@@ -25,12 +25,14 @@ import {
   ModalComponent,
   InputsearchComponent,
   IconComponent,
-  TableComponent,
   ButtonComponent,
   DialogService,
   ToastService,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
+  TableColumn,
+  TableAction,
 } from '../../../../shared/components/index';
-import { TableColumn, TableAction } from '../../../../shared/components/index';
 
 // Import styles
 import './templates.component.css';
@@ -50,7 +52,7 @@ import './templates.component.css';
     TemplateEditModalComponent,
     InputsearchComponent,
     IconComponent,
-    TableComponent,
+    ResponsiveDataViewComponent,
     ButtonComponent,
   ],
   providers: [TemplatesService],
@@ -131,19 +133,16 @@ import './templates.component.css';
 
         <!-- Templates Table -->
         <div *ngIf="!isLoading && templates.length > 0" class="p-6">
-          <app-table
+          <app-responsive-data-view
             [data]="templates"
             [columns]="tableColumns"
+            [cardConfig]="cardConfig"
             [actions]="tableActions"
             [loading]="isLoading"
-            [sortable]="true"
-            [hoverable]="true"
-            [striped]="true"
-            size="md"
-            (sort)="onTableSort($event)"
-            (rowClick)="viewTemplate($event)"
+            emptyMessage="No hay plantillas"
+            emptyIcon="file-text"
           >
-          </app-table>
+          </app-responsive-data-view>
 
           <!-- Pagination -->
           <div class="mt-6 flex justify-center">
@@ -254,6 +253,20 @@ export class TemplatesComponent implements OnInit, OnDestroy {
       variant: 'danger',
     },
   ];
+
+  // Card configuration for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'template_name',
+    subtitleKey: 'configuration_type',
+    subtitleTransform: (value: string) => this.formatConfigurationType(value),
+    badgeKey: 'is_active',
+    badgeConfig: { type: 'status', size: 'sm' },
+    badgeTransform: (val: boolean) => val ? 'Active' : 'Inactive',
+    detailKeys: [
+      { key: 'is_system', label: 'Type', transform: (val: boolean) => val ? 'System' : 'Custom' },
+      { key: 'created_at', label: 'Created', transform: (val: string) => this.formatDate(val) },
+    ],
+  };
 
   stats = {
     totalTemplates: 0,

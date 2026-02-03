@@ -11,7 +11,7 @@ import { CartState } from '../models/cart.model';
   standalone: true,
   imports: [CommonModule, StatsComponent],
   template: `
-    <div class="grid grid-cols-3 gap-2 md:gap-4 lg:gap-6">
+    <div class="stats-container">
       <!-- Productos en Carrito -->
       <app-stats
         title="Productos"

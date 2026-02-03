@@ -13,6 +13,7 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
+import { HttpClient } from '@angular/common/http';
 import { ModalComponent } from '../modal/modal.component';
 import { AuthService } from '../../../core/services/auth.service';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
@@ -26,6 +27,7 @@ import {
   Department,
   City,
 } from '../../../services/country.service';
+import { environment } from '../../../../environments/environment';
 
 @Component({
   selector: 'app-profile-modal',
@@ -58,9 +60,20 @@ import {
             <!-- Foto / Placeholder -->
             <div class="flex-shrink-0">
               <div
-                class="w-24 h-24 rounded-full bg-primary-100 flex items-center justify-center text-primary-600 text-3xl font-bold border-2 border-primary-200"
+                class="w-24 h-24 rounded-full overflow-hidden border-2 border-primary-200"
               >
-                {{ getInitials() }}
+                <img
+                  *ngIf="userInfo?.avatar_url"
+                  [src]="userInfo.avatar_url"
+                  alt="Avatar"
+                  class="w-full h-full object-cover"
+                />
+                <div
+                  *ngIf="!userInfo?.avatar_url"
+                  class="w-full h-full bg-primary-100 flex items-center justify-center text-primary-600 text-3xl font-bold"
+                >
+                  {{ getInitials() }}
+                </div>
               </div>
             </div>
 
@@ -301,6 +314,66 @@ import {
           (ngSubmit)="onSubmit()"
           class="space-y-6"
         >
+          <!-- Foto de Perfil -->
+          <div>
+            <h4 class="text-lg font-medium text-gray-900 mb-4">
+              Foto de Perfil
+            </h4>
+            <div class="flex items-center gap-4">
+              <div
+                class="relative w-24 h-24 rounded-full overflow-hidden border-2 border-primary-200 cursor-pointer group"
+                (click)="avatarInput.click()"
+              >
+                <img
+                  *ngIf="avatarPreview || userInfo?.avatar_url"
+                  [src]="avatarPreview || userInfo?.avatar_url"
+                  alt="Avatar"
+                  class="w-full h-full object-cover"
+                />
+                <div
+                  *ngIf="!avatarPreview && !userInfo?.avatar_url"
+                  class="w-full h-full bg-primary-100 flex items-center justify-center text-primary-600 text-3xl font-bold"
+                >
+                  {{ getInitials() }}
+                </div>
+                <div
+                  class="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <span class="text-white text-xs font-medium">Cambiar</span>
+                </div>
+              </div>
+              <input
+                #avatarInput
+                type="file"
+                accept="image/*"
+                class="hidden"
+                (change)="onAvatarSelected($event)"
+              />
+              <div class="flex flex-col gap-1">
+                <button
+                  type="button"
+                  class="text-primary-600 hover:text-primary-700 text-sm font-medium"
+                  (click)="avatarInput.click()"
+                  [disabled]="uploadingAvatar"
+                >
+                  {{ uploadingAvatar ? 'Subiendo...' : 'Seleccionar imagen' }}
+                </button>
+                <span class="text-xs text-gray-500">JPG, PNG o WebP. Máximo 5MB.</span>
+                <button
+                  *ngIf="avatarPreview || userInfo?.avatar_url"
+                  type="button"
+                  class="text-red-500 hover:text-red-600 text-sm font-medium text-left"
+                  (click)="removeAvatar()"
+                  [disabled]="uploadingAvatar"
+                >
+                  Eliminar foto
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="border-t border-gray-200"></div>
+
           <!-- Información Personal -->
           <div>
             <h4 class="text-lg font-medium text-gray-900 mb-4">
@@ -560,6 +633,7 @@ export class ProfileModalComponent implements OnInit {
   @Output() isOpenChange = new EventEmitter<boolean>();
 
   private fb = inject(FormBuilder);
+  private http = inject(HttpClient);
   private authService = inject(AuthService);
   private authFacade = inject(AuthFacade);
   private countryService = inject(CountryService);
@@ -575,6 +649,11 @@ export class ProfileModalComponent implements OnInit {
 
   isEditing = false;
   showPasswordSection = false;
+
+  // Avatar upload state
+  avatarPreview: string | null = null;
+  uploadingAvatar = false;
+  pendingAvatarKey: string | null = null;
 
   userInfo: any = null;
   addressInfo: any = null;
@@ -601,6 +680,7 @@ export class ProfileModalComponent implements OnInit {
       phone: [''],
       document_type: [''],
       document_number: [''],
+      avatar_url: [''],
       address: this.fb.group({
         address_line_1: ['', Validators.required],
         address_line_2: [''],
@@ -704,6 +784,10 @@ export class ProfileModalComponent implements OnInit {
 
   async enableEditMode() {
     this.isEditing = true;
+    // Reset avatar state
+    this.avatarPreview = null;
+    this.pendingAvatarKey = null;
+
     // Ensure form is populated with current data
     if (this.userInfo) {
       this.profileForm.patchValue({
@@ -713,6 +797,7 @@ export class ProfileModalComponent implements OnInit {
         phone: this.userInfo.phone,
         document_type: this.userInfo.document_type,
         document_number: this.userInfo.document_number,
+        avatar_url: '', // Will be set only if changed
       });
     }
 
@@ -769,6 +854,8 @@ export class ProfileModalComponent implements OnInit {
 
   cancelEditMode() {
     this.isEditing = false;
+    this.avatarPreview = null;
+    this.pendingAvatarKey = null;
     this.loadProfile();
   }
 
@@ -888,8 +975,13 @@ export class ProfileModalComponent implements OnInit {
       }
     }
 
-    const payload = {
-      ...formValue,
+    // Build payload
+    const payload: any = {
+      first_name: formValue.first_name,
+      last_name: formValue.last_name,
+      phone: formValue.phone,
+      document_type: formValue.document_type,
+      document_number: formValue.document_number,
       address: {
         address_line_1: addressData.address_line_1,
         address_line_2: addressData.address_line_2,
@@ -899,6 +991,16 @@ export class ProfileModalComponent implements OnInit {
         postal_code: addressData.postal_code,
       },
     };
+
+    // Handle avatar_url: only include if changed
+    if (this.pendingAvatarKey) {
+      // New avatar was uploaded
+      payload.avatar_url = this.pendingAvatarKey;
+    } else if (formValue.avatar_url === null) {
+      // Avatar was explicitly removed
+      payload.avatar_url = null;
+    }
+    // If neither condition is true, avatar_url is not included in payload (unchanged)
 
     this.authService
       .updateProfile(payload)
@@ -1032,5 +1134,66 @@ export class ProfileModalComponent implements OnInit {
       ? this.userInfo.last_name.charAt(0)
       : '';
     return (first + last).toUpperCase();
+  }
+
+  onAvatarSelected(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    // Validate file size (5MB max)
+    const maxSize = 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      this.toastService.error('La imagen no debe superar los 5MB');
+      return;
+    }
+
+    // Validate file type
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      this.toastService.error('Solo se permiten imágenes JPG, PNG o WebP');
+      return;
+    }
+
+    // Show local preview immediately
+    const reader = new FileReader();
+    reader.onload = () => {
+      this.avatarPreview = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+
+    // Upload to S3
+    this.uploadingAvatar = true;
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('entityType', 'avatars');
+
+    this.http.post<any>(`${environment.apiUrl}/upload`, formData).subscribe({
+      next: (response) => {
+        // Store the key for saving later
+        this.pendingAvatarKey = response.key;
+        // Use the signed URL for preview
+        this.avatarPreview = response.url;
+        this.uploadingAvatar = false;
+        this.toastService.success('Imagen cargada correctamente');
+      },
+      error: (err) => {
+        console.error('Error uploading avatar:', err);
+        this.avatarPreview = null;
+        this.pendingAvatarKey = null;
+        this.uploadingAvatar = false;
+        this.toastService.error('Error al subir la imagen');
+      },
+    });
+
+    // Reset input to allow selecting the same file again
+    input.value = '';
+  }
+
+  removeAvatar() {
+    this.avatarPreview = null;
+    this.pendingAvatarKey = null;
+    // Mark avatar for removal by setting to null in form
+    this.profileForm.patchValue({ avatar_url: null });
   }
 }

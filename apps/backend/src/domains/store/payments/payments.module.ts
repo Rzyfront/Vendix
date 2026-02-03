@@ -8,6 +8,7 @@ import { PaymentsService } from './payments.service';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { OrdersModule } from '../orders/orders.module';
+import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { InventoryTransactionsService } from '../inventory/transactions/inventory-transactions.service';
 import { TaxesModule } from '../taxes/taxes.module';
@@ -39,6 +40,7 @@ import { BankTransferProcessor } from './processors/bank-transfer/bank-transfer.
     PaypalModule,
     BankTransferModule,
     forwardRef(() => OrdersModule),
+    forwardRef(() => OrderFlowModule),
     TaxesModule,
   ],
   controllers: [

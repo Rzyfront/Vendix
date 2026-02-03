@@ -22,6 +22,7 @@ export const loginSuccess = createAction(
     roles?: string[];
     message?: string;
     updated_environment?: string;
+    expires_in?: number;
   }>(),
 );
 
@@ -51,6 +52,7 @@ export const loginCustomerSuccess = createAction(
     roles?: string[];
     message?: string;
     updated_environment?: string;
+    expires_in?: number;
   }>(),
 );
 

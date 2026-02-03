@@ -18,7 +18,6 @@ import {
 
 // Import components from shared
 import {
-  TableComponent,
   TableColumn,
   TableAction,
   InputsearchComponent,
@@ -27,6 +26,8 @@ import {
   SelectorComponent,
   DialogService,
   ToastService,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
 } from '../../../../shared/components/index';
 
 import {
@@ -47,7 +48,7 @@ import {
     PaymentMethodCreateModalComponent,
     PaymentMethodEditModalComponent,
     PaymentMethodEmptyStateComponent,
-    TableComponent,
+    ResponsiveDataViewComponent,
     InputsearchComponent,
     SelectorComponent,
     IconComponent,
@@ -183,6 +184,33 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
     { value: 'true', label: 'Activo' },
     { value: 'false', label: 'Inactivo' },
   ];
+
+  // Card configuration for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'name',
+    subtitleKey: 'display_name',
+    badgeKey: 'type',
+    badgeConfig: {
+      type: 'custom',
+      size: 'sm',
+      colorMap: {
+        cash: '#10b981', // Green
+        card: '#3b82f6', // Blue
+        paypal: '#f59e0b', // Amber
+        bank_transfer: '#8b5cf6', // Purple
+        voucher: '#ef4444', // Red
+      },
+    },
+    badgeTransform: (value: string) =>
+      this.paymentMethodsService.getPaymentMethodTypeLabel(value),
+    detailKeys: [
+      { key: 'provider', label: 'Proveedor', icon: 'credit-card' },
+      { key: '_count.store_payment_methods', label: 'Tiendas', icon: 'shopping-bag' },
+      { key: 'created_at', label: 'Fecha', transform: (v) => this.formatDate(v) },
+    ],
+    footerKey: 'is_active',
+    footerTransform: (val) => (val ? 'Activo' : 'Inactivo'),
+  };
 
   constructor() {
     this.filterForm = this.fb.group({

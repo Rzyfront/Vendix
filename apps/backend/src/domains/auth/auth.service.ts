@@ -24,6 +24,8 @@ import {
 import { OnboardingService } from '../organization/onboarding/onboarding.service';
 import { DefaultPanelUIService } from '../../common/services/default-panel-ui.service';
 import { toTitleCase } from '@common/utils/format.util';
+import { TOKEN_DEFAULTS } from './constants/token.constants';
+import { S3Service } from '@common/services/s3.service';
 
 @Injectable()
 export class AuthService {
@@ -36,6 +38,7 @@ export class AuthService {
     private readonly auditService: AuditService,
     private readonly onboardingService: OnboardingService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
+    private readonly s3Service: S3Service,
   ) { }
 
   async updateProfile(userId: number, updateProfileDto: any) {
@@ -46,6 +49,7 @@ export class AuthService {
       address,
       document_type,
       document_number,
+      avatar_url,
     } = updateProfileDto;
 
     // 1. Actualizar datos básicos del usuario
@@ -56,6 +60,11 @@ export class AuthService {
     if (document_type !== undefined) updateData.document_type = document_type;
     if (document_number !== undefined)
       updateData.document_number = document_number;
+
+    // Manejar avatar_url - sanitizar para almacenar solo el key de S3, no la URL firmada
+    if (avatar_url !== undefined) {
+      updateData.avatar_url = this.s3Service.sanitizeForStorage(avatar_url);
+    }
 
     let user = await this.prismaService.users.update({
       where: { id: userId },
@@ -174,6 +183,7 @@ export class AuthService {
     // Convertir nombres a Title Case
     const formatted_first_name = toTitleCase(first_name || '');
     const formatted_last_name = toTitleCase(last_name || '');
+    const formatted_organization_name = toTitleCase(organization_name || '');
 
     // Buscar si ya existe un OWNER con este email con onboarding incompleto
     // IMPORTANTE: Solo considerar owners, NO customers u otros roles
@@ -233,7 +243,7 @@ export class AuthService {
 
       const organization = await tx.organizations.create({
         data: {
-          name: organization_name,
+          name: formatted_organization_name,
           slug: organization_slug,
           email: email,
           state: 'draft', // Organización creada en estado draft hasta completar onboarding
@@ -300,6 +310,7 @@ export class AuthService {
       await tx.user_settings.create({
         data: {
           user_id: user.id,
+          app_type: 'ORG_ADMIN',
           config: ownerConfig,
         },
       });
@@ -450,9 +461,20 @@ export class AuthService {
       where: { user_id: userWithRoles.id },
     });
 
+    if (!userSettings) {
+      throw new Error('User settings not found after registration');
+    }
+
+    const userSettingsForResponse = {
+      id: userSettings.id,
+      user_id: userSettings.user_id,
+      app_type: userSettings.app_type,
+      config: userSettings.config || {},
+    };
+
     return {
       user: userWithRolesAndPassword,
-      user_settings: userSettings,
+      user_settings: userSettingsForResponse,
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       token_type: tokens.token_type,
@@ -537,6 +559,7 @@ export class AuthService {
     await this.prismaService.user_settings.create({
       data: {
         user_id: user.id,
+        app_type: 'STORE_ECOMMERCE',
         config: customerConfig,
       },
     });
@@ -695,6 +718,10 @@ export class AuthService {
       where: { user_id: userWithRoles.id },
     });
 
+    if (!userSettings) {
+      throw new Error('User settings not found after registration');
+    }
+
     // Transformar user_roles a roles array simple para compatibilidad
     const { user_roles, ...userWithoutRoles } = userWithRoles;
     const roles = user_roles?.map((ur) => ur.roles?.name).filter(Boolean) || [];
@@ -706,9 +733,16 @@ export class AuthService {
     // Remover password del response
     const { password: _, ...userWithRolesAndPassword } = userWithRolesArray;
 
+    const userSettingsForResponse = {
+      id: userSettings.id,
+      user_id: userSettings.user_id,
+      app_type: userSettings.app_type,
+      config: userSettings.config || {},
+    };
+
     return {
       user: userWithRolesAndPassword,
-      user_settings: userSettings,
+      user_settings: userSettingsForResponse,
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       token_type: tokens.token_type,
@@ -841,6 +875,7 @@ export class AuthService {
     await this.prismaService.user_settings.create({
       data: {
         user_id: user.id,
+        app_type: 'STORE_ADMIN',
         config: staffConfig,
       },
     });
@@ -1052,7 +1087,7 @@ export class AuthService {
     }
 
     // Validar consistencia entre slugs y user_settings.app_type
-    const user_app_type = userSettings?.config?.['app'];
+    const user_app_type = userSettings?.app_type;
     let effective_organization_slug = organization_slug;
     let effective_store_slug = store_slug;
 
@@ -1201,16 +1236,12 @@ export class AuthService {
     if (
       store_slug &&
       userSettings &&
-      userSettings.config?.['app'] === 'ORG_ADMIN'
+      userSettings.app_type === 'ORG_ADMIN'
     ) {
       // Actualizar app_type en base de datos
-      const newConfig = {
-        ...(userSettings.config as object),
-        app: 'STORE_ADMIN',
-      };
       userSettings = await this.prismaService.user_settings.update({
         where: { id: userSettings.id },
-        data: { config: newConfig },
+        data: { app_type: 'STORE_ADMIN' },
       });
 
       // El flujo continúa normalmente con effective_store_slug
@@ -1430,9 +1461,22 @@ export class AuthService {
       store: active_store || user.main_store,
     };
 
+    if (!userSettings) {
+      throw new UnauthorizedException(
+        'User settings not found. Please contact support.',
+      );
+    }
+
+    const userSettingsForResponse = {
+      id: userSettings.id,
+      user_id: userSettings.user_id,
+      app_type: userSettings.app_type,
+      config: userSettings.config || {},
+    };
+
     return {
       user: userWithRolesAndPassword, // Usar usuario con roles array simple y store activo
-      user_settings: userSettings,
+      user_settings: userSettingsForResponse,
       store_settings: active_store_settings,
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
@@ -1460,24 +1504,24 @@ export class AuthService {
       // Obtener el secret del refresh token
       const refreshSecret =
         this.configService.get<string>('JWT_REFRESH_SECRET') ||
-        this.configService.get<string>('JWT_SECRET') ||
-        'your-super-secret-jwt-key';
+        this.configService.get<string>('JWT_SECRET');
 
-      // Verificar el refresh token con el secret correcto
+      if (!refreshSecret) {
+        throw new UnauthorizedException('JWT secret not configured');
+      }
+
+      // Verificar el refresh token JWT (firma y expiración)
       const payload = this.jwtService.verify(refresh_token, {
         secret: refreshSecret,
       });
 
-      // Hashear el refresh token recibido para comparación
-      const hashedRefreshToken = await bcrypt.hash(refresh_token, 12);
-
-      // Buscar refresh token activo por hash
-      const tokenRecord = await this.prismaService.refresh_tokens.findFirst({
+      // Buscar tokens activos del usuario (por user_id del payload JWT)
+      // No podemos buscar por hash directamente porque bcrypt genera hashes diferentes cada vez
+      const activeTokens = await this.prismaService.refresh_tokens.findMany({
         where: {
-          token: hashedRefreshToken,
-          expires_at: {
-            gt: new Date(),
-          },
+          user_id: payload.sub,
+          revoked: false,
+          expires_at: { gt: new Date() },
         },
         include: {
           users: {
@@ -1499,6 +1543,16 @@ export class AuthService {
           },
         },
       });
+
+      // Comparar con bcrypt.compare() - forma correcta de validar hashes bcrypt
+      let tokenRecord: (typeof activeTokens)[number] | null = null;
+      for (const record of activeTokens) {
+        const isValid = await bcrypt.compare(refresh_token, record.token);
+        if (isValid) {
+          tokenRecord = record;
+          break;
+        }
+      }
 
       if (!tokenRecord) {
         throw new UnauthorizedException('Refresh token inválido o expirado');
@@ -1533,13 +1587,20 @@ export class AuthService {
 
       // Actualizar el refresh token en la base de datos
       const refreshTokenExpiry =
-        this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d';
+        this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ||
+        TOKEN_DEFAULTS.REFRESH_TOKEN_EXPIRY;
       const expiryMs = this.parseExpiryToMilliseconds(refreshTokenExpiry);
+
+      // Hashear el nuevo refresh token antes de guardarlo
+      const hashedNewToken = await bcrypt.hash(
+        tokens.refresh_token,
+        TOKEN_DEFAULTS.BCRYPT_ROUNDS,
+      );
 
       await this.prismaService.refresh_tokens.update({
         where: { id: tokenRecord.id },
         data: {
-          token: tokens.refresh_token,
+          token: hashedNewToken,
           expires_at: new Date(Date.now() + expiryMs),
           // Actualizar información de seguridad
           ip_address: client_info?.ip_address || tokenRecord.ip_address,
@@ -1584,7 +1645,14 @@ export class AuthService {
 
     // Remover password del response
     const { password, ...userWithoutPassword } = user;
-    return userWithoutPassword;
+
+    // Firmar el avatar_url si existe (convertir key de S3 a URL firmada)
+    const signedAvatarUrl = await this.s3Service.signUrl(user.avatar_url);
+
+    return {
+      ...userWithoutPassword,
+      avatar_url: signedAvatarUrl || null,
+    };
   }
 
   async logout(
@@ -2240,24 +2308,32 @@ export class AuthService {
       store_id: scope.store_id,
     };
 
+    const accessTokenExpiry =
+      this.configService.get<string>('JWT_EXPIRES_IN') ||
+      TOKEN_DEFAULTS.ACCESS_TOKEN_EXPIRY;
+
+    const refreshTokenExpiry =
+      this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ||
+      TOKEN_DEFAULTS.REFRESH_TOKEN_EXPIRY;
+
+    const refreshSecret =
+      this.configService.get<string>('JWT_REFRESH_SECRET') ||
+      this.configService.get<string>('JWT_SECRET');
+
     const accessToken = this.jwtService.sign(payload, {
-      expiresIn: (this.configService.get<string>('JWT_EXPIRES_IN') ||
-        '1h') as any,
+      expiresIn: accessTokenExpiry as any,
     });
+
     const refreshToken = this.jwtService.sign(payload, {
-      secret: (this.configService.get<string>('JWT_REFRESH_SECRET') ||
-        this.configService.get<string>('JWT_SECRET')) as string,
-      expiresIn: (this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ||
-        '7d') as any,
+      secret: refreshSecret as string,
+      expiresIn: refreshTokenExpiry as any,
     });
 
     return {
       access_token: accessToken,
       refresh_token: refreshToken,
       token_type: 'Bearer',
-      expires_in: this.parseExpiryToMilliseconds(
-        this.configService.get<string>('JWT_EXPIRES_IN') || '1h',
-      ),
+      expires_in: this.parseExpiryToMilliseconds(accessTokenExpiry),
     };
   }
   private async createUserSession(
@@ -2270,14 +2346,18 @@ export class AuthService {
   ) {
     // Obtener duración del refresh token del entorno
     const refreshTokenExpiry =
-      this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d';
+      this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ||
+      TOKEN_DEFAULTS.REFRESH_TOKEN_EXPIRY;
     const expiryMs = this.parseExpiryToMilliseconds(refreshTokenExpiry);
 
     // Generar fingerprint del dispositivo
     const device_fingerprint = this.generateDeviceFingerprint(client_info);
 
     // Hashear el refresh token para almacenamiento seguro
-    const hashedRefreshToken = await bcrypt.hash(refresh_token, 12);
+    const hashedRefreshToken = await bcrypt.hash(
+      refresh_token,
+      TOKEN_DEFAULTS.BCRYPT_ROUNDS,
+    );
 
     await this.prismaService.refresh_tokens.create({
       data: {
@@ -2899,11 +2979,15 @@ export class AuthService {
     };
 
     const accessToken = this.jwtService.sign(payload, {
-      expiresIn: this.configService.get('JWT_EXPIRES_IN', '1h'),
+      expiresIn:
+        this.configService.get('JWT_EXPIRES_IN') ||
+        TOKEN_DEFAULTS.ACCESS_TOKEN_EXPIRY,
     });
 
     const refreshToken = this.jwtService.sign(payload, {
-      expiresIn: this.configService.get('JWT_REFRESH_EXPIRES_IN', '7d'),
+      expiresIn:
+        this.configService.get('JWT_REFRESH_EXPIRES_IN') ||
+        TOKEN_DEFAULTS.REFRESH_TOKEN_EXPIRY,
     });
 
     const tokens = {

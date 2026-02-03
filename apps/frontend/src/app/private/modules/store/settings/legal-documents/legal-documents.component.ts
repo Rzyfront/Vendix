@@ -14,10 +14,13 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
 import { InputsearchComponent } from '../../../../../shared/components/inputsearch/inputsearch.component';
 import {
-    TableComponent,
     TableColumn,
     TableAction,
 } from '../../../../../shared/components/table/table.component';
+import {
+    ResponsiveDataViewComponent,
+    ItemListCardConfig,
+} from '../../../../../shared/components/index';
 
 @Component({
     selector: 'app-legal-documents',
@@ -30,7 +33,7 @@ import {
         ButtonComponent,
         StatsComponent,
         InputsearchComponent,
-        TableComponent,
+        ResponsiveDataViewComponent,
     ],
     template: `
     <div class="flex flex-col gap-6 p-6">
@@ -110,16 +113,16 @@ import {
             <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           </div>
 
-          <app-table
+          <app-responsive-data-view
             [data]="filteredDocuments()"
             [columns]="columns"
+            [cardConfig]="cardConfig"
             [actions]="actions"
             [loading]="loading()"
-            [showHeader]="true"
-            [hoverable]="true"
             emptyMessage="No se encontraron documentos"
+            emptyIcon="file-text"
           >
-          </app-table>
+          </app-responsive-data-view>
         </div>
       </div>
     </div>
@@ -165,6 +168,23 @@ export class LegalDocumentsComponent implements OnInit {
 
     isModalOpen = false;
     selectedDocument?: StoreLegalDocument;
+
+    cardConfig: ItemListCardConfig = {
+        titleKey: 'title',
+        subtitleKey: 'document_type',
+        subtitleTransform: (val: string) => this.formatEnumLabel(val),
+        badgeKey: 'is_active',
+        badgeConfig: { type: 'status' },
+        badgeTransform: (val: boolean) => (val ? 'Activo' : 'Inactivo'),
+        detailKeys: [
+            { key: 'version', label: 'Versión' },
+            {
+                key: 'effective_date',
+                label: 'Fecha Efectiva',
+                transform: (val: string) => new Date(val).toLocaleDateString(),
+            },
+        ],
+    };
 
     columns: TableColumn[] = [
         { key: 'title', label: 'Título', width: '35%' },

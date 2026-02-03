@@ -60,76 +60,24 @@
       </div>
 
       <!-- Table Section -->
-      <app-table [data]="users" [columns]="tableColumns" [actions]="tableActions"
+      <!-- Table Section -->
+      <app-responsive-data-view
+        [data]="users"
+        [columns]="tableColumns"
+        [actions]="tableActions"
+        [cardConfig]="cardConfig"
+        [loading]="isLoading"
+        [emptyMessage]="getEmptyStateTitle()"
+        (rowClick)="editUser($event)"
         (sort)="onSortChange($event.column, $event.direction)">
-        <!-- Custom cell for status -->
-        <ng-template #statusCell let-item>
-          <span class="px-2 py-1 text-xs font-medium rounded-full" [class]="getStateDisplay(item.state).class">
-            {{ getStateDisplay(item.state).text }}
-          </span>
-        </ng-template>
-
-        <!-- Custom cell for 2FA -->
-        <ng-template #twoFactorCell let-item>
-          <div class="flex items-center gap-2">
-            <app-icon name="shield" class="w-4 h-4" [ngClass]="
-                item.two_factor_enabled ? 'text-green-500' : 'text-gray-400'
-              "></app-icon>
-            <span class="text-text">
-              {{ item.two_factor_enabled ? "Sí" : "No" }}
-            </span>
-          </div>
-        </ng-template>
-
-        <!-- Custom cell for email verification -->
-        <ng-template #emailVerifiedCell let-item>
-          <div class="flex items-center gap-2">
-            <app-icon name="check" class="w-4 h-4" [ngClass]="
-                item.email_verified ? 'text-green-500' : 'text-yellow-500'
-              "></app-icon>
-            <span class="text-text">
-              {{ item.email_verified ? "Verificado" : "Pendiente" }}
-            </span>
-          </div>
-        </ng-template>
-
-        <!-- Custom actions -->
-        <ng-template #actionsCell let-item>
-          <div class="flex items-center gap-2">
-            <!-- Edit Button -->
-            <button (click)="editUser(item)"
-              class="p-1 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
-              title="Editar usuario">
-              <app-icon name="edit" class="w-4 h-4"></app-icon>
-            </button>
-
-            <!-- Toggle Status Button -->
-            <button (click)="toggleUserStatus(item)" class="p-1 rounded transition-colors" [ngClass]="
-                item.state === 'active'
-                  ? 'text-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/20'
-                  : 'text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20'
-              " [title]="
-                item.state === 'active' ? 'Archivar usuario' : 'Reactivar usuario'
-              ">
-              <app-icon name="archive" class="w-4 h-4"></app-icon>
-            </button>
-
-            <!-- Delete Button -->
-            <button (click)="confirmDelete(item)"
-              class="p-1 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-              title="Eliminar usuario">
-              <app-icon name="delete" class="w-4 h-4"></app-icon>
-            </button>
-          </div>
-        </ng-template>
-
+        
         <!-- Empty State internal slot (standard practice) -->
         <div class="p-8 flex justify-center w-full" *ngIf="!isLoading && users.length === 0">
           <app-user-empty-state [title]="getEmptyStateTitle()" [description]="getEmptyStateDescription()"
             (actionClick)="createUser()">
           </app-user-empty-state>
         </div>
-      </app-table>
+      </app-responsive-data-view>
     </div>
 
     <!-- Create User Modal -->

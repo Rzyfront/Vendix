@@ -65,15 +65,16 @@
       </div>
 
       <!-- Table -->
-      <app-table [data]="roles" [columns]="tableColumns" [actions]="tableActions" [loading]="isLoading"
-        (sortChange)="onSortChange($any($event))">
+      <!-- Table -->
+      <app-responsive-data-view [data]="roles" [columns]="tableColumns" [actions]="tableActions"
+        [cardConfig]="cardConfig" [loading]="isLoading" (sortChange)="onSortChange($any($event))">
         <!-- Empty State -->
         <div class="p-8 flex justify-center" *ngIf="!isLoading && roles.length === 0">
           <app-role-empty-state [title]="getEmptyStateTitle()" [description]="getEmptyStateDescription()"
             [showAction]="!filterForm.value.search && !filterForm.value.is_system_role" (actionClick)="createRole()">
           </app-role-empty-state>
         </div>
-      </app-table>
+      </app-responsive-data-view>
     </div>
   </div>
 </div>

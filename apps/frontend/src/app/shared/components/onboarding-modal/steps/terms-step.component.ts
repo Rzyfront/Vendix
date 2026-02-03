@@ -448,6 +448,17 @@ export class TermsStepComponent implements OnInit {
     this.cdr.markForCheck();
   }
 
+  acceptAllAndSubmit() {
+    // Mark all documents as accepted
+    this.documents.forEach((doc) => {
+      doc.accepted = true;
+    });
+    this.cdr.markForCheck();
+
+    // Submit all acceptances
+    this.submitAcceptances();
+  }
+
   submitAcceptances() {
     if (!this.allAccepted) return;
 

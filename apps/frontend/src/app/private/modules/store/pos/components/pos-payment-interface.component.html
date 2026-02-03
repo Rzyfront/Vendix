@@ -1,357 +1,305 @@
-<app-modal [isOpen]="isOpen" [size]="'xl'" (closed)="onModalClosed()" [showCloseButton]="true" [title]="'Procesar Pago'"
-  [subtitle]="'Completa la venta seleccionando método de pago y cliente'">
+<app-modal
+  [isOpen]="isOpen"
+  [size]="'lg'"
+  [title]="'Procesar Pago'"
+  [subtitle]="'Selecciona método de pago y cliente'"
+  (closed)="onModalClosed()"
+>
+  <!-- Main Content -->
+  <div class="payment-content">
+    <!-- Resumen Section -->
+    <section class="payment-section">
+      <div class="section-header">
+        <div class="section-indicator"></div>
+        <h2 class="section-title">Resumen</h2>
+      </div>
 
-  <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 p-4 h-full">
-    <!-- Columna 1: Resumen (3 columnas) -->
-    <div class="lg:col-span-3 h-full">
-      <app-card [shadow]="'md'" [customClasses]="'payment-summary-enhanced h-full flex flex-col'">
-        <div class="p-4 flex-1 flex flex-col">
-          <h4 class="section-header-enhanced text-base mb-4">Resumen</h4>
+      <!-- Product List -->
+      <div class="product-list">
+        <div *ngFor="let item of cartState?.items" class="product-item">
+          <span class="product-name">{{ item.product.name }}</span>
+          <span class="product-qty">x{{ item.quantity }}</span>
+        </div>
+        <div *ngIf="!cartState?.items?.length" class="empty-cart">
+          El carrito está vacío
+        </div>
+      </div>
 
-          <!-- Product List -->
-          <div class="mb-4">
-            <div class="max-h-48 overflow-y-auto pr-2 custom-scrollbar border-b border-[var(--color-border)] pb-3">
-              <div *ngFor="let item of cartState?.items" class="flex justify-between items-start text-sm py-2">
-                <span class="text-[var(--color-text-primary)] font-medium leading-tight flex-1">
-                  {{ item.product.name }}
-                </span>
-                <span class="text-[var(--color-text-secondary)] font-semibold whitespace-nowrap ml-2">
-                  x{{ item.quantity }}
-                </span>
-              </div>
-              <div *ngIf="!cartState?.items?.length"
-                class="text-xs text-center text-[var(--color-text-muted)] py-4 italic">
-                El carrito está vacío
-              </div>
+      <!-- Summary Details -->
+      <div class="summary-details">
+        <div class="summary-row">
+          <span>Productos</span>
+          <span class="summary-value">{{ cartState?.summary?.itemCount || 0 }}</span>
+        </div>
+        <div class="summary-row">
+          <span>Cantidad</span>
+          <span class="summary-value">{{ cartState?.summary?.totalItems || 0 }}</span>
+        </div>
+        <div class="summary-row">
+          <span>Subtotal</span>
+          <span class="summary-value">${{ cartState?.summary?.subtotal || 0 | number: "1.2-2" }}</span>
+        </div>
+        <div class="summary-row">
+          <span>Impuestos</span>
+          <span class="summary-value">${{ cartState?.summary?.taxAmount || 0 | number: "1.2-2" }}</span>
+        </div>
+        <div *ngIf="(cartState?.summary?.discountAmount ?? 0) > 0" class="summary-row">
+          <span>Descuento</span>
+          <span class="summary-value discount">-${{ cartState?.summary?.discountAmount | number: "1.2-2" }}</span>
+        </div>
+      </div>
+
+      <!-- Total -->
+      <div class="total-section">
+        <p class="total-label">Total a Pagar</p>
+        <p class="total-amount">${{ cartState?.summary?.total || 0 | number: "1.2-2" }}</p>
+      </div>
+    </section>
+
+    <!-- Método de Pago Section -->
+    <section class="payment-section">
+      <div class="section-header">
+        <app-icon name="credit-card" [size]="16" class="section-icon"></app-icon>
+        <h2 class="section-title">Método de Pago</h2>
+      </div>
+
+      <div *ngIf="paymentMethods.length > 0; else noPaymentMethods" class="payment-methods-grid">
+        <button
+          *ngFor="let method of paymentMethods"
+          type="button"
+          (click)="selectPaymentMethod(method)"
+          class="payment-method-btn"
+          [class.selected]="paymentState.selectedMethod?.id === method.id"
+        >
+          <app-icon [name]="method.icon" [size]="24"></app-icon>
+          <span class="method-name">{{ method.name }}</span>
+        </button>
+      </div>
+
+      <ng-template #noPaymentMethods>
+        <div class="no-methods">
+          <app-icon name="credit-card" [size]="24"></app-icon>
+          <p>No hay métodos configurados</p>
+          <button class="configure-link" (click)="navigateToSettings()">Configurar ahora</button>
+        </div>
+      </ng-template>
+
+      <!-- Cash Input (when cash selected) -->
+      <div *ngIf="paymentState.selectedMethod?.type === 'cash'" class="cash-section">
+        <div class="cash-inputs">
+          <div class="cash-input-group">
+            <label>Monto Recibido</label>
+            <div class="cash-input" [class.error]="isCashAmountInsufficient">
+              <span class="currency">$</span>
+              <input
+                type="number"
+                [formControl]="cashReceivedControl"
+                placeholder="0.00"
+                step="0.01"
+                (input)="calculateChange()"
+              />
             </div>
+            <span *ngIf="isCashAmountInsufficient" class="error-text">
+              Faltan: ${{ missingAmount | number: "1.2-2" }}
+            </span>
           </div>
-
-          <!-- Summary Details -->
-          <div class="space-y-2 text-sm flex-1">
-            <div class="flex justify-between items-center">
-              <span class="text-[var(--color-text-secondary)]">Productos</span>
-              <span class="font-semibold text-[var(--color-text-primary)]">{{ cartState?.summary?.itemCount || 0 }}</span>
-            </div>
-            <div class="flex justify-between items-center">
-              <span class="text-[var(--color-text-secondary)]">Cantidad</span>
-              <span class="font-semibold text-[var(--color-text-primary)]">{{ cartState?.summary?.totalItems || 0 }}</span>
-            </div>
-            <div class="flex justify-between items-center">
-              <span class="text-[var(--color-text-secondary)]">Subtotal</span>
-              <span class="font-semibold">${{ cartState?.summary?.subtotal || 0 | number: "1.2-2" }}</span>
-            </div>
-            <div class="flex justify-between items-center">
-              <span class="text-[var(--color-text-secondary)]">Impuestos</span>
-              <span class="font-semibold">${{ cartState?.summary?.taxAmount || 0 | number: "1.2-2" }}</span>
-            </div>
-            <div *ngIf="(cartState?.summary?.discountAmount ?? 0) > 0" class="flex justify-between items-center">
-              <span class="text-[var(--color-text-secondary)]">Descuento</span>
-              <span class="font-semibold text-[var(--color-error)]">-${{ cartState?.summary?.discountAmount | number: "1.2-2" }}</span>
-            </div>
-          </div>
-
-          <!-- Total -->
-          <div class="mt-4 pt-4 border-t border-[var(--color-border)]">
-            <div class="flex flex-col">
-              <span class="text-xs text-[var(--color-text-secondary)]">Total a Pagar</span>
-              <span class="text-2xl font-bold text-[var(--color-primary)]">
-                ${{ cartState?.summary?.total || 0 | number: "1.2-2" }}
-              </span>
+          <div class="cash-input-group">
+            <label>Cambio</label>
+            <div class="change-display">
+              <span>${{ paymentState.change | number: "1.2-2" }}</span>
+              <app-icon name="coins" [size]="18"></app-icon>
             </div>
           </div>
         </div>
-      </app-card>
-    </div>
 
-    <!-- Columna 2: Métodos de Pago (5 columnas) -->
-    <div class="lg:col-span-5 flex flex-col gap-4">
-      <!-- Selección de Método de Pago -->
-      <app-card [shadow]="'md'" [customClasses]="'border border-[var(--color-border)]'">
-        <div class="p-4">
-          <h3 class="flex items-center gap-2 mb-3 text-sm font-semibold text-[var(--color-text-primary)]">
-            <app-icon name="credit-card" [size]="16" class="text-[var(--color-primary)]"></app-icon>
-            Método de Pago
-          </h3>
-
-          <div *ngIf="paymentMethods.length > 0; else noPaymentMethods" class="grid grid-cols-4 gap-2">
-            <div *ngFor="let method of paymentMethods; let i = index" (click)="selectPaymentMethod(method)"
-              [class]="getPaymentMethodClasses(method)"
-              class="payment-method-card cursor-pointer p-3 text-center transition-all duration-200 rounded-lg"
-              role="button" tabindex="0" (keydown.enter)="selectPaymentMethod(method)" (keydown.space)="selectPaymentMethod(method)"
-              [attr.aria-label]="'Seleccionar método de pago ' + method.name"
-              [attr.aria-pressed]="paymentState.selectedMethod?.id === method.id">
-              <div class="flex flex-col items-center gap-1">
-                <app-icon [name]="method.icon" [size]="20"
-                  [color]="paymentState.selectedMethod?.id === method.id
-                    ? 'var(--color-primary)'
-                    : 'var(--color-text-secondary)'">
-                </app-icon>
-                <span class="text-xs font-semibold leading-tight text-[var(--color-text-primary)]">
-                  {{ method.name }}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <ng-template #noPaymentMethods>
-            <div class="flex flex-col items-center justify-center text-center py-4">
-              <app-icon name="credit-card-off" [size]="24" color="var(--color-text-secondary)" class="mb-2"></app-icon>
-              <p class="text-xs text-[var(--color-text-secondary)]">No hay métodos configurados.</p>
-              <button class="text-xs text-[var(--color-primary)] font-medium hover:underline mt-1"
-                (click)="navigateToSettings()">
-                Configurar ahora
-              </button>
-            </div>
-          </ng-template>
+        <!-- Quick Amounts -->
+        <div class="quick-amounts">
+          <button type="button" (click)="setHalfAmount()" class="quick-btn">
+            <span>1/2 Pago</span>
+            <span class="quick-value">${{ (cartState?.summary?.total || 0) / 2 | number: "1.0-0" }}</span>
+          </button>
+          <button type="button" (click)="setFullAmount()" class="quick-btn primary">
+            <span>Total</span>
+            <app-icon name="check" [size]="16"></app-icon>
+          </button>
         </div>
-      </app-card>
 
-      <!-- Detalles del Método Seleccionado -->
-      <app-card [shadow]="'md'" [customClasses]="'border border-[var(--color-border)] flex-1'">
-        <div class="p-4 h-full flex flex-col">
-          <!-- Sin selección -->
-          <div *ngIf="!paymentState.selectedMethod"
-            class="flex-1 flex flex-col items-center justify-center text-[var(--color-text-muted)] min-h-[200px]">
-            <app-icon name="arrow-left" [size]="48" class="mb-3 opacity-50"></app-icon>
-            <p class="text-base font-medium">Selecciona un método de pago</p>
-            <p class="text-sm mt-1">Elige una opción de arriba</p>
-          </div>
-
-          <!-- Con selección -->
-          <div *ngIf="paymentState.selectedMethod" class="flex-1 flex flex-col">
-            <h4 class="text-sm font-semibold text-[var(--color-text-primary)] mb-4 pb-2 border-b border-[var(--color-border)]">
-              {{ paymentState.selectedMethod.name }}
-            </h4>
-
-            <!-- Contenido Efectivo -->
-            <div *ngIf="paymentState.selectedMethod.type === 'cash'" class="flex-1 flex flex-col gap-3">
-              <div class="grid grid-cols-2 gap-3">
-                <!-- Input Monto -->
-                <div>
-                  <label class="block text-xs font-semibold text-[var(--color-text-secondary)] uppercase mb-2">Monto Recibido</label>
-                  <div [class]="['enhanced-cash-input p-2 flex items-center bg-[var(--color-background)] rounded-lg',
-                    isCashAmountInsufficient ? 'border-2 border-[var(--color-error)] bg-[var(--color-error-light)]/10' : 'border-2 border-[var(--color-border)]']">
-                    <span class="pl-2 pr-1 text-lg font-semibold" [class]="isCashAmountInsufficient ? 'text-[var(--color-error)]' : 'text-[var(--color-text-secondary)]'">$</span>
-                    <input id="cashReceived" type="number" [formControl]="cashReceivedControl"
-                      class="flex-1 py-1 px-1 text-xl font-bold bg-transparent focus:outline-none"
-                      [class]="isCashAmountInsufficient ? 'text-[var(--color-error)]' : 'text-[var(--color-text-primary)]'"
-                      placeholder="0.00" step="0.01" (input)="calculateChange()" />
-                  </div>
-                  <!-- Monto Faltante -->
-                  <div *ngIf="isCashAmountInsufficient" class="mt-1 text-xs text-[var(--color-error)] font-medium">
-                    Faltan: ${{ missingAmount | number: "1.2-2" }}
-                  </div>
-                </div>
-
-                <!-- Cambio -->
-                <div>
-                  <label class="block text-xs font-semibold text-[var(--color-text-secondary)] uppercase mb-2">Cambio</label>
-                  <div class="p-3 bg-[var(--color-success-light)]/20 border-2 border-[var(--color-success)]/30 rounded-lg h-[50px] flex items-center justify-between">
-                    <span class="text-lg font-bold text-[var(--color-success)]">${{ paymentState.change | number: "1.2-2" }}</span>
-                    <app-icon name="coins" [size]="18" class="text-[var(--color-success)]"></app-icon>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Montos Rápidos -->
-              <div class="grid grid-cols-2 gap-2">
-                <button type="button" (click)="setHalfAmount()"
-                  class="quick-amount-btn py-2 px-3 text-sm font-semibold border-2 border-[var(--color-primary-light)]/30 hover:bg-[var(--color-primary-light)]/10 flex items-center justify-between rounded-lg">
-                  <span>1/2 Pago</span>
-                  <span class="text-[var(--color-primary)]">${{ (cartState?.summary?.total || 0) / 2 | number: "1.0-0" }}</span>
-                </button>
-                <button type="button" (click)="setFullAmount()"
-                  class="quick-amount-btn py-2 px-3 text-sm font-semibold border-2 border-[var(--color-primary)]/30 hover:bg-[var(--color-primary-light)]/10 flex items-center justify-between rounded-lg">
-                  <span>Pago Total</span>
-                  <app-icon name="check-circle" [size]="16" class="text-[var(--color-primary)]"></app-icon>
-                </button>
-              </div>
-
-              <!-- Teclado Numérico -->
-              <div class="grid grid-cols-3 gap-2 flex-1">
-                <button *ngFor="let num of [7, 8, 9, 4, 5, 6, 1, 2, 3]" type="button" (click)="appendNumber(num)"
-                  class="keypad-btn py-3 text-lg hover:bg-[var(--color-surface-hover)] rounded-lg">
-                  {{ num }}
-                </button>
-                <button type="button" (click)="clearCashAmount()"
-                  class="keypad-btn py-3 text-lg text-[var(--color-error)] border-[var(--color-error)]/30 hover:bg-[var(--color-error-light)] rounded-lg">C</button>
-                <button type="button" (click)="appendNumber(0)"
-                  class="keypad-btn py-3 text-lg hover:bg-[var(--color-surface-hover)] rounded-lg">0</button>
-                <button type="button" (click)="backspace()"
-                  class="keypad-btn py-3 text-lg flex items-center justify-center hover:bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)] rounded-lg">
-                  <app-icon name="arrow-left" [size]="20"></app-icon>
-                </button>
-              </div>
-            </div>
-
-            <!-- Contenido Referencia (Tarjeta/Otros) -->
-            <div *ngIf="paymentState.selectedMethod.requiresReference" class="flex-1 flex flex-col justify-center">
-              <div class="text-center mb-4">
-                <div class="inline-flex items-center justify-center w-14 h-14 rounded-full bg-[var(--color-primary-light)]/20 text-[var(--color-primary)] mb-3">
-                  <app-icon [name]="paymentState.selectedMethod.icon" [size]="28"></app-icon>
-                </div>
-                <p class="text-sm text-[var(--color-text-secondary)]">Ingresa el número de referencia o autorización</p>
-              </div>
-              <app-input [formControl]="referenceControl"
-                [label]="paymentState.selectedMethod.referenceLabel || 'Referencia'"
-                [placeholder]="paymentState.selectedMethod.referenceLabel || 'Ingresa la referencia'" [size]="'lg'"
-                [error]="getReferenceError()" [attr.aria-required]="'true'">
-              </app-input>
-            </div>
-          </div>
+        <!-- Numeric Keypad -->
+        <div class="keypad">
+          <button *ngFor="let num of [1, 2, 3, 4, 5, 6, 7, 8, 9]" type="button" (click)="appendNumber(num)" class="keypad-btn">
+            {{ num }}
+          </button>
+          <button type="button" (click)="clearCashAmount()" class="keypad-btn clear">C</button>
+          <button type="button" (click)="appendNumber(0)" class="keypad-btn">0</button>
+          <button type="button" (click)="backspace()" class="keypad-btn">
+            <app-icon name="delete" [size]="20"></app-icon>
+          </button>
         </div>
-      </app-card>
-    </div>
+      </div>
 
-    <!-- Columna 3: Tipo de Venta / Cliente (4 columnas) -->
-    <div class="lg:col-span-4 flex flex-col">
-      <app-card [shadow]="'md'" [customClasses]="'payment-details-enhanced h-full flex flex-col'">
-        <div class="p-4 flex-1 flex flex-col">
-          <h3 class="flex items-center gap-2 mb-4 text-sm font-semibold text-[var(--color-text-primary)]">
-            <app-icon name="users" [size]="16" class="text-[var(--color-primary)]"></app-icon>
-            Tipo de Venta
-          </h3>
+      <!-- Reference Input (when required) -->
+      <div *ngIf="paymentState.selectedMethod?.requiresReference" class="reference-section">
+        <div class="reference-header">
+          <app-icon [name]="paymentState.selectedMethod?.icon || 'credit-card'" [size]="28"></app-icon>
+          <p>Ingresa el número de referencia</p>
+        </div>
+        <app-input
+          [formControl]="referenceControl"
+          [label]="paymentState.selectedMethod?.referenceLabel || 'Referencia'"
+          [placeholder]="'Ingresa la referencia'"
+          [size]="'lg'"
+          [error]="getReferenceError()"
+        ></app-input>
+      </div>
+    </section>
 
-          <!-- Venta Anónima Toggle (solo si está permitido) -->
-          <div *ngIf="allowAnonymousSales" class="mb-3">
-            <label class="flex items-center gap-3 cursor-pointer p-3 border-2 rounded-lg hover:bg-[var(--color-surface-hover)] transition-all duration-200"
-              [class.border-[var(--color-primary)]]="paymentState.isAnonymousSale"
-              [class.bg-[var(--color-primary-light)]]="paymentState.isAnonymousSale">
-              <input type="radio" [checked]="paymentState.isAnonymousSale" (change)="toggleAnonymousSale(true)"
-                class="w-4 h-4 text-[var(--color-primary)]">
-              <div class="flex-1">
-                <div class="flex items-center gap-2">
-                  <app-icon name="user-x" [size]="18" [color]="paymentState.isAnonymousSale ? 'var(--color-primary)' : 'var(--color-text-secondary)'"></app-icon>
-                  <span class="font-medium text-sm">Venta Anónima</span>
-                </div>
-                <p class="text-xs text-[var(--color-text-muted)] mt-1">Sin cliente asociado</p>
-              </div>
-            </label>
+    <!-- Tipo de Venta Section -->
+    <section class="payment-section">
+      <div class="section-header">
+        <app-icon name="users" [size]="16" class="section-icon"></app-icon>
+        <h2 class="section-title">Tipo de Venta</h2>
+      </div>
+
+      <!-- Sale Type Options -->
+      <div class="sale-type-options">
+        <!-- Anonymous Sale Option -->
+        <button
+          *ngIf="allowAnonymousSales"
+          type="button"
+          class="sale-type-btn"
+          [class.selected]="paymentState.isAnonymousSale"
+          (click)="toggleAnonymousSale(true)"
+        >
+          <div class="radio-indicator">
+            <div *ngIf="paymentState.isAnonymousSale" class="radio-dot"></div>
           </div>
-
-          <!-- Venta con Cliente Toggle -->
-          <div class="mb-3">
-            <label class="flex items-center gap-3 cursor-pointer p-3 border-2 rounded-lg hover:bg-[var(--color-surface-hover)] transition-all duration-200"
-              [class.border-[var(--color-primary)]]="!paymentState.isAnonymousSale"
-              [class.bg-[var(--color-primary-light)]]="!paymentState.isAnonymousSale">
-              <input type="radio" [checked]="!paymentState.isAnonymousSale" (change)="toggleAnonymousSale(false)"
-                class="w-4 h-4 text-[var(--color-primary)]">
-              <div class="flex-1">
-                <div class="flex items-center gap-2">
-                  <app-icon name="user" [size]="18" [color]="!paymentState.isAnonymousSale ? 'var(--color-primary)' : 'var(--color-text-secondary)'"></app-icon>
-                  <span class="font-medium text-sm">Con Cliente</span>
-                </div>
-                <p class="text-xs text-[var(--color-text-muted)] mt-1">
-                  {{ customerDisplayName }}
-                </p>
-              </div>
-            </label>
+          <app-icon name="user-x" [size]="20"></app-icon>
+          <div class="sale-type-info">
+            <span class="sale-type-name">Venta Anónima</span>
+            <span class="sale-type-desc">Sin cliente asociado</span>
           </div>
+        </button>
 
-          <!-- Información del Cliente Actual -->
-          <div *ngIf="!paymentState.isAnonymousSale && cartState?.customer" class="mt-auto pt-4 border-t border-[var(--color-border)]">
-            <div class="bg-[var(--color-surface-hover)] rounded-lg p-3">
-              <div class="flex items-center gap-2 mb-2">
-                <app-icon name="user-check" [size]="16" class="text-[var(--color-success)]"></app-icon>
-                <span class="text-xs font-semibold text-[var(--color-text-primary)]">Cliente Seleccionado</span>
-              </div>
-              <p class="text-sm font-medium text-[var(--color-text-primary)]">{{ customerDisplayName }}</p>
-              <p class="text-xs text-[var(--color-text-secondary)] mt-1">{{ customerEmail }}</p>
-            </div>
+        <!-- Customer Sale Option -->
+        <button
+          type="button"
+          class="sale-type-btn"
+          [class.selected]="!paymentState.isAnonymousSale"
+          (click)="toggleAnonymousSale(false)"
+        >
+          <div class="radio-indicator">
+            <div *ngIf="!paymentState.isAnonymousSale" class="radio-dot"></div>
           </div>
-
-          <!-- Botón para cambiar cliente (cuando no es anónimo y no hay cliente) -->
-          <div *ngIf="!paymentState.isAnonymousSale && !cartState?.customer" class="mt-auto pt-4 border-t border-[var(--color-border)]">
-            <button type="button" (click)="openCustomerSelector()"
-              class="w-full py-3 px-4 border-2 border-dashed border-[var(--color-border)] rounded-lg hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-light)]/10 transition-all duration-200 flex items-center justify-center gap-2">
-              <app-icon name="user-plus" [size]="18" class="text-[var(--color-text-secondary)]"></app-icon>
-              <span class="text-sm font-medium text-[var(--color-text-secondary)]">Seleccionar Cliente</span>
-            </button>
+          <app-icon name="user" [size]="20"></app-icon>
+          <div class="sale-type-info">
+            <span class="sale-type-name">Con Cliente</span>
+            <span class="sale-type-desc">{{ cartState?.customer ? customerDisplayName : 'Seleccionar cliente' }}</span>
           </div>
+        </button>
+      </div>
 
-          <!-- Customer Selector (internal) -->
-          <div *ngIf="showCustomerSelector" class="mt-auto pt-4 border-t border-[var(--color-border)]">
-            <div class="space-y-3">
-              <!-- Search -->
-              <div>
-                <label class="block text-xs font-semibold text-[var(--color-text-secondary)] uppercase mb-2">Buscar Cliente</label>
-                <app-input [placeholder]="'Buscar por nombre, email o documento...'" [size]="'sm'" (inputChange)="onCustomerSearch($event)"></app-input>
-              </div>
+      <!-- Selected Customer Display -->
+      <div *ngIf="!paymentState.isAnonymousSale && cartState?.customer" class="selected-customer">
+        <div class="customer-avatar">
+          <app-icon name="user-check" [size]="16"></app-icon>
+        </div>
+        <div class="customer-info">
+          <span class="customer-name">{{ customerDisplayName }}</span>
+          <span class="customer-email">{{ customerEmail }}</span>
+        </div>
+        <button type="button" class="change-customer-btn" (click)="openCustomerSelector()">
+          <app-icon name="edit-2" [size]="14"></app-icon>
+        </button>
+      </div>
 
-              <!-- Search Results -->
-              <div *ngIf="!showCreateCustomerForm && customerSearchResults.length > 0" class="space-y-2 max-h-40 overflow-y-auto">
-                <div *ngFor="let customer of customerSearchResults" (click)="selectCustomer(customer)"
-                  class="p-3 border border-[var(--color-border)] rounded-lg hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-light)]/10 cursor-pointer transition-all duration-200">
-                  <p class="text-sm font-medium text-[var(--color-text-primary)]">{{ customer.first_name }} {{ customer.last_name }}</p>
-                  <p class="text-xs text-[var(--color-text-secondary)]">{{ customer.email }}</p>
-                </div>
-              </div>
+      <!-- Select Customer Button -->
+      <button
+        *ngIf="!paymentState.isAnonymousSale && !cartState?.customer && !showCustomerSelector"
+        type="button"
+        class="select-customer-btn"
+        (click)="openCustomerSelector()"
+      >
+        <app-icon name="user-plus" [size]="18"></app-icon>
+        <span>Seleccionar Cliente</span>
+      </button>
 
-              <!-- No Results -->
-              <div *ngIf="!showCreateCustomerForm && customerSearchQuery && customerSearchResults.length === 0"
-                class="text-center py-4">
-                <p class="text-sm text-[var(--color-text-secondary)]">No se encontraron clientes</p>
-                <button type="button" (click)="switchToCreateCustomer()"
-                  class="mt-2 text-sm text-[var(--color-primary)] font-medium hover:underline">
-                  Crear nuevo cliente
-                </button>
-              </div>
+      <!-- Customer Selector Panel -->
+      <div *ngIf="showCustomerSelector" class="customer-selector">
+        <div class="selector-header">
+          <span>Buscar Cliente</span>
+          <button type="button" (click)="closeCustomerSelector()">
+            <app-icon name="x" [size]="16"></app-icon>
+          </button>
+        </div>
 
-              <!-- Create Customer Form -->
-              <div *ngIf="showCreateCustomerForm" class="space-y-3">
-                <h5 class="text-sm font-semibold text-[var(--color-text-primary)]">Nuevo Cliente</h5>
-                <app-input [formControl]="customerEmailControl" [label]="'Email'" [placeholder]="'correo@ejemplo.com'" [size]="'sm'"></app-input>
-                <div class="grid grid-cols-2 gap-2">
-                  <app-input [formControl]="customerFirstNameControl" [label]="'Nombre'" [placeholder]="'Juan'" [size]="'sm'"></app-input>
-                  <app-input [formControl]="customerLastNameControl" [label]="'Apellido'" [placeholder]="'Pérez'" [size]="'sm'"></app-input>
-                </div>
-                <app-input [formControl]="customerPhoneControl" [label]="'Teléfono'" [placeholder]="'+1 234 5678'" [size]="'sm'"></app-input>
-                <div class="grid grid-cols-2 gap-2">
-                  <app-selector [formControl]="customerDocumentTypeControl" [label]="'Tipo Doc.'" [placeholder]="'Seleccionar...'" [size]="'sm'" [options]="documentTypeOptions"></app-selector>
-                  <app-input [formControl]="customerDocumentNumberControl" [label]="'Número Doc.'" [placeholder]="'12345678'" [size]="'sm'"></app-input>
-                </div>
-                <div class="flex gap-2">
-                  <button type="button" (click)="onCreateCustomer()"
-                    class="flex-1 py-2 px-3 bg-[var(--color-primary)] text-white rounded-lg text-sm font-medium hover:bg-[var(--color-primary-dark)] transition-colors">
-                    Crear
-                  </button>
-                  <button type="button" (click)="switchToCustomerSearch()"
-                    class="flex-1 py-2 px-3 border border-[var(--color-border)] rounded-lg text-sm font-medium hover:bg-[var(--color-surface-hover)] transition-colors">
-                    Cancelar
-                  </button>
-                </div>
-              </div>
+        <app-input
+          [placeholder]="'Buscar por nombre, email o documento...'"
+          [size]="'sm'"
+          (inputChange)="onCustomerSearch($event)"
+        ></app-input>
 
-              <!-- Close Button -->
-              <button type="button" (click)="closeCustomerSelector()"
-                class="w-full py-2 px-3 border border-[var(--color-border)] rounded-lg text-sm font-medium hover:bg-[var(--color-surface-hover)] transition-colors flex items-center justify-center gap-2">
-                <app-icon name="x" [size]="16"></app-icon>
-                Cerrar
-              </button>
-            </div>
+        <!-- Search Results -->
+        <div *ngIf="!showCreateCustomerForm && customerSearchResults.length > 0" class="search-results">
+          <button
+            *ngFor="let customer of customerSearchResults"
+            type="button"
+            class="customer-result"
+            (click)="selectCustomer(customer)"
+          >
+            <span class="result-name">{{ customer.first_name }} {{ customer.last_name }}</span>
+            <span class="result-email">{{ customer.email }}</span>
+          </button>
+        </div>
+
+        <!-- No Results -->
+        <div *ngIf="!showCreateCustomerForm && customerSearchQuery && customerSearchResults.length === 0" class="no-results">
+          <p>No se encontraron clientes</p>
+          <button type="button" (click)="switchToCreateCustomer()">Crear nuevo cliente</button>
+        </div>
+
+        <!-- Create Customer Form -->
+        <div *ngIf="showCreateCustomerForm" class="create-customer-form">
+          <h5>Nuevo Cliente</h5>
+          <app-input [formControl]="customerEmailControl" [label]="'Email'" [placeholder]="'correo@ejemplo.com'" [size]="'sm'"></app-input>
+          <div class="form-row">
+            <app-input [formControl]="customerFirstNameControl" [label]="'Nombre'" [placeholder]="'Juan'" [size]="'sm'"></app-input>
+            <app-input [formControl]="customerLastNameControl" [label]="'Apellido'" [placeholder]="'Pérez'" [size]="'sm'"></app-input>
+          </div>
+          <app-input [formControl]="customerPhoneControl" [label]="'Teléfono'" [placeholder]="'+1 234 5678'" [size]="'sm'"></app-input>
+          <div class="form-row">
+            <app-selector [formControl]="customerDocumentTypeControl" [label]="'Tipo Doc.'" [placeholder]="'Seleccionar'" [size]="'sm'" [options]="documentTypeOptions"></app-selector>
+            <app-input [formControl]="customerDocumentNumberControl" [label]="'Número Doc.'" [placeholder]="'12345678'" [size]="'sm'"></app-input>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn-create" (click)="onCreateCustomer()">Crear</button>
+            <button type="button" class="btn-cancel" (click)="switchToCustomerSearch()">Cancelar</button>
           </div>
         </div>
-      </app-card>
-    </div>
+      </div>
+    </section>
   </div>
 
-  <!-- Footer con Botones -->
-  <div slot="footer" class="flex justify-between items-center w-full gap-4 pt-2">
-    <app-button variant="outline-danger" size="md" (clicked)="onModalClosed()" [disabled]="paymentState.isProcessing">
-      Cancelar
-    </app-button>
-
-    <div class="flex gap-3">
-      <app-button variant="outline" size="md" (clicked)="saveAsDraft()" [disabled]="paymentState.isProcessing">
-        <app-icon name="save" [size]="18" slot="icon" class="mr-2"></app-icon>
+  <!-- Footer Buttons -->
+  <div slot="footer" class="payment-footer">
+    <div class="footer-row">
+      <button type="button" class="btn-cancel-payment" (click)="onModalClosed()" [disabled]="paymentState.isProcessing">
+        Cancelar
+      </button>
+      <button type="button" class="btn-draft" (click)="saveAsDraft()" [disabled]="paymentState.isProcessing">
+        <app-icon name="save" [size]="16"></app-icon>
         Borrador
-      </app-button>
-
-      <app-button variant="primary" size="lg" (clicked)="processPayment()" [loading]="paymentState.isProcessing"
-        [disabled]="!canProcessPayment()" [customClasses]="'min-w-[180px] font-semibold'">
-        <app-icon name="check" [size]="18" slot="icon" class="mr-2"></app-icon>
-        {{ paymentState.selectedMethod?.type === "cash" ? "Cobrar" : "Confirmar" }}
-      </app-button>
+      </button>
     </div>
+    <button
+      type="button"
+      class="btn-confirm"
+      (click)="processPayment()"
+      [disabled]="!canProcessPayment() || paymentState.isProcessing"
+      [class.loading]="paymentState.isProcessing"
+    >
+      <app-icon *ngIf="!paymentState.isProcessing" name="check-circle" [size]="20"></app-icon>
+      <span *ngIf="paymentState.isProcessing" class="spinner"></span>
+      {{ paymentState.selectedMethod?.type === "cash" ? "Cobrar" : "Confirmar Pago" }}
+    </button>
   </div>
 </app-modal>

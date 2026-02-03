@@ -11,10 +11,11 @@ import {
   ToastService,
   IconComponent,
   StatsComponent,
-  TableComponent,
   TableColumn,
   TableAction,
   DialogService,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
 } from '../../../../../../app/shared/components/index';
 
 @Component({
@@ -25,7 +26,7 @@ import {
     ButtonComponent,
     IconComponent,
     StatsComponent,
-    TableComponent,
+    ResponsiveDataViewComponent,
   ],
   template: `
     <div class="w-full space-y-6">
@@ -84,16 +85,15 @@ import {
             </app-button>
           </div>
           <div class="p-4">
-            <app-table
+            <app-responsive-data-view
               [data]="payment_methods"
               [columns]="enabled_payment_methods_columns"
+              [cardConfig]="enabled_card_config"
               [actions]="enabled_payment_methods_actions"
               [loading]="is_loading"
-              [emptyMessage]="'No hay métodos de pago activados'"
-              size="md"
-              [hoverable]="true"
-              [bordered]="true"
-            ></app-table>
+              emptyMessage="No hay métodos de pago activados"
+              emptyIcon="credit-card"
+            ></app-responsive-data-view>
           </div>
         </div>
 
@@ -118,16 +118,15 @@ import {
             </app-button>
           </div>
           <div class="p-4">
-            <app-table
+            <app-responsive-data-view
               [data]="available_payment_methods"
               [columns]="available_payment_methods_columns"
+              [cardConfig]="available_card_config"
               [actions]="available_payment_methods_actions"
               [loading]="is_loading_available"
-              [emptyMessage]="'No hay métodos disponibles'"
-              size="md"
-              [hoverable]="true"
-              [bordered]="true"
-            ></app-table>
+              emptyMessage="No hay métodos disponibles"
+              emptyIcon="credit-card"
+            ></app-responsive-data-view>
           </div>
         </div>
       </div>
@@ -154,6 +153,61 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
   is_loading_available = false;
   is_enabling = false;
 
+  // Card configs for mobile
+  enabled_card_config: ItemListCardConfig = {
+    titleKey: 'display_name',
+    titleTransform: (val: any) => val || 'Sin nombre',
+    subtitleKey: 'system_payment_method.provider',
+    badgeKey: 'state',
+    badgeConfig: { type: 'status' },
+    badgeTransform: (val: string) => {
+      const state_map: Record<string, string> = {
+        enabled: 'Activo',
+        disabled: 'Inactivo',
+        requires_configuration: 'Requiere Configuración',
+        archived: 'Archivado',
+      };
+      return state_map[val] || val;
+    },
+    detailKeys: [
+      {
+        key: 'system_payment_method.type',
+        label: 'Tipo',
+        transform: (val: string) => {
+          const type_map: Record<string, string> = {
+            cash: 'Efectivo',
+            card: 'Tarjeta',
+            paypal: 'PayPal',
+            bank_transfer: 'Transferencia',
+          };
+          return type_map[val] || val;
+        }
+      }
+    ],
+  };
+
+  available_card_config: ItemListCardConfig = {
+    titleKey: 'display_name',
+    subtitleKey: 'type',
+    subtitleTransform: (val: string) => {
+      const type_map: Record<string, string> = {
+        cash: 'Efectivo',
+        card: 'Tarjeta',
+        paypal: 'PayPal',
+        bank_transfer: 'Transferencia',
+      };
+      return type_map[val] || val;
+    },
+    badgeKey: 'provider',
+    badgeConfig: {
+      type: 'custom',
+      colorMap: {
+        'system': '#64748b',
+        'organization': '#7c3aed'
+      }
+    },
+    badgeTransform: (val: string) => val === 'system' ? 'Sistema' : 'Organización',
+  };
 
   // Table configuration for enabled payment methods
   enabled_payment_methods_columns: TableColumn[] = [

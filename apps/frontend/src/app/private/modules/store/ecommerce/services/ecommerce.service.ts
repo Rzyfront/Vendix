@@ -59,14 +59,14 @@ export class EcommerceService {
 
   /**
    * Update e-commerce settings
-   * Creates or updates the ecommerce domain configuration
+   * Creates or updates the ecommerce configuration in store_settings
    */
   updateSettings(settings: EcommerceSettings): Observable<EcommerceSettings> {
     const payload: UpdateEcommerceSettingsDto = { ecommerce: settings };
     return this.http
       .patch<any>(`${this.apiBaseUrl}/settings`, payload)
       .pipe(
-        map((response) => response.data?.config || response.data || response),
+        map((response) => response.data || response),
         catchError(this.handleError)
       );
   }

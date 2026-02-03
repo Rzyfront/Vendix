@@ -97,6 +97,7 @@ export class UsersService {
     await this.prisma.user_settings.create({
       data: {
         user_id: user.id,
+        app_type: app, // Campo directo
         config: config,
       },
     });
@@ -498,7 +499,7 @@ export class UsersService {
     }
 
     const config: UserConfigDto = {
-      app: (user.user_settings[0]?.config as any)?.app || 'VENDIX_LANDING',
+      app: user.user_settings[0]?.app_type || 'VENDIX_LANDING',
       roles: user.user_roles.map((ur) => ur.role_id),
       store_ids: user.store_users.map((su) => su.store_id),
       panel_ui: (user.user_settings[0]?.config as any)?.panel_ui || {},
@@ -511,18 +512,19 @@ export class UsersService {
     const { app, roles, store_ids, panel_ui } = configDto;
 
     return this.prisma.$transaction(async (tx) => {
-      // 1. Update User Settings (App & Panel UI)
       const existingSettings = await tx.user_settings.findFirst({
         where: { user_id: id },
       });
 
       if (existingSettings) {
+        const existingConfig = (existingSettings.config as any) || {};
+
         await tx.user_settings.update({
           where: { id: existingSettings.id },
           data: {
+            app_type: app,
             config: {
-              ...((existingSettings.config as object) || {}),
-              app,
+              ...existingConfig,
               panel_ui,
             },
             updated_at: new Date(),
@@ -532,7 +534,8 @@ export class UsersService {
         await tx.user_settings.create({
           data: {
             user_id: id,
-            config: { app, panel_ui },
+            app_type: app,
+            config: { panel_ui },
           },
         });
       }

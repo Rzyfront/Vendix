@@ -2,23 +2,36 @@
   position: relative;
   display: inline-block;
 
-  .user-trigger {
-    display: flex;
+  // Full trigger style (desktop)
+  .user-trigger-full {
     align-items: center;
     gap: 0.75rem;
     padding: 0.5rem 0.75rem;
     border: none;
-    background: transparent;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
     border-radius: 0.75rem;
     cursor: pointer;
     transition: all 0.2s ease;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
 
     &:hover {
       background: var(--color-background);
       transform: translateY(-1px);
       box-shadow: var(--shadow-sm);
+    }
+
+    .user-avatar {
+      width: 2rem;
+      height: 2rem;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: var(--fs-xs);
+      color: white;
+      background: var(--color-primary);
+      flex-shrink: 0;
     }
 
     .user-info {
@@ -41,20 +54,6 @@
       }
     }
 
-    .user-avatar {
-      width: var(--logo-sm);
-      height: var(--logo-sm);
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 600;
-      font-size: var(--fs-sm);
-      color: white;
-      background: var(--color-primary);
-      flex-shrink: 0;
-    }
-
     .chevron-icon {
       color: var(--color-text-secondary);
       transition: transform 0.2s ease;
@@ -64,6 +63,44 @@
       }
     }
   }
+
+  // Minimal trigger style (mobile)
+  .user-trigger-minimal {
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.25rem;
+    border: none;
+    background: transparent;
+    border-radius: 9999px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &:hover {
+      background: rgba(0, 0, 0, 0.04);
+
+      .user-avatar-minimal {
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb, 59, 130, 246), 0.15);
+      }
+    }
+
+    .user-avatar-minimal {
+      width: 2rem;
+      height: 2rem;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: var(--fs-xs);
+      color: var(--color-primary);
+      background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
+      border: 1.5px solid rgba(var(--color-primary-rgb, 59, 130, 246), 0.2);
+      flex-shrink: 0;
+      transition: all 0.2s ease;
+    }
+  }
+
 
   .dropdown-menu {
     position: absolute;
@@ -190,18 +227,11 @@
 @media (max-width: 48em) {
   /* 768px */
   .user-dropdown-container {
-    .user-trigger {
-      padding: 6px 8px;
-      gap: 8px;
-
-      .user-info {
-        display: none;
-      }
-
-      .user-avatar {
-        width: 2rem;
-        height: 2rem;
-        font-size: var(--fs-xs);
+    .user-trigger-minimal {
+      .user-avatar-minimal {
+        width: 1.875rem;
+        height: 1.875rem;
+        font-size: 0.6875rem;
       }
     }
 

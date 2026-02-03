@@ -148,8 +148,16 @@ export class DomainsController {
   @Get('stats')
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
   @Permissions('organization:domains:read')
-  async getDomainStats(): Promise<SuccessResponse<any>> {
-    const stats = await this.domainsService.getDomainStats();
+  async getDomainStats(
+    @Req() req: AuthenticatedRequest,
+  ): Promise<SuccessResponse<any>> {
+    const user_role = req?.user?.user_roles?.[0]?.roles?.name;
+    const is_super_admin = user_role === UserRole.SUPER_ADMIN;
+
+    // Super admins see all stats, others see only their organization
+    const organization_id = is_super_admin ? undefined : req?.user?.organization_id;
+
+    const stats = await this.domainsService.getDomainStats(organization_id);
     return this.responseService.success(
       stats,
       'Domain statistics retrieved successfully',

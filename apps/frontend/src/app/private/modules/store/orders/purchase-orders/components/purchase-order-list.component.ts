@@ -11,12 +11,13 @@ import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
 
 import {
-  TableComponent,
   TableColumn,
   TableAction,
   IconComponent,
   DialogService,
   ToastService,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
 } from '../../../../../../shared/components/index';
 
 import { PurchaseOrdersService } from '../../../inventory/services';
@@ -29,7 +30,7 @@ import {
 @Component({
   selector: 'app-purchase-order-list',
   standalone: true,
-  imports: [CommonModule, FormsModule, TableComponent, IconComponent],
+  imports: [CommonModule, FormsModule, ResponsiveDataViewComponent, IconComponent],
   templateUrl: './purchase-order-list.component.html',
   styleUrls: ['./purchase-order-list.component.scss'],
 })
@@ -131,6 +132,40 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
         ['draft', 'submitted', 'approved', 'ordered'].includes(order.status),
     },
   ];
+
+  // Card Config
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'order_number',
+    titleTransform: (val: string) => `Orden #${val}`,
+    subtitleKey: 'supplierName',
+    badgeKey: 'status',
+    badgeConfig: {
+      type: 'custom',
+      size: 'sm',
+      colorMap: {
+        draft: '#6b7280',
+        submitted: '#f59e0b',
+        approved: '#3b82f6',
+        ordered: '#8b5cf6',
+        partial: '#f97316',
+        received: '#10b981',
+        cancelled: '#ef4444',
+      },
+    },
+    badgeTransform: (val: any) => this.getStatusLabel(val),
+    detailKeys: [
+      {
+        key: 'total_amount',
+        label: 'Total',
+        transform: (val: any) => this.formatCurrency(val)
+      },
+      {
+        key: 'expected_date',
+        label: 'Entrega',
+        transform: (val: any) => val ? new Date(val).toLocaleDateString() : '-'
+      }
+    ]
+  };
 
   // Status options for filter
   status_options = [

@@ -408,10 +408,11 @@ export class ProductCreatePageComponent implements OnInit {
           description: brand.description,
         }));
 
-        // Force control update if value exists but wasn't matching options
+        // Re-set the brand value to force selector sync after options load
         const brandControl = this.productForm.get('brand_id');
         if (brandControl?.value) {
-          brandControl.updateValueAndValidity({ emitEvent: false });
+          const currentValue = brandControl.value;
+          brandControl.setValue(currentValue);
         }
       },
       error: (error: any) => {

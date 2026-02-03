@@ -31,6 +31,9 @@ export class StoreSettingsService {
   private settings$$ = new BehaviorSubject<StoreSettings | null>(null);
   settings$ = this.settings$$.asObservable();
 
+  private auto_save_error$$ = new Subject<Error>();
+  autoSaveError$ = this.auto_save_error$$.asObservable();
+
   constructor() {
     this.setupAutoSave();
   }
@@ -42,7 +45,15 @@ export class StoreSettingsService {
         distinctUntilChanged(
           (prev, curr) => JSON.stringify(prev) === JSON.stringify(curr),
         ),
-        switchMap((settings) => this.update_settings_api(settings)),
+        switchMap((settings) =>
+          this.update_settings_api(settings).pipe(
+            catchError((error) => {
+              console.error('Error saving settings:', error);
+              this.auto_save_error$$.next(error);
+              return throwError(() => error);
+            }),
+          ),
+        ),
         takeUntil(this.destroy$$),
       )
       .subscribe({
@@ -53,7 +64,6 @@ export class StoreSettingsService {
           // Dispatch success action directly to update NgRx store
           this.store.dispatch(AuthActions.updateStoreSettingsSuccess({ store_settings: response.data }));
         },
-        error: (error) => console.error('Error saving settings:', error),
       });
   }
 
@@ -68,14 +78,13 @@ export class StoreSettingsService {
       );
   }
 
-  saveSettings(settings: Partial<StoreSettings>): Observable<ApiResponse<StoreSettings>> {
-    return this.save_settings$$.pipe(
-      debounceTime(2500),
-      distinctUntilChanged(
-        (prev, curr) => JSON.stringify(prev) === JSON.stringify(curr),
-      ),
-      switchMap((s) => this.update_settings_api(s)),
-    );
+  /**
+   * Dispara el auto-guardado con debounce.
+   * El flujo de auto-save ya está configurado en setupAutoSave().
+   * Suscríbete a settings$ para recibir notificaciones cuando el guardado se complete.
+   */
+  triggerAutoSave(settings: Partial<StoreSettings>): void {
+    this.save_settings$$.next(settings);
   }
 
   saveSettingsNow(

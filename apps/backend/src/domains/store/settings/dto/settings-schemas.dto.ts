@@ -13,6 +13,7 @@ import {
   IsIn,
   IsNotEmpty,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -22,21 +23,25 @@ import {
 
 export class GeneralSettingsDto {
   // Campos de store_settings (existentes)
-  @ApiProperty({ example: 'America/Bogota' })
+  @ApiProperty({ example: 'America/Bogota', required: false })
+  @IsOptional()
   @IsString()
-  timezone: string;
+  timezone?: string;
 
-  @ApiProperty({ example: 'USD' })
+  @ApiProperty({ example: 'USD', required: false })
+  @IsOptional()
   @IsString()
-  currency: string;
+  currency?: string;
 
-  @ApiProperty({ example: 'es' })
+  @ApiProperty({ example: 'es', required: false })
+  @IsOptional()
   @IsString()
-  language: string;
+  language?: string;
 
-  @ApiProperty({ example: false })
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
   @IsBoolean()
-  tax_included: boolean;
+  tax_included?: boolean;
 
   // Campos de la tabla stores (NUEVOS)
   @ApiProperty({ example: 'Mi Tienda', required: false })
@@ -60,63 +65,76 @@ export class GeneralSettingsDto {
 }
 
 export class InventorySettingsDto {
-  @ApiProperty({ example: 10 })
+  @ApiProperty({ example: 10, required: false })
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  low_stock_threshold: number;
+  low_stock_threshold?: number;
 
   @ApiProperty({
     enum: ['hide', 'show', 'disable', 'allow_backorder'],
     example: 'hide',
+    required: false,
   })
+  @IsOptional()
   @IsEnum(['hide', 'show', 'disable', 'allow_backorder'])
-  out_of_stock_action: 'hide' | 'show' | 'disable' | 'allow_backorder';
+  out_of_stock_action?: 'hide' | 'show' | 'disable' | 'allow_backorder';
 
-  @ApiProperty({ example: true })
+  @ApiProperty({ example: true, required: false })
+  @IsOptional()
   @IsBoolean()
-  track_inventory: boolean;
+  track_inventory?: boolean;
 
-  @ApiProperty({ example: false })
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
   @IsBoolean()
-  allow_negative_stock: boolean;
+  allow_negative_stock?: boolean;
 }
 
 export class CheckoutSettingsDto {
-  @ApiProperty({ example: true })
+  @ApiProperty({ example: true, required: false })
+  @IsOptional()
   @IsBoolean()
-  require_customer_data: boolean;
+  require_customer_data?: boolean;
 
-  @ApiProperty({ example: false })
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
   @IsBoolean()
-  allow_guest_checkout: boolean;
+  allow_guest_checkout?: boolean;
 
-  @ApiProperty({ example: false })
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
   @IsBoolean()
-  allow_partial_payments: boolean;
+  allow_partial_payments?: boolean;
 
-  @ApiProperty({ example: true })
+  @ApiProperty({ example: true, required: false })
+  @IsOptional()
   @IsBoolean()
-  require_payment_confirmation: boolean;
+  require_payment_confirmation?: boolean;
 }
 
 
 
 export class NotificationsSettingsDto {
-  @ApiProperty({ example: true })
+  @ApiProperty({ example: true, required: false })
+  @IsOptional()
   @IsBoolean()
-  email_enabled: boolean;
+  email_enabled?: boolean;
 
-  @ApiProperty({ example: false })
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
   @IsBoolean()
-  sms_enabled: boolean;
+  sms_enabled?: boolean;
 
-  @ApiProperty({ example: true })
+  @ApiProperty({ example: true, required: false })
+  @IsOptional()
   @IsBoolean()
-  low_stock_alerts: boolean;
+  low_stock_alerts?: boolean;
 
-  @ApiProperty({ example: true })
+  @ApiProperty({ example: true, required: false })
+  @IsOptional()
   @IsBoolean()
-  new_order_alerts: boolean;
+  new_order_alerts?: boolean;
 
   @ApiProperty({ example: 'alerts@store.com', required: false })
   @IsOptional()
@@ -200,60 +218,164 @@ export class PosSettingsDto {
 }
 
 export class ReceiptsSettingsDto {
-  @ApiProperty({ example: true })
+  @ApiProperty({ example: true, required: false })
+  @IsOptional()
   @IsBoolean()
-  print_receipt: boolean;
+  print_receipt?: boolean;
 
-  @ApiProperty({ example: false })
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
   @IsBoolean()
-  email_receipt: boolean;
+  email_receipt?: boolean;
 
   @ApiProperty({ example: '', required: false })
   @IsOptional()
   @IsString()
   receipt_header?: string;
 
-  @ApiProperty({ example: '¡Gracias por su compra!' })
+  @ApiProperty({ example: '¡Gracias por su compra!', required: false })
+  @IsOptional()
   @IsString()
-  receipt_footer: string;
+  receipt_footer?: string;
 }
 
 export class AppSettingsDto {
-  @ApiProperty({ example: 'Vendix', description: 'Nombre de la aplicación' })
+  @ApiProperty({ example: 'Vendix', description: 'Nombre de la aplicación', required: false })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @MaxLength(100)
-  name: string;
+  name?: string;
 
-  @ApiProperty({ example: '#7ED7A5', description: 'Color primario en formato HEX' })
+  @ApiProperty({ example: '#7ED7A5', description: 'Color primario en formato HEX', required: false })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @Matches(/^#[0-9A-Fa-f]{6}$/, { message: 'primary_color must be a valid hex color (e.g., #7ED7A5)' })
-  primary_color: string;
+  primary_color?: string;
 
-  @ApiProperty({ example: '#2F6F4E', description: 'Color secundario en formato HEX' })
+  @ApiProperty({ example: '#2F6F4E', description: 'Color secundario en formato HEX', required: false })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @Matches(/^#[0-9A-Fa-f]{6}$/, { message: 'secondary_color must be a valid hex color' })
-  secondary_color: string;
+  secondary_color?: string;
 
-  @ApiProperty({ example: '#FFFFFF', description: 'Color de acento en formato HEX' })
+  @ApiProperty({ example: '#FFFFFF', description: 'Color de acento en formato HEX', required: false })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @Matches(/^#[0-9A-Fa-f]{6}$/, { message: 'accent_color must be a valid hex color' })
-  accent_color: string;
+  accent_color?: string;
 
-  @ApiProperty({ enum: ['default', 'aura', 'monocromo'], example: 'default' })
+  @ApiProperty({ enum: ['default', 'aura', 'monocromo'], example: 'default', required: false })
+  @IsOptional()
+  @ValidateIf((o) => o.theme !== undefined && o.theme !== null)
   @IsIn(['default', 'aura', 'monocromo'], { message: 'theme must be either "default", "aura", or "monocromo"' })
-  theme: 'default' | 'aura' | 'monocromo';
+  theme?: 'default' | 'aura' | 'monocromo';
 
   @ApiProperty({ example: 'https://example.com/logo.png', required: false })
   @IsOptional()
-  @IsUrl({}, { message: 'logo_url must be a valid URL' })
-  logo_url?: string;
+  @IsString()
+  logo_url?: string | null;
 
   @ApiProperty({ example: 'https://example.com/favicon.ico', required: false })
   @IsOptional()
-  @IsUrl({}, { message: 'favicon_url must be a valid URL' })
-  favicon_url?: string;
+  @IsString()
+  favicon_url?: string | null;
+}
+
+export class BrandingSettingsDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  primary_color?: string;
+
+  @IsOptional()
+  @IsString()
+  secondary_color?: string;
+
+  @IsOptional()
+  @IsString()
+  accent_color?: string;
+
+  @IsOptional()
+  @IsString()
+  background_color?: string;
+
+  @IsOptional()
+  @IsString()
+  surface_color?: string;
+
+  @IsOptional()
+  @IsString()
+  text_color?: string;
+
+  @IsOptional()
+  @IsString()
+  text_secondary_color?: string;
+
+  @IsOptional()
+  @IsString()
+  text_muted_color?: string;
+
+  @IsOptional()
+  @IsString()
+  logo_url?: string | null;
+
+  @IsOptional()
+  @IsString()
+  favicon_url?: string | null;
+
+  @IsOptional()
+  @IsString()
+  custom_css?: string;
+}
+
+export class FontsSettingsDto {
+  @IsOptional()
+  @IsString()
+  primary?: string;
+
+  @IsOptional()
+  @IsString()
+  secondary?: string;
+
+  @IsOptional()
+  @IsString()
+  headings?: string;
+}
+
+export class PublicationSettingsDto {
+  @IsOptional()
+  @IsBoolean()
+  store_published?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  ecommerce_enabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  landing_enabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  maintenance_mode?: boolean;
+
+  @IsOptional()
+  @IsString()
+  maintenance_message?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  allow_public_access?: boolean;
+}
+
+export class PanelUISettingsDto {
+  @IsOptional()
+  STORE_ADMIN?: Record<string, boolean>;
+
+  @IsOptional()
+  STORE_ECOMMERCE?: Record<string, boolean>;
 }

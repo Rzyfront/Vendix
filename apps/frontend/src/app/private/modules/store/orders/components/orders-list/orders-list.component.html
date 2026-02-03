@@ -1,11 +1,4 @@
 <!-- Orders Table -->
-<app-table
-  [data]="orders"
-  [columns]="columns"
-  [actions]="actions"
-  [loading]="loading"
-  (sort)="onSort($event)"
-  (rowClick)="handleViewOrder($event.id)"
->
-</app-table>
-
+<app-responsive-data-view [data]="orders" [columns]="columns" [actions]="actions" [cardConfig]="cardConfig"
+  [loading]="loading" (sort)="onSort($event)" (rowClick)="handleViewOrder($event.id)">
+</app-responsive-data-view>

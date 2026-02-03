@@ -47,25 +47,27 @@ import { ProductQueryDto, Brand } from '../../products/interfaces';
   schemas: [NO_ERRORS_SCHEMA],
   template: `
     <div
-      class="h-full flex flex-col bg-surface rounded-card shadow-card border border-border overflow-hidden"
+      class="h-full flex flex-col bg-surface rounded-card lg:rounded-card shadow-card border border-border overflow-hidden"
     >
       <!-- Products Header -->
-      <div class="px-6 py-4 border-b border-border">
+      <div class="px-3 lg:px-6 py-3 lg:py-4 border-b border-border product-header">
         <div
-          class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+          class="flex flex-col gap-3"
         >
-          <div class="flex-1 min-w-0">
+          <!-- Title Row (desktop only) -->
+          <div class="hidden lg:flex items-center justify-between">
             <h2 class="text-lg font-semibold text-text-primary">
               Productos Disponibles ({{ filteredProducts.length }})
             </h2>
           </div>
 
+          <!-- Search Row -->
           <div
-            class="flex flex-col lg:flex-row items-start lg:items-center gap-3 w-full lg:w-auto"
+            class="flex items-center gap-2 lg:gap-3 w-full"
           >
             <!-- Input de búsqueda -->
             <app-inputsearch
-              class="w-full lg:w-64"
+              class="flex-1"
               size="sm"
               placeholder="Buscar productos..."
               [debounceTime]="300"
@@ -82,14 +84,15 @@ import { ProductQueryDto, Brand } from '../../products/interfaces';
               [selectedCategory]="selectedCategory?.id?.toString() || ''"
               [selectedBrand]="selectedBrand?.id?.toString() || ''"
               (filterChange)="onFilterChange($event)"
-              class="w-full lg:w-auto"
+              class="shrink-0"
             ></app-product-filter-dropdown>
 
+            <!-- Barcode scanner (desktop only) -->
             <app-button
               variant="outline"
               size="sm"
               (clicked)="onToggleScanMode()"
-              class="shrink-0"
+              class="shrink-0 hidden lg:flex"
               title="Escanear código de barras"
             >
               <app-icon name="barcode" [size]="16" slot="icon"></app-icon>
@@ -99,7 +102,7 @@ import { ProductQueryDto, Brand } from '../../products/interfaces';
       </div>
 
       <!-- Products Content -->
-      <div class="flex-1 overflow-y-auto p-6">
+      <div class="flex-1 overflow-y-auto p-3 lg:p-6">
         <!-- Loading State -->
         <div *ngIf="loading" class="p-8 text-center">
           <div
@@ -141,17 +144,17 @@ import { ProductQueryDto, Brand } from '../../products/interfaces';
         <!-- Modern Compact Products Grid -->
         <div
           *ngIf="!loading && filteredProducts.length > 0"
-          class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3"
+          class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-3"
         >
-          <!-- Modern Product Card -->
+          <!-- Modern Product Card (iOS-style) -->
           <div
             *ngFor="let product of filteredProducts; trackBy: trackByProductId"
             (click)="onAddToCart(product)"
-            class="group relative bg-surface border border-border rounded-card shadow-card hover:shadow-lg transition-all duration-200 hover:scale-[1.02] cursor-pointer overflow-hidden"
+            class="group relative bg-surface border border-border rounded-2xl shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer overflow-hidden product-card"
             [class]="
               product.stock === 0
                 ? 'opacity-60 cursor-not-allowed'
-                : 'cursor-pointer hover:border-primary'
+                : 'cursor-pointer hover:border-primary active:scale-[0.97]'
             "
           >
             <!-- Product Image or Icon -->
@@ -200,19 +203,19 @@ import { ProductQueryDto, Brand } from '../../products/interfaces';
             </div>
 
             <!-- Product Info -->
-            <div class="p-3">
+            <div class="p-2 sm:p-3">
               <!-- Product Name -->
               <h3
-                class="text-text-primary font-medium text-sm leading-tight line-clamp-2 mb-2 group-hover:text-primary transition-colors"
+                class="text-text-primary font-medium text-xs sm:text-sm leading-tight line-clamp-2 mb-1 sm:mb-2 group-hover:text-primary transition-colors"
                 [title]="product.name"
               >
                 {{ product.name }}
               </h3>
 
-              <!-- Product Description (shortened) -->
+              <!-- Product Description (hidden on mobile, shortened on desktop) -->
               <p
                 *ngIf="product.description"
-                class="text-text-secondary text-xs line-clamp-1 mb-2"
+                class="hidden sm:block text-text-secondary text-xs line-clamp-1 mb-2"
                 [title]="product.description"
               >
                 {{ product.description }}
@@ -222,14 +225,14 @@ import { ProductQueryDto, Brand } from '../../products/interfaces';
               <div class="flex items-center justify-between">
                 <!-- Price -->
                 <div class="flex flex-col">
-                  <span class="text-text-primary font-bold text-lg">
+                  <span class="text-text-primary font-bold text-sm sm:text-lg">
                     {{ product.final_price | currency }}
                   </span>
                 </div>
 
                 <!-- Quick Add Button -->
                 <button
-                  class="w-7 h-7 rounded-full bg-primary/10 hover:bg-primary/20 border border-primary/20 hover:border-primary/30 flex items-center justify-center transition-all duration-200 group/btn"
+                  class="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-primary/10 hover:bg-primary/20 border border-primary/20 hover:border-primary/30 flex items-center justify-center transition-all duration-200 group/btn"
                   [class]="
                     product.stock === 0
                       ? 'opacity-50 cursor-not-allowed'
@@ -239,16 +242,21 @@ import { ProductQueryDto, Brand } from '../../products/interfaces';
                 >
                   <app-icon
                     name="plus"
+                    [size]="12"
+                    class="text-primary/70 group-hover/btn:text-primary transition-colors sm:hidden"
+                  ></app-icon>
+                  <app-icon
+                    name="plus"
                     [size]="14"
-                    class="text-primary/70 group-hover/btn:text-primary transition-colors"
+                    class="text-primary/70 group-hover/btn:text-primary transition-colors hidden sm:block"
                   ></app-icon>
                 </button>
               </div>
 
-              <!-- Additional Product Details -->
+              <!-- Additional Product Details (hidden on small mobile) -->
               <div
                 *ngIf="product.sku || product.category_name"
-                class="mt-2 pt-2 border-t border-border/60"
+                class="hidden sm:block mt-2 pt-2 border-t border-border/60"
               >
                 <div
                   class="flex items-center justify-between text-xs text-text-muted"
@@ -282,6 +290,13 @@ import { ProductQueryDto, Brand } from '../../products/interfaces';
         scrollbar-width: none;
       }
 
+      /* iOS-style header blur */
+      .product-header {
+        background: rgba(var(--color-surface-rgb, 255, 255, 255), 0.85);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+      }
+
       /* Clamp utilities for text truncation */
       .line-clamp-1 {
         display: -webkit-box;
@@ -297,14 +312,25 @@ import { ProductQueryDto, Brand } from '../../products/interfaces';
         overflow: hidden;
       }
 
-      /* Modern card transitions */
-      .modern-card {
-        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      /* iOS-style product cards */
+      .product-card {
+        transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+        -webkit-tap-highlight-color: transparent;
       }
 
-      /* Subtle hover effects */
-      .modern-card:hover {
-        transform: translateY(-1px);
+      .product-card:active {
+        transform: scale(0.97);
+      }
+
+      @media (hover: hover) {
+        .product-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 25px -8px rgba(0, 0, 0, 0.15);
+        }
+
+        .product-card:active {
+          transform: scale(0.98);
+        }
       }
 
       /* Price styling */

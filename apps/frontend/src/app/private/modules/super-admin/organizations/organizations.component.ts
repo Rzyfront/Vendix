@@ -26,12 +26,14 @@ import {
   ModalComponent,
   InputsearchComponent,
   IconComponent,
-  TableComponent,
   ButtonComponent,
   DialogService,
   ToastService,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
+  TableColumn,
+  TableAction,
 } from '../../../../shared/components/index';
-import { TableColumn, TableAction } from '../../../../shared/components/index';
 
 // Import styles (CSS instead of SCSS to avoid loader issues)
 import './organizations.component.css';
@@ -51,7 +53,7 @@ import './organizations.component.css';
     OrganizationEditModalComponent,
     InputsearchComponent,
     IconComponent,
-    TableComponent,
+    ResponsiveDataViewComponent,
     ButtonComponent,
   ],
   providers: [OrganizationsService],
@@ -134,19 +136,16 @@ import './organizations.component.css';
 
         <!-- Organizations Table -->
         <div *ngIf="!isLoading && organizations.length > 0" class="p-6">
-          <app-table
+          <app-responsive-data-view
             [data]="organizations"
             [columns]="tableColumns"
+            [cardConfig]="cardConfig"
             [actions]="tableActions"
             [loading]="isLoading"
-            [sortable]="true"
-            [hoverable]="true"
-            [striped]="true"
-            size="md"
-            (sort)="onTableSort($event)"
-            (rowClick)="viewOrganization($event)"
+            emptyMessage="No hay organizaciones"
+            emptyIcon="building"
           >
-          </app-table>
+          </app-responsive-data-view>
 
           <!-- Pagination -->
           <div class="mt-6 flex justify-center">
@@ -223,6 +222,19 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
       variant: 'danger',
     },
   ];
+
+  // Card configuration for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'name',
+    subtitleKey: 'email',
+    badgeKey: 'state',
+    badgeConfig: { type: 'status', size: 'sm' },
+    badgeTransform: (value: string) => this.formatStatus(value),
+    detailKeys: [
+      { key: 'phone', label: 'Teléfono', icon: 'phone' },
+      { key: 'tax_id', label: 'NIT/CC', icon: 'credit-card' },
+    ],
+  };
 
   stats = {
     total: 0,

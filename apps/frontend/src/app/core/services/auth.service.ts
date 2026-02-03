@@ -44,7 +44,8 @@ export interface User {
 export interface UserSettings {
   id: number;
   user_id: number;
-  config: { app: AppEnvironment; panel_ui: { [key: string]: boolean } };
+  app_type: string; // NEW: Direct field (required)
+  config: { panel_ui: { [key: string]: boolean } }; // app removed from here
 }
 export interface AuthResponse {
   success: boolean;
@@ -112,15 +113,18 @@ export class AuthService {
           // Los roles ahora vienen directamente como array de strings desde la API
           user.roles = user.roles || [];
 
+          // NEW STANDARD: Read app_type directly
+          const userAppType = (user_settings as any).app_type || 'ORG_ADMIN';
+
           if (
             !this.validateUserEnvironmentAccess(
               user.roles || [],
-              (user_settings.config.app || '').toUpperCase(),
+              (userAppType || '').toUpperCase(),
             )
           ) {
             this.clearTokens();
             throw new Error(
-              `Acceso denegado: Tu rol no permite acceso al entorno ${user_settings.config.app}.`,
+              `Acceso denegado: Tu rol no permite acceso al entorno ${userAppType}.`,
             );
           }
 
@@ -133,7 +137,7 @@ export class AuthService {
               store_settings,
               permissions: decodedToken?.permissions || [],
             },
-            updatedEnvironment: (user_settings.config.app || '').toUpperCase(),
+            updatedEnvironment: (userAppType || '').toUpperCase(),
           };
         }),
       );
@@ -236,15 +240,18 @@ export class AuthService {
           // Los roles ahora vienen directamente como array de strings desde la API
           user.roles = user.roles || [];
 
+          // NEW STANDARD: Read app_type directly
+          const userAppType = (user_settings as any).app_type || 'ORG_ADMIN';
+
           if (
             !this.validateUserEnvironmentAccess(
               user.roles || [],
-              (user_settings.config.app || '').toUpperCase(),
+              (userAppType || '').toUpperCase(),
             )
           ) {
             this.clearTokens();
             throw new Error(
-              `Acceso denegado: Tu rol no permite acceso al entorno ${user_settings.config.app}.`,
+              `Acceso denegado: Tu rol no permite acceso al entorno ${userAppType}.`,
             );
           }
 
@@ -257,7 +264,7 @@ export class AuthService {
               store_settings,
               permissions: decodedToken?.permissions || [],
             },
-            updatedEnvironment: (user_settings.config.app || '').toUpperCase(),
+            updatedEnvironment: (userAppType || '').toUpperCase(),
           };
         }),
       );
@@ -325,6 +332,9 @@ export class AuthService {
           const decodedToken = this.decodeJwtToken(access_token);
           user.roles = user.roles || [];
 
+          // NEW STANDARD: Read app_type directly
+          const userAppType = (user_settings as any).app_type || 'STORE_ECOMMERCE';
+
           return {
             ...response,
             data: {
@@ -334,7 +344,7 @@ export class AuthService {
               store_settings,
               permissions: decodedToken?.permissions || [],
             },
-            updatedEnvironment: (user_settings.config.app || '').toUpperCase(),
+            updatedEnvironment: (userAppType || '').toUpperCase(),
           };
         }),
       );
@@ -381,31 +391,7 @@ export class AuthService {
         const settings = response.data || response;
         const config = settings?.config;
 
-        // Backward compatibility: Transform old format to new format
-        if (
-          config?.panel_ui &&
-          !config.panel_ui.ORG_ADMIN &&
-          !config.panel_ui.STORE_ADMIN
-        ) {
-          // Old format detected - panel_ui is not nested by app type
-          const appType = config.app || 'ORG_ADMIN';
-
-          return {
-            ...settings,
-            config: {
-              ...config,
-              panel_ui: {
-                [appType]: config.panel_ui,
-              },
-              preferences: config.preferences || {
-                language: 'es',
-                theme: 'aura',
-              },
-            },
-          };
-        }
-
-        // Add preferences if missing (for newer formats without preferences)
+        // Add preferences if missing
         if (config && !config.preferences) {
           return {
             ...settings,

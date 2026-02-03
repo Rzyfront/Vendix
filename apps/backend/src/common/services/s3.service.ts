@@ -10,6 +10,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Upload } from '@aws-sdk/lib-storage';
 import * as sharp from 'sharp';
+import { extractS3KeyFromUrl } from '../helpers/s3-url.helper';
 
 @Injectable()
 export class S3Service {
@@ -244,6 +245,25 @@ export class S3Service {
             this.logger.error(`Error generating favicon: ${error.message}`);
             return null;
         }
+    }
+
+    /**
+     * Sanitizes a URL or key for database storage.
+     * Extracts the S3 key from signed URLs to prevent storing expiring URLs.
+     *
+     * IMPORTANT: Always use this method before saving image URLs to the database.
+     * Signed URLs expire (typically 24 hours), causing images to become inaccessible.
+     *
+     * @param urlOrKey - A signed S3 URL, an S3 key, or null/undefined
+     * @returns The S3 key suitable for storage, or null if input is null/undefined
+     *
+     * @example
+     * // Before saving to database:
+     * const keyToStore = this.s3Service.sanitizeForStorage(dto.image_url);
+     * await prisma.products.update({ data: { image_url: keyToStore } });
+     */
+    sanitizeForStorage(urlOrKey: string | null | undefined): string | null {
+        return extractS3KeyFromUrl(urlOrKey);
     }
 
     /**

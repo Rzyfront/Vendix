@@ -246,7 +246,7 @@ export const selectPanelUiConfig = createSelector(
 
 export const selectSelectedAppType = createSelector(
   selectUserSettings,
-  (userSettings: any) => userSettings?.selected_app_type || userSettings?.config?.app || 'ORG_ADMIN',
+  (userSettings: any) => userSettings?.app_type || 'ORG_ADMIN',
 );
 
 export const selectCurrentAppPanelUi = createSelector(

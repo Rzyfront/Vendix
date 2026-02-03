@@ -5,7 +5,8 @@ import { Observable, BehaviorSubject, combineLatest, map } from 'rxjs';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { loadExpenses } from './state/actions/expenses.actions';
 import { selectExpenses, selectExpensesLoading } from './state/selectors/expenses.selectors';
-import { TableComponent, TableColumn, TableAction } from '../../../../shared/components/table/table.component';
+import { TableColumn, TableAction } from '../../../../shared/components/table/table.component';
+import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../shared/components/index';
 import { ButtonComponent } from '../../../../shared/components/button/button.component';
 import { InputsearchComponent } from '../../../../shared/components/inputsearch/inputsearch.component';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
@@ -21,7 +22,7 @@ import { ExpensesStatsComponent } from './components/expenses-stats/expenses-sta
   standalone: true,
   imports: [
     CommonModule,
-    TableComponent,
+    ResponsiveDataViewComponent,
     ReactiveFormsModule,
     FormsModule,
     ExpensesStatsComponent,
@@ -91,16 +92,16 @@ import { ExpensesStatsComponent } from './components/expenses-stats/expenses-sta
 
         <!-- Table Container -->
         <div class="flex-1 p-4 overflow-hidden">
-          <app-table
+          <app-responsive-data-view
             [data]="(filteredExpenses$ | async) || []"
             [columns]="columns"
+            [cardConfig]="cardConfig"
             [actions]="tableActions"
             [loading]="(loading$ | async) || false"
-            [hoverable]="true"
-            [striped]="true"
-            size="md"
+            emptyMessage="No hay gastos registrados"
+            emptyIcon="coins"
             (rowClick)="onRowClick($event)"
-          ></app-table>
+          ></app-responsive-data-view>
         </div>
 
       </div>
@@ -143,6 +144,37 @@ export class ExpensesComponent implements OnInit {
       action: (row) => this.editExpense(row)
     }
   ];
+
+  // Card Config for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'description',
+    subtitleKey: 'expense_categories.name',
+    subtitleTransform: (val: any) => val || 'Sin categoría',
+    badgeKey: 'state',
+    badgeConfig: {
+      type: 'status',
+      colorMap: {
+        pending: 'warn',
+        approved: 'success',
+        rejected: 'danger',
+        paid: 'info',
+        cancelled: 'default'
+      }
+    },
+    detailKeys: [
+      {
+        key: 'amount',
+        label: 'Monto',
+        transform: (val: any) => val ? `$${Number(val).toFixed(2)}` : '$0.00'
+      },
+      {
+        key: 'expense_date',
+        label: 'Fecha',
+        icon: 'calendar',
+        transform: (val: any) => val ? new Date(val).toLocaleDateString() : ''
+      },
+    ],
+  };
 
   columns: TableColumn[] = [
     { key: 'id', label: 'ID', width: '80px', priority: 2 },

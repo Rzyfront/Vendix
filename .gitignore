@@ -24,6 +24,7 @@ docs/
 .agent/
 .opencode/
 # Production keys and sensitive docs
+keys/
 vendix-production-key.pem
 *_PRODUCTION_INFO.md
 MIGRATION_COMPLETE.md

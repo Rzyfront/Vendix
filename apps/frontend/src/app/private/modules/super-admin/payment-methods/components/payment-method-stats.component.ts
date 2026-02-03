@@ -8,7 +8,7 @@ import { StatsComponent } from '../../../../../shared/components/index';
   standalone: true,
   imports: [CommonModule, StatsComponent],
   template: `
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="stats-container">
       <app-stats
         title="Total Métodos"
         [value]="stats().total_methods"

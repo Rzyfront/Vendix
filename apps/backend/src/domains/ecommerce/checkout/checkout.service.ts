@@ -5,6 +5,7 @@ import { CartService } from '../cart/cart.service';
 import { TaxesService } from '../../store/taxes/taxes.service';
 import { CheckoutDto } from './dto/checkout.dto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { payment_processing_mode_enum } from '@prisma/client';
 
 @Injectable()
 export class CheckoutService {
@@ -15,11 +16,39 @@ export class CheckoutService {
     private readonly taxes_service: TaxesService,
   ) { }
 
-  async getPaymentMethods() {
+  async getPaymentMethods(shippingMethodType?: string) {
+    // Determine allowed processing modes based on shipping method type
+    // - pickup: DIRECT (cash at store) + ONLINE (online payments)
+    // - delivery/carrier/own_fleet: ONLINE + ON_DELIVERY (pay on delivery)
+    let allowedModes: payment_processing_mode_enum[];
+
+    if (shippingMethodType === 'pickup') {
+      allowedModes = [
+        payment_processing_mode_enum.DIRECT,
+        payment_processing_mode_enum.ONLINE,
+      ];
+    } else if (shippingMethodType) {
+      // For delivery methods (own_fleet, carrier, custom, third_party_provider)
+      allowedModes = [
+        payment_processing_mode_enum.ONLINE,
+        payment_processing_mode_enum.ON_DELIVERY,
+      ];
+    } else {
+      // No shipping type specified - return all methods (backwards compatibility)
+      allowedModes = [
+        payment_processing_mode_enum.DIRECT,
+        payment_processing_mode_enum.ONLINE,
+        payment_processing_mode_enum.ON_DELIVERY,
+      ];
+    }
+
     // store_id se aplica automáticamente por EcommercePrismaService
     const methods = await this.prisma.store_payment_methods.findMany({
       where: {
         state: 'enabled',
+        system_payment_method: {
+          processing_mode: { in: allowedModes },
+        },
       },
       include: {
         system_payment_method: true,
@@ -32,6 +61,7 @@ export class CheckoutService {
       name: m.display_name || m.system_payment_method.display_name,
       type: m.system_payment_method.type,
       provider: m.system_payment_method.provider,
+      processing_mode: m.system_payment_method.processing_mode,
       logo_url: m.system_payment_method.logo_url,
       min_amount: m.min_amount,
       max_amount: m.max_amount,

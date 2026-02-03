@@ -5,6 +5,7 @@ import { takeUntil, tap } from 'rxjs/operators';
 import { ReplaySubject, Subject } from 'rxjs';
 import { AppConfig } from './app-config.service';
 import * as ConfigActions from '../store/config/config.actions';
+import { LandingOnlyGuard } from '../guards/landing-only.guard';
 
 @Injectable({
   providedIn: 'root',
@@ -131,6 +132,7 @@ export class RouteManagerService implements OnDestroy {
     return [
       {
         path: 'auth',
+        canActivate: [LandingOnlyGuard],
         children: [
           {
             path: 'login',

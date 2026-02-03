@@ -25,6 +25,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { ProductVariantService } from './services/product-variant.service';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper, S3OrgContext, S3StoreContext } from '@common/helpers/s3-path.helper';
+import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
 
 @Injectable()
 export class ProductsService {
@@ -199,12 +200,12 @@ export class ProductsService {
           // Manejar imágenes (combinar image_urls legacy con images structured)
           const finalImages: any[] = [];
 
-          // 1. Procesar image_urls (legacy)
+          // 1. Procesar image_urls (legacy) - sanitize to prevent storing signed URLs
           if (image_urls && image_urls.length > 0) {
             finalImages.push(
               ...image_urls.map((url, index) => ({
                 product_id: product.id,
-                image_url: url,
+                image_url: extractS3KeyFromUrl(url) || url,
                 is_main: index === 0,
               })),
             );
@@ -944,12 +945,12 @@ export class ProductsService {
 
             const finalImages: any[] = [];
 
-            // 1. Procesar image_urls (legacy)
+            // 1. Procesar image_urls (legacy) - sanitize to prevent storing signed URLs
             if (image_urls && image_urls.length > 0) {
               finalImages.push(
                 ...image_urls.map((url, index) => ({
                   product_id: id,
-                  image_url: url,
+                  image_url: extractS3KeyFromUrl(url) || url,
                   is_main: index === 0,
                 })),
               );
@@ -1382,6 +1383,7 @@ export class ProductsService {
     for (const [index, image] of images.entries()) {
       let imageUrl = image.image_url;
       if (imageUrl.startsWith('data:image')) {
+        // Upload base64 image - result.key is already a clean S3 key
         const result = await this.s3Service.uploadBase64(
           imageUrl,
           `${basePath}/${productSlug}-${Date.now()}-${index}`,
@@ -1389,6 +1391,11 @@ export class ProductsService {
           { generateThumbnail: true },
         );
         imageUrl = result.key;
+      } else {
+        // CRITICAL: Sanitize existing URLs to extract S3 key
+        // This prevents storing signed URLs that expire after 24 hours
+        const sanitizedKey = extractS3KeyFromUrl(imageUrl);
+        imageUrl = sanitizedKey || imageUrl;
       }
       processedImages.push({
         image_url: imageUrl,

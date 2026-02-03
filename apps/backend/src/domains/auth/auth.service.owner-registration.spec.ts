@@ -162,8 +162,8 @@ describe('AuthService - Owner Registration Flow', () => {
       };
       const mockUserSettings = {
         user_id: 1,
+        app_type: 'ORG_ADMIN',
         config: {
-          app: 'ORG_ADMIN',
           panel_ui: {
             stores: true,
             users: true,
@@ -341,7 +341,8 @@ describe('AuthService - Owner Registration Flow', () => {
       };
       const mockUserSettings = {
         user_id: 1,
-        config: { app: 'ORG_ADMIN', panel_ui: {} },
+        app_type: 'ORG_ADMIN',
+        config: { panel_ui: {} },
       };
       const mockOwnerRole = { id: 1, name: 'owner' };
 

@@ -298,12 +298,30 @@ interface WizardStep {
 
           <div class="flex space-x-3">
             <app-button
+              variant="outline"
+              size="sm"
+              [disabled]="termsStep?.submitting ?? false"
+              (clicked)="termsStep?.acceptAllAndSubmit()"
+            >
+              <span *ngIf="!termsStep?.submitting">Aceptar todo y continuar</span>
+              <span *ngIf="termsStep?.submitting" class="flex items-center gap-2">
+                <app-icon name="loader-2" [spin]="true" size="14"></app-icon>
+                Procesando...
+              </span>
+              <app-icon
+                *ngIf="!termsStep?.submitting"
+                name="check-check"
+                size="16"
+                slot="icon"
+              ></app-icon>
+            </app-button>
+            <app-button
               variant="primary"
               size="sm"
               [disabled]="!(termsStep?.allAccepted ?? false) || (termsStep?.submitting ?? false)"
               (clicked)="termsStep?.submitAcceptances()"
             >
-              <span *ngIf="!termsStep?.submitting">Aceptar y Continuar</span>
+              <span *ngIf="!termsStep?.submitting">Aceptar</span>
               <span *ngIf="termsStep?.submitting" class="flex items-center gap-2">
                 <app-icon name="loader-2" [spin]="true" size="14"></app-icon>
                 Procesando...

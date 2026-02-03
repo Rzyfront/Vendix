@@ -1,4 +1,11 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  OnDestroy,
+  signal,
+  HostListener,
+  ChangeDetectorRef,
+} from '@angular/core';
 import { Subject, takeUntil } from 'rxjs';
 import { CommonModule } from '@angular/common';
 
@@ -9,6 +16,7 @@ import {
   SpinnerComponent,
   CardComponent,
   BadgeComponent,
+  DialogService,
 } from '../../../../shared/components';
 import {
   PosCartService,
@@ -28,6 +36,8 @@ import { PosPaymentInterfaceComponent } from './components/pos-payment-interface
 import { PosOrderConfirmationComponent } from './components/pos-order-confirmation.component';
 import { PosCartComponent } from './cart/pos-cart.component';
 import { PosRegisterConfigModalComponent } from './components/pos-register-config-modal.component';
+import { PosMobileFooterComponent } from './components/pos-mobile-footer.component';
+import { PosCartModalComponent } from './components/pos-cart-modal.component';
 
 @Component({
   selector: 'app-pos',
@@ -46,11 +56,13 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
     PosCartComponent,
     PosRegisterConfigModalComponent,
     BadgeComponent,
+    PosMobileFooterComponent,
+    PosCartModalComponent,
   ],
   template: `
-    <div class="h-full flex flex-col gap-4 overflow-hidden">
-      <!-- POS Stats -->
-      <div class="flex-none">
+    <div class="h-full flex flex-col gap-4 overflow-hidden pos-container">
+      <!-- POS Stats (hidden on mobile) -->
+      <div class="flex-none hidden lg:block">
         <app-pos-stats [cartState]="cartState"></app-pos-stats>
       </div>
 
@@ -59,35 +71,37 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
         class="flex-1 flex flex-col bg-surface rounded-card shadow-card border border-border min-h-0 overflow-hidden"
       >
         <!-- Header -->
-        <div class="flex-none px-6 py-4 border-b border-border">
+        <div class="flex-none px-4 lg:px-6 py-3 lg:py-4 border-b border-border pos-header">
           <div
-            class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+            class="flex justify-between items-center gap-3"
           >
-            <div class="flex items-center gap-3">
+            <!-- Left: Logo + Title -->
+            <div class="flex items-center gap-2 lg:gap-3">
               <div
-                class="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center"
+                class="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-primary/10 flex items-center justify-center"
               >
                 <app-icon
                   name="shopping-bag"
-                  [size]="24"
+                  [size]="isMobile() ? 20 : 24"
                   class="text-primary"
                 ></app-icon>
               </div>
               <div class="flex flex-col">
-                <h1 class="font-bold text-text-primary text-lg leading-none flex items-center gap-2">
-                  Vendix POS
-                  <app-badge variant="success">Vende</app-badge>
+                <h1 class="font-bold text-text-primary text-base lg:text-lg leading-none flex items-center gap-2">
+                  <span class="hidden sm:inline">Vendix</span> POS
+                  <app-badge variant="success" class="hidden sm:inline-flex">Vende</app-badge>
                 </h1>
-                <span class="text-xs text-text-secondary font-medium">
+                <span class="text-[10px] lg:text-xs text-text-secondary font-medium hidden sm:inline">
                   Punto de venta
                 </span>
               </div>
             </div>
 
-            <div class="flex items-center gap-3">
-              <!-- Customer Badge -->
+            <!-- Right: Customer + Settings -->
+            <div class="flex items-center gap-2 lg:gap-3">
+              <!-- Customer Badge (desktop only) -->
               <div
-                *ngIf="selectedCustomer"
+                *ngIf="selectedCustomer && !isMobile()"
                 class="group flex items-center gap-2.5 bg-gradient-to-r from-primary-light/50 to-primary-light/30 px-3 py-2 rounded-lg cursor-pointer hover:from-primary-light/70 hover:to-primary-light/50 transition-all border border-primary/30 shadow-sm"
                 (click)="onOpenCustomerModal()"
               >
@@ -120,8 +134,9 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
                 </div>
               </div>
 
+              <!-- Add Customer Button (desktop only) -->
               <app-button
-                *ngIf="!selectedCustomer"
+                *ngIf="!selectedCustomer && !isMobile()"
                 variant="outline"
                 size="sm"
                 (clicked)="onOpenCustomerModal()"
@@ -136,28 +151,28 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
                 <span class="hidden sm:inline">Cliente</span>
               </app-button>
 
-              <div class="flex gap-2 items-center">
-                <app-button
-                  variant="ghost"
-                  size="md"
-                  (clicked)="onOpenRegisterConfigModal()"
-                  title="Configurar Caja"
-                  class="w-10 h-10 !p-0 flex items-center justify-center rounded-lg text-text-secondary hover:text-primary hover:bg-primary-light/10 transition-colors"
-                >
-                  <app-icon
-                    name="settings"
-                    [size]="20"
-                    class="currentColor"
-                  ></app-icon>
-                </app-button>
-              </div>
+              <!-- Settings Button -->
+              <app-button
+                variant="ghost"
+                size="md"
+                (clicked)="onOpenRegisterConfigModal()"
+                title="Configurar Caja"
+                class="w-9 h-9 lg:w-10 lg:h-10 !p-0 flex items-center justify-center rounded-lg text-text-secondary hover:text-primary hover:bg-primary-light/10 transition-colors"
+              >
+                <app-icon
+                  name="settings"
+                  [size]="isMobile() ? 18 : 20"
+                  class="currentColor"
+                ></app-icon>
+              </app-button>
             </div>
           </div>
         </div>
 
         <!-- Main Content Grid -->
-        <div class="flex-1 p-4 sm:p-6 min-h-0 overflow-hidden">
-          <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 h-full">
+        <div class="flex-1 p-3 lg:p-6 min-h-0 overflow-hidden pos-main-content">
+          <!-- Desktop: Grid 3 columns with sidebar cart -->
+          <div class="hidden lg:grid lg:grid-cols-3 gap-6 h-full">
             <!-- Products Area (Left Side - 2 columns) -->
             <div class="lg:col-span-2 h-full min-h-0">
               <app-pos-product-selection
@@ -176,8 +191,40 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
               ></app-pos-cart>
             </div>
           </div>
+
+          <!-- Mobile: Full width products only -->
+          <div class="lg:hidden h-full pb-20">
+            <app-pos-product-selection
+              class="h-full block"
+              (productSelected)="onProductSelected($event)"
+              (productAddedToCart)="onProductAddedToCart($event)"
+            ></app-pos-product-selection>
+          </div>
         </div>
       </div>
+
+      <!-- Mobile Footer (only visible on mobile) -->
+      <app-pos-mobile-footer
+        *ngIf="isMobile()"
+        [cartSummary]="cartSummary"
+        [itemCount]="cartItems.length"
+        (viewCart)="onOpenCartModal()"
+        (saveDraft)="onSaveDraft()"
+        (checkout)="onCheckout()"
+      ></app-pos-mobile-footer>
+
+      <!-- Mobile Cart Modal -->
+      <app-pos-cart-modal
+        [isOpen]="showCartModal && isMobile()"
+        [cartState]="cartState"
+        (closed)="onCloseCartModal()"
+        (itemQuantityChanged)="onCartItemQuantityChanged($event)"
+        (itemRemoved)="onCartItemRemoved($event)"
+        (clearCart)="onClearCart()"
+        (assignCustomer)="onOpenCustomerModal()"
+        (saveDraft)="onSaveDraftFromModal()"
+        (checkout)="onCheckoutFromModal()"
+      ></app-pos-cart-modal>
 
       <!-- Loading Overlay -->
       <div
@@ -232,6 +279,25 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
     `
       :host {
         display: block;
+        height: 100%;
+      }
+
+      .pos-container {
+        height: 100%;
+      }
+
+      /* iOS-style blur header */
+      .pos-header {
+        background: rgba(var(--color-surface-rgb, 255, 255, 255), 0.85);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+      }
+
+      /* Mobile optimizations */
+      @media (max-width: 1023px) {
+        .pos-main-content {
+          padding-bottom: 80px; /* Space for mobile footer */
+        }
       }
     `,
   ],
@@ -250,6 +316,7 @@ export class PosComponent implements OnInit, OnDestroy {
   showRegisterConfigModal = false;
 
   showOrderConfirmation = false;
+  showCartModal = false;
 
   currentOrderId: string | null = null;
   currentOrderNumber: string | null = null;
@@ -265,6 +332,9 @@ export class PosComponent implements OnInit, OnDestroy {
     totalItems: 0,
   };
 
+  // Mobile detection signal
+  isMobile = signal(false);
+
   private destroy$ = new Subject<void>();
 
   constructor(
@@ -272,9 +342,21 @@ export class PosComponent implements OnInit, OnDestroy {
     private customerService: PosCustomerService,
     private paymentService: PosPaymentService,
     private toastService: ToastService,
-  ) { }
+    private dialogService: DialogService,
+    private cdr: ChangeDetectorRef,
+  ) {}
+
+  @HostListener('window:resize')
+  onResize(): void {
+    this.checkMobile();
+  }
+
+  private checkMobile(): void {
+    this.isMobile.set(window.innerWidth < 1024);
+  }
 
   ngOnInit(): void {
+    this.checkMobile();
     this.setupSubscriptions();
   }
 
@@ -520,5 +602,58 @@ export class PosComponent implements OnInit, OnDestroy {
     this.showOrderConfirmation = false;
     this.completedOrder = null;
     this.onClearCart();
+  }
+
+  // Mobile Cart Modal Methods
+  onOpenCartModal(): void {
+    this.showCartModal = true;
+  }
+
+  onCloseCartModal(): void {
+    this.showCartModal = false;
+  }
+
+  onCartItemQuantityChanged(event: { itemId: string; quantity: number }): void {
+    if (event.quantity <= 0) {
+      this.onCartItemRemoved(event.itemId);
+      return;
+    }
+
+    this.cartService
+      .updateCartItem({ itemId: event.itemId, quantity: event.quantity })
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        error: (error: any) => {
+          this.toastService.error(
+            error.message || 'Error al actualizar cantidad',
+          );
+        },
+      });
+  }
+
+  onCartItemRemoved(itemId: string): void {
+    this.cartService
+      .removeFromCart(itemId)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Producto eliminado del carrito');
+        },
+        error: (error: any) => {
+          this.toastService.error(
+            error.message || 'Error al eliminar producto',
+          );
+        },
+      });
+  }
+
+  onSaveDraftFromModal(): void {
+    this.showCartModal = false;
+    this.onSaveDraft();
+  }
+
+  onCheckoutFromModal(): void {
+    this.showCartModal = false;
+    this.onCheckout();
   }
 }

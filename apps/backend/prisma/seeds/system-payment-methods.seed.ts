@@ -27,6 +27,7 @@ export async function seedSystemPaymentMethods(
       requires_config: false,
       supported_currencies: ['USD', 'MXN', 'EUR', 'COP'],
       min_amount: 0,
+      processing_mode: 'DIRECT', // Requires physical presence at store
     },
     {
       name: 'stripe_card',
@@ -58,6 +59,7 @@ export async function seedSystemPaymentMethods(
       supported_currencies: ['USD', 'MXN', 'EUR', 'COP'],
       processing_fee_type: 'percentage',
       processing_fee_value: 2.9,
+      processing_mode: 'ONLINE', // Processed via payment gateway
     },
     {
       name: 'paypal',
@@ -90,6 +92,7 @@ export async function seedSystemPaymentMethods(
       supported_currencies: ['USD', 'EUR', 'COP'],
       processing_fee_type: 'percentage',
       processing_fee_value: 3.4,
+      processing_mode: 'ONLINE', // Processed via payment gateway
     },
     {
       name: 'bank_transfer',
@@ -126,6 +129,7 @@ export async function seedSystemPaymentMethods(
         },
       },
       supported_currencies: ['USD', 'MXN', 'COP'],
+      processing_mode: 'ONLINE', // No physical presence required
     },
     {
       name: 'payment_vouchers',
@@ -164,6 +168,7 @@ export async function seedSystemPaymentMethods(
       supported_currencies: ['USD', 'MXN', 'EUR', 'COP'],
       processing_fee_type: 'fixed',
       processing_fee_value: 0,
+      processing_mode: 'ONLINE', // Digital vouchers
     },
   ];
 

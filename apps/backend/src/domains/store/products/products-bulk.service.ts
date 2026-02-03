@@ -20,6 +20,7 @@ import {
   BulkUploadTemplateDto,
 } from './dto';
 import { generateSlug } from '@common/utils/slug.util';
+import { toTitleCase } from '@common/utils/format.util';
 import * as XLSX from 'xlsx';
 
 @Injectable()
@@ -378,25 +379,24 @@ export class ProductsBulkService {
     name: string,
     storeId: number,
   ): Promise<number> {
-    // Intentar buscar por nombre (case insensitive si es posible, aquí simulo con slug o búsqueda directa)
-    // Prisma no soporta insensitive nativo en findFirst en todas las versiones sin preview features, pero intentaremos.
-    // O buscamos por nombre exacto primero.
-    // Mejor estrategia: Normalizar nombre para buscar.
+    // Normalize: trim + lowercase for search
+    const normalizedName = name.trim().toLowerCase();
+    if (!normalizedName) return 0;
 
-    const slug = generateSlug(name); // Slugify el nombre para usar como referencia si es necesario, pero buscamos por nombre
-
+    // Search case-insensitive
     const existing = await this.prisma.brands.findFirst({
       where: {
-        name: { equals: name, mode: 'insensitive' },
+        name: { equals: normalizedName, mode: 'insensitive' },
       },
     });
 
     if (existing) return existing.id;
 
-    // Crear marca
+    // Create brand with Title Case
+    const titleCaseName = toTitleCase(name.trim());
     const created = await this.prisma.brands.create({
       data: {
-        name: name,
+        name: titleCaseName,
         description: 'Creada automáticamente por carga masiva',
         state: 'active',
       },
@@ -408,9 +408,13 @@ export class ProductsBulkService {
     name: string,
     storeId: number,
   ): Promise<number> {
-    const slug = generateSlug(name);
+    // Normalize: trim + lowercase for slug/search
+    const normalizedName = name.trim().toLowerCase();
+    if (!normalizedName) return 0;
 
-    // La categoría es única por store_id + slug
+    const slug = generateSlug(normalizedName);
+
+    // Category is unique by store_id + slug
     const existing = await this.prisma.categories.findFirst({
       where: {
         store_id: storeId,
@@ -420,10 +424,11 @@ export class ProductsBulkService {
 
     if (existing) return existing.id;
 
-    // Crear categoría
+    // Create category with Title Case
+    const titleCaseName = toTitleCase(name.trim());
     const created = await this.prisma.categories.create({
       data: {
-        name: name,
+        name: titleCaseName,
         slug: slug,
         store_id: storeId,
         description: 'Creada automáticamente por carga masiva',

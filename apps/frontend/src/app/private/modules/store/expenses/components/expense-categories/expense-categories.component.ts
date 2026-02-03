@@ -3,7 +3,8 @@ import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
-import { TableComponent, TableColumn } from '../../../../../../shared/components/table/table.component';
+import { TableColumn } from '../../../../../../shared/components/table/table.component';
+import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../../../shared/components/index';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
@@ -17,7 +18,7 @@ import { ExpenseCategory } from '../../interfaces/expense.interface';
   imports: [
     CommonModule,
     ReactiveFormsModule,
-    TableComponent,
+    ResponsiveDataViewComponent,
     ModalComponent,
     ButtonComponent,
     InputComponent
@@ -69,12 +70,14 @@ import { ExpenseCategory } from '../../interfaces/expense.interface';
 
         <!-- Categories Table -->
         <div class="overflow-hidden">
-          <app-table
+          <app-responsive-data-view
             [data]="(categories$ | async) || []"
             [columns]="columns"
+            [cardConfig]="cardConfig"
             [loading]="(loading$ | async) || false"
-            size="sm">
-          </app-table>
+            emptyMessage="No hay categorías"
+            emptyIcon="tag">
+          </app-responsive-data-view>
         </div>
       
         <ng-template #actionsTemplate let-row>
@@ -113,9 +116,14 @@ export class ExpenseCategoriesComponent implements OnInit, AfterViewInit {
   @ViewChild('actionsTemplate') actionsTemplate!: TemplateRef<any>;
 
   columns: TableColumn[] = [
-    { key: 'name', label: 'Nombre', sortable: true },
-    { key: 'description', label: 'Descripción' }
+    { key: 'name', label: 'Nombre', sortable: true, priority: 1 },
+    { key: 'description', label: 'Descripción', priority: 2 }
   ];
+
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'name',
+    subtitleKey: 'description',
+  };
 
   constructor(
     private fb: FormBuilder,

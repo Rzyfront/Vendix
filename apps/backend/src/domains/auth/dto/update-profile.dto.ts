@@ -33,6 +33,11 @@ export class UpdateProfileDto {
     @IsString()
     document_number?: string;
 
+    @ApiPropertyOptional({ description: 'URL o key de la imagen de perfil' })
+    @IsOptional()
+    @IsString()
+    avatar_url?: string | null;
+
     @ApiPropertyOptional({ description: 'Datos de dirección' })
     @IsOptional()
     @ValidateNested()

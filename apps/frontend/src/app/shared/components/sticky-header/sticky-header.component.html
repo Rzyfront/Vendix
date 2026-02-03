@@ -1,33 +1,33 @@
 <div [ngClass]="{
-    'sticky top-0 z-30 border-b border-gray-200 shadow-sm rounded-b-xl mb-6': true,
-    'bg-white -mx-4': variant() === 'default',
-    'bg-white/80 backdrop-blur-md px-4 py-2 md:px-6 md:py-3': variant() === 'glass'
+    'sticky top-0 z-30 border-b border-gray-200 shadow-sm rounded-b-xl mb-4 md:mb-6': true,
+    'bg-white/95 backdrop-blur-sm -mx-2 md:-mx-4': variant() === 'default',
+    'bg-white/80 backdrop-blur-md px-2 py-1.5 md:px-6 md:py-3': variant() === 'glass'
   }">
-    <div class="max-w-[1600px] mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1.5 md:gap-3"
+    <div class="max-w-[1600px] mx-auto flex flex-row items-center justify-between gap-2 md:gap-3"
         [ngClass]="{ 'p-1.5 md:px-6 md:py-2.5': variant() === 'default' }">
 
-        <div class="flex items-center gap-2 md:gap-4">
+        <div class="flex items-center gap-2 md:gap-4 min-w-0 flex-1">
             <!-- Back Button -->
-            <app-button *ngIf="showBackButton()" variant="ghost" [routerLink]="backRoute()" size="sm"
-                customClasses="!p-0 !w-8 !h-8 !rounded-lg border border-transparent hover:border-gray-200">
-                <app-icon name="arrow-left" size="18" class="text-gray-500"></app-icon>
+            <app-button *ngIf="showBackButton()" variant="ghost" [routerLink]="backRoute()" size="xsm"
+                customClasses="!p-0 !w-7 !h-7 md:!w-8 md:!h-8 flex-shrink-0 !rounded-lg border border-transparent hover:border-gray-200">
+                <app-icon name="arrow-left" size="16" class="md:!w-[18px] md:!h-[18px] text-gray-500"></app-icon>
             </app-button>
 
             <!-- Icon & Title Section -->
-            <div class="flex items-center gap-2.5">
-                <!-- Icon -->
-                <div class="w-10 h-10 rounded-lg bg-bg flex items-center justify-center border border-border shadow-sm">
+            <div class="flex items-center gap-2 md:gap-2.5 min-w-0">
+                <!-- Icon - Hidden on mobile, visible from md -->
+                <div class="hidden md:flex w-10 h-10 rounded-lg bg-bg items-center justify-center border border-border shadow-sm flex-shrink-0">
                     <app-icon [name]="icon()" size="20" class="text-primary-600"></app-icon>
                 </div>
 
                 <!-- Title & Subtitle -->
-                <div class="flex flex-col">
+                <div class="flex flex-col min-w-0">
                     <div class="flex items-center gap-2">
-                        <h1 class="text-lg font-bold text-gray-900 leading-tight">
+                        <h1 class="text-base md:text-lg font-bold text-gray-900 leading-tight truncate">
                             {{ title() }}
                         </h1>
-                        <!-- Badge -->
-                        <div *ngIf="badgeText()" class="flex items-center gap-1.5 px-1.5 py-0.5 rounded-md"
+                        <!-- Badge - Hidden on mobile -->
+                        <div *ngIf="badgeText()" class="hidden md:flex items-center gap-1.5 px-1.5 py-0.5 rounded-md flex-shrink-0"
                             [ngClass]="[getBadgeClasses(), badgePulse() ? 'animate-pulse' : '']">
                             <span class="w-1.5 h-1.5 rounded-full" [ngClass]="getBadgeDotClasses()"></span>
                             <span class="text-[9px] font-bold uppercase tracking-wide">
@@ -35,7 +35,8 @@
                             </span>
                         </div>
                     </div>
-                    <p *ngIf="subtitle()" class="text-xs text-gray-500 font-medium">
+                    <!-- Subtitle - Hidden on very small screens, visible from sm -->
+                    <p *ngIf="subtitle()" class="hidden sm:block text-xs text-gray-500 font-medium truncate">
                         {{ subtitle() }}
                     </p>
                 </div>
@@ -43,21 +44,21 @@
         </div>
 
         <!-- Metadata & Actions Section -->
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-2 md:gap-4 flex-shrink-0">
             <!-- Metadata -->
             <div *ngIf="metadataContent()" class="hidden md:block text-xs text-gray-400 italic">
                 {{ metadataContent() }}
             </div>
 
-            <!-- Actions Section -->
-            <div class="flex items-center gap-2 w-full sm:w-auto">
+            <!-- Actions Section - Always visible, compact on mobile -->
+            <div class="flex items-center gap-1 md:gap-2">
                 <ng-container *ngFor="let action of actions()">
                     <app-button *ngIf="action.visible !== false" [variant]="action.variant" [loading]="!!action.loading"
-                        [disabled]="!!action.disabled" (clicked)="onActionClick(action.id)" size="sm"
-                        customClasses="!rounded-lg flex-1 sm:flex-none font-bold shadow-sm shadow-primary-200 active:scale-95 transition-all !py-1.5">
-                        <app-icon *ngIf="action.icon" [name]="action.icon" size="14" slot="icon"
-                            class="mr-1.5"></app-icon>
-                        <span class="px-1 text-sm">{{ action.label }}</span>
+                        [disabled]="!!action.disabled" (clicked)="onActionClick(action.id)" size="xsm"
+                        customClasses="!rounded-lg font-bold shadow-sm shadow-primary-200 active:scale-95 transition-all md:!h-9 md:!px-3">
+                        <app-icon *ngIf="action.icon" [name]="action.icon" size="12" slot="icon"
+                            class="md:!w-[14px] md:!h-[14px] mr-0.5 md:mr-1.5"></app-icon>
+                        <span class="text-[10px] md:text-sm">{{ action.label }}</span>
                     </app-button>
                 </ng-container>
             </div>

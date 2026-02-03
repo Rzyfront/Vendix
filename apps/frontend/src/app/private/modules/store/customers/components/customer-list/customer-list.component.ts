@@ -2,12 +2,13 @@ import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
-  TableComponent,
+  ResponsiveDataViewComponent,
   InputsearchComponent,
   ButtonComponent,
   IconComponent,
   TableColumn,
   TableAction,
+  ItemListCardConfig,
 } from '../../../../../../shared/components';
 import { Customer } from '../../models/customer.model';
 
@@ -16,7 +17,7 @@ import { Customer } from '../../models/customer.model';
   standalone: true,
   imports: [
     CommonModule,
-    TableComponent,
+    ResponsiveDataViewComponent,
     InputsearchComponent,
     ButtonComponent,
     IconComponent,
@@ -104,17 +105,20 @@ import { Customer } from '../../models/customer.model';
         </div>
       </div>
 
-      <!-- Table -->
+      <!-- Responsive Data View (Table on desktop, Cards on mobile) -->
       <div *ngIf="!loading && customers.length > 0" class="p-6">
-        <app-table
+        <app-responsive-data-view
           [data]="customers"
           [columns]="columns"
+          [cardConfig]="cardConfig"
           [actions]="actions"
           [loading]="loading"
           [hoverable]="true"
           [striped]="true"
-          size="md"
-        ></app-table>
+          [emptyMessage]="'No se encontraron clientes'"
+          [emptyIcon]="'users'"
+          tableSize="md"
+        ></app-responsive-data-view>
       </div>
     </div>
   `,
@@ -145,6 +149,34 @@ export class CustomerListComponent {
       transform: (val) => (val ? new Date(val).toLocaleDateString() : '-'),
     },
   ];
+
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'first_name',
+    titleTransform: (item) => `${item.first_name} ${item.last_name}`,
+    subtitleKey: 'email',
+    avatarFallbackIcon: 'user',
+    badgeKey: 'state',
+    badgeConfig: { type: 'status', size: 'sm' },
+    badgeTransform: (v) => (v === 'active' ? 'Activo' : 'Inactivo'),
+    detailKeys: [
+      { key: 'phone', label: 'Teléfono', icon: 'phone' },
+      { key: 'document_number', label: 'Documento', icon: 'credit-card' },
+      { key: 'total_orders', label: 'Pedidos' },
+      {
+        key: 'created_at',
+        label: 'Registrado',
+        transform: (v) => (v ? new Date(v).toLocaleDateString() : '-'),
+      },
+    ],
+    footerKey: 'total_spend',
+    footerLabel: 'Total Gastado',
+    footerTransform: (v) =>
+      new Intl.NumberFormat('es-CO', {
+        style: 'currency',
+        currency: 'COP',
+        minimumFractionDigits: 0,
+      }).format(v || 0),
+  };
 
   actions: TableAction[] = [
     {

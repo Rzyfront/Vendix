@@ -99,7 +99,8 @@ describe('Contextual Login Flow - Focused Integration Tests', () => {
       await prismaService.user_settings.create({
         data: {
           user_id: ownerUser.id,
-          config: { app: 'ORG_ADMIN' },
+          app_type: 'ORG_ADMIN',
+          config: {},
         },
       });
     });
@@ -119,7 +120,7 @@ describe('Contextual Login Flow - Focused Integration Tests', () => {
       expect(response.body.data.user.roles).toContain('owner');
       expect(response.body.data.access_token).toBeDefined();
       expect(response.body.data.refresh_token).toBeDefined();
-      expect(response.body.data.user_settings.config.app).toBe('ORG_ADMIN');
+      expect(response.body.data.user_settings.app_type).toBe('ORG_ADMIN');
     });
 
     it('should fail login when no organization or store slug provided', async () => {
@@ -208,7 +209,8 @@ describe('Contextual Login Flow - Focused Integration Tests', () => {
       await prismaService.user_settings.create({
         data: {
           user_id: suspendedUser.id,
-          config: { app: 'ORG_ADMIN' },
+          app_type: 'ORG_ADMIN',
+          config: {},
         },
       });
     });

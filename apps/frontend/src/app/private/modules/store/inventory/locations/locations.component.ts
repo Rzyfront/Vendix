@@ -6,7 +6,6 @@ import { Subscription } from 'rxjs';
 // Shared Components
 import {
     ButtonComponent,
-    TableComponent,
     TableColumn,
     TableAction,
     InputsearchComponent,
@@ -16,6 +15,8 @@ import {
     IconComponent,
     SelectorComponent,
     SelectorOption,
+    ResponsiveDataViewComponent,
+    ItemListCardConfig,
 } from '../../../../../shared/components/index';
 
 // Services
@@ -34,7 +35,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
         CommonModule,
         FormsModule,
         ButtonComponent,
-        TableComponent,
+        ResponsiveDataViewComponent,
         InputsearchComponent,
         StatsComponent,
         IconComponent,
@@ -151,18 +152,17 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
 
         <!-- Table -->
         <div *ngIf="!is_loading && filtered_locations.length > 0" class="p-6">
-          <app-table
+          <app-responsive-data-view
             [data]="filtered_locations"
             [columns]="table_columns"
+            [cardConfig]="cardConfig"
             [actions]="table_actions"
             [loading]="is_loading"
-            [hoverable]="true"
-            [striped]="true"
-            size="md"
             emptyMessage="No hay ubicaciones registradas"
+            emptyIcon="map-pin"
             (sort)="onSort($event)"
             (rowClick)="onRowClick($event)"
-          ></app-table>
+          ></app-responsive-data-view>
         </div>
       </div>
 
@@ -236,7 +236,7 @@ export class LocationsComponent implements OnInit, OnDestroy {
         {
             label: 'Editar',
             icon: 'edit',
-            variant: 'ghost',
+            variant: 'primary',
             action: (item: InventoryLocation) => this.openEditModal(item),
         },
         {
@@ -246,6 +246,31 @@ export class LocationsComponent implements OnInit, OnDestroy {
             action: (item: InventoryLocation) => this.confirmDelete(item),
         },
     ];
+
+    // Card Config for mobile
+    cardConfig: ItemListCardConfig = {
+        titleKey: 'name',
+        subtitleKey: 'code',
+        badgeKey: 'is_active',
+        badgeConfig: { type: 'status', size: 'sm' },
+        badgeTransform: (val: boolean) => (val ? 'Activo' : 'Inactivo'),
+        detailKeys: [
+            {
+                key: 'type',
+                label: 'Tipo',
+                icon: 'warehouse',
+                transform: (value: string) => {
+                    const types: any = {
+                        'warehouse': 'Almacén',
+                        'store': 'Tienda',
+                        'virtual': 'Virtual',
+                        'transit': 'Tránsito'
+                    };
+                    return types[value] || value;
+                }
+            },
+        ],
+    };
 
     // UI State
     is_loading = false;

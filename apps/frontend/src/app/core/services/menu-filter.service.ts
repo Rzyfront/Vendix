@@ -20,8 +20,12 @@ export class MenuFilterService {
    * Includes both parent modules and individual sub-modules.
    *
    * Note: "Configuración" maps to "settings" and is shared by both ORG_ADMIN and STORE_ADMIN.
+   *
+   * When a label maps to multiple keys (array), the item is visible if ANY key is enabled.
+   * This allows the same label to work in different app contexts (e.g., "Dominios" in
+   * ORG_ADMIN uses 'domains' key, while in STORE_ADMIN it uses 'settings_domains').
    */
-  private moduleKeyMap: Record<string, string> = {
+  private moduleKeyMap: Record<string, string | string[]> = {
     // ORG_ADMIN mappings (módulos principales)
     'Panel Principal': 'dashboard',
     Tiendas: 'stores',
@@ -71,7 +75,8 @@ export class MenuFilterService {
     'Métodos de Pago': 'settings_payments',
     Apariencia: 'settings_appearance',
     Seguridad: 'settings_security',
-    Dominios: 'settings_domains',
+    // 'Dominios' supports both ORG_ADMIN (domains) and STORE_ADMIN (settings_domains)
+    Dominios: ['domains', 'settings_domains'],
     Envíos: 'settings_shipping',
     'Documentos Legales': 'settings_legal_documents',
   };
@@ -91,6 +96,24 @@ export class MenuFilterService {
           this.filterItemsRecursive(menuItems, visibleModules),
         ),
       );
+  }
+
+  /**
+   * Check if a module key (or any key in an array) is visible.
+   *
+   * @param moduleKey - Single key or array of keys to check
+   * @param visibleModules - Array of visible module keys
+   * @returns true if at least one key is in visibleModules
+   */
+  private isModuleKeyVisible(
+    moduleKey: string | string[],
+    visibleModules: string[],
+  ): boolean {
+    if (Array.isArray(moduleKey)) {
+      // If array, check if ANY key matches (OR logic)
+      return moduleKey.some((key) => visibleModules.includes(key));
+    }
+    return visibleModules.includes(moduleKey);
   }
 
   /**
@@ -127,8 +150,8 @@ export class MenuFilterService {
       // Case 2: Item has a module key mapping (filter by panel_ui)
       const moduleKey = this.moduleKeyMap[item.label];
       if (moduleKey) {
-        // Only include if this specific module is visible
-        if (visibleModules.includes(moduleKey)) {
+        // Only include if this specific module (or any key in array) is visible
+        if (this.isModuleKeyVisible(moduleKey, visibleModules)) {
           const filteredItem = { ...item };
 
           // Recursively filter children if present
@@ -171,6 +194,12 @@ export class MenuFilterService {
   isMenuItemVisible(menuItem: MenuItem): boolean {
     const moduleKey = this.moduleKeyMap[menuItem.label];
     if (!moduleKey) return true; // Default to visible if no mapping
+
+    // Handle array of keys (check if ANY is visible)
+    if (Array.isArray(moduleKey)) {
+      return moduleKey.some((key) => this.authFacade.isModuleVisible(key));
+    }
+
     return this.authFacade.isModuleVisible(moduleKey);
   }
 }

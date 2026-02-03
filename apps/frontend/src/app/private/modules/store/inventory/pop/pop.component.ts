@@ -1,10 +1,10 @@
-import { Component, OnInit, OnDestroy, ViewChild } from '@angular/core';
+import { Component, OnInit, OnDestroy, ViewChild, signal, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription, take } from 'rxjs';
 
-import { PopCartService, PopCartSummary } from './services/pop-cart.service';
+import { PopCartService, PopCartSummary, PopCartState, PopCartItem } from './services/pop-cart.service';
 import {
   cartToPurchaseOrderRequest,
   CreatePurchaseOrderRequest,
@@ -26,6 +26,8 @@ import { PopSupplierQuickCreateComponent } from './components/pop-supplier-quick
 import { PopWarehouseQuickCreateComponent } from './components/pop-warehouse-quick-create.component';
 import { PopLotModalComponent } from './components/pop-lot-modal.component';
 import { PopPreBulkModalComponent } from './components/pop-prebulk-modal.component';
+import { PopMobileFooterComponent } from './components/pop-mobile-footer.component';
+import { PopCartModalComponent } from './components/pop-cart-modal.component';
 
 /**
  * POP (Point of Purchase) Main Component
@@ -44,6 +46,8 @@ import { PopPreBulkModalComponent } from './components/pop-prebulk-modal.compone
     PopWarehouseQuickCreateComponent,
     PopLotModalComponent,
     PopPreBulkModalComponent,
+    PopMobileFooterComponent,
+    PopCartModalComponent,
   ],
   template: `
     <div
@@ -54,7 +58,6 @@ import { PopPreBulkModalComponent } from './components/pop-prebulk-modal.compone
         class="flex-1 flex flex-col bg-surface rounded-card shadow-card border border-border min-h-0 overflow-hidden"
       >
         <!-- Header (Supplier, Location, Dates) -->
-        <!-- We keep PopHeaderComponent but ensure it fits the visual style -->
         <app-pop-header
           class="flex-none border-b border-border"
           (openSupplierModal)="supplierModalOpen = true"
@@ -63,7 +66,8 @@ import { PopPreBulkModalComponent } from './components/pop-prebulk-modal.compone
 
         <!-- Main Content Grid -->
         <div class="flex-1 p-4 sm:p-6 min-h-0 overflow-hidden">
-          <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 h-full">
+          <!-- Desktop: Grid 3 columns -->
+          <div class="hidden lg:grid lg:grid-cols-3 gap-4 sm:gap-6 h-full">
             <!-- Products Area (Left Side - 2 columns) -->
             <div class="lg:col-span-2 h-full min-h-0">
               <app-pop-product-selection
@@ -74,7 +78,7 @@ import { PopPreBulkModalComponent } from './components/pop-prebulk-modal.compone
               ></app-pop-product-selection>
             </div>
 
-            <!-- Cart Area (Right Side - 1 column) -->
+            <!-- Cart Area (Right Side - 1 column) - Hidden on mobile -->
             <div class="h-full min-h-0">
               <app-pop-cart
                 class="h-full block"
@@ -85,9 +89,46 @@ import { PopPreBulkModalComponent } from './components/pop-prebulk-modal.compone
               ></app-pop-cart>
             </div>
           </div>
+
+          <!-- Mobile: Only products with bottom padding for footer -->
+          <div class="lg:hidden h-full pb-32 overflow-y-auto">
+            <app-pop-product-selection
+              class="h-full block"
+              (productAddedToCart)="onProductAdded($event)"
+              (requestManualAdd)="onManualAddRequested()"
+              (bulkDataLoaded)="onBulkDataReceived($event)"
+            ></app-pop-product-selection>
+          </div>
         </div>
       </div>
     </div>
+
+    <!-- Mobile Footer -->
+    <app-pop-mobile-footer
+      *ngIf="isMobile()"
+      [cartSummary]="cartSummary"
+      [itemCount]="cartItemCount"
+      (viewOrder)="onOpenCartModal()"
+      (saveDraft)="onSaveAsDraft()"
+      (createOrder)="onSubmitOrder()"
+    ></app-pop-mobile-footer>
+
+    <!-- Mobile Cart Modal -->
+    <app-pop-cart-modal
+      [isOpen]="showCartModal && isMobile()"
+      [cartState]="cartState"
+      [supplierName]="selectedSupplierName"
+      [locationName]="selectedLocationName"
+      (closed)="onCloseCartModal()"
+      (itemQuantityChanged)="onItemQuantityChanged($event)"
+      (itemCostChanged)="onItemCostChanged($event)"
+      (itemRemoved)="onItemRemoved($event)"
+      (clearCart)="onClearCart()"
+      (configureLot)="openLotModal($event)"
+      (saveDraft)="onSaveDraftFromModal()"
+      (createOrder)="onCreateOrderFromModal()"
+      (createAndReceive)="onCreateAndReceiveFromModal()"
+    ></app-pop-cart-modal>
 
     <!-- Modals -->
     <app-pop-prebulk-modal
@@ -135,6 +176,17 @@ export class PopComponent implements OnInit, OnDestroy {
   // Route params
   orderId?: number;
 
+  // Mobile responsive
+  isMobile = signal(false);
+  showCartModal = false;
+
+  // Cart state for mobile components
+  cartState: PopCartState | null = null;
+  cartSummary: PopCartSummary | null = null;
+  cartItemCount = 0;
+  selectedSupplierName = '';
+  selectedLocationName = '';
+
   private subscriptions: Subscription[] = [];
 
   constructor(
@@ -148,6 +200,18 @@ export class PopComponent implements OnInit, OnDestroy {
   ) { }
 
   ngOnInit(): void {
+    // Initialize mobile detection
+    this.checkMobile();
+
+    // Subscribe to cart state for mobile components
+    this.subscriptions.push(
+      this.popCartService.cartState$.subscribe((state) => {
+        this.cartState = state;
+        this.cartSummary = state.summary;
+        this.cartItemCount = state.items.length;
+      })
+    );
+
     // Check for editing existing order
     this.route.paramMap.subscribe((params) => {
       const id = params.get('id');
@@ -164,6 +228,15 @@ export class PopComponent implements OnInit, OnDestroy {
         this.autoAddProductById(Number(productId));
       }
     });
+  }
+
+  @HostListener('window:resize')
+  onResize(): void {
+    this.checkMobile();
+  }
+
+  private checkMobile(): void {
+    this.isMobile.set(window.innerWidth < 1024);
   }
 
   private autoAddProductById(productId: number): void {
@@ -267,8 +340,9 @@ export class PopComponent implements OnInit, OnDestroy {
       const profit_margin = Number(normalizedRow['profit_margin'] || normalizedRow['margen'] || normalizedRow['margin']) || 0;
 
       // Final metadata mapping for new requirement
-      const brand = (normalizedRow['marca'] || normalizedRow['brand'] || '').trim();
-      const categories = (normalizedRow['categorías'] || normalizedRow['categorias'] || normalizedRow['categories'] || '').trim();
+      // Note: The modal already maps 'Marca' -> 'brand_id' and 'Categorías' -> 'category_ids'
+      const brand = (normalizedRow['brand_id'] || normalizedRow['marca'] || normalizedRow['brand'] || '').toString().trim();
+      const categories = (normalizedRow['category_ids'] || normalizedRow['categorías'] || normalizedRow['categorias'] || normalizedRow['categories'] || '').toString().trim();
       const isOnSale = normalizedRow['en oferta'] || normalizedRow['en_oferta'] || normalizedRow['is_on_sale'] || false;
       const salePrice = Number(normalizedRow['precio oferta'] || normalizedRow['precio_oferta'] || normalizedRow['sale_price']) || 0;
 
@@ -394,6 +468,73 @@ export class PopComponent implements OnInit, OnDestroy {
   }
 
   // ============================================================
+  // Mobile Modal Handlers
+  // ============================================================
+
+  onOpenCartModal(): void {
+    this.showCartModal = true;
+  }
+
+  onCloseCartModal(): void {
+    this.showCartModal = false;
+  }
+
+  onItemQuantityChanged(event: { itemId: string; quantity: number }): void {
+    this.popCartService.updateCartItem({
+      itemId: event.itemId,
+      quantity: event.quantity,
+    }).subscribe();
+  }
+
+  onItemCostChanged(event: { itemId: string; cost: number }): void {
+    this.popCartService.updateCartItem({
+      itemId: event.itemId,
+      unit_cost: event.cost,
+    }).subscribe();
+  }
+
+  onItemRemoved(itemId: string): void {
+    this.popCartService.removeFromCart(itemId).subscribe({
+      next: () => {
+        this.toastService.success('Producto eliminado de la orden');
+      },
+    });
+  }
+
+  async onClearCart(): Promise<void> {
+    const confirm = await this.dialogService.confirm({
+      title: 'Vaciar Orden',
+      message: '¿Estás seguro de que quieres eliminar todos los productos?',
+      confirmText: 'Vaciar',
+      cancelText: 'Cancelar',
+      confirmVariant: 'danger',
+    });
+
+    if (confirm) {
+      this.popCartService.clearCart().subscribe({
+        next: () => {
+          this.toastService.info('Orden vaciada');
+        },
+      });
+    }
+  }
+
+  onSaveDraftFromModal(): void {
+    this.showCartModal = false;
+    this.onSaveAsDraft();
+  }
+
+  onCreateOrderFromModal(): void {
+    this.showCartModal = false;
+    this.onSubmitOrder();
+  }
+
+  onCreateAndReceiveFromModal(): void {
+    this.showCartModal = false;
+    this.onCreateAndReceive();
+  }
+
+  // ============================================================
   // Order Actions
   // ============================================================
 
@@ -413,7 +554,7 @@ export class PopComponent implements OnInit, OnDestroy {
       next: (response) => {
         this.toastService.success('Orden guardada como borrador');
         this.popCartService.clearCart().subscribe();
-        this.router.navigate(['/store/orders/purchase-orders']);
+        this.router.navigate(['/admin/products']);
       },
       error: (error) => {
         console.error('Error saving draft:', error);
@@ -443,7 +584,7 @@ export class PopComponent implements OnInit, OnDestroy {
         if (response.success && response.data) {
           this.toastService.success('Orden creada exitosamente');
           this.popCartService.clearCart().subscribe();
-          this.router.navigate(['/store/orders/purchase-orders']);
+          this.router.navigate(['/admin/products']);
         }
       },
       error: (error) => {
@@ -488,8 +629,8 @@ export class PopComponent implements OnInit, OnDestroy {
               next: (res: any) => {
                 this.toastService.success('Stock ingresado correctamente');
                 this.popCartService.clearCart().subscribe();
-                // Navigate to inventory or stay? Navigate to orders for now
-                this.router.navigate(['/store/orders/purchase-orders']);
+                // Navigate to products list after successful purchase
+                this.router.navigate(['/admin/products']);
               },
               error: (err: any) => {
                 console.error('Error receiving order:', err);
@@ -498,7 +639,7 @@ export class PopComponent implements OnInit, OnDestroy {
                 );
                 // Still clear cart as order was created? Yes to prevent dupes
                 this.popCartService.clearCart().subscribe();
-                this.router.navigate(['/store/orders/purchase-orders']);
+                this.router.navigate(['/admin/products']);
               },
             });
         }

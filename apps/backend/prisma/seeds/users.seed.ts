@@ -479,12 +479,12 @@ export async function seedUsers(
       update: {},
       create: {
         user_id: createdUser.id,
+        app_type: app as any, // app_type enum value (VENDIX_ADMIN, ORG_ADMIN, STORE_ADMIN, etc.)
         config: {
-          app,
           panel_ui,
           preferences: {
             language: 'es',
-            theme: 'aura',
+            theme: 'default',
           },
         },
       },

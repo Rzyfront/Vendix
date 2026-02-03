@@ -39,8 +39,16 @@ apps/backend/src/domains/
 │   ├── store.module.ts
 │   ├── store.controller.ts
 │   ├── store.service.ts
-│   ├── dto/
-│   └── interfaces/
+│   ├── settings/            # NUEVO: Store settings (branding, fonts, ecommerce)
+│   │   ├── settings.service.ts
+│   │   ├── interfaces/
+│   │   │   └── store-settings.interface.ts
+│   │   └── defaults/
+│   │       └── default-store-settings.ts
+│   ├── products/
+│   ├── brands/
+│   ├── categories/
+│   └── ecommerce/           # Ecommerce operations
 │
 ├── ecommerce/               # Catálogo público de e-commerce
 │   ├── catalog/
@@ -57,7 +65,8 @@ apps/backend/src/domains/
 ├── public/                  # Dominios públicos (landing pages)
 │   └── domains/
 │       ├── public-domains.module.ts
-│       └── public-domains.controller.ts
+│       ├── public-domains.controller.ts
+│       └── public-domains.service.ts
 │
 └── common/                  # Utilidades compartidas
     ├── middleware/
@@ -65,8 +74,52 @@ apps/backend/src/domains/
     ├── decorators/
     ├── interceptors/
     ├── context/
+    ├── services/            # S3, helpers, etc.
     └── responses/
 ```
+
+---
+
+## 🔄 App Type Standard (NEW)
+
+### App Type Enum
+
+The backend uses a unified `app_type_enum` across the entire system:
+
+```prisma
+enum app_type_enum {
+  VENDIX_LANDING     # Public: Vendix SaaS landing
+  VENDIX_ADMIN       # Private: Super admin panel
+  ORG_LANDING        # Public: Organization landing
+  ORG_ADMIN          # Private: Organization admin
+  STORE_LANDING      # Public: Store landing
+  STORE_ADMIN        # Private: Store admin panel
+  STORE_ECOMMERCE    # Public: Store e-commerce
+}
+
+model domain_settings {
+  app_type  app_type_enum  @default(VENDIX_LANDING) // <--- Source of Truth
+  config    Json?                                      // Now nullable (legacy)
+  // ...
+}
+
+model user_settings {
+  app_type  app_type_enum  @default(STORE_ADMIN) // Override post-login
+  // ...
+}
+```
+
+### Domain Resolution
+
+**File:** `domains/public/domains/public-domains.service.ts`
+
+The `resolveDomain()` method now returns:
+- `app`: Direct from `domain_settings.app_type` (NOT `config.app`)
+- `branding`: From `store_settings.settings.branding`
+- `fonts`: From `store_settings.settings.fonts`
+- `ecommerce`: From `store_settings.settings.ecommerce`
+- `publication`: From `store_settings.settings.publication`
+- `config`: Legacy (kept for backward compatibility)
 
 ---
 metadata:
@@ -502,6 +555,35 @@ async findActive() {
 | `common/decorators/permissions.decorator.ts` | Permission-based access |
 | `common/context/request-context.service.ts` | Multi-tenant context |
 | `common/responses/response.service.ts` | Standardized responses |
+| `domains/public/domains/public-domains.service.ts` | Domain resolution with app_type |
+| `domains/store/settings/interfaces/store-settings.interface.ts` | Store settings interfaces |
+| `domains/store/settings/defaults/default-store-settings.ts` | Default store settings |
+
+---
+
+## 📝 App Type Migration Notes
+
+### Before (Legacy):
+```typescript
+// Old way - config.app nested in config JSON
+config: {
+  app: 'STORE_ADMIN',
+  branding: { ... }
+}
+```
+
+### After (New Standard):
+```typescript
+// New way - app_type directly on domain
+app_type: 'STORE_ADMIN'  // Source of Truth
+
+// Branding from store_settings.settings.branding
+branding: {
+  name: string;
+  primary_color: string;
+  // ...
+}
+```
 
 ---
 

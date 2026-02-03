@@ -1,11 +1,13 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { Store } from '@ngrx/store';
 import { AuthState } from './auth.reducer';
 import * as AuthActions from './auth.actions';
+import { TokenRefreshTimerService } from '../../services/token-refresh-timer.service';
 
 @Injectable({ providedIn: 'root' })
 export class AuthInitService {
   private readonly LOCALSTORAGE_KEY = 'vendix_auth_state';
+  private tokenRefreshTimer = inject(TokenRefreshTimerService);
 
   constructor(private store: Store) {}
 
@@ -45,8 +47,22 @@ export class AuthInitService {
       }
 
       // Validar que el token de acceso no esté vacío
-      if (!parsed.tokens.accessToken) {
+      // Support both camelCase and snake_case token formats
+      const accessToken = parsed.tokens.accessToken || parsed.tokens.access_token;
+      if (!accessToken) {
         console.warn('[AuthInitService] Token de acceso no encontrado');
+        localStorage.removeItem(this.LOCALSTORAGE_KEY);
+        return;
+      }
+
+      // Calculate remaining token lifetime and start proactive refresh timer
+      const expiresInMs = this.calculateRemainingTokenTime(accessToken);
+      if (expiresInMs > 0) {
+        this.tokenRefreshTimer.startTimer(expiresInMs);
+      } else {
+        console.warn(
+          '[AuthInitService] Token expirado, no se restaurará la sesión',
+        );
         localStorage.removeItem(this.LOCALSTORAGE_KEY);
         return;
       }
@@ -69,6 +85,37 @@ export class AuthInitService {
       );
       localStorage.removeItem(this.LOCALSTORAGE_KEY);
       localStorage.removeItem('vendix_logged_out_recently');
+    }
+  }
+
+  /**
+   * Decodes a JWT token and calculates the remaining time until expiration.
+   * @param token - The JWT access token
+   * @returns Remaining time in milliseconds, or 0 if token is expired or invalid
+   */
+  private calculateRemainingTokenTime(token: string): number {
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      if (!payload.exp) {
+        // No expiration claim, assume token is valid for a default duration
+        console.warn(
+          '[AuthInitService] Token has no expiration claim, using default',
+        );
+        return 60 * 60 * 1000; // 1 hour default
+      }
+
+      const expirationMs = payload.exp * 1000; // JWT exp is in seconds
+      const now = Date.now();
+      const remainingMs = expirationMs - now;
+
+      console.log(
+        `[AuthInitService] Token expires in ${Math.round(remainingMs / 1000)}s`,
+      );
+
+      return remainingMs > 0 ? remainingMs : 0;
+    } catch (error) {
+      console.warn('[AuthInitService] Failed to decode token:', error);
+      return 0;
     }
   }
 }

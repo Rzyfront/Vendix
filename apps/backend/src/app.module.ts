@@ -14,6 +14,7 @@ import { TestModule } from './test/test.module';
 import { DomainsModule } from './domains/domains.module';
 import { StorageModule } from './storage.module';
 import { PublicDomainsModule } from './domains/public/domains/public-domains.module';
+import { JobsModule } from './jobs/jobs.module';
 
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtAuthGuard } from './domains/auth/guards/jwt-auth.guard';
@@ -44,6 +45,7 @@ import { DomainResolverMiddleware } from './common/middleware/domain-resolver.mi
     AuditModule,
     DefaultPanelUIModule,
     HelpersModule,
+    JobsModule,
   ],
   controllers: [AppController],
   providers: [

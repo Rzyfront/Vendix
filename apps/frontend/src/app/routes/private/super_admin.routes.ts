@@ -99,6 +99,71 @@ export const superAdminRoutes: Routes = [
             '../../private/modules/super-admin/legal-documents/legal-documents.component'
           ).then((c) => c.LegalDocumentsComponent),
       },
+      // Placeholder routes - modules under construction
+      {
+        path: 'billing',
+        loadComponent: () =>
+          import(
+            '../../shared/components/under-construction/under-construction.component'
+          ).then((c) => c.UnderConstructionComponent),
+        data: { title: 'Facturación', description: 'El módulo de facturación está siendo desarrollado.' },
+      },
+      {
+        path: 'support',
+        loadComponent: () =>
+          import(
+            '../../shared/components/under-construction/under-construction.component'
+          ).then((c) => c.UnderConstructionComponent),
+        data: { title: 'Soporte', description: 'El módulo de soporte está siendo desarrollado.' },
+      },
+      {
+        path: 'analytics/platform',
+        loadComponent: () =>
+          import(
+            '../../shared/components/under-construction/under-construction.component'
+          ).then((c) => c.UnderConstructionComponent),
+        data: { title: 'Analíticas de Plataforma', description: 'Las analíticas de plataforma estarán disponibles próximamente.' },
+      },
+      {
+        path: 'analytics/users',
+        loadComponent: () =>
+          import(
+            '../../shared/components/under-construction/under-construction.component'
+          ).then((c) => c.UnderConstructionComponent),
+        data: { title: 'Analíticas de Usuarios', description: 'Las analíticas de usuarios estarán disponibles próximamente.' },
+      },
+      {
+        path: 'analytics/performance',
+        loadComponent: () =>
+          import(
+            '../../shared/components/under-construction/under-construction.component'
+          ).then((c) => c.UnderConstructionComponent),
+        data: { title: 'Rendimiento', description: 'El módulo de rendimiento está siendo desarrollado.' },
+      },
+      {
+        path: 'system/settings',
+        loadComponent: () =>
+          import(
+            '../../shared/components/under-construction/under-construction.component'
+          ).then((c) => c.UnderConstructionComponent),
+        data: { title: 'Configuración del Sistema', description: 'La configuración del sistema está siendo desarrollada.' },
+      },
+      {
+        path: 'system/logs',
+        loadComponent: () =>
+          import(
+            '../../shared/components/under-construction/under-construction.component'
+          ).then((c) => c.UnderConstructionComponent),
+        data: { title: 'Registros del Sistema', description: 'Los registros del sistema estarán disponibles próximamente.' },
+      },
+      {
+        path: 'system/backups',
+        loadComponent: () =>
+          import(
+            '../../shared/components/under-construction/under-construction.component'
+          ).then((c) => c.UnderConstructionComponent),
+        data: { title: 'Copias de Seguridad', description: 'El módulo de copias de seguridad está siendo desarrollado.' },
+      },
     ],
   },
 ];

@@ -6,6 +6,7 @@ import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { purchase_order_status_enum } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { BadRequestException } from '@nestjs/common';
+import { toTitleCase } from '@common/utils/format.util';
 
 @Injectable()
 export class PurchaseOrdersService {
@@ -92,42 +93,50 @@ export class PurchaseOrdersService {
             basePrice = cost * (1 + margin / 100);
           }
 
-          // Resolve Brand
+          // Resolve Brand: trim + lowercase for search, Title Case for creation
           let brandId: number | undefined;
           if (item.brand_name) {
-            const brandName = item.brand_name.trim();
-            const brand = await tx.brands.findFirst({
-              where: { name: { equals: brandName, mode: 'insensitive' } }
-            });
-            if (brand) {
-              brandId = brand.id;
-            } else {
-              const newBrand = await tx.brands.create({
-                data: {
-                  name: brandName,
-                  description: 'Creada automáticamente por carga masiva PO',
-                  state: 'active'
-                }
+            const normalizedBrandName = item.brand_name.trim().toLowerCase();
+            if (normalizedBrandName) {
+              const brand = await tx.brands.findFirst({
+                where: { name: { equals: normalizedBrandName, mode: 'insensitive' } }
               });
-              brandId = newBrand.id;
+              if (brand) {
+                brandId = brand.id;
+              } else {
+                const titleCaseBrandName = toTitleCase(item.brand_name.trim());
+                const newBrand = await tx.brands.create({
+                  data: {
+                    name: titleCaseBrandName,
+                    description: 'Creada automáticamente por carga masiva PO',
+                    state: 'active'
+                  }
+                });
+                brandId = newBrand.id;
+              }
             }
           }
 
-          // Resolve Categories
+          // Resolve Categories: split by ",", trim + lowercase for search, Title Case for creation
           const categoryIds: number[] = [];
           if (item.category_names) {
             const names = item.category_names.split(',').map(n => n.trim()).filter(n => n);
             for (const name of names) {
+              const normalizedCatName = name.toLowerCase();
+              const slug = normalizedCatName.replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+
+              // Search by slug (already lowercase/normalized)
               const cat = await tx.categories.findFirst({
-                where: { name: { equals: name, mode: 'insensitive' }, store_id: storeId }
+                where: { slug: slug, store_id: storeId }
               });
               if (cat) {
                 categoryIds.push(cat.id);
               } else {
+                const titleCaseCatName = toTitleCase(name);
                 const newCat = await tx.categories.create({
                   data: {
-                    name: name,
-                    slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, ''),
+                    name: titleCaseCatName,
+                    slug: slug,
                     store_id: storeId,
                     state: 'active'
                   }

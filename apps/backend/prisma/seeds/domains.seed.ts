@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, app_type_enum } from '@prisma/client';
 import { getPrismaClient } from './shared/client';
 
 const baseDomain = process.env.BASE_DOMAIN || 'vendix.com';
@@ -12,6 +12,11 @@ export interface SeedDomainsResult {
  * 1. seedOrganizationsAndStores() - Organizations and stores must exist
  *
  * Creates domain settings for organizations and stores
+ *
+ * NUEVO ESTÁNDAR:
+ * - app_type es la única fuente de verdad para el tipo de aplicación
+ * - config solo contiene metadata de routing/security (no branding ni app)
+ * - branding ahora vive en store_settings
  */
 export async function seedDomains(
   prisma?: PrismaClient,
@@ -51,29 +56,21 @@ export async function seedDomains(
     },
   });
 
+  // NUEVO ESTÁNDAR: Dominios con app_type explícito
   const domainSettings = [
+    // ============================================================================
     // Vendix core domains
+    // ============================================================================
     {
       hostname: baseDomain,
       organization_id: vendixOrg.id,
       store_id: null,
+      app_type: app_type_enum.VENDIX_LANDING,
       domain_type: 'vendix_core',
       is_primary: true,
       status: 'active',
       ssl_status: 'issued',
       config: {
-        branding: {
-          name: 'Vendix',
-          primary_color: '#7ED7A5',
-          secondary_color: '#2F6F4E',
-          background_color: '#F4F4F4',
-          accent_color: '#FFFFFF',
-          border_color: '#B0B0B0',
-          text_color: '#222222',
-          theme: 'light',
-          logo_url: null,
-          favicon_url: null,
-        },
         security: {
           cors_origins: [
             `http://${baseDomain}`,
@@ -84,57 +81,38 @@ export async function seedDomains(
           session_timeout: 3600000,
           max_login_attempts: 5,
         },
-        app: 'VENDIX_LANDING',
       },
     },
     {
       hostname: 'vendix.com',
       organization_id: vendixOrg.id,
       store_id: null,
+      app_type: app_type_enum.VENDIX_LANDING,
       domain_type: 'vendix_core',
       is_primary: false,
       status: 'active',
       ssl_status: 'issued',
       config: {
-        branding: {
-          name: 'Vendix Corp',
-          primary_color: '#7ED7A5',
-          secondary_color: '#2F6F4E',
-          background_color: '#F4F4F4',
-          accent_color: '#FFFFFF',
-          border_color: '#B0B0B0',
-          text_color: '#222222',
-          theme: 'light',
-          logo_url: null,
-          favicon_url: null,
-        },
         security: {
           session_timeout: 3600000,
           max_login_attempts: 5,
         },
-        app: 'VENDIX_LANDING',
       },
     },
-    // Organization domains
+
+    // ============================================================================
+    // Organization domains - Tech Solutions
+    // ============================================================================
     {
       hostname: 'techsolutions.vendix.com',
       organization_id: techSolutionsOrg.id,
       store_id: null,
+      app_type: app_type_enum.ORG_LANDING,
       domain_type: 'organization',
       is_primary: true,
       status: 'active',
       ssl_status: 'issued',
       config: {
-        branding: {
-          name: 'Tech Solutions',
-          primary_color: '#4A90E2',
-          secondary_color: '#2C5282',
-          background_color: '#F7FAFC',
-          accent_color: '#FFFFFF',
-          border_color: '#CBD5E0',
-          text_color: '#2D3748',
-          theme: 'light',
-        },
         security: {
           cors_origins: [
             'https://techsolutions.vendix.com',
@@ -143,80 +121,85 @@ export async function seedDomains(
           session_timeout: 7200000,
           max_login_attempts: 3,
         },
-        app: 'ORG_LANDING',
       },
     },
     {
       hostname: 'admin-techsolutions.vendix.com',
       organization_id: techSolutionsOrg.id,
       store_id: null,
+      app_type: app_type_enum.ORG_ADMIN,
       domain_type: 'organization',
       is_primary: false,
       status: 'active',
       ssl_status: 'issued',
-      config: {
-        app: 'ORG_ADMIN',
-      },
+      config: {},
     },
+
+    // ============================================================================
+    // Organization domains - Fashion Retail
+    // ============================================================================
     {
       hostname: 'fashionretail.vendix.com',
       organization_id: fashionRetailOrg.id,
       store_id: null,
+      app_type: app_type_enum.ORG_LANDING,
       domain_type: 'organization',
       is_primary: true,
       status: 'active',
       ssl_status: 'issued',
-      config: {
-        branding: {
-          name: 'Fashion Retail',
-          primary_color: '#E53E3E',
-          secondary_color: '#C53030',
-          background_color: '#FFF5F5',
-          accent_color: '#FFFFFF',
-          border_color: '#FED7D7',
-          text_color: '#2D3748',
-          theme: 'light',
-        },
-        app: 'ORG_LANDING',
-      },
+      config: {},
     },
-    // Store domains
+
+    // ============================================================================
+    // Store/Ecommerce domains
+    // ============================================================================
     {
       hostname: 'tienda-techsolutions.vendix.com',
       organization_id: techSolutionsOrg.id,
       store_id: techStore3?.id,
+      app_type: app_type_enum.STORE_ECOMMERCE,
       domain_type: 'ecommerce',
       is_primary: true,
       status: 'active',
       ssl_status: 'issued',
-      config: {
-        app: 'STORE_ECOMMERCE',
-      },
+      config: {}, // Branding ahora está en store_settings
+    },
+    {
+      hostname: 'admin-tienda-techsolutions.vendix.com',
+      organization_id: techSolutionsOrg.id,
+      store_id: techStore3?.id,
+      app_type: app_type_enum.STORE_ADMIN,
+      domain_type: 'store',
+      is_primary: false,
+      status: 'active',
+      ssl_status: 'issued',
+      config: {},
     },
     {
       hostname: 'moda-fashionretail.vendix.com',
       organization_id: fashionRetailOrg.id,
       store_id: fashionStore2?.id,
+      app_type: app_type_enum.STORE_ECOMMERCE,
       domain_type: 'ecommerce',
       is_primary: true,
       status: 'active',
       ssl_status: 'issued',
-      config: {
-        app: 'STORE_ECOMMERCE',
-      },
+      config: {}, // Branding ahora está en store_settings
     },
-    // Pending domain
+
+    // ============================================================================
+    // Pending domains
+    // ============================================================================
     {
       hostname: 'gourmetfoods.vendix.com',
       organization_id: gourmetFoodsOrg.id,
       store_id: null,
+      app_type: app_type_enum.ORG_LANDING,
       domain_type: 'organization',
       is_primary: true,
       status: 'pending_dns',
       ssl_status: 'pending',
-      config: {
-        app: 'ORG_LANDING',
-      },
+      config: {},
     },
   ];
 
@@ -256,7 +239,10 @@ export async function seedDomains(
     await client.domain_settings.create({
       data: {
         hostname: domain.hostname,
+        organization_id: domain.organization_id,
         store_id: domain.store_id,
+        // NUEVO: app_type es la fuente de verdad
+        app_type: domain.app_type,
         domain_type: domain.domain_type as any,
         is_primary: domain.is_primary,
         status: domain.status as any,

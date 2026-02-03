@@ -32,6 +32,8 @@ export {
 } from './onboarding-modal';
 export { StickyHeaderComponent } from './sticky-header/sticky-header.component';
 export { BadgeComponent } from './badge/badge.component';
+export { ItemListComponent } from './item-list/item-list.component';
+export { ResponsiveDataViewComponent } from './responsive-data-view/responsive-data-view.component';
 
 // Types
 export type { BadgeVariant } from './badge/badge.component';
@@ -71,4 +73,9 @@ export type {
   StickyHeaderVariant,
   StickyHeaderBadgeColor,
 } from './sticky-header/sticky-header.component';
+export type {
+  ItemListCardConfig,
+  ItemListDetailField,
+  ItemListSize,
+} from './item-list/item-list.interfaces';
 export { CHART_THEMES } from './chart';

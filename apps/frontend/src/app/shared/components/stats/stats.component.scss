@@ -1,28 +1,107 @@
 :host {
   display: block;
+
+  // Mobile: Fixed width for horizontal scroll container
+  @media (max-width: 639px) {
+    width: 160px; // w-40
+    flex-shrink: 0;
+  }
 }
+
+// ============================================
+// STAT CARD - Mobile-First Horizontal Scroll Design
+// ============================================
 
 .stat-card {
-  transition: all 0.2s ease-in-out;
-  max-width: 100%; // Prevenir overflow en móviles
+  @apply bg-surface rounded-2xl shadow-sm border border-border transition-shadow overflow-hidden;
 
-  &:hover {
-    transform: translateY(-2px);
+  // Desktop layout: horizontal with icon on right
+  @apply p-3.5 flex items-center;
+
+  // Mobile layout (< 640px): Block layout with icon in corner
+  @media (max-width: 639px) {
+    @apply p-3 block relative w-full h-full;
   }
 }
 
-// Mobile: altura ultra compacta para 4 columnas
-@media (max-width: 767px) {
-  :host {
-    display: block;
-    min-height: 90px;
+// ============================================
+// ICON
+// ============================================
+
+.stat-icon {
+  @apply rounded-xl flex items-center justify-center flex-shrink-0;
+
+  // Desktop: compact icon container on right (use order to move visually)
+  @apply w-8 h-8 ml-1.5 order-2;
+
+  // Mobile: absolute positioning in top-right corner, inline with title
+  @media (max-width: 639px) {
+    @apply absolute top-3 right-3 w-auto h-auto ml-0 order-none bg-transparent !important;
+
+    app-icon {
+      @apply text-lg;
+    }
   }
 }
 
-// Tablet: altura compacta
-@media (min-width: 768px) and (max-width: 1023px) {
-  :host {
-    display: block;
-    min-height: 100px;
+// ============================================
+// CONTENT
+// ============================================
+
+.stat-content {
+  @apply flex-1 overflow-hidden order-1;
+  min-width: 0;
+
+  @media (max-width: 639px) {
+    @apply order-none;
+  }
+}
+
+// ============================================
+// TITLE
+// ============================================
+
+.stat-title {
+  @apply text-xs font-medium text-text-secondary;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  // Mobile: uppercase bold like reference design
+  @media (max-width: 639px) {
+    @apply text-[10px] font-bold uppercase tracking-wide;
+    max-width: calc(100% - 24px); // Leave space for icon
+  }
+}
+
+// ============================================
+// VALUE
+// ============================================
+
+.stat-value {
+  @apply text-xl font-bold text-text-primary mt-0.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  // Mobile: same size as reference
+  @media (max-width: 639px) {
+    @apply text-xl mt-1;
+  }
+}
+
+// ============================================
+// SMALL TEXT (optional subtitle/description)
+// ============================================
+
+.stat-small {
+  @apply text-[10px] font-medium mt-1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  // Mobile: emerald color for positive growth like reference
+  @media (max-width: 639px) {
+    @apply text-[10px] mt-0.5 text-emerald-500;
   }
 }
