@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, catchError, throwError } from 'rxjs';
+import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import {
   InventoryLocation,
@@ -19,11 +20,20 @@ import {
   PaginatedResponse,
 } from '../interfaces';
 
+// Caché estático global (persiste entre instancias del servicio)
+interface CacheEntry<T> {
+  observable: T;
+  lastFetch: number;
+}
+
+let inventoryStatsCache: CacheEntry<Observable<ApiResponse<InventoryStats>>> | null = null;
+
 @Injectable({
   providedIn: 'root',
 })
 export class InventoryService {
   private readonly base_url = `${environment.apiUrl}/store/inventory`;
+  private readonly CACHE_TTL = 30000; // 30 segundos
 
   constructor(private http: HttpClient) {}
 
@@ -246,9 +256,30 @@ export class InventoryService {
   // ============================================================
 
   getInventoryStats(): Observable<ApiResponse<InventoryStats>> {
-    return this.http
+    const now = Date.now();
+
+    if (inventoryStatsCache && (now - inventoryStatsCache.lastFetch) < this.CACHE_TTL) {
+      return inventoryStatsCache.observable;
+    }
+
+    const observable$ = this.http
       .get<ApiResponse<InventoryStats>>(`${this.base_url}/stats`)
-      .pipe(catchError(this.handleError));
+      .pipe(
+        shareReplay({ bufferSize: 1, refCount: false }),
+        tap(() => {
+          if (inventoryStatsCache) {
+            inventoryStatsCache.lastFetch = Date.now();
+          }
+        }),
+        catchError(this.handleError),
+      );
+
+    inventoryStatsCache = {
+      observable: observable$,
+      lastFetch: now,
+    };
+
+    return observable$;
   }
 
   // ============================================================
@@ -285,5 +316,13 @@ export class InventoryService {
     }
 
     return throwError(() => error_message);
+  }
+
+  /**
+   * Invalida el caché de estadísticas
+   * Útil después de crear/editar/eliminar inventario
+   */
+  invalidateCache(): void {
+    inventoryStatsCache = null;
   }
 }

@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, BehaviorSubject, finalize, catchError, throwError, map } from 'rxjs';
+import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import {
     AuditQueryDto,
@@ -8,12 +9,21 @@ import {
     PaginatedAuditResponse,
 } from '../interfaces/audit.interface';
 
+// Caché estático global (persiste entre instancias del servicio)
+interface CacheEntry<T> {
+  observable: T;
+  lastFetch: number;
+}
+
+let orgAuditStatsCache: CacheEntry<Observable<AuditStats>> | null = null;
+
 @Injectable({
     providedIn: 'root',
 })
 export class AuditService {
     private http = inject(HttpClient);
     private apiUrl = environment.apiUrl;
+    private readonly CACHE_TTL = 30000; // 30 segundos
 
     private isLoading$ = new BehaviorSubject<boolean>(false);
 
@@ -88,18 +98,59 @@ export class AuditService {
      * Obtener estadísticas de auditoría
      */
     getAuditStats(fromDate?: string, toDate?: string): Observable<AuditStats> {
-        let params = new HttpParams();
-        if (fromDate) params = params.set('fromDate', fromDate);
-        if (toDate) params = params.set('toDate', toDate);
+        // Si hay parámetros de fecha, no usar caché
+        if (fromDate || toDate) {
+            let params = new HttpParams();
+            if (fromDate) params = params.set('fromDate', fromDate);
+            if (toDate) params = params.set('toDate', toDate);
 
-        return this.http
-            .get<any>(`${this.apiUrl}/organization/audit/stats`, { params })
+            return this.http
+                .get<any>(`${this.apiUrl}/organization/audit/stats`, { params })
+                .pipe(
+                    map((response) => response.data),
+                    catchError((error) => {
+                        console.error('Error loading audit stats:', error);
+                        return throwError(() => error);
+                    }),
+                );
+        }
+
+        // Sin parámetros - usar caché
+        const now = Date.now();
+
+        if (orgAuditStatsCache && (now - orgAuditStatsCache.lastFetch) < this.CACHE_TTL) {
+            return orgAuditStatsCache.observable;
+        }
+
+        const observable$ = this.http
+            .get<any>(`${this.apiUrl}/organization/audit/stats`)
             .pipe(
+                shareReplay({ bufferSize: 1, refCount: false }),
                 map((response) => response.data),
+                tap(() => {
+                    if (orgAuditStatsCache) {
+                        orgAuditStatsCache.lastFetch = Date.now();
+                    }
+                }),
                 catchError((error) => {
                     console.error('Error loading audit stats:', error);
                     return throwError(() => error);
                 }),
             );
+
+        orgAuditStatsCache = {
+            observable: observable$,
+            lastFetch: now,
+        };
+
+        return observable$;
+    }
+
+    /**
+     * Invalida el caché de estadísticas
+     * Útil después de crear/editar/eliminar logs de auditoría
+     */
+    invalidateCache(): void {
+        orgAuditStatsCache = null;
     }
 }

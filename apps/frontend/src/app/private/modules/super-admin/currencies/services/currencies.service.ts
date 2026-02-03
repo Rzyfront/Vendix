@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import {
   Currency,
@@ -11,12 +12,21 @@ import {
   PaginatedCurrenciesResponse,
 } from '../interfaces';
 
+// Caché estático global (persiste entre instancias del servicio)
+interface CacheEntry<T> {
+  observable: T;
+  lastFetch: number;
+}
+
+let currenciesStatsCache: CacheEntry<Observable<CurrencyStats>> | null = null;
+
 @Injectable({
   providedIn: 'root',
 })
 export class CurrenciesService {
   private http = inject(HttpClient);
   private readonly apiUrl = environment.apiUrl;
+  private readonly CACHE_TTL = 30000; // 30 segundos
 
   getCurrencies(query: CurrencyQueryDto = {}): Observable<PaginatedCurrenciesResponse> {
     let params = new HttpParams();
@@ -29,7 +39,29 @@ export class CurrenciesService {
   }
 
   getCurrencyStats(): Observable<CurrencyStats> {
-    return this.http.get<any>(`${this.apiUrl}/superadmin/currencies/dashboard`);
+    const now = Date.now();
+
+    if (currenciesStatsCache && (now - currenciesStatsCache.lastFetch) < this.CACHE_TTL) {
+      return currenciesStatsCache.observable;
+    }
+
+    const observable$ = this.http
+      .get<any>(`${this.apiUrl}/superadmin/currencies/dashboard`)
+      .pipe(
+        shareReplay({ bufferSize: 1, refCount: false }),
+        tap(() => {
+          if (currenciesStatsCache) {
+            currenciesStatsCache.lastFetch = Date.now();
+          }
+        }),
+      );
+
+    currenciesStatsCache = {
+      observable: observable$,
+      lastFetch: now,
+    };
+
+    return observable$;
   }
 
   getCurrencyByCode(code: string): Observable<Currency> {
@@ -58,5 +90,13 @@ export class CurrenciesService {
 
   deleteCurrency(code: string): Observable<void> {
     return this.http.delete<void>(`${this.apiUrl}/superadmin/currencies/${code}`);
+  }
+
+  /**
+   * Invalida el caché de estadísticas
+   * Útil después de crear/editar/eliminar monedas
+   */
+  invalidateCache(): void {
+    currenciesStatsCache = null;
   }
 }

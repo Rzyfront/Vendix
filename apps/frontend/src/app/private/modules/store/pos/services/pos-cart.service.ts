@@ -441,7 +441,7 @@ export class PosCartService {
       product.tax_assignments?.reduce((rateSum: number, assignment: any) => {
         const assignmentRate =
           assignment.tax_categories?.tax_rates?.reduce(
-            (sum: number, tr: any) => sum + parseFloat(tr.rate || '0'),
+            (sum: number, tr: any) => sum + (parseFloat(tr.rate || '0') / 100),
             0,
           ) || 0;
         return rateSum + assignmentRate;

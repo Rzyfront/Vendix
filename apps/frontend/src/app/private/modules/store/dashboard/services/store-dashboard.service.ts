@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, catchError, throwError } from 'rxjs';
+import { Observable, catchError, throwError, map } from 'rxjs';
+import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 
 export interface StoreDashboardStats {
@@ -52,18 +53,44 @@ export interface CustomerActivity {
   totalOrders: number;
 }
 
+// Caché estático global (persiste entre instancias del servicio)
+interface CacheEntry<T> {
+  observable: T;
+  lastFetch: number;
+}
+
+// Map para caché por storeId
+const storeDashboardCache = new Map<string, CacheEntry<Observable<StoreDashboardStats>>>();
+const storeProductsStatsCache = new Map<string, CacheEntry<Observable<any>>>();
+
 @Injectable({
   providedIn: 'root',
 })
 export class StoreDashboardService {
   private readonly apiUrl = environment.apiUrl;
+  private readonly CACHE_TTL = 30000; // 30 segundos
 
   constructor(private http: HttpClient) {}
 
   getDashboardStats(storeId: string): Observable<StoreDashboardStats> {
-    return this.http
-      .get<StoreDashboardStats>(`${this.apiUrl}/store/stores/${storeId}/stats`)
+    const now = Date.now();
+    const cached = storeDashboardCache.get(storeId);
+
+    if (cached && (now - cached.lastFetch) < this.CACHE_TTL) {
+      return cached.observable;
+    }
+
+    const observable$ = this.http
+      .get<any>(`${this.apiUrl}/store/stores/${storeId}/stats`)
       .pipe(
+        shareReplay({ bufferSize: 1, refCount: false }),
+        map((response: any) => response.data || response),
+        tap(() => {
+          const entry = storeDashboardCache.get(storeId);
+          if (entry) {
+            entry.lastFetch = Date.now();
+          }
+        }),
         catchError((error) => {
           console.error('Error fetching store dashboard stats:', error);
           return throwError(
@@ -71,6 +98,13 @@ export class StoreDashboardService {
           );
         }),
       );
+
+    storeDashboardCache.set(storeId, {
+      observable: observable$,
+      lastFetch: now,
+    });
+
+    return observable$;
   }
 
   // Commented out: endpoint does not exist in backend
@@ -91,14 +125,35 @@ export class StoreDashboardService {
   // }
 
   getProductsStats(storeId: string): Observable<any> {
-    return this.http
+    const now = Date.now();
+    const cached = storeProductsStatsCache.get(storeId);
+
+    if (cached && (now - cached.lastFetch) < this.CACHE_TTL) {
+      return cached.observable;
+    }
+
+    const observable$ = this.http
       .get(`${this.apiUrl}/store/products/stats/store/${storeId}`)
       .pipe(
+        shareReplay({ bufferSize: 1, refCount: false }),
+        tap(() => {
+          const entry = storeProductsStatsCache.get(storeId);
+          if (entry) {
+            entry.lastFetch = Date.now();
+          }
+        }),
         catchError((error) => {
           console.error('Error fetching store products stats:', error);
           return throwError(() => new Error('Failed to fetch products stats'));
         }),
       );
+
+    storeProductsStatsCache.set(storeId, {
+      observable: observable$,
+      lastFetch: now,
+    });
+
+    return observable$;
   }
 
   // Commented out: endpoint does not exist in backend
@@ -193,4 +248,19 @@ export class StoreDashboardService {
   //       }),
   //     );
   // }
+
+  /**
+   * Invalida el caché de estadísticas
+   * Útil después de actualizar datos de la tienda
+   * @param storeId - ID de la tienda. Si no se proporciona, se limpia todo el caché
+   */
+  invalidateCache(storeId?: string): void {
+    if (storeId) {
+      storeDashboardCache.delete(storeId);
+      storeProductsStatsCache.delete(storeId);
+    } else {
+      storeDashboardCache.clear();
+      storeProductsStatsCache.clear();
+    }
+  }
 }

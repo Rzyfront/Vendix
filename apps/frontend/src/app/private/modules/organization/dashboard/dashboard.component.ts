@@ -46,19 +46,52 @@ export class DashboardComponent implements OnInit, OnDestroy {
   ) { }
 
   ngOnInit(): void {
+    
+
+    // Try to get organizationId synchronously first
+    const context = this.globalFacade.getUserContext();
+    
+
+    // In ORG_ADMIN environment, the organization context is null
+    // We need to get the organization_id from the authenticated user
+    const orgIdFromContext = context?.organization?.id;
+    const orgIdFromUser = context?.user?.organization_id;
+
+    if (orgIdFromContext) {
+      
+      this.organizationId = orgIdFromContext;
+      this.loadDashboardData();
+      return;
+    }
+
+    if (orgIdFromUser) {
+      
+      this.organizationId = String(orgIdFromUser);
+      this.loadDashboardData();
+      return;
+    }
+
     // First check route param
     const routeId = this.route.snapshot.paramMap.get('id');
+    
     if (routeId) {
       this.organizationId = routeId;
       this.loadDashboardData();
     } else {
-      // Fallback to user context
+      // Fallback to user context observable
+      
       this.globalFacade.userContext$
         .pipe(takeUntil(this.destroy$))
         .subscribe((context) => {
-          if (context?.organization?.id) {
-            this.organizationId = context.organization.id;
+          
+
+          const orgId = context?.organization?.id || context?.user?.organization_id;
+          if (orgId) {
+            
+            this.organizationId = String(orgId);
             this.loadDashboardData();
+          } else {
+            console.warn('[Dashboard] Context emitted but no organization ID found');
           }
         });
     }
@@ -82,6 +115,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (data) => {
+          
           this.dashboardStats = data;
           this.updateRevenueChart(data);
           this.updateStoreDistributionChart(data);

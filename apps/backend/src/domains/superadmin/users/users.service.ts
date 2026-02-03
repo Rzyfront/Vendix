@@ -375,23 +375,58 @@ export class UsersService {
       activeUsers,
       inactiveUsers,
       pendingUsers,
+      suspendedUsers,
+      archivedUsers,
+      with2FA,
+      emailVerified,
       usersByRole,
       recentUsers,
     ] = await Promise.all([
+      // Total users
       this.prisma.users.count(),
+
+      // Active users
       this.prisma.users.count({
         where: { state: user_state_enum.active },
       }),
+
+      // Inactive users
       this.prisma.users.count({
         where: { state: user_state_enum.inactive },
       }),
+
+      // Pending verification users
       this.prisma.users.count({
         where: { state: user_state_enum.pending_verification },
       }),
+
+      // Suspended users
+      this.prisma.users.count({
+        where: { state: user_state_enum.suspended },
+      }),
+
+      // Archived users
+      this.prisma.users.count({
+        where: { state: user_state_enum.archived },
+      }),
+
+      // Users with 2FA enabled
+      this.prisma.users.count({
+        where: { two_factor_enabled: true },
+      }),
+
+      // Users with verified email
+      this.prisma.users.count({
+        where: { email_verified: true },
+      }),
+
+      // Group by role
       this.prisma.user_roles.groupBy({
         by: ['role_id'],
         _count: true,
       }),
+
+      // Recent users
       this.prisma.users.findMany({
         take: 5,
         orderBy: { created_at: 'desc' },
@@ -423,10 +458,14 @@ export class UsersService {
     });
 
     return {
-      totalUsers,
-      activeUsers,
-      inactiveUsers,
-      pendingUsers,
+      total_usuarios: totalUsers,
+      activos: activeUsers,
+      inactivos: inactiveUsers,
+      pendientes: pendingUsers,
+      suspendidos: suspendedUsers,
+      archivados: archivedUsers,
+      con_2fa: with2FA,
+      email_verificado: emailVerified,
       usersByRole: usersByRoleWithNames,
       recentUsers: recentUsersWithoutPasswords,
     };

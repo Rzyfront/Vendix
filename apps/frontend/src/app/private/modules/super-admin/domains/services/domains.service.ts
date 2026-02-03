@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { map, tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 
 import {
@@ -30,11 +30,20 @@ export interface PaginatedResponse<T> {
   };
 }
 
+// Caché estático global (persiste entre instancias del servicio)
+interface CacheEntry<T> {
+  observable: T;
+  lastFetch: number;
+}
+
+let domainsStatsCache: CacheEntry<Observable<ApiResponse<DomainStats>>> | null = null;
+
 @Injectable({
   providedIn: 'root',
 })
 export class DomainsService {
   private readonly apiUrl = environment.apiUrl;
+  private readonly CACHE_TTL = 30000; // 30 segundos
 
   constructor(private http: HttpClient) { }
 
@@ -106,34 +115,40 @@ export class DomainsService {
    * Get domain statistics (simplified version for dashboard)
    */
   getDomainStatsList(): Observable<ApiResponse<DomainStats>> {
-    return this.http
+    const now = Date.now();
+
+    if (domainsStatsCache && (now - domainsStatsCache.lastFetch) < this.CACHE_TTL) {
+      return domainsStatsCache.observable;
+    }
+
+    const observable$ = this.http
       .get<any>(`${this.apiUrl}/superadmin/domains/dashboard`)
       .pipe(
+        shareReplay({ bufferSize: 1, refCount: false }),
         map((response: any) => {
           if (response.success && response.data) {
-            // Map backend response to frontend interface
-            const mappedData: DomainStats = {
-              total_domains: response.data.total || 0,
-              active_domains: response.data.active || 0,
-              pending_domains: response.data.pending || 0,
-              verified_domains: response.data.verified || 0,
-              customer_domains: response.data.customDomains || 0,
-              primary_domains: response.data.platformSubdomains || 0,
-              alias_domains: response.data.aliasDomains || 0,
-              vendix_subdomains: response.data.platformSubdomains || 0,
-              customer_custom_domains: response.data.customDomains || 0,
-              customer_subdomains: response.data.clientSubdomains || 0,
-            };
-
             return {
               success: response.success,
-              data: mappedData,
+              data: response.data as DomainStats,
               message: response.message,
             };
           }
           return response;
         }),
+        tap(() => {
+          if (domainsStatsCache) {
+            domainsStatsCache.lastFetch = Date.now();
+          }
+        }),
       );
+
+    // Guardar en caché estático
+    domainsStatsCache = {
+      observable: observable$,
+      lastFetch: now,
+    };
+
+    return observable$;
   }
 
   /**
@@ -217,5 +232,13 @@ export class DomainsService {
     return this.http.get<ApiResponse<Domain>>(
       `${this.apiUrl}/domains/resolve/${hostname}`,
     );
+  }
+
+  /**
+   * Invalida el caché de estadísticas
+   * Útil después de crear/editar/eliminar dominios
+   */
+  invalidateCache(): void {
+    domainsStatsCache = null;
   }
 }

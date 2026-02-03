@@ -32,6 +32,8 @@ export enum AuditAction {
   LOGIN = 'LOGIN',
   LOGOUT = 'LOGOUT',
   READ = 'READ',
+  VIEW = 'VIEW',
+  SEARCH = 'SEARCH',
   PERMISSION_CHANGE = 'PERMISSION_CHANGE',
 }
 
@@ -48,8 +50,8 @@ export enum AuditResource {
 
 export interface AuditStats {
   total_logs: number;
-  logs_by_action: Record<AuditAction, number>;
-  logs_by_resource: Record<AuditResource, number>;
+  logs_by_action: Record<string, number>;
+  logs_by_resource: Record<string, number>;
   logs_by_user: Array<{
     user_id: string;
     user_name: string;

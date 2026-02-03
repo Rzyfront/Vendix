@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, catchError, throwError, map } from 'rxjs';
+import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import {
   Product,
@@ -22,11 +23,20 @@ interface ApiResponse<T> {
   message: string;
 }
 
+// Caché estático global (persiste entre instancias del servicio)
+interface CacheEntry<T> {
+  observable: T;
+  lastFetch: number;
+}
+
+const storeProductsStatsCache = new Map<number, CacheEntry<Observable<ProductStats>>>();
+
 @Injectable({
   providedIn: 'root',
 })
 export class ProductsService {
   private readonly apiUrl = environment.apiUrl;
+  private readonly CACHE_TTL = 30000; // 30 segundos
 
   constructor(private http: HttpClient) {}
 
@@ -220,11 +230,32 @@ export class ProductsService {
 
   // Estadísticas
   getProductStats(storeId: number): Observable<ProductStats> {
+    const now = Date.now();
+    const cached = storeProductsStatsCache.get(storeId);
+
+    if (cached && (now - cached.lastFetch) < this.CACHE_TTL) {
+      return cached.observable;
+    }
+
     const url = `${this.apiUrl}/store/products/stats/store/${storeId}`;
-    return this.http.get<ApiResponse<ProductStats>>(url).pipe(
+    const observable$ = this.http.get<ApiResponse<ProductStats>>(url).pipe(
+      shareReplay({ bufferSize: 1, refCount: false }),
       map((response) => response.data),
+      tap(() => {
+        const entry = storeProductsStatsCache.get(storeId);
+        if (entry) {
+          entry.lastFetch = Date.now();
+        }
+      }),
       catchError(this.handleError),
     );
+
+    storeProductsStatsCache.set(storeId, {
+      observable: observable$,
+      lastFetch: now,
+    });
+
+    return observable$;
   }
 
   // Búsqueda y filtros avanzados
@@ -386,5 +417,18 @@ export class ProductsService {
     }
 
     return throwError(() => errorMessage);
+  }
+
+  /**
+   * Invalida el caché de estadísticas
+   * Útil después de crear/editar/eliminar productos
+   * @param storeId - ID de la tienda. Si no se proporciona, se limpia todo el caché
+   */
+  invalidateCache(storeId?: number): void {
+    if (storeId) {
+      storeProductsStatsCache.delete(storeId);
+    } else {
+      storeProductsStatsCache.clear();
+    }
   }
 }

@@ -320,16 +320,16 @@ export class DomainsComponent implements OnInit, OnDestroy {
   };
 
   stats: DomainStats = {
-    total_domains: 0,
-    active_domains: 0,
-    pending_domains: 0,
-    verified_domains: 0,
-    customer_domains: 0,
-    primary_domains: 0,
-    alias_domains: 0,
-    vendix_subdomains: 0,
-    customer_custom_domains: 0,
-    customer_subdomains: 0,
+    totalDomains: 0,
+    activeDomains: 0,
+    pendingDomains: 0,
+    verifiedDomains: 0,
+    customerDomains: 0,
+    primaryDomains: 0,
+    aliasDomains: 0,
+    vendixSubdomains: 0,
+    customerCustomDomains: 0,
+    customerSubdomains: 0,
   };
 
   pagination = {
@@ -530,30 +530,30 @@ export class DomainsComponent implements OnInit, OnDestroy {
   }
 
   updateStats(): void {
-    this.stats.total_domains = this.domains.length;
-    this.stats.active_domains = this.domains.filter(
+    this.stats.totalDomains = this.domains.length;
+    this.stats.activeDomains = this.domains.filter(
       (domain) => domain.status === DomainStatus.ACTIVE,
     ).length;
-    this.stats.pending_domains = this.domains.filter(
+    this.stats.pendingDomains = this.domains.filter(
       (domain) => domain.status === DomainStatus.PENDING,
     ).length;
-    this.stats.verified_domains = this.domains.filter(
+    this.stats.verifiedDomains = this.domains.filter(
       (domain) => domain.status === DomainStatus.VERIFIED,
     ).length;
-    this.stats.primary_domains = this.domains.filter(
+    this.stats.primaryDomains = this.domains.filter(
       (domain) => domain.domain_type === DomainType.PRIMARY,
     ).length;
-    this.stats.alias_domains = this.domains.filter(
+    this.stats.aliasDomains = this.domains.filter(
       (domain) => domain.domain_type === DomainType.ALIAS,
     ).length;
-    this.stats.customer_domains = this.domains.filter(
+    this.stats.customerDomains = this.domains.filter(
       (domain) => domain.domain_type === DomainType.CUSTOMER,
     ).length;
 
     // Calculate new stats
-    this.stats.vendix_subdomains = this.stats.primary_domains;
-    this.stats.customer_custom_domains = this.stats.customer_domains;
-    this.stats.customer_subdomains = this.stats.alias_domains;
+    this.stats.vendixSubdomains = this.stats.primaryDomains;
+    this.stats.customerCustomDomains = this.stats.customerDomains;
+    this.stats.customerSubdomains = this.stats.aliasDomains;
   }
 
   refreshDomains(): void {

@@ -90,4 +90,28 @@ export class AuditController {
       'Audit statistics retrieved successfully',
     );
   }
+
+  @Get('dashboard')
+  @ApiOperation({
+    summary: 'Get audit dashboard statistics',
+    description: 'Retrieve dashboard statistics from audit logs',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Dashboard statistics retrieved successfully',
+  })
+  @Permissions('organization:audit:read')
+  async getDashboardStats(
+    @Query('fromDate') fromDate?: string,
+    @Query('toDate') toDate?: string,
+  ) {
+    const from = fromDate ? new Date(fromDate) : undefined;
+    const to = toDate ? new Date(toDate) : undefined;
+
+    const stats = await this.auditService.getAuditStats(from, to);
+    return this.responseService.success(
+      stats,
+      'Dashboard statistics retrieved successfully',
+    );
+  }
 }

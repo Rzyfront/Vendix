@@ -19,7 +19,7 @@ import {
           [value]="stats()?.total_logs || 0"
           iconName="list"
           iconBgColor="bg-blue-100"
-          iconColor="text-blue-600"
+          iconColor="text-blue-500"
         ></app-stats>
 
         <app-stats
@@ -27,8 +27,8 @@ import {
           [value]="getActionCount('CREATE')"
           [smallText]="calculatePercentage(getActionCount('CREATE')) + '% del total'"
           iconName="plus"
-          iconBgColor="bg-green-100"
-          iconColor="text-green-600"
+          iconBgColor="bg-emerald-100"
+          iconColor="text-emerald-500"
         ></app-stats>
 
         <app-stats
@@ -37,7 +37,7 @@ import {
           [smallText]="calculatePercentage(getActionCount('UPDATE')) + '% del total'"
           iconName="edit"
           iconBgColor="bg-indigo-100"
-          iconColor="text-indigo-600"
+          iconColor="text-indigo-500"
         ></app-stats>
 
         <app-stats
@@ -46,7 +46,7 @@ import {
           [smallText]="calculatePercentage(getActionCount('DELETE')) + '% del total'"
           iconName="trash-2"
           iconBgColor="bg-red-100"
-          iconColor="text-red-600"
+          iconColor="text-red-500"
         ></app-stats>
       </div>
 
@@ -57,15 +57,15 @@ import {
             [value]="getActionCount('LOGIN')"
             iconName="log-in"
             iconBgColor="bg-purple-100"
-            iconColor="text-purple-600"
+            iconColor="text-purple-500"
           ></app-stats>
 
           <app-stats
             title="Lecturas"
             [value]="getActionCount('READ')"
             iconName="eye"
-            iconBgColor="bg-yellow-100"
-            iconColor="text-yellow-600"
+            iconBgColor="bg-amber-100"
+            iconColor="text-amber-500"
           ></app-stats>
 
           <app-stats
@@ -74,7 +74,7 @@ import {
             [smallText]="topResourceCount() + ' acciones'"
             iconName="database"
             iconBgColor="bg-gray-100"
-            iconColor="text-gray-600"
+            iconColor="text-gray-500"
           ></app-stats>
 
           <app-stats
@@ -83,7 +83,7 @@ import {
             smallText="Días con actividad"
             iconName="calendar"
             iconBgColor="bg-orange-100"
-            iconColor="text-orange-600"
+            iconColor="text-orange-500"
           ></app-stats>
         </div>
       }

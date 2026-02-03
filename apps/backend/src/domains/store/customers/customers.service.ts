@@ -243,4 +243,82 @@ export class CustomersService {
       where: { id: user.id },
     });
   }
+
+  async getStats(storeId: number) {
+    try {
+      // Get current month start date
+      const now = new Date();
+      const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+      // Get all customers for the store
+      const where = {
+        store_users: {
+          some: {
+            store_id: storeId,
+          },
+        },
+        user_roles: {
+          some: {
+            roles: {
+              name: 'customer',
+            },
+          },
+        },
+      };
+
+      const [totalCustomers, newCustomersThisMonth] = await Promise.all([
+        // Total customers count
+        this.prisma.users.count({ where }),
+
+        // New customers this month
+        this.prisma.users.count({
+          where: {
+            ...where,
+            created_at: {
+              gte: currentMonthStart,
+            },
+          },
+        }),
+      ]);
+
+      // Calculate active customers (customers who have made at least one order)
+      const activeCustomers = await this.prisma.users.count({
+        where: {
+          ...where,
+          orders: {
+            some: {
+              store_id: storeId,
+            },
+          },
+        },
+      });
+
+      // Calculate total revenue from all customer orders
+      const revenueResult = await this.prisma.orders.aggregate({
+        where: {
+          store_id: storeId,
+          state: 'finished',
+          customer_id: {
+            not: null,
+          },
+        },
+        _sum: {
+          grand_total: true,
+        },
+      });
+
+      const totalRevenue = revenueResult._sum.grand_total || 0;
+
+      return {
+        total_customers: totalCustomers,
+        active_customers: activeCustomers,
+        new_customers_this_month: newCustomersThisMonth,
+        total_revenue: totalRevenue,
+      };
+    } catch (error) {
+      throw new BadRequestException(
+        `Error calculating customer stats: ${error.message}`,
+      );
+    }
+  }
 }

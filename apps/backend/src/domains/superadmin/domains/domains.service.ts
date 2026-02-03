@@ -195,24 +195,55 @@ export class DomainsService {
     const [
       totalDomains,
       activeDomains,
-      domainsByType,
-      domainsByOwnership,
+      pendingDomains,
+      verifiedDomains,
+      primaryDomains,
+      vendixSubdomains,
+      customerSubdomains,
+      customerCustomDomains,
       recentDomains,
     ] = await Promise.all([
+      // Total domains
       this.prisma.domain_settings.count(),
+
+      // Active domains (status = 'active')
+      this.prisma.domain_settings.count({
+        where: { status: 'active' },
+      }),
+
+      // Pending domains (status in ['pending_dns', 'pending_ssl'])
       this.prisma.domain_settings.count({
         where: {
-          OR: [{ last_verified_at: { not: null } }, { last_error: null }],
+          status: { in: ['pending_dns', 'pending_ssl'] },
         },
       }),
-      this.prisma.domain_settings.groupBy({
-        by: ['domain_type'],
-        _count: true,
+
+      // Verified domains (last_verified_at is not null)
+      this.prisma.domain_settings.count({
+        where: { last_verified_at: { not: null } },
       }),
-      this.prisma.domain_settings.groupBy({
-        by: ['domain_type'],
-        _count: true,
+
+      // Primary domains (is_primary = true)
+      this.prisma.domain_settings.count({
+        where: { is_primary: true },
       }),
+
+      // Vendix subdomains (ownership = 'vendix_subdomain')
+      this.prisma.domain_settings.count({
+        where: { ownership: 'vendix_subdomain' },
+      }),
+
+      // Customer subdomains (ownership = 'custom_subdomain')
+      this.prisma.domain_settings.count({
+        where: { ownership: 'custom_subdomain' },
+      }),
+
+      // Customer custom domains (ownership = 'custom_domain')
+      this.prisma.domain_settings.count({
+        where: { ownership: 'custom_domain' },
+      }),
+
+      // Recent domains
       this.prisma.domain_settings.findMany({
         take: 5,
         orderBy: { created_at: 'desc' },
@@ -227,23 +258,32 @@ export class DomainsService {
       }),
     ]);
 
+    // Group by type for additional info
+    const domainsByType = await this.prisma.domain_settings.groupBy({
+      by: ['domain_type'],
+      _count: true,
+    });
+
+    const domainsByTypeReduced = domainsByType.reduce(
+      (acc: Record<string, number>, item: any) => {
+        acc[item.domain_type] = item._count;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+
     return {
       totalDomains,
       activeDomains,
-      domainsByType: domainsByType.reduce(
-        (acc, item) => {
-          acc[item.domain_type] = item._count;
-          return acc;
-        },
-        {} as Record<string, number>,
-      ),
-      domainsByOwnership: domainsByOwnership.reduce(
-        (acc, item) => {
-          acc[item.domain_type] = item._count;
-          return acc;
-        },
-        {} as Record<string, number>,
-      ),
+      pendingDomains,
+      verifiedDomains,
+      customerDomains: domainsByTypeReduced['customer'] || 0,
+      primaryDomains,
+      aliasDomains: domainsByTypeReduced['alias'] || 0,
+      vendixSubdomains,
+      customerCustomDomains,
+      customerSubdomains,
+      domainsByType: domainsByTypeReduced,
       recentDomains,
     };
   }
