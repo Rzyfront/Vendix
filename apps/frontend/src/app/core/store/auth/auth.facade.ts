@@ -6,12 +6,14 @@ import * as AuthActions from './auth.actions';
 import * as AuthSelectors from './auth.selectors';
 import { AuthState } from './auth.reducer';
 import { extractApiErrorMessage } from '../../utils/api-error-handler';
+import { SessionService } from '../../services/session.service';
 
 @Injectable({
   providedIn: 'root',
 })
 export class AuthFacade {
   private store = inject(Store<AuthState>);
+  private sessionService = inject(SessionService);
 
   // State observables
   readonly user$ = this.store.select(AuthSelectors.selectUser);
@@ -143,8 +145,13 @@ export class AuthFacade {
     this.store.dispatch(AuthActions.registerCustomer(data));
   }
 
+  /**
+   * Cierra la sesión del usuario.
+   * Usa SessionService para mostrar toast de éxito y coordinar el cierre limpio.
+   */
   logout(options?: { redirect?: boolean }): void {
-    this.store.dispatch(AuthActions.logout({ redirect: options?.redirect ?? true }));
+    // Usar SessionService para logout explícito con toast de éxito
+    this.sessionService.terminateSession('explicit');
   }
 
   refreshToken(refresh_token: string): void {

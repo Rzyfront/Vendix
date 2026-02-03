@@ -53,21 +53,33 @@ export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
         display: inline-block;
       }
 
-      /* Asegurar alturas exactas para consistencia */
+      /* Asegurar alturas exactas para consistencia (mobile-first) */
+      .h-7 {
+        height: 1.75rem; /* 28px */
+      }
+
+      .h-8 {
+        height: 2rem; /* 32px - móvil sm */
+      }
+
       .h-9 {
         height: 2.25rem; /* 36px */
+      }
+
+      .h-10 {
+        height: 2.5rem; /* 40px - móvil md */
       }
 
       .h-11 {
         height: 2.75rem; /* 44px */
       }
 
-      .h-13 {
-        height: 3.25rem; /* 52px */
+      .h-12 {
+        height: 3rem; /* 48px - móvil lg */
       }
 
-      .h-7 {
-        height: 1.75rem; /* 28px */
+      .h-13 {
+        height: 3.25rem; /* 52px */
       }
     `,
   ],
@@ -106,12 +118,12 @@ export class ButtonComponent {
       'justify-center',
     ];
 
-    // Size classes - alturas consistentes con inputs y selectors
+    // Size classes - mobile-first con alturas consistentes con inputs y selectors
     const sizeClasses = {
       xsm: ['h-7', 'px-2', 'text-xs'], // 28px - extra small
-      sm: ['h-9', 'px-3', 'text-sm'], // 36px
-      md: ['h-11', 'px-4', 'text-base'], // 44px
-      lg: ['h-13', 'px-6', 'text-lg'], // 52px
+      sm: ['h-8', 'px-2.5', 'text-sm', 'sm:h-9', 'sm:px-3'], // 32px móvil → 36px desktop
+      md: ['h-10', 'px-3', 'text-sm', 'sm:h-11', 'sm:px-4', 'sm:text-base'], // 40px móvil → 44px desktop
+      lg: ['h-12', 'px-4', 'text-base', 'sm:h-13', 'sm:px-6', 'sm:text-lg'], // 48px móvil → 52px desktop
     };
 
     // Variant classes

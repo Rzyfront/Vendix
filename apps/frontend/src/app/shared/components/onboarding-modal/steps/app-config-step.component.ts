@@ -17,6 +17,11 @@ import { ButtonComponent, IconComponent } from '../../index';
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
+      /* ═══════════════════════════════════════════════════════════════
+         Mobile-First iOS-Style Design for App Config Step
+         Base: Mobile (<640px) | Tablet: 640px+ | Desktop: 1024px+
+         ═══════════════════════════════════════════════════════════════ */
+
       .app-config-step {
         padding: 0;
         background: transparent;
@@ -28,9 +33,12 @@ import { ButtonComponent, IconComponent } from '../../index';
         padding: 0;
       }
 
+      /* ─────────────────────────────────────────────────────────────────
+         Header - iOS Style
+         ───────────────────────────────────────────────────────────────── */
       .app-config-header {
         text-align: center;
-        margin-bottom: 1rem;
+        margin-bottom: 1.25rem;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -41,22 +49,21 @@ import { ButtonComponent, IconComponent } from '../../index';
       }
 
       .config-icon-bg {
-        width: 56px;
-        height: 56px;
-        background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%);
-        border-radius: 50%;
+        width: 64px;
+        height: 64px;
+        background: var(--color-primary-light);
+        border-radius: 1rem;
         display: flex;
         align-items: center;
         justify-content: center;
-        box-shadow: var(--shadow-md);
       }
 
       .config-icon {
-        color: var(--color-text-on-primary);
+        color: var(--color-primary);
       }
 
       .config-title {
-        font-size: var(--fs-xl);
+        font-size: var(--fs-lg);
         font-weight: var(--fw-bold);
         color: var(--color-text-primary);
         margin-bottom: 0.25rem;
@@ -65,41 +72,48 @@ import { ButtonComponent, IconComponent } from '../../index';
       .config-subtitle {
         color: var(--color-text-secondary);
         font-size: var(--fs-sm);
-        line-height: 1.5;
+        line-height: 1.4;
+        max-width: 280px;
       }
 
+      /* ─────────────────────────────────────────────────────────────────
+         Form Layout - Mobile First (1 column)
+         ───────────────────────────────────────────────────────────────── */
       .config-form {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
+        display: flex;
+        flex-direction: column;
         gap: 1rem;
       }
 
+      /* ─────────────────────────────────────────────────────────────────
+         Section Cards - iOS Style
+         ───────────────────────────────────────────────────────────────── */
       .form-section {
         background: var(--color-surface);
-        padding: 1rem;
-        border-radius: var(--radius-lg);
+        padding: 1.25rem;
+        border-radius: 1.25rem;
         border: 1px solid var(--color-border);
         display: flex;
         flex-direction: column;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
       }
 
       .section-header {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
+        gap: 0.625rem;
         margin-bottom: 1rem;
-        padding-bottom: 0.75rem;
-        border-bottom: 1px solid var(--color-border);
       }
 
       .section-icon {
-        width: 28px;
-        height: 28px;
+        width: 32px;
+        height: 32px;
         background: var(--color-primary-light);
-        border-radius: var(--radius-sm);
+        border-radius: 0.625rem;
         display: flex;
         align-items: center;
         justify-content: center;
+        flex-shrink: 0;
       }
 
       .section-icon-element {
@@ -113,92 +127,101 @@ import { ButtonComponent, IconComponent } from '../../index';
         margin: 0;
       }
 
+      /* ─────────────────────────────────────────────────────────────────
+         Color Selector
+         ───────────────────────────────────────────────────────────────── */
       .color-selector {
         flex: 1;
+        display: flex;
+        flex-direction: column;
       }
 
       .color-inputs-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 0.75rem;
-        margin-bottom: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        margin-bottom: 1.25rem;
       }
 
       .color-input-group {
         display: flex;
         flex-direction: column;
-        gap: 0.375rem;
+        gap: 0.5rem;
       }
 
       .color-label {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        font-size: var(--fs-xs);
-        font-weight: var(--fw-medium);
+        font-size: 11px;
+        font-weight: var(--fw-semibold);
         color: var(--color-text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
       }
 
-      .help-icon {
-        color: var(--color-text-muted);
-        cursor: help;
-      }
-
-      .help-icon:hover {
-        color: var(--color-primary);
-      }
-
-      .color-preview {
-        width: 18px;
-        height: 18px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--color-border);
-      }
-
-      .color-input-wrapper {
+      .color-input-row {
         display: flex;
-        gap: 0.5rem;
         align-items: center;
+        gap: 0.5rem;
       }
 
-      .color-picker {
+      .color-preview-box {
         width: 36px;
         height: 36px;
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        cursor: pointer;
-        transition: all var(--transition-fast) ease;
+        border-radius: 0.5rem;
+        border: 2px solid var(--color-border);
         flex-shrink: 0;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        position: relative;
+        overflow: hidden;
       }
 
-      .color-picker:hover {
+      .color-preview-box:hover {
         border-color: var(--color-primary);
+        transform: scale(1.02);
       }
 
-      .color-text {
+      .color-preview-box:active {
+        transform: scale(0.98);
+      }
+
+      .color-picker-hidden {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
+        cursor: pointer;
+      }
+
+      .color-hex-input {
         flex: 1;
-        padding: 0.5rem;
+        min-width: 0;
+        max-width: 100px;
+        padding: 0.5rem 0.625rem;
         border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        font-size: var(--fs-xs);
+        border-radius: 0.5rem;
+        font-size: 0.75rem;
         font-family: 'SF Mono', 'Monaco', 'Roboto Mono', monospace;
-        transition: all var(--transition-fast) ease;
-        background: var(--color-surface);
+        background: var(--color-background);
         color: var(--color-text-primary);
+        transition: all 0.2s ease;
         height: 36px;
+        text-transform: uppercase;
       }
 
-      .color-text:focus {
+      .color-hex-input:focus {
         outline: none;
         border-color: var(--color-primary);
         box-shadow: 0 0 0 2px var(--color-ring);
+        background: var(--color-surface);
       }
 
+      /* ─────────────────────────────────────────────────────────────────
+         Palette Preview - iOS Style
+         ───────────────────────────────────────────────────────────────── */
       .palette-preview {
         background: var(--color-background);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        padding: 0.75rem;
+        border-radius: 0.875rem;
+        padding: 1rem;
         margin-top: auto;
       }
 
@@ -206,7 +229,7 @@ import { ButtonComponent, IconComponent } from '../../index';
         display: flex;
         align-items: center;
         justify-content: space-between;
-        margin-bottom: 0.75rem;
+        margin-bottom: 0.875rem;
       }
 
       .palette-title {
@@ -219,16 +242,17 @@ import { ButtonComponent, IconComponent } from '../../index';
       .random-btn {
         background: var(--color-surface);
         border: 1px solid var(--color-border);
-        border-radius: var(--radius-sm);
+        border-radius: 0.5rem;
         display: flex;
         align-items: center;
-        gap: 0.25rem;
-        padding: 0.25rem 0.5rem;
+        gap: 0.375rem;
+        padding: 0.375rem 0.75rem;
         font-size: var(--fs-xs);
         font-weight: var(--fw-medium);
         color: var(--color-text-secondary);
         cursor: pointer;
-        transition: all var(--transition-fast) ease;
+        transition: all 0.2s ease;
+        height: 32px;
       }
 
       .random-btn:hover {
@@ -237,97 +261,123 @@ import { ButtonComponent, IconComponent } from '../../index';
         background: var(--color-primary-light);
       }
 
+      .random-btn:active {
+        transform: scale(0.96);
+      }
+
       .random-icon {
         color: inherit;
       }
 
       .palette-colors {
         display: flex;
-        gap: 0.375rem;
+        gap: 0.5rem;
         flex-wrap: wrap;
       }
 
       .palette-color {
-        width: 28px;
-        height: 28px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--color-border);
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        border: 2px solid transparent;
         cursor: pointer;
-        transition: all var(--transition-fast) ease;
+        transition: all 0.2s ease;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
       }
 
       .palette-color:hover {
-        transform: scale(1.1);
+        transform: scale(1.15);
         border-color: var(--color-primary);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
       }
 
+      .palette-color:active {
+        transform: scale(1.05);
+      }
+
+      /* ─────────────────────────────────────────────────────────────────
+         Domain Card - iOS Success Style
+         ───────────────────────────────────────────────────────────────── */
       .domain-card {
         display: flex;
         align-items: flex-start;
-        gap: 0.75rem;
+        gap: 0.875rem;
         padding: 1rem;
-        border-radius: var(--radius-lg);
+        border-radius: 0.875rem;
         margin-bottom: 1rem;
       }
 
       .domain-card.auto-domain {
-        background: var(--color-success-light);
-        border: 1px solid rgba(34, 197, 94, 0.3);
+        background: color-mix(in srgb, var(--color-success) 8%, transparent);
+        border: 1px solid color-mix(in srgb, var(--color-success) 20%, transparent);
       }
 
       .domain-icon {
-        width: 40px;
-        height: 40px;
-        background: var(--color-surface);
-        border-radius: var(--radius-md);
+        width: 36px;
+        height: 36px;
+        background: white;
+        border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
         flex-shrink: 0;
-        box-shadow: var(--shadow-sm);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
       }
 
       .domain-check-icon {
         color: var(--color-success);
       }
 
+      .domain-content {
+        flex: 1;
+        min-width: 0;
+      }
+
       .domain-content h4 {
         font-size: var(--fs-sm);
         font-weight: var(--fw-semibold);
         color: var(--color-success);
-        margin-bottom: 0.125rem;
+        margin: 0 0 0.375rem 0;
       }
 
       .domain-url {
         font-family: 'SF Mono', 'Monaco', 'Roboto Mono', monospace;
-        font-size: var(--fs-xs);
-        font-weight: var(--fw-semibold);
+        font-size: var(--fs-sm);
+        font-weight: var(--fw-bold);
         color: var(--color-success);
-        background: var(--color-surface);
-        padding: 0.125rem 0.375rem;
-        border-radius: var(--radius-sm);
-        display: inline-block;
-        margin-bottom: 0.25rem;
+        display: block;
+        margin-bottom: 0.375rem;
+        word-break: break-all;
       }
 
       .domain-description {
-        color: var(--color-text-secondary);
+        color: var(--color-text-muted);
         font-size: var(--fs-xs);
-        line-height: 1.3;
+        line-height: 1.4;
+        margin: 0;
       }
 
+      /* ─────────────────────────────────────────────────────────────────
+         Toggle - iOS Style (44x24)
+         ───────────────────────────────────────────────────────────────── */
       .custom-domain-toggle {
-        margin-bottom: 0.75rem;
+        margin-bottom: 1rem;
       }
 
       .toggle-label {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
+        justify-content: space-between;
         cursor: pointer;
-        font-size: var(--fs-xs);
+        font-size: var(--fs-sm);
         font-weight: var(--fw-medium);
-        color: var(--color-text-secondary);
+        color: var(--color-text-primary);
+        padding: 0.5rem 0;
+      }
+
+      .toggle-text {
+        flex: 1;
+        padding-right: 1rem;
       }
 
       .toggle-input {
@@ -335,25 +385,26 @@ import { ButtonComponent, IconComponent } from '../../index';
       }
 
       .toggle-slider {
-        width: 36px;
-        height: 20px;
+        width: 44px;
+        height: 24px;
         background: var(--color-border);
-        border-radius: var(--radius-pill);
+        border-radius: 12px;
         position: relative;
-        transition: all var(--transition-fast) ease;
+        transition: background-color 0.3s ease;
+        flex-shrink: 0;
       }
 
       .toggle-slider::before {
         content: '';
         position: absolute;
-        width: 16px;
-        height: 16px;
-        background: var(--color-surface);
+        width: 20px;
+        height: 20px;
+        background: white;
         border-radius: 50%;
         top: 2px;
         left: 2px;
-        transition: all var(--transition-fast) ease;
-        box-shadow: var(--shadow-sm);
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
       }
 
       .toggle-input:checked + .toggle-slider {
@@ -361,68 +412,92 @@ import { ButtonComponent, IconComponent } from '../../index';
       }
 
       .toggle-input:checked + .toggle-slider::before {
-        transform: translateX(16px);
+        transform: translateX(20px);
       }
 
+      /* ─────────────────────────────────────────────────────────────────
+         Custom Domain Section
+         ───────────────────────────────────────────────────────────────── */
       .custom-domain-section {
         background: var(--color-background);
         border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        padding: 0.75rem;
+        border-radius: 0.875rem;
+        padding: 1rem;
       }
 
       .form-field {
         display: flex;
         flex-direction: column;
-        gap: 0.25rem;
+        gap: 0.5rem;
       }
 
       .field-label {
-        font-size: var(--fs-xs);
-        font-weight: var(--fw-medium);
+        font-size: 11px;
+        font-weight: var(--fw-semibold);
         color: var(--color-text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
       }
 
       .field-input {
-        padding: 0.5rem 0.625rem;
+        padding: 0.875rem 1rem;
         border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        font-size: var(--fs-sm);
-        transition: all var(--transition-fast) ease;
+        border-radius: 0.75rem;
+        font-size: var(--fs-base);
+        transition: all 0.2s ease;
         background: var(--color-surface);
         color: var(--color-text-primary);
-        height: 2.25rem;
+        height: 48px;
       }
 
       .field-input:focus {
         outline: none;
         border-color: var(--color-primary);
-        box-shadow: 0 0 0 2px var(--color-ring);
+        box-shadow: 0 0 0 3px var(--color-ring);
       }
 
       .field-hint {
         display: flex;
-        align-items: center;
-        gap: 0.25rem;
+        align-items: flex-start;
+        gap: 0.375rem;
+        margin-top: 0.25rem;
       }
 
       .hint-icon {
         color: var(--color-text-muted);
         flex-shrink: 0;
+        margin-top: 1px;
       }
 
       .hint-text {
         color: var(--color-text-muted);
         font-size: var(--fs-xs);
-        line-height: 1.3;
+        line-height: 1.4;
       }
 
-      @media (max-width: 1024px) {
+      /* ═══════════════════════════════════════════════════════════════
+         Desktop (1024px+) - 2 columns layout
+         ═══════════════════════════════════════════════════════════════ */
+      @media (min-width: 1024px) {
         .config-form {
-          grid-template-columns: 1fr;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 1.25rem;
         }
+
+        .config-subtitle {
+          max-width: 400px;
+        }
+
         .color-inputs-grid {
-          grid-template-columns: 1fr;
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 1rem;
+        }
+
+        .palette-color {
+          width: 32px;
+          height: 32px;
         }
       }
     `,
@@ -462,24 +537,24 @@ import { ButtonComponent, IconComponent } from '../../index';
 
             <div class="color-selector">
               <div class="color-inputs-grid">
+                <!-- Primary Color -->
                 <div class="color-input-group">
-                  <label class="color-label">
-                    Color primario
-                    <span
-                      class="color-preview"
+                  <label class="color-label">Color primario</label>
+                  <div class="color-input-row">
+                    <div
+                      class="color-preview-box"
                       [style.background-color]="primaryColor"
-                    ></span>
-                  </label>
-                  <div class="color-input-wrapper">
-                    <input
-                      type="color"
-                      class="color-picker"
-                      [value]="primaryColor"
-                      (input)="onPrimaryColorChange($event)"
-                    />
+                    >
+                      <input
+                        type="color"
+                        class="color-picker-hidden"
+                        [value]="primaryColor"
+                        (input)="onPrimaryColorChange($event)"
+                      />
+                    </div>
                     <input
                       type="text"
-                      class="color-text"
+                      class="color-hex-input"
                       [value]="primaryColor"
                       (input)="onPrimaryColorChange($event)"
                       placeholder="#7ed7a5"
@@ -487,24 +562,24 @@ import { ButtonComponent, IconComponent } from '../../index';
                   </div>
                 </div>
 
+                <!-- Secondary Color -->
                 <div class="color-input-group">
-                  <label class="color-label">
-                    Color secundario
-                    <span
-                      class="color-preview"
+                  <label class="color-label">Color secundario</label>
+                  <div class="color-input-row">
+                    <div
+                      class="color-preview-box"
                       [style.background-color]="secondaryColor"
-                    ></span>
-                  </label>
-                  <div class="color-input-wrapper">
-                    <input
-                      type="color"
-                      class="color-picker"
-                      [value]="secondaryColor"
-                      (input)="onSecondaryColorChange($event)"
-                    />
+                    >
+                      <input
+                        type="color"
+                        class="color-picker-hidden"
+                        [value]="secondaryColor"
+                        (input)="onSecondaryColorChange($event)"
+                      />
+                    </div>
                     <input
                       type="text"
-                      class="color-text"
+                      class="color-hex-input"
                       [value]="secondaryColor"
                       (input)="onSecondaryColorChange($event)"
                       placeholder="#2f6f4e"
@@ -512,24 +587,24 @@ import { ButtonComponent, IconComponent } from '../../index';
                   </div>
                 </div>
 
+                <!-- Tertiary Color -->
                 <div class="color-input-group">
-                  <label class="color-label">
-                    Color terciario
-                    <span
-                      class="color-preview"
+                  <label class="color-label">Color terciario</label>
+                  <div class="color-input-row">
+                    <div
+                      class="color-preview-box"
                       [style.background-color]="tertiaryColor"
-                    ></span>
-                  </label>
-                  <div class="color-input-wrapper">
-                    <input
-                      type="color"
-                      class="color-picker"
-                      [value]="tertiaryColor"
-                      (input)="onTertiaryColorChange($event)"
-                    />
+                    >
+                      <input
+                        type="color"
+                        class="color-picker-hidden"
+                        [value]="tertiaryColor"
+                        (input)="onTertiaryColorChange($event)"
+                      />
+                    </div>
                     <input
                       type="text"
-                      class="color-text"
+                      class="color-hex-input"
                       [value]="tertiaryColor"
                       (input)="onTertiaryColorChange($event)"
                       placeholder="#f59e0b"
@@ -593,9 +668,10 @@ import { ButtonComponent, IconComponent } from '../../index';
               </div>
             </div>
 
-            <!-- Custom Domain Toggle -->
+            <!-- Custom Domain Toggle - iOS Style -->
             <div class="custom-domain-toggle">
               <label class="toggle-label">
+                <span class="toggle-text">Usar dominio personalizado</span>
                 <input
                   type="checkbox"
                   class="toggle-input"
@@ -603,7 +679,6 @@ import { ButtonComponent, IconComponent } from '../../index';
                   (change)="toggleCustomDomain()"
                 />
                 <span class="toggle-slider"></span>
-                Usar dominio personalizado (opcional)
               </label>
             </div>
 

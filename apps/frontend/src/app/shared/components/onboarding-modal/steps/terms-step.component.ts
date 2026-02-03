@@ -1,7 +1,6 @@
 /** REBUILD TRIGGER 2 **/
 import {
   Component,
-  Input,
   Output,
   EventEmitter,
   OnInit,
@@ -10,6 +9,8 @@ import {
   inject,
   signal,
   computed,
+  ViewChild,
+  ElementRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -21,8 +22,7 @@ import {
   LegalDocument,
 } from '../../../../core/services/legal.service';
 import { ToastService } from '../../toast/toast.service';
-import { catchError, finalize } from 'rxjs/operators';
-import { of } from 'rxjs';
+import { finalize } from 'rxjs/operators';
 
 // Use a more flexible import for marked to avoid compilation issues in monorepo
 import { marked } from 'marked';
@@ -39,330 +39,571 @@ interface DocumentStatus extends LegalDocument {
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
-      .terms-step {
-        padding: 1rem 0;
-        width: 100%;
-        max-width: 1200px; /* Wider for XL modal */
-        margin: 0 auto;
+      /* ============================================
+         MOBILE-FIRST TERMS STEP DESIGN
+         Inspired by modern mobile onboarding patterns
+         ============================================ */
+
+      :host {
+        display: block;
+        height: 100%;
       }
+
+      .terms-step {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        max-height: 70vh;
+        overflow: hidden;
+      }
+
+      /* Scrollable content area */
+      .terms-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0 0.5rem;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      /* Custom scrollbar for webkit browsers */
+      .terms-content::-webkit-scrollbar {
+        width: 4px;
+      }
+
+      .terms-content::-webkit-scrollbar-thumb {
+        background: var(--color-border);
+        border-radius: 10px;
+      }
+
+      /* ============================================
+         HEADER SECTION
+         ============================================ */
 
       .terms-header {
         text-align: center;
-        margin-bottom: 2rem;
+        padding: 0.75rem 0;
       }
 
       .terms-icon-wrapper {
-        width: 48px;
-        height: 48px;
-        background: var(--color-primary-light);
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin: 0 auto 1rem;
-      }
-
-      .terms-icon {
-        color: var(--color-primary);
-      }
-
-      .terms-title {
-        font-size: var(--fs-lg);
-        font-weight: var(--fw-bold);
-        color: var(--color-text-primary);
         margin-bottom: 0.5rem;
       }
 
-      .terms-description {
-        font-size: var(--fs-sm);
-        color: var(--color-text-secondary);
+      .terms-icon-bg {
+        width: 48px;
+        height: 48px;
+        background: var(--color-success-light);
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        animation: termsPop 0.6s ease-out;
       }
 
-      .terms-layout {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 2rem;
-      }
-
-      @media (min-width: 1024px) {
-        .terms-layout.has-selection {
-          grid-template-columns: 350px 1fr;
+      @keyframes termsPop {
+        0% {
+          transform: scale(0);
+          opacity: 0;
+        }
+        50% {
+          transform: scale(1.1);
+        }
+        100% {
+          transform: scale(1);
+          opacity: 1;
         }
       }
 
-      .terms-list {
-        display: flex;
-        flex-direction: column;
-        gap: 0.75rem;
+      .terms-icon {
+        color: var(--color-success);
       }
 
-      .term-item {
-        display: flex;
-        align-items: flex-start;
-        padding: 1rem;
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        transition: all 0.2s ease;
-        background: var(--color-surface);
-        cursor: pointer;
-      }
-
-      .term-item:hover {
-        border-color: var(--color-primary);
-        background: var(--color-background-hover);
-      }
-
-      .term-item.is-selected {
-        border-color: var(--color-primary);
-        ring: 1px solid var(--color-primary);
-        background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.05);
-      }
-
-      .term-checkbox {
-        margin-top: 0.25rem;
-        margin-right: 1rem;
-        width: 1.15rem;
-        height: 1.15rem;
-        cursor: pointer;
-      }
-
-      .term-content {
-        flex: 1;
-        min-width: 0;
-      }
-
-      .term-label {
-        font-weight: var(--fw-bold);
+      .terms-title {
+        font-size: 1.25rem;
+        font-weight: 700;
         color: var(--color-text-primary);
-        display: block;
-        margin-bottom: 0.25rem;
-        font-size: var(--fs-sm);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        margin: 0 0 0.25rem 0;
       }
 
-      .term-acceptance {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        font-size: 11px;
-        color: var(--color-text-secondary);
-        padding: 0.25rem 0;
+      .terms-subtitle {
+        font-size: 0.75rem;
+        color: var(--color-text-muted);
+        line-height: 1.5;
+        margin: 0;
+        padding: 0 0.5rem;
       }
 
-      .term-acceptance:hover {
-        color: var(--color-primary);
-      }
-
-      .term-details {
-        font-size: 11px;
-        color: var(--color-text-secondary);
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-      }
-
-      .view-action {
-        color: var(--color-primary);
-        font-size: 11px;
-        font-weight: var(--fw-medium);
-        display: flex;
-        align-items: center;
-        gap: 0.25rem;
-        margin-left: auto;
-      }
-
-      .view-action:hover {
-        text-decoration: underline;
-      }
-
-      .document-viewer {
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg);
-        background: var(--color-surface);
-        display: flex;
-        flex-direction: column;
-        height: 500px;
-        overflow: hidden;
-      }
-
-      .viewer-header {
-        padding: 0.75rem 1.25rem;
-        border-b: 1px solid var(--color-border);
-        background: var(--color-background);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
-
-      .viewer-title {
-        font-weight: var(--fw-bold);
-        font-size: var(--fs-sm);
-        color: var(--color-text-primary);
-      }
-
-      .viewer-body {
-        flex: 1;
-        padding: 1.5rem;
-        overflow-y: auto;
-      }
-
-      .terms-actions {
-        display: none; /* Moved to parent modal footer */
-      }
+      /* ============================================
+         LOADING & EMPTY STATES
+         ============================================ */
 
       .loading-state {
         display: flex;
         flex-direction: column;
         align-items: center;
         padding: 2rem;
+        text-align: center;
+      }
+
+      .loading-text {
+        margin-top: 0.75rem;
+        font-size: 0.875rem;
+        color: var(--color-text-muted);
       }
 
       .empty-state {
         text-align: center;
         padding: 2rem;
+      }
+
+      .empty-text {
         color: var(--color-text-secondary);
+        font-size: 0.875rem;
+        margin-bottom: 1rem;
+      }
+
+      /* ============================================
+         DOCUMENT CARDS
+         ============================================ */
+
+      .terms-documents {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+      }
+
+      .document-card {
+        background: var(--color-surface);
+        border: 2px solid var(--color-border);
+        border-radius: 1rem;
+        padding: 1rem;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-align: left;
+      }
+
+      .document-card:hover {
+        border-color: color-mix(in srgb, var(--color-success) 50%, transparent);
+      }
+
+      .document-card:active {
+        transform: scale(0.98);
+      }
+
+      .document-card.selected {
+        border-color: var(--color-success);
+        background: color-mix(in srgb, var(--color-success) 5%, var(--color-surface));
+      }
+
+      .card-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-bottom: 0.5rem;
+      }
+
+      .card-title-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex: 1;
+        min-width: 0;
+      }
+
+      .card-icon {
+        width: 32px;
+        height: 32px;
+        background: var(--color-success-light);
+        border-radius: 0.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+
+      .card-title {
+        font-size: 0.875rem;
+        font-weight: 700;
+        color: var(--color-text-primary);
+        margin: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* Checkbox styling for touch-friendly interaction */
+      .card-checkbox {
+        position: relative;
+        width: 24px;
+        height: 24px;
+        flex-shrink: 0;
+      }
+
+      .card-checkbox input {
+        position: absolute;
+        opacity: 0;
+        width: 100%;
+        height: 100%;
+        cursor: pointer;
+        z-index: 1;
+      }
+
+      .checkbox-visual {
+        width: 24px;
+        height: 24px;
+        border: 2px solid var(--color-border);
+        border-radius: 0.375rem;
+        background: var(--color-surface);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s ease;
+      }
+
+      .card-checkbox input:checked + .checkbox-visual {
+        background: var(--color-success);
+        border-color: var(--color-success);
+      }
+
+      .checkbox-icon {
+        opacity: 0;
+        transform: scale(0.5);
+        transition: all 0.2s ease;
+      }
+
+      .card-checkbox input:checked + .checkbox-visual .checkbox-icon {
+        opacity: 1;
+        transform: scale(1);
+      }
+
+      .card-meta {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.375rem;
+      }
+
+      .version-badge {
+        font-size: 0.625rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        background: var(--color-background);
+        padding: 0.25rem 0.375rem;
+        border-radius: 0.25rem;
+        color: var(--color-text-muted);
+        font-family: monospace;
+      }
+
+      .view-link {
+        font-size: 0.6875rem;
+        font-weight: 600;
+        color: var(--color-success);
+        display: flex;
+        align-items: center;
+        gap: 0.125rem;
+        margin-left: auto;
+        cursor: pointer;
+        transition: opacity 0.2s ease;
+      }
+
+      .view-link:hover {
+        opacity: 0.8;
+      }
+
+      .card-hint {
+        font-size: 0.625rem;
+        color: var(--color-text-muted);
+        line-height: 1.4;
+      }
+
+      .card-loading {
+        margin-left: 0.5rem;
+      }
+
+      /* ============================================
+         DOCUMENT VIEWER
+         ============================================ */
+
+      .document-viewer {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: 1rem;
+        overflow: hidden;
+        max-height: 40vh;
+        display: flex;
+        flex-direction: column;
+        margin-bottom: 1rem;
+      }
+
+      .viewer-header {
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid var(--color-border);
+        background: var(--color-background);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-shrink: 0;
+      }
+
+      .viewer-title {
+        font-weight: 700;
+        font-size: 0.875rem;
+        color: var(--color-text-primary);
+      }
+
+      .viewer-version {
+        font-size: 0.625rem;
+        color: var(--color-text-muted);
+        font-family: monospace;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .viewer-body {
+        flex: 1;
+        padding: 1rem;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      /* Prose styling for markdown content */
+      .viewer-body :global(h1),
+      .viewer-body :global(h2),
+      .viewer-body :global(h3) {
+        color: var(--color-text-primary);
+        margin-top: 1rem;
+        margin-bottom: 0.5rem;
+      }
+
+      .viewer-body :global(h1) {
+        font-size: 1.25rem;
+      }
+
+      .viewer-body :global(h2) {
+        font-size: 1.125rem;
+      }
+
+      .viewer-body :global(h3) {
+        font-size: 1rem;
+      }
+
+      .viewer-body :global(p) {
+        color: var(--color-text-secondary);
+        font-size: 0.875rem;
+        line-height: 1.6;
+        margin-bottom: 0.75rem;
+      }
+
+      .viewer-body :global(ul),
+      .viewer-body :global(ol) {
+        padding-left: 1.25rem;
+        margin-bottom: 0.75rem;
+      }
+
+      .viewer-body :global(li) {
+        color: var(--color-text-secondary);
+        font-size: 0.875rem;
+        line-height: 1.6;
+        margin-bottom: 0.25rem;
+      }
+
+      /* ============================================
+         DESKTOP RESPONSIVE ADJUSTMENTS
+         ============================================ */
+
+      @media (min-width: 768px) {
+        .terms-step {
+          max-height: none;
+        }
+
+        .terms-content {
+          padding: 0 1rem;
+        }
+
+        .terms-header {
+          padding: 1rem 0;
+        }
+
+        .terms-icon-bg {
+          width: 56px;
+          height: 56px;
+        }
+
+        .terms-title {
+          font-size: 1.5rem;
+        }
+
+        .terms-subtitle {
+          font-size: 0.875rem;
+          max-width: 400px;
+          margin: 0 auto;
+          padding: 0;
+        }
+
+        /* Two-column layout for desktop */
+        .terms-layout {
+          display: grid;
+          grid-template-columns: 350px 1fr;
+          gap: 1.5rem;
+          margin-bottom: 1rem;
+        }
+
+        .terms-documents {
+          margin-bottom: 0;
+        }
+
+        .document-card {
+          padding: 1.25rem;
+        }
+
+        .card-title {
+          font-size: 1rem;
+        }
+
+        .card-hint {
+          font-size: 0.6875rem;
+        }
+
+        .document-viewer {
+          max-height: 400px;
+          margin-bottom: 0;
+        }
+
+        .viewer-header {
+          padding: 1rem 1.25rem;
+        }
+
+        .viewer-title {
+          font-size: 1rem;
+        }
+
+        .viewer-body {
+          padding: 1.25rem;
+        }
+
       }
     `,
   ],
   template: `
     <div class="terms-step">
-      <div class="terms-header">
-        <div class="terms-icon-wrapper">
-          <app-icon name="shield-check" size="24" class="terms-icon"></app-icon>
+      <!-- Scrollable Content -->
+      <div class="terms-content">
+        <!-- Header -->
+        <div class="terms-header">
+          <div class="terms-icon-wrapper">
+            <div class="terms-icon-bg">
+              <app-icon name="shield-check" size="28" class="terms-icon"></app-icon>
+            </div>
+          </div>
+          <h2 class="terms-title">Documentos Legales</h2>
+          <p class="terms-subtitle">
+            Revisa y acepta los términos del servicio y políticas de privacidad
+            para activar tu cuenta.
+          </p>
         </div>
-        <h2 class="terms-title">Documentos Legales</h2>
-        <p class="terms-description">
-          Revisa y acepta los términos del servicio y políticas de privacidad
-          para activar tu cuenta.
-        </p>
-      </div>
 
-      <div *ngIf="loading" class="loading-state">
-        <app-icon name="loader-2" [spin]="true" size="32"></app-icon>
-        <p class="mt-2 text-sm text-gray-500">Cargando documentos...</p>
-      </div>
-
-      <div *ngIf="!loading && documents.length === 0" class="empty-state">
-        <p>No hay documentos pendientes por aceptar.</p>
-        <div class="mt-4">
-          <app-button variant="primary" (clicked)="onComplete()"
-            >Continuar</app-button
-          >
+        <!-- Loading State -->
+        <div *ngIf="loading" class="loading-state">
+          <app-icon name="loader-2" [spin]="true" size="32"></app-icon>
+          <p class="loading-text">Cargando documentos...</p>
         </div>
-      </div>
 
-      <div
-        *ngIf="!loading && documents.length > 0"
-        class="terms-layout"
-        [class.has-selection]="!!selectedDoc()"
-      >
-        <!-- Document List -->
-        <div class="terms-list">
-          <div
-            *ngFor="let doc of documents"
-            class="term-item"
-            [class.is-selected]="selectedDoc()?.id === doc.id"
-            (click)="selectDocument(doc)"
-          >
-            <div class="term-content">
-              <span class="term-label">{{ doc.title }}</span>
-              
-              <div 
-                class="term-acceptance" 
-                (click)="$event.stopPropagation(); doc.accepted = !doc.accepted; cdr.markForCheck()"
-              >
-                <input
-                  type="checkbox"
-                  [id]="'doc-' + doc.id"
-                  [(ngModel)]="doc.accepted"
-                  class="term-checkbox"
-                  [disabled]="doc.loading"
-                  (click)="$event.stopPropagation()"
-                />
-                <label [for]="'doc-' + doc.id" class="cursor-pointer">
-                  Haz clic aquí para aceptar los términos y condiciones
-                </label>
+        <!-- Empty State -->
+        <div *ngIf="!loading && documents.length === 0" class="empty-state">
+          <p class="empty-text">No hay documentos pendientes por aceptar.</p>
+          <app-button variant="primary" (clicked)="onComplete()">
+            Continuar
+          </app-button>
+        </div>
+
+        <!-- Documents Layout -->
+        <div
+          *ngIf="!loading && documents.length > 0"
+          class="terms-layout"
+        >
+          <!-- Document List -->
+          <div class="terms-documents">
+            <div
+              *ngFor="let doc of documents"
+              class="document-card"
+              [class.selected]="selectedDoc()?.id === doc.id"
+              (click)="selectDocument(doc)"
+            >
+              <div class="card-header">
+                <div class="card-title-row">
+                  <div class="card-icon">
+                    <app-icon name="file-text" size="18" class="terms-icon"></app-icon>
+                  </div>
+                  <h4 class="card-title">{{ doc.title }}</h4>
+                </div>
+
+                <div
+                  class="card-checkbox"
+                  (click)="$event.stopPropagation(); toggleAcceptance(doc)"
+                >
+                  <input
+                    type="checkbox"
+                    [id]="'doc-' + doc.id"
+                    [checked]="doc.accepted"
+                    [disabled]="doc.loading"
+                    (click)="$event.stopPropagation()"
+                    (change)="toggleAcceptance(doc)"
+                  />
+                  <div class="checkbox-visual">
+                    <app-icon
+                      name="check"
+                      size="14"
+                      color="#ffffff"
+                      class="checkbox-icon"
+                    ></app-icon>
+                  </div>
+                </div>
+
+                <app-icon
+                  *ngIf="doc.loading"
+                  name="loader-2"
+                  [spin]="true"
+                  size="14"
+                  class="card-loading"
+                ></app-icon>
               </div>
 
-              <div class="term-details mt-2">
-                <span class="bg-gray-100 px-1.5 py-0.5 rounded text-[10px] font-mono">
-                  v{{ doc.version }}
-                </span>
-                <span 
-                  class="view-action cursor-pointer" 
+              <div class="card-meta">
+                <span class="version-badge">v{{ doc.version }}</span>
+                <span
+                  class="view-link"
                   (click)="$event.stopPropagation(); selectDocument(doc)"
                 >
                   Ver documento
                   <app-icon name="chevron-right" size="12"></app-icon>
                 </span>
               </div>
+
+              <p class="card-hint">
+                Haz clic en el checkbox para aceptar los términos
+              </p>
             </div>
-
-            <app-icon
-              *ngIf="doc.loading"
-              name="loader-2"
-              [spin]="true"
-              size="14"
-              class="text-primary ml-2"
-            ></app-icon>
           </div>
-        </div>
 
-        <!-- Document Viewer -->
-        <div
-          *ngIf="selectedDoc()"
-          class="document-viewer animate-in fade-in slide-in-from-right-4 duration-300"
-        >
-          <div class="viewer-header">
-            <span class="viewer-title">{{ selectedDoc()?.title }}</span>
-            <span
-              class="text-[10px] text-text-secondary font-mono uppercase tracking-wider"
-            >
-              Versión {{ selectedDoc()?.version }}
-            </span>
-          </div>
+          <!-- Document Viewer -->
           <div
-            class="viewer-body prose prose-sm max-w-none prose-slate"
-            [innerHTML]="renderedContent()"
-          ></div>
-        </div>
-
-        <!-- Empty Selection State (if on desktop and nothing selected) -->
-        <div
-          *ngIf="!selectedDoc() && documents.length > 0"
-          class="hidden lg:flex document-viewer items-center justify-center bg-gray-50 border-dashed"
-        >
-          <div class="text-center p-8">
-            <app-icon
-              name="file-text"
-              size="48"
-              class="text-gray-200 mb-4 mx-auto"
-            ></app-icon>
-            <p class="text-sm text-gray-400">
-              Selecciona un documento para leer su contenido completo
-            </p>
+            *ngIf="selectedDoc()"
+            #documentViewer
+            class="document-viewer animate-in fade-in slide-in-from-right-4 duration-300"
+          >
+            <div class="viewer-header">
+              <span class="viewer-title">{{ selectedDoc()?.title }}</span>
+              <span class="viewer-version">
+                Versión {{ selectedDoc()?.version }}
+              </span>
+            </div>
+            <div
+              class="viewer-body prose prose-sm max-w-none prose-slate"
+              [innerHTML]="renderedContent()"
+            ></div>
           </div>
         </div>
-      </div>
-
-      <div class="terms-actions" *ngIf="!loading && documents.length > 0">
-        <app-button variant="outline" size="sm" (clicked)="onBack()">
-          Atrás
-        </app-button>
-        <app-button
-          variant="primary"
-          size="sm"
-          [disabled]="!allAccepted || submitting"
-          (clicked)="submitAcceptances()"
-        >
-          <span *ngIf="!submitting">Aceptar y Continuar</span>
-          <span *ngIf="submitting" class="flex items-center gap-2">
-            <app-icon name="loader-2" [spin]="true" size="14"></app-icon>
-            Procesando...
-          </span>
-        </app-button>
       </div>
     </div>
   `,
@@ -382,6 +623,8 @@ export class TermsStepComponent implements OnInit {
 
   // Selected document for viewing
   selectedDoc = signal<DocumentStatus | null>(null);
+
+  @ViewChild('documentViewer') documentViewer?: ElementRef<HTMLElement>;
 
   // Rendered HTML from Markdown
   renderedContent = computed(() => {
@@ -445,6 +688,19 @@ export class TermsStepComponent implements OnInit {
 
   selectDocument(doc: DocumentStatus) {
     this.selectedDoc.set(doc);
+    this.cdr.markForCheck();
+
+    // Scroll to document viewer after a brief delay to allow rendering
+    setTimeout(() => {
+      this.documentViewer?.nativeElement?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start'
+      });
+    }, 100);
+  }
+
+  toggleAcceptance(doc: DocumentStatus) {
+    doc.accepted = !doc.accepted;
     this.cdr.markForCheck();
   }
 

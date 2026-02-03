@@ -227,19 +227,34 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       icon: 'chart-line',
       children: [
         {
+          label: 'Centro de Analíticas',
+          icon: 'circle',
+          route: '/admin/analytics',
+        },
+        {
           label: 'Ventas',
           icon: 'circle',
-          route: '/admin/analytics/sales',
+          route: '/admin/analytics/sales/summary',
         },
         {
-          label: 'Tráfico',
+          label: 'Inventario',
           icon: 'circle',
-          route: '/admin/analytics/traffic',
+          route: '/admin/analytics/inventory/stock-levels',
         },
         {
-          label: 'Rendimiento',
+          label: 'Productos',
           icon: 'circle',
-          route: '/admin/analytics/performance',
+          route: '/admin/analytics/products/performance',
+        },
+        {
+          label: 'Clientes',
+          icon: 'circle',
+          route: '/admin/analytics/customers/summary',
+        },
+        {
+          label: 'Financiero',
+          icon: 'circle',
+          route: '/admin/analytics/financial/profit-loss',
         },
       ],
     },

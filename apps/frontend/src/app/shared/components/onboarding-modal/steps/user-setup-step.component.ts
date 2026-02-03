@@ -29,6 +29,10 @@ import {
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
+      /* ═══════════════════════════════════════════════════════════════
+         MOBILE-FIRST STYLES - Base styles optimized for mobile
+         ═══════════════════════════════════════════════════════════════ */
+
       .user-step {
         padding: 0;
         background: transparent;
@@ -37,70 +41,82 @@ import {
       .user-container {
         max-width: 100%;
         margin: 0;
-        padding: 0;
+        padding: 0 0.25rem;
       }
 
+      /* ─────────────────────────────────────────────────────────────────
+         HEADER - iOS-inspired hero section
+         ───────────────────────────────────────────────────────────────── */
       .user-header {
         text-align: center;
         margin-bottom: 1rem;
         display: flex;
         flex-direction: column;
         align-items: center;
+        padding: 0 1rem;
       }
 
       .user-icon-wrapper {
-        margin-bottom: 0.75rem;
+        margin-bottom: 0.875rem;
       }
 
       .user-icon-bg {
-        width: 56px;
-        height: 56px;
-        background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%);
+        width: 80px;
+        height: 80px;
+        background: var(--color-primary-light);
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
-        box-shadow: var(--shadow-md);
       }
 
       .user-icon {
-        color: var(--color-text-on-primary);
+        color: var(--color-primary);
       }
 
       .user-title {
-        font-size: var(--fs-xl);
+        font-size: var(--fs-lg);
         font-weight: var(--fw-bold);
         color: var(--color-text-primary);
-        margin-bottom: 0.25rem;
+        margin-bottom: 0.375rem;
       }
 
       .user-subtitle {
         color: var(--color-text-secondary);
         font-size: var(--fs-sm);
         line-height: 1.5;
+        max-width: 280px;
       }
 
+      /* ─────────────────────────────────────────────────────────────────
+         OPTIONAL BADGE - Subtle info indicator
+         ───────────────────────────────────────────────────────────────── */
       .optional-badge {
         display: inline-flex;
         align-items: center;
+        justify-content: center;
         gap: 0.375rem;
-        background: var(--color-success-light);
-        border: 1px solid rgba(34, 197, 94, 0.3);
-        border-radius: var(--radius-md);
-        padding: 0.5rem 0.75rem;
+        background: var(--color-primary-light);
+        border: 1px solid color-mix(in srgb, var(--color-primary) 20%, transparent);
+        border-radius: 1.25rem;
+        padding: 0.5rem 1rem;
         margin-bottom: 1rem;
       }
 
       .optional-icon {
-        color: var(--color-success);
+        color: var(--color-primary);
       }
 
       .optional-text {
-        color: var(--color-success);
-        font-size: var(--fs-xs);
+        color: var(--color-primary);
+        font-size: 11px;
         font-weight: var(--fw-medium);
+        letter-spacing: 0.02em;
       }
 
+      /* ─────────────────────────────────────────────────────────────────
+         FORM CONTAINER
+         ───────────────────────────────────────────────────────────────── */
       .user-form {
         background: transparent;
         padding: 0;
@@ -108,11 +124,14 @@ import {
         box-shadow: none;
       }
 
+      /* ─────────────────────────────────────────────────────────────────
+         FORM SECTIONS - iOS-style cards
+         ───────────────────────────────────────────────────────────────── */
       .form-section {
-        margin-bottom: 1.25rem;
+        margin-bottom: 1rem;
         background: var(--color-surface);
-        padding: 1rem;
-        border-radius: var(--radius-lg);
+        padding: 1rem 1.25rem;
+        border-radius: 1.25rem;
         border: 1px solid var(--color-border);
       }
 
@@ -123,20 +142,21 @@ import {
       .section-header {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
+        gap: 0.625rem;
         margin-bottom: 1rem;
-        padding-bottom: 0.75rem;
-        border-bottom: 1px solid var(--color-border);
+        padding-bottom: 0;
+        border-bottom: none;
       }
 
       .section-icon {
-        width: 28px;
-        height: 28px;
+        width: 32px;
+        height: 32px;
         background: var(--color-primary-light);
-        border-radius: var(--radius-sm);
+        border-radius: 0.625rem;
         display: flex;
         align-items: center;
         justify-content: center;
+        flex-shrink: 0;
       }
 
       .section-icon-element {
@@ -150,10 +170,13 @@ import {
         margin: 0;
       }
 
+      /* ─────────────────────────────────────────────────────────────────
+         FORM GRID - Mobile-first responsive layout
+         ───────────────────────────────────────────────────────────────── */
       .form-grid {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 1rem;
+        grid-template-columns: 1fr;
+        gap: 0.875rem;
       }
 
       .form-field {
@@ -166,24 +189,29 @@ import {
       }
 
       .form-field.half-width {
-        grid-column: span 2;
+        grid-column: 1 / -1;
       }
 
+      /* ─────────────────────────────────────────────────────────────────
+         LABELS - iOS-style uppercase micro labels
+         ───────────────────────────────────────────────────────────────── */
       .field-label {
         display: flex;
         align-items: center;
         gap: 0.375rem;
-        font-size: var(--fs-xs);
+        font-size: 11px;
         font-weight: var(--fw-medium);
-        color: var(--color-text-secondary);
-        margin-bottom: 0.375rem;
+        color: var(--color-text-muted);
+        margin-bottom: 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
       }
 
       .help-icon {
         color: var(--color-text-muted);
         cursor: help;
         position: relative;
-        display: inline-flex;
+        display: none;
       }
 
       .help-icon:hover {
@@ -207,6 +235,8 @@ import {
         z-index: 50;
         margin-bottom: 0.375rem;
         pointer-events: none;
+        text-transform: none;
+        letter-spacing: normal;
       }
 
       .help-icon[data-tooltip]:hover::before {
@@ -224,37 +254,60 @@ import {
 
       .field-optional {
         color: var(--color-text-muted);
-        font-size: var(--fs-xs);
-        font-style: italic;
+        font-size: 10px;
+        font-style: normal;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        opacity: 0.7;
       }
 
+      /* ─────────────────────────────────────────────────────────────────
+         INPUTS - Compact touch targets
+         ───────────────────────────────────────────────────────────────── */
       .field-input {
-        padding: 0.5rem 0.625rem;
+        padding: 0.625rem 0.75rem;
         border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
+        border-radius: 0.75rem;
         font-size: var(--fs-sm);
         transition: all var(--transition-fast) ease;
-        background: var(--color-surface);
+        background: var(--color-background);
         color: var(--color-text-primary);
-        height: 2.25rem;
         width: 100%;
+        height: 40px;
+        min-height: 40px;
+        -webkit-appearance: none;
+        appearance: none;
       }
 
       .field-input:focus {
         outline: none;
         border-color: var(--color-primary);
-        box-shadow: 0 0 0 2px var(--color-ring);
+        box-shadow: 0 0 0 3px var(--color-ring);
+        background: var(--color-surface);
       }
 
       .field-input::placeholder {
         color: var(--color-text-muted);
+        opacity: 0.6;
       }
 
+      /* Select specific styling */
+      select.field-input {
+        cursor: pointer;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 1rem center;
+        padding-right: 2.5rem;
+      }
+
+      /* ─────────────────────────────────────────────────────────────────
+         HINTS
+         ───────────────────────────────────────────────────────────────── */
       .field-hint {
         display: flex;
         align-items: center;
         gap: 0.25rem;
-        margin-top: 0.25rem;
+        margin-top: 0.375rem;
       }
 
       .hint-icon {
@@ -267,40 +320,84 @@ import {
         line-height: 1.3;
       }
 
-      .user-skip {
-        margin-top: 1rem;
-        text-align: center;
-      }
+      /* ═══════════════════════════════════════════════════════════════
+         TABLET BREAKPOINT (640px+) - 2 columns
+         ═══════════════════════════════════════════════════════════════ */
+      @media (min-width: 640px) {
+        .user-container {
+          padding: 0;
+        }
 
-      .skip-content {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.375rem;
-        padding: 0.5rem 0.75rem;
-        background: var(--color-warning-light);
-        border: 1px solid rgba(251, 146, 60, 0.3);
-        border-radius: var(--radius-md);
-      }
+        .user-icon-bg {
+          width: 72px;
+          height: 72px;
+        }
 
-      .skip-icon {
-        color: var(--color-warning);
-      }
+        .user-title {
+          font-size: var(--fs-xl);
+        }
 
-      .skip-text {
-        color: var(--color-warning);
-        font-size: var(--fs-xs);
-        font-weight: var(--fw-medium);
-      }
+        .user-subtitle {
+          max-width: 320px;
+        }
 
-      @media (max-width: 1024px) {
         .form-grid {
           grid-template-columns: repeat(2, 1fr);
+          gap: 1rem;
         }
-      }
 
-      @media (max-width: 640px) {
+        .form-field.half-width {
+          grid-column: span 1;
+        }
+
+        .field-label {
+          font-size: var(--fs-xs);
+        }
+
+        .field-input {
+          padding: 0.625rem 0.75rem;
+          font-size: var(--fs-sm);
+          height: 40px;
+          min-height: 40px;
+        }
+
+        .help-icon {
+          display: inline-flex;
+        }
+
+        }
+
+      /* ═══════════════════════════════════════════════════════════════
+         DESKTOP BREAKPOINT (1024px+) - 4 columns
+         ═══════════════════════════════════════════════════════════════ */
+      @media (min-width: 1024px) {
+        .user-icon-bg {
+          width: 64px;
+          height: 64px;
+        }
+
+        .form-section {
+          padding: 1.25rem 1.5rem;
+        }
+
         .form-grid {
-          grid-template-columns: 1fr;
+          grid-template-columns: repeat(4, 1fr);
+        }
+
+        .form-field.half-width {
+          grid-column: span 2;
+        }
+
+        .field-input {
+          padding: 0.5rem 0.75rem;
+          height: 40px;
+          min-height: 40px;
+          border-radius: var(--radius-md);
+        }
+
+        select.field-input {
+          padding-right: 2rem;
+          background-position: right 0.75rem center;
         }
       }
     `,
@@ -312,20 +409,20 @@ import {
         <div class="user-header">
           <div class="user-icon-wrapper">
             <div class="user-icon-bg">
-              <app-icon name="user" size="48" class="user-icon"></app-icon>
+              <app-icon name="user" size="40" class="user-icon"></app-icon>
             </div>
           </div>
           <div class="user-header-content">
             <h2 class="user-title">Completa tu perfil</h2>
             <p class="user-subtitle">
-              Cuéntanos un poco sobre ti para personalizar tu experiencia
+              Cuéntanos sobre ti para personalizar tu experiencia
             </p>
           </div>
         </div>
 
         <!-- Optional Badge -->
         <div class="optional-badge">
-          <app-icon name="info" size="16" class="optional-icon"></app-icon>
+          <app-icon name="info" size="14" class="optional-icon"></app-icon>
           <span class="optional-text">Todos los campos son opcionales</span>
         </div>
 
@@ -348,8 +445,7 @@ import {
               <div class="form-field">
                 <label class="field-label">
                   Nombre
-                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Tu primer nombre"></app-icon>
-                  <span class="field-optional">(opcional)</span>
+                  <app-icon name="help-circle" size="12" class="help-icon" data-tooltip="Tu primer nombre"></app-icon>
                 </label>
                 <input
                   type="text"
@@ -362,8 +458,7 @@ import {
               <div class="form-field">
                 <label class="field-label">
                   Apellido
-                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Tu apellido principal"></app-icon>
-                  <span class="field-optional">(opcional)</span>
+                  <app-icon name="help-circle" size="12" class="help-icon" data-tooltip="Tu apellido principal"></app-icon>
                 </label>
                 <input
                   type="text"
@@ -373,18 +468,16 @@ import {
                 />
               </div>
 
-              <!-- Teléfono -->
               <div class="form-field">
                 <label class="field-label">
                   Teléfono
-                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Solo para notificaciones importantes"></app-icon>
-                  <span class="field-optional">(opcional)</span>
+                  <app-icon name="help-circle" size="12" class="help-icon" data-tooltip="Solo para notificaciones importantes"></app-icon>
                 </label>
                 <input
                   type="tel"
                   class="field-input"
                   formControlName="phone"
-                  placeholder="+57 123 456 7890"
+                  placeholder="+57 300 123 4567"
                 />
               </div>
             </div>
@@ -407,8 +500,7 @@ import {
               <div class="form-field half-width">
                 <label class="field-label">
                   Calle y número
-                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Dirección de tu domicilio"></app-icon>
-                  <span class="field-optional">(opcional)</span>
+                  <app-icon name="help-circle" size="12" class="help-icon" data-tooltip="Dirección de tu domicilio"></app-icon>
                 </label>
                 <input
                   type="text"
@@ -420,26 +512,24 @@ import {
 
               <div class="form-field half-width">
                 <label class="field-label">
-                  Apartamento, suite, etc.
-                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Información adicional de dirección"></app-icon>
-                  <span class="field-optional">(opcional)</span>
+                  Apto, edificio, etc.
+                  <app-icon name="help-circle" size="12" class="help-icon" data-tooltip="Información adicional de dirección"></app-icon>
                 </label>
                 <input
                   type="text"
                   class="field-input"
                   formControlName="address_line2"
-                  placeholder="Apt 101, Suite 200"
+                  placeholder="Apt 101, Torre A"
                 />
               </div>
 
               <div class="form-field">
                 <label class="field-label">
                   País
-                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="País de residencia"></app-icon>
-                  <span class="field-optional">(opcional)</span>
+                  <app-icon name="help-circle" size="12" class="help-icon" data-tooltip="País de residencia"></app-icon>
                 </label>
                 <select class="field-input" formControlName="country_code">
-                  <option value="">Selecciona</option>
+                  <option value="">Selecciona país</option>
                   <option
                     *ngFor="let country of countries"
                     [value]="country.code"
@@ -449,63 +539,47 @@ import {
                 </select>
               </div>
 
-              <!-- Departamento (Estado/Provincia) -->
               <div class="form-field">
                 <label class="field-label">
                   Departamento
-                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Estado o departamento"></app-icon>
-                  <span class="field-optional">(opcional)</span>
+                  <app-icon name="help-circle" size="12" class="help-icon" data-tooltip="Estado o departamento"></app-icon>
                 </label>
                 <select class="field-input" formControlName="state_province">
-                  <option value="">Selecciona un departamento</option>
+                  <option value="">Selecciona</option>
                   <option *ngFor="let dep of departments" [value]="dep.id">
                     {{ dep.name }}
                   </option>
                 </select>
               </div>
 
-              <!-- Ciudad -->
               <div class="form-field">
                 <label class="field-label">
                   Ciudad
-                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Ciudad de residencia"></app-icon>
-                  <span class="field-optional">(opcional)</span>
+                  <app-icon name="help-circle" size="12" class="help-icon" data-tooltip="Ciudad de residencia"></app-icon>
                 </label>
                 <select class="field-input" formControlName="city">
-                  <option value="">Selecciona una ciudad</option>
+                  <option value="">Selecciona</option>
                   <option *ngFor="let city of cities" [value]="city.id">
                     {{ city.name }}
                   </option>
                 </select>
               </div>
 
-              <!-- Código postal -->
               <div class="form-field">
                 <label class="field-label">
                   Código postal
-                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Código postal de tu ubicación"></app-icon>
-                  <span class="field-optional">(opcional)</span>
+                  <app-icon name="help-circle" size="12" class="help-icon" data-tooltip="Código postal de tu ubicación"></app-icon>
                 </label>
                 <input
                   type="text"
                   class="field-input"
                   formControlName="postal_code"
-                  placeholder="06000"
+                  placeholder="110111"
                 />
               </div>
             </div>
           </div>
         </form>
-
-        <!-- Skip Information -->
-        <div class="user-skip">
-          <div class="skip-content">
-            <app-icon name="arrow-right" size="16" class="skip-icon"></app-icon>
-            <span class="skip-text">
-              Puedes completar esta información más tarde en tu perfil
-            </span>
-          </div>
-        </div>
       </div>
     </div>
   `,

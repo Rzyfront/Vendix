@@ -28,70 +28,58 @@ import { IconComponent } from '../../../../shared/components';
     IconComponent,
   ],
   template: `
+    <!-- Container: Mobile-first con padding reducido en móvil -->
     <div
-      class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-[var(--color-background)] to-[rgba(126, 215, 165, 0.1)]"
+      class="min-h-screen flex items-center justify-center p-4 sm:p-6 lg:p-8 bg-gradient-to-br from-[var(--color-background)] to-[rgba(126,215,165,0.1)]"
     >
-      <div class="max-w-sm w-full space-y-8">
-        <!-- Header section with logo and title -->
-        <div class="text-center my-3">
-          <div class="mx-auto flex items-center justify-center space-x-3 mb-4">
+      <!-- Content wrapper: full-width en mobile, max-width en desktop -->
+      <div class="w-full max-w-sm space-y-6">
+        <!-- Header: Tamaños reducidos en mobile -->
+        <div class="text-center">
+          <!-- Logo más pequeño en mobile -->
+          <div class="mx-auto flex items-center justify-center gap-2 mb-3">
             <div
-              class="w-10 h-10 bg-[var(--color-primary)] rounded-xl flex items-center justify-center"
+              class="w-9 h-9 sm:w-10 sm:h-10 bg-[var(--color-primary)] rounded-xl flex items-center justify-center"
             >
-              <app-icon name="cart" [size]="24" color="white"></app-icon>
+              <app-icon name="key" [size]="20" color="white"></app-icon>
             </div>
-            <h1 class="text-xl font-semibold text-[var(--color-text-primary)]">
+            <h1 class="text-lg sm:text-xl font-semibold text-[var(--color-text-primary)]">
               Vendix
             </h1>
           </div>
-          <h2
-            class="mt-6 text-2xl font-extrabold text-[var(--color-text-primary)]"
-          >
+
+          <!-- Título responsive -->
+          <h2 class="text-xl sm:text-2xl font-bold text-[var(--color-text-primary)]">
             Recuperar Contraseña
           </h2>
-          <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
-            Ingresa el Vlink de tu organización y tu email para recibir
-            instrucciones.
+          <p class="mt-2 mb-2 text-sm text-[var(--color-text-secondary)] px-2">
+            Ingresa tu Vlink y email para recibir instrucciones.
           </p>
         </div>
 
-        <!-- Card with form -->
-        <app-card shadow="md" [animateOnLoad]="true" class="mt-8">
+        <!-- Card con form y padding responsive -->
+        <app-card class="!mt-6 sm:!mt-8" shadow="md" [animateOnLoad]="true" [responsivePadding]="true">
           <form
             [formGroup]="forgotPasswordForm"
             (ngSubmit)="onSubmit()"
-            class="space-y-8"
+            class="space-y-5"
           >
-            <!-- Error message display -->
-            <div
-              *ngIf="error"
-              class="rounded-md bg-[rgba(239, 68, 68, 0.1)] p-4 border border-[rgba(239, 68, 68, 0.2)]"
-            >
-              <div class="flex">
-                <div class="flex-shrink-0">
-                  <svg
-                    class="h-5 w-5 text-[var(--color-destructive)]"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                  >
-                    <path
-                      fill-rule="evenodd"
-                      d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                      clip-rule="evenodd"
-                    />
-                  </svg>
-                </div>
-                <div class="ml-3">
-                  <h3
-                    class="text-sm font-medium text-[var(--color-destructive)]"
-                  >
-                    {{ error }}
-                  </h3>
+            <!-- Error alert (compacto) -->
+            @if (error) {
+              <div class="rounded-lg bg-red-50 p-3 border border-red-200">
+                <div class="flex items-start gap-2">
+                  <app-icon
+                    name="alert-circle"
+                    [size]="18"
+                    class="text-red-500 flex-shrink-0 mt-0.5"
+                  ></app-icon>
+                  <p class="text-sm text-red-700">{{ error }}</p>
                 </div>
               </div>
-            </div>
+            }
 
-            <div>
+            <!-- Inputs con gap reducido -->
+            <div class="space-y-4">
               <app-input
                 label="Vlink"
                 formControlName="vlink"
@@ -111,6 +99,7 @@ import { IconComponent } from '../../../../shared/components';
               ></app-input>
             </div>
 
+            <!-- Submit button -->
             <app-button
               type="submit"
               variant="primary"
@@ -119,25 +108,22 @@ import { IconComponent } from '../../../../shared/components';
               [loading]="isLoading"
               [fullWidth]="true"
               [showTextWhileLoading]="true"
-              class="mt-4 w-full"
             >
               @if (isLoading) {
-                Enviando instrucciones...
+                Enviando...
               } @else {
                 Enviar Instrucciones
               }
             </app-button>
 
-            <!-- Back to login link -->
-            <div class="flex justify-center mt-4">
-              <div class="text-sm">
-                <a
-                  routerLink="/auth/login"
-                  class="font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)]"
-                >
-                  Volver a Iniciar Sesión
-                </a>
-              </div>
+            <!-- Back link -->
+            <div class="text-center pt-2">
+              <a
+                routerLink="/auth/login"
+                class="text-sm font-medium text-[var(--color-primary)] hover:underline"
+              >
+                ← Volver a Iniciar Sesión
+              </a>
             </div>
           </form>
         </app-card>

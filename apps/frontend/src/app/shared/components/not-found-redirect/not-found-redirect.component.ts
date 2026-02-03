@@ -4,6 +4,7 @@ import { Store } from '@ngrx/store';
 import { take } from 'rxjs/operators';
 import { combineLatest } from 'rxjs';
 import { ToastService } from '../toast/toast.service';
+import { SessionService } from '../../../core/services/session.service';
 import {
   selectIsAuthenticated,
   selectSelectedAppType,
@@ -35,6 +36,7 @@ export class NotFoundRedirectComponent implements OnInit {
   private router = inject(Router);
   private toastService = inject(ToastService);
   private store = inject(Store);
+  private sessionService = inject(SessionService);
 
   private readonly APP_REDIRECT_MAP: Record<string, string> = {
     [AppEnvironment.VENDIX_LANDING]: '/',
@@ -47,11 +49,19 @@ export class NotFoundRedirectComponent implements OnInit {
   };
 
   ngOnInit(): void {
-    // Show toast notification
-    this.toastService.warning(
-      'La ruta solicitada no existe o no está disponible',
-      'Ruta no encontrada',
-    );
+    // Si la sesión se está terminando, no hacer nada
+    // SessionService maneja la navegación
+    if (this.sessionService.isTerminating()) {
+      return;
+    }
+
+    // Solo mostrar toast si NO estamos en proceso de logout
+    if (!this.sessionService.shouldSuppressNotifications()) {
+      this.toastService.warning(
+        'La ruta solicitada no existe o no está disponible',
+        'Ruta no encontrada',
+      );
+    }
 
     // Get user state and redirect
     combineLatest([

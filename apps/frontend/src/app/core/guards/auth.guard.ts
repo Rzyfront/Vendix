@@ -10,6 +10,7 @@ import { Observable, of } from 'rxjs';
 import { catchError, switchMap, take } from 'rxjs/operators';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { ToastService } from '../../shared/components/toast/toast.service';
+import { SessionService } from '../services/session.service';
 
 @Injectable({
   providedIn: 'root',
@@ -18,6 +19,7 @@ export class AuthGuard implements CanActivate {
   private authFacade = inject(AuthFacade);
   private router = inject(Router);
   private toastService = inject(ToastService);
+  private sessionService = inject(SessionService);
 
   canActivate(
     route: ActivatedRouteSnapshot,
@@ -25,24 +27,29 @@ export class AuthGuard implements CanActivate {
   ): Observable<boolean | UrlTree> {
     const path = state.url;
 
-    console.log('🛡️ [AUTH GUARD] canActivate() START', {
-      path,
-      loggedOutFlag: typeof localStorage !== 'undefined' ? localStorage.getItem('vendix_logged_out_recently') : 'N/A',
-      userEnv: typeof localStorage !== 'undefined' ? localStorage.getItem('vendix_user_environment') : 'N/A',
-    });
+    // Si la sesión se está terminando, permitir navegación sin restricciones
+    // para que el usuario pueda ser redirigido limpiamente
+    if (this.sessionService.isTerminating()) {
+      console.log('[AUTH GUARD] Session terminating, allowing navigation');
+      return of(true);
+    }
+
+    console.log('[AUTH GUARD] canActivate() START', { path });
 
     // 1. Check if route is public (no auth required)
     if (this.isPublicRoute(path)) {
-      console.log('✅ [AUTH GUARD] Public route, allowing access');
       return of(true);
     }
 
     // 2. Check localStorage flag first for immediate logout detection
     if (this.wasRecentlyLoggedOut()) {
-      console.log('🚫 [AUTH GUARD] Recently logged out (< 5min), redirecting to login');
-      this.toastService.warning(
-        'Debes iniciar sesión para acceder a esta página',
-      );
+      console.log('[AUTH GUARD] Recently logged out, redirecting');
+      // Solo mostrar toast si NO estamos en proceso de logout
+      if (!this.sessionService.shouldSuppressNotifications()) {
+        this.toastService.warning(
+          'Debes iniciar sesión para acceder a esta página',
+        );
+      }
       return of(this.router.createUrlTree(['/auth/login']));
     }
 
@@ -50,42 +57,38 @@ export class AuthGuard implements CanActivate {
     return this.authFacade.isAuthenticated$.pipe(
       take(1),
       switchMap((isAuthenticated) => {
-        console.log('🔐 [AUTH GUARD] Authentication check:', {
-          isAuthenticated,
-          roles: this.authFacade.getRoles(),
-        });
-
         if (!isAuthenticated) {
-          console.log('🚫 [AUTH GUARD] Not authenticated, redirecting to login');
-          this.toastService.warning(
-            'Debes iniciar sesión para acceder a esta página',
-          );
+          console.log('[AUTH GUARD] Not authenticated, redirecting');
+          // Solo mostrar toast si NO estamos en proceso de logout
+          if (!this.sessionService.shouldSuppressNotifications()) {
+            this.toastService.warning(
+              'Debes iniciar sesión para acceder a esta página',
+            );
+          }
           return of(this.router.createUrlTree(['/auth/login']));
         }
 
         // 4. Check role-based permissions
         const hasPermission = this.hasRolePermission(path);
-        console.log('👤 [AUTH GUARD] Role permission check:', {
-          path,
-          hasPermission,
-          roles: this.authFacade.getRoles(),
-        });
-
         if (!hasPermission) {
-          console.log('🚫 [AUTH GUARD] No role permission, redirecting to dashboard');
-          this.toastService.error(
-            'No tienes permisos para acceder a esta página',
-          );
+          console.log('[AUTH GUARD] No role permission, redirecting');
+          // Solo mostrar toast si NO estamos en proceso de logout
+          if (!this.sessionService.shouldSuppressNotifications()) {
+            this.toastService.error(
+              'No tienes permisos para acceder a esta página',
+            );
+          }
           return of(this.getDashboardUrl());
         }
 
-        console.log('✅ [AUTH GUARD] All checks passed, allowing access');
-        // If authenticated and has permission, allow access
         return of(true);
       }),
       catchError((error) => {
-        console.error('❌ [AUTH GUARD] Error:', error);
-        this.toastService.error('Error verificando autenticación');
+        console.error('[AUTH GUARD] Error:', error);
+        // Solo mostrar toast si NO estamos en proceso de logout
+        if (!this.sessionService.shouldSuppressNotifications()) {
+          this.toastService.error('Error verificando autenticación');
+        }
         return of(this.router.createUrlTree(['/']));
       }),
     );

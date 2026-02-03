@@ -348,6 +348,26 @@
             </div>
           </div>
         </div>
+
+        <!-- SECCIÓN 6: CONFIGURACIÓN DEL FOOTER (Ocupa ancho completo) -->
+        <div class="xl:col-span-2">
+          <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
+                <app-icon name="panel-bottom" size="18" class="text-primary-600"></app-icon>
+              </div>
+              Configuración del Footer
+            </h2>
+            <p class="text-sm text-gray-500 mb-6">
+              Personaliza el pie de página de tu tienda online con información de contacto,
+              enlaces útiles, ayuda al cliente y redes sociales.
+            </p>
+            <app-footer-settings-form
+              [initialData]="footerSettings"
+              (valueChange)="onFooterChange($event)">
+            </app-footer-settings-form>
+          </div>
+        </div>
       </div>
     </form>
   </ng-container>

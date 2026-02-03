@@ -41,7 +41,7 @@ interface ChartData {
   template: `
     <div style="background-color: var(--color-background);">
       <!-- Stats Cards -->
-      <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-6">
+      <div class="stats-container">
         <app-stats
           *ngFor="let stat of statsData"
           [title]="stat.title"

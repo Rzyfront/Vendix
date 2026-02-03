@@ -35,7 +35,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
     },
   ],
   template: `
-    <div [class]="'w-full mt-4 ' + customWrapperClass">
+    <div [class]="'w-full mt-3 sm:mt-4 ' + customWrapperClass">
       <!-- Label -->
       <label
         *ngIf="label"
@@ -313,11 +313,11 @@ export class InputComponent implements ControlValueAccessor {
       'placeholder:text-text-muted',
     ];
 
-    // Clases por tamaño
+    // Clases por tamaño (mobile-first: touch targets ≥ 44px en móvil)
     const sizeClasses = {
-      sm: ['px-3', 'py-1.5', 'text-sm'],
-      md: ['px-4', 'py-2', 'text-base'],
-      lg: ['px-4', 'py-3', 'text-lg'],
+      sm: ['px-3', 'py-2.5', 'text-sm', 'min-h-[40px]'], // 40px - Compacto pero touch-friendly
+      md: ['px-3', 'py-3', 'text-base', 'min-h-[44px]', 'sm:px-4'], // 44px ✓ Touch target estándar
+      lg: ['px-4', 'py-3.5', 'text-lg', 'min-h-[48px]'], // 48px - Extra grande para formularios destacados
     };
 
     // Clases por estado (validación)

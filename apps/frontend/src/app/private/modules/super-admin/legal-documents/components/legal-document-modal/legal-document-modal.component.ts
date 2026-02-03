@@ -205,8 +205,8 @@ import {
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="form.invalid || isSubmitting"
-            [loading]="isSubmitting"
+            [disabled]="form.invalid || submitting"
+            [loading]="submitting"
           >
             <app-icon
               slot="icon"
@@ -223,6 +223,7 @@ import {
 export class LegalDocumentModalComponent implements OnInit, OnChanges {
   @Input() isOpen = false;
   @Input() document?: LegalDocument;
+  @Input() submitting = false;
   @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() save = new EventEmitter<
     CreateSystemDocumentDto | UpdateSystemDocumentDto
@@ -232,7 +233,6 @@ export class LegalDocumentModalComponent implements OnInit, OnChanges {
   private fb = inject(FormBuilder);
 
   form: FormGroup;
-  isSubmitting = false;
 
   documentTypeOptions: SelectorOption[] = Object.values(
     LegalDocumentTypeEnum,
@@ -316,7 +316,6 @@ export class LegalDocumentModalComponent implements OnInit, OnChanges {
 
   private resetForm() {
     this.form.reset();
-    this.isSubmitting = false;
   }
 
   patchForm(doc: LegalDocument) {
@@ -337,12 +336,7 @@ export class LegalDocumentModalComponent implements OnInit, OnChanges {
       return;
     }
 
-    this.isSubmitting = true;
-    // Simulate API delay or just emit immediately
-    // In a real app, the parent handles the API call and sets loading state back
-    // For now I will emit and let parent handle it.
-
-    const formValue = this.form.getRawValue(); // use getRawValue to include disabled fields if needed, or value if not
+    const formValue = this.form.getRawValue();
 
     // Prepare DTO
     let dto: CreateSystemDocumentDto | UpdateSystemDocumentDto;

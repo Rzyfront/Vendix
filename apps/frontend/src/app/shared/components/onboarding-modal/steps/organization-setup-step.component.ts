@@ -21,38 +21,79 @@ import { IconComponent } from '../../index';
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
-      .organization-step {
-        padding: 0;
-        background: transparent;
+      /* ============================================
+         MOBILE-FIRST ORGANIZATION SETUP STEP
+         Inspired by modern mobile onboarding patterns
+         ============================================ */
+
+      :host {
+        display: block;
+        height: 100%;
       }
 
-      .organization-container {
-        max-width: 100%;
-        margin: 0;
-        padding: 0;
+      .organization-step {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        max-height: 70vh;
+        overflow: hidden;
       }
+
+      /* Scrollable content area */
+      .organization-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0 0.5rem;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      /* Custom scrollbar for webkit browsers */
+      .organization-content::-webkit-scrollbar {
+        width: 4px;
+      }
+
+      .organization-content::-webkit-scrollbar-thumb {
+        background: var(--color-border);
+        border-radius: 10px;
+      }
+
+      /* ============================================
+         HEADER SECTION
+         ============================================ */
 
       .organization-header {
         text-align: center;
-        margin-bottom: 1rem;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
+        padding: 0.75rem 0;
       }
 
       .org-icon-wrapper {
-        margin-bottom: 0.75rem;
+        margin-bottom: 0.5rem;
       }
 
       .org-icon-bg {
-        width: 56px;
-        height: 56px;
+        width: 48px;
+        height: 48px;
         background: linear-gradient(135deg, var(--color-success) 0%, #16a34a 100%);
         border-radius: 50%;
-        display: flex;
+        display: inline-flex;
         align-items: center;
         justify-content: center;
         box-shadow: var(--shadow-md);
+        animation: orgPop 0.6s ease-out;
+      }
+
+      @keyframes orgPop {
+        0% {
+          transform: scale(0);
+          opacity: 0;
+        }
+        50% {
+          transform: scale(1.1);
+        }
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
       }
 
       .org-icon {
@@ -60,64 +101,71 @@ import { IconComponent } from '../../index';
       }
 
       .org-title {
-        font-size: var(--fs-xl);
-        font-weight: var(--fw-bold);
+        font-size: 1.25rem;
+        font-weight: 700;
         color: var(--color-text-primary);
-        margin-bottom: 0.25rem;
+        margin: 0 0 0.25rem 0;
       }
 
       .org-subtitle {
-        color: var(--color-text-secondary);
-        font-size: var(--fs-sm);
+        font-size: 0.75rem;
+        color: var(--color-text-muted);
         line-height: 1.5;
+        margin: 0;
+        padding: 0 0.5rem;
       }
 
+      /* ============================================
+         PREFILLED BADGE
+         ============================================ */
+
       .prefilled-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.375rem;
+        display: flex;
+        align-items: flex-start;
+        gap: 0.5rem;
         background: var(--color-warning-light);
         border: 1px solid rgba(251, 146, 60, 0.3);
-        border-radius: var(--radius-md);
-        padding: 0.5rem 0.75rem;
-        margin-bottom: 1rem;
+        border-radius: 0.75rem;
+        padding: 0.625rem 0.75rem;
+        margin: 0.75rem 0;
       }
 
       .prefilled-icon {
         color: var(--color-warning);
+        flex-shrink: 0;
+        margin-top: 1px;
       }
 
       .prefilled-text {
         color: var(--color-warning);
-        font-size: var(--fs-xs);
-        font-weight: var(--fw-medium);
+        font-size: 0.6875rem;
+        font-weight: 500;
+        line-height: 1.4;
       }
 
+      /* ============================================
+         FORM SECTIONS
+         ============================================ */
+
       .organization-form {
-        background: transparent;
-        padding: 0;
-        border: none;
-        box-shadow: none;
+        display: flex;
+        flex-direction: column;
+        gap: 0.875rem;
       }
 
       .form-section {
-        margin-bottom: 1.25rem;
         background: var(--color-surface);
-        padding: 1rem;
-        border-radius: var(--radius-lg);
+        padding: 0.875rem;
+        border-radius: 0.875rem;
         border: 1px solid var(--color-border);
-      }
-
-      .form-section:last-child {
-        margin-bottom: 0;
       }
 
       .section-header {
         display: flex;
         align-items: center;
         gap: 0.5rem;
-        margin-bottom: 1rem;
-        padding-bottom: 0.75rem;
+        margin-bottom: 0.75rem;
+        padding-bottom: 0.625rem;
         border-bottom: 1px solid var(--color-border);
       }
 
@@ -125,10 +173,11 @@ import { IconComponent } from '../../index';
         width: 28px;
         height: 28px;
         background: var(--color-success-light);
-        border-radius: var(--radius-sm);
+        border-radius: 0.375rem;
         display: flex;
         align-items: center;
         justify-content: center;
+        flex-shrink: 0;
       }
 
       .section-icon-element {
@@ -136,16 +185,20 @@ import { IconComponent } from '../../index';
       }
 
       .section-title {
-        font-size: var(--fs-base);
-        font-weight: var(--fw-semibold);
+        font-size: 0.875rem;
+        font-weight: 600;
         color: var(--color-text-primary);
         margin: 0;
       }
 
+      /* ============================================
+         FORM GRID - MOBILE FIRST
+         ============================================ */
+
       .form-grid {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
       }
 
       .form-field {
@@ -156,133 +209,221 @@ import { IconComponent } from '../../index';
       .field-label {
         display: flex;
         align-items: center;
-        gap: 0.375rem;
-        font-size: var(--fs-xs);
-        font-weight: var(--fw-medium);
+        gap: 0.25rem;
+        font-size: 0.6875rem;
+        font-weight: 500;
         color: var(--color-text-secondary);
         margin-bottom: 0.375rem;
       }
 
       .field-required {
         color: var(--color-error);
-        font-size: var(--fs-xs);
-        font-weight: var(--fw-bold);
+        font-size: 0.6875rem;
+        font-weight: 700;
       }
 
       .field-optional {
         color: var(--color-text-muted);
-        font-size: var(--fs-xs);
+        font-size: 0.625rem;
         font-style: italic;
       }
 
+      /* Input fields with compact sizing */
       .field-input {
-        padding: 0.5rem 0.625rem;
+        height: 40px;
+        min-height: 40px;
+        padding: 0.625rem 0.75rem;
         border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
+        border-radius: 0.75rem;
         font-size: var(--fs-sm);
-        transition: all var(--transition-fast) ease;
+        transition: all 0.2s ease;
         background: var(--color-surface);
         color: var(--color-text-primary);
-        height: 2.25rem;
         width: 100%;
       }
 
       .field-input:focus {
         outline: none;
         border-color: var(--color-success);
-        box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.15);
+        box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15);
       }
 
       .field-input::placeholder {
         color: var(--color-text-muted);
+        font-size: 0.8125rem;
       }
 
+      /* Textarea with compact sizing */
       .field-textarea {
-        padding: 0.5rem 0.625rem;
+        min-height: 72px;
+        padding: 0.625rem 0.75rem;
         border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
+        border-radius: 0.75rem;
         font-size: var(--fs-sm);
-        transition: all var(--transition-fast) ease;
+        transition: all 0.2s ease;
         background: var(--color-surface);
         color: var(--color-text-primary);
         resize: vertical;
-        min-height: 80px;
         font-family: inherit;
         line-height: 1.5;
+        width: 100%;
       }
 
       .field-textarea:focus {
         outline: none;
         border-color: var(--color-success);
-        box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.15);
+        box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15);
       }
 
       .field-textarea::placeholder {
         color: var(--color-text-muted);
+        font-size: 0.8125rem;
       }
 
       .field-hint {
         display: flex;
         align-items: center;
         gap: 0.25rem;
-        margin-top: 0.25rem;
+        margin-top: 0.375rem;
       }
 
       .hint-icon {
         color: var(--color-text-muted);
+        flex-shrink: 0;
       }
 
       .hint-text {
         color: var(--color-text-muted);
-        font-size: var(--fs-xs);
-        line-height: 1.3;
+        font-size: 0.625rem;
+        line-height: 1.4;
       }
 
-      @media (max-width: 1024px) {
+      /* ============================================
+         DESKTOP RESPONSIVE ADJUSTMENTS
+         ============================================ */
+
+      @media (min-width: 768px) {
+        .organization-step {
+          max-height: none;
+        }
+
+        .organization-content {
+          padding: 0 1rem;
+        }
+
+        .organization-header {
+          padding: 1rem 0;
+        }
+
+        .org-icon-bg {
+          width: 56px;
+          height: 56px;
+        }
+
+        .org-title {
+          font-size: 1.5rem;
+        }
+
+        .org-subtitle {
+          font-size: 0.875rem;
+          max-width: 400px;
+          margin: 0 auto;
+          padding: 0;
+        }
+
+        .prefilled-badge {
+          max-width: 500px;
+          margin: 1rem auto;
+          padding: 0.75rem 1rem;
+        }
+
+        .prefilled-text {
+          font-size: 0.75rem;
+        }
+
+        .organization-form {
+          max-width: 600px;
+          margin: 0 auto;
+          gap: 1rem;
+        }
+
+        .form-section {
+          padding: 1rem 1.25rem;
+        }
+
+        .section-header {
+          margin-bottom: 1rem;
+          padding-bottom: 0.75rem;
+        }
+
+        .section-title {
+          font-size: 1rem;
+        }
+
+        /* Grid layout for desktop */
         .form-grid {
+          display: grid;
           grid-template-columns: repeat(2, 1fr);
+          gap: 1rem;
         }
-      }
 
-      @media (max-width: 640px) {
-        .form-grid {
-          grid-template-columns: 1fr;
+        .field-label {
+          font-size: 0.75rem;
         }
+
+        .field-optional {
+          font-size: 0.6875rem;
+        }
+
+        .field-input {
+          height: 40px;
+          min-height: 40px;
+          padding: 0.5rem 0.75rem;
+          font-size: var(--fs-sm);
+        }
+
+        .field-textarea {
+          min-height: 72px;
+          padding: 0.5rem 0.75rem;
+        }
+
+        .hint-text {
+          font-size: 0.6875rem;
+        }
+
       }
     `,
   ],
   template: `
-    <div class="step-content organization-step">
-      <div class="organization-container">
+    <div class="organization-step">
+      <!-- Scrollable Content -->
+      <div class="organization-content">
         <!-- Header -->
         <div class="organization-header">
           <div class="org-icon-wrapper">
             <div class="org-icon-bg">
-              <app-icon name="building" size="48" class="org-icon"></app-icon>
+              <app-icon name="building" size="28" class="org-icon"></app-icon>
             </div>
           </div>
-          <div class="org-header-content">
-            <h2 class="org-title">Configura tu organización</h2>
-            <p class="org-subtitle">
-              Cuéntanos sobre tu empresa para personalizar tu experiencia
-            </p>
-          </div>
+          <h2 class="org-title">Configura tu organización</h2>
+          <p class="org-subtitle">
+            Cuéntanos sobre tu empresa para personalizar tu experiencia
+          </p>
         </div>
 
         <!-- Pre-filled Badge -->
         <div class="prefilled-badge" *ngIf="isAutoGenerated">
           <app-icon name="sparkles" size="16" class="prefilled-icon"></app-icon>
-          <span class="prefilled-text"
-            >Organización autogenerada desde "{{ storeName }}". Puedes editarla
-            si lo deseas.</span
-          >
+          <span class="prefilled-text">
+            Organización autogenerada desde "{{ storeName }}". Puedes editarla si lo deseas.
+          </span>
         </div>
 
         <div class="prefilled-badge" *ngIf="!isAutoGenerated">
           <app-icon name="info" size="16" class="prefilled-icon"></app-icon>
-          <span class="prefilled-text"
-            >Algunos campos están precargados con tu información</span
-          >
+          <span class="prefilled-text">
+            Algunos campos están precargados con tu información
+          </span>
         </div>
 
         <!-- Organization Form -->
@@ -293,7 +434,7 @@ import { IconComponent } from '../../index';
               <div class="section-icon">
                 <app-icon
                   name="building-2"
-                  size="20"
+                  size="18"
                   class="section-icon-element"
                 ></app-icon>
               </div>
@@ -361,7 +502,7 @@ import { IconComponent } from '../../index';
               <div class="section-icon">
                 <app-icon
                   name="file-text"
-                  size="20"
+                  size="18"
                   class="section-icon-element"
                 ></app-icon>
               </div>
@@ -403,7 +544,7 @@ import { IconComponent } from '../../index';
               <div class="section-icon">
                 <app-icon
                   name="align-left"
-                  size="20"
+                  size="18"
                   class="section-icon-element"
                 ></app-icon>
               </div>
@@ -419,13 +560,13 @@ import { IconComponent } from '../../index';
                 class="field-textarea"
                 formControlName="description"
                 placeholder="Describe brevemente qué hace tu empresa, tus productos o servicios..."
-                rows="4"
+                rows="3"
               ></textarea>
               <div class="field-hint">
-                <app-icon name="info" size="14" class="hint-icon"></app-icon>
-                <span class="hint-text"
-                  >Esto nos ayudará a personalizar mejor tu experiencia</span
-                >
+                <app-icon name="info" size="12" class="hint-icon"></app-icon>
+                <span class="hint-text">
+                  Esto nos ayudará a personalizar mejor tu experiencia
+                </span>
               </div>
             </div>
           </div>

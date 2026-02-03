@@ -328,14 +328,47 @@ getGrowthText(rate?: number): string {
 }
 ```
 
+## Common Implementation Mistakes ⚠️
+
+**NEVER use these classes for stats containers:**
+
+| ❌ Incorrect Class | ✅ Correct Class |
+|-------------------|-----------------|
+| `grid grid-cols-4 gap-2 md:gap-4 lg:gap-6` | `stats-container` |
+| `grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4` | `stats-container` |
+| `grid grid-cols-2 md:grid-cols-4 gap-4` | `stats-container` |
+| `flex flex-wrap gap-4` | `stats-container` |
+
+### Why These Are Wrong
+
+1. **No mobile scroll**: Raw grid classes don't provide horizontal scroll on mobile
+2. **Cards get compressed**: On narrow screens, 4 cards in a grid become unreadable
+3. **Inconsistent UX**: Different modules will behave differently
+4. **No snap scrolling**: Users can't easily scroll to specific cards
+
+### Quick Fix Pattern
+
+```html
+<!-- BEFORE (wrong) -->
+<div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
+  <app-stats ...></app-stats>
+</div>
+
+<!-- AFTER (correct) -->
+<div class="stats-container">
+  <app-stats ...></app-stats>
+</div>
+```
+
 ## Checklist
 
-- [ ] Use `stats-container` class on parent div
+- [ ] Use `stats-container` class on parent div (NOT grid classes)
 - [ ] Maximum 4 stats cards per row (standard)
 - [ ] Use consistent color palette (see table above)
 - [ ] Include `smallText` for growth/comparison metrics
 - [ ] Format large numbers with K/M suffixes
 - [ ] Test horizontal scroll on mobile viewport
+- [ ] Verify cards are swipeable with snap behavior on mobile
 
 ## Resources
 

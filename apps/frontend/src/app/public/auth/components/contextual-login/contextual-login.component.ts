@@ -55,59 +55,62 @@ export interface LoginError {
   ],
   template: `
     <div
-      class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8"
-      [class]="'bg-[var(--color-background)]'"
+      class="min-h-screen flex flex-col justify-center px-4 py-6 sm:px-6 sm:py-12 lg:px-8 bg-[var(--color-background)]"
     >
-      <div class="max-w-sm w-full space-y-8">
+      <div class="w-full max-w-sm mx-auto space-y-6 sm:space-y-8">
         <!-- Contextual Branding -->
-        <div class="text-center my-3">
-          <div class="mx-auto flex items-center justify-center space-x-3 mb-4">
+        <div class="text-center">
+          <div class="mx-auto flex items-center justify-center space-x-2 sm:space-x-3 mb-3 sm:mb-4">
             <div
-              class="w-10 h-10 bg-[var(--color-primary)] rounded-xl flex items-center justify-center"
+              class="w-8 h-8 sm:w-10 sm:h-10 bg-[var(--color-primary)] rounded-xl flex items-center justify-center"
             >
-              <app-icon name="cart" [size]="24" color="white"></app-icon>
+              <app-icon name="cart" [size]="20" class="sm:hidden" color="white"></app-icon>
+              <app-icon name="cart" [size]="24" class="hidden sm:block" color="white"></app-icon>
             </div>
-            <h1 class="text-xl font-semibold text-[var(--color-text-primary)]">
+            <h1 class="text-lg sm:text-xl font-semibold text-[var(--color-text-primary)]">
               {{ displayName || 'Vendix' }}
             </h1>
           </div>
 
           <h2
-            class="mt-6 text-2xl font-extrabold text-[var(--color-text-primary)]"
+            class="mt-4 sm:mt-6 text-xl sm:text-2xl font-extrabold text-[var(--color-text-primary)]"
           >
             {{ loginTitle }}
           </h2>
           @if (displayName) {
-            <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
+            <p class="mt-1 sm:mt-2 mb-2 text-sm text-[var(--color-text-secondary)]">
               {{ contextDescription }}
             </p>
           }
           @if (!displayName) {
-            <p class="mt-1 text-sm text-[var(--color-text-muted)]">
+            <p class="mt-1 mb-2 text-sm text-[var(--color-text-muted)]">
               {{ defaultDescription }}
             </p>
           }
         </div>
 
         <!-- Login Form -->
-        <app-card shadow="md" class="mt-20" [animateOnLoad]="true">
+        <app-card shadow="md" class="!mt-6 sm:!mt-8" [animateOnLoad]="true" [responsivePadding]="true" overflow="visible">
           <form
             [formGroup]="loginForm"
             (ngSubmit)="onSubmit()"
-            class="space-y-8"
+            class="space-y-4 sm:space-y-6"
           >
             <div>
               <!-- Vlink Field (only for Vendix context) -->
               @if (contextType === 'vendix') {
-                <app-input
-                  label="Vlink"
-                  formControlName="vlink"
-                  [control]="loginForm.get('vlink')"
-                  type="text"
-                  size="md"
-                  placeholder="mi-organizacion"
-                >
-                </app-input>
+                <div class="vlink-field" [class.show-tooltip]="showVlinkTooltip">
+                  <app-input
+                    label="V-link"
+                    formControlName="vlink"
+                    [control]="loginForm.get('vlink')"
+                    type="text"
+                    size="md"
+                    placeholder="mi-organizacion"
+                    tooltipText="Identificador único enviado a tu e-mail o usa tu dominio asignado."
+                  >
+                  </app-input>
+                </div>
               }
 
               <!-- Email Field -->
@@ -183,54 +186,118 @@ export interface LoginError {
 
             <!-- Actions -->
             <div class="flex justify-center mt-4">
-              <div class="text-sm">
-                <a
-                  (click)="navigateToForgotPassword()"
-                  class="font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)] cursor-pointer"
-                >
-                  ¿Olvidaste tu contraseña?
-                </a>
-              </div>
+              <a
+                (click)="navigateToForgotPassword()"
+                class="inline-block py-2 px-1 text-sm font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)] cursor-pointer active:opacity-70 transition-opacity"
+              >
+                ¿Olvidaste tu contraseña?
+              </a>
             </div>
           </form>
         </app-card>
 
         <!-- Back to Landing -->
-        <div class="text-center mt-6">
+        <div class="text-center mt-3 sm:mt-4">
           <a
             routerLink="/"
-            class="font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-primary)]"
+            class="inline-block py-1.5 px-1 text-sm font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] active:opacity-70 transition-opacity"
           >
             ← Volver al inicio
           </a>
         </div>
 
         <!-- Additional Links -->
-        <div class="text-center text-sm text-[var(--color-text-secondary)]">
-          @if (contextType === 'vendix') {
+        @if (contextType === 'vendix') {
+          <div class="text-center text-sm text-[var(--color-text-secondary)] mt-1">
             <p>
               ¿Necesitas una cuenta corporativa?
               <a
                 routerLink="/auth/register"
-                class="font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)]"
+                class="font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)] active:opacity-70 transition-opacity"
               >
                 Solicitar acceso
               </a>
             </p>
-          }
-        </div>
+          </div>
+        }
 
         <!-- Context Info -->
         @if (displayName) {
-          <div class="text-center text-xs text-[var(--color-text-muted)] mt-4">
+          <div class="text-center text-xs text-[var(--color-text-muted)] mt-2 sm:mt-3">
             <p>{{ contextFooter }}</p>
-            <p>Powered by Vendix</p>
+            <p class="mt-0.5">Powered by Vendix</p>
           </div>
         }
       </div>
     </div>
   `,
-  styleUrls: [],
+  styles: [
+    `
+      /* Common styles for right-aligned tooltip (Hover and Auto-show) */
+      .vlink-field ::ng-deep .help-icon[data-tooltip]:hover::after,
+      .vlink-field.show-tooltip ::ng-deep .help-icon[data-tooltip]::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        left: 100%;
+        top: 50%;
+        bottom: auto;
+        right: auto;
+        transform: translateY(-50%);
+        padding: 0.5rem 0.75rem;
+        background: var(--color-text-primary);
+        color: var(--color-surface);
+        font-size: 0.75rem;
+        border-radius: 0.375rem;
+        white-space: normal;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        z-index: 100;
+        margin-left: 0.5rem;
+        margin-bottom: 0;
+        pointer-events: none;
+        max-width: 260px;
+        width: max-content;
+        text-align: left;
+        line-height: 1.4;
+        opacity: 1;
+        visibility: visible;
+        animation: tooltipFadeInRight 0.3s ease-out;
+      }
+
+      .vlink-field ::ng-deep .help-icon[data-tooltip]:hover::before,
+      .vlink-field.show-tooltip ::ng-deep .help-icon[data-tooltip]::before {
+        content: '';
+        position: absolute;
+        left: 100%;
+        top: 50%;
+        bottom: auto;
+        right: auto;
+        transform: translateY(-50%);
+        width: 0;
+        height: 0;
+        border-top: 5px solid transparent;
+        border-bottom: 5px solid transparent;
+        border-right: 5px solid var(--color-text-primary);
+        border-left: 0;
+        margin-left: 0.15rem;
+        z-index: 101;
+        opacity: 1;
+        visibility: visible;
+        pointer-events: none;
+        animation: tooltipFadeInRight 0.3s ease-out;
+      }
+
+      @keyframes tooltipFadeInRight {
+        from {
+          opacity: 0;
+          transform: translateY(-50%) translateX(-4px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(-50%) translateX(0);
+        }
+      }
+    `,
+  ],
 })
 export class ContextualLoginComponent implements OnInit, OnDestroy {
   loginForm: FormGroup;
@@ -240,6 +307,7 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
   contextType: 'vendix' | 'organization' | 'store' = 'vendix';
   displayName: string = '';
   logoUrl: string = '';
+  showVlinkTooltip = true;
 
   private destroy$ = new Subject<void>();
   private toast = inject(ToastService);
@@ -260,6 +328,11 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.loadAuthContext();
     this.verifyAllowedContext();
+
+    // Auto-hide V-link tooltip after 3 seconds
+    setTimeout(() => {
+      this.showVlinkTooltip = false;
+    }, 3000);
 
     this.authFacade.loading$
       .pipe(takeUntil(this.destroy$))

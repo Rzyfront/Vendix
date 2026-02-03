@@ -9,7 +9,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
-import { StoreSettings, EcommerceSettings, EcommerceBrandingSettings } from '../settings/interfaces/store-settings.interface';
+import { StoreSettings, EcommerceSettings } from '../settings/interfaces/store-settings.interface';
 
 @Injectable()
 export class EcommerceService {
@@ -52,21 +52,6 @@ export class EcommerceService {
     // 3. Create a copy to avoid mutating the original
     const config = JSON.parse(JSON.stringify(ecommerceConfig));
 
-    // 3.1. Migration: If no branding exists but inicio.colores does, create branding from legacy data
-    if (!config.branding && config.inicio?.colores) {
-      config.branding = {
-        primary_color: config.inicio.colores.primary_color,
-        secondary_color: config.inicio.colores.secondary_color,
-        accent_color: config.inicio.colores.accent_color,
-        // Defaults for missing fields
-        background_color: '#F4F4F4',
-        surface_color: '#FFFFFF',
-        text_color: '#222222',
-        text_secondary_color: '#666666',
-        text_muted_color: '#999999',
-      } as EcommerceBrandingSettings;
-    }
-
     // 4. Sign S3 URLs for slider photos
     if (config.slider?.photos) {
       for (const photo of config.slider.photos) {
@@ -79,14 +64,6 @@ export class EcommerceService {
     // 5. Sign logo_url in inicio section
     if (config.inicio?.logo_url && !config.inicio.logo_url.startsWith('http')) {
       config.inicio.logo_url = await this.s3Service.signUrl(config.inicio.logo_url);
-    }
-
-    // 5.1. Sign branding images
-    if (config.branding?.logo_url && !config.branding.logo_url.startsWith('http')) {
-      config.branding.logo_url = await this.s3Service.signUrl(config.branding.logo_url);
-    }
-    if (config.branding?.favicon_url && !config.branding.favicon_url.startsWith('http')) {
-      config.branding.favicon_url = await this.s3Service.signUrl(config.branding.favicon_url);
     }
 
     // 6. Build ecommerce URL from domain hostname
@@ -170,6 +147,8 @@ export class EcommerceService {
         ...existingEcommerce.inicio,
         ...processedDto.inicio,
       },
+      // Preserve footer from DTO or existing, ensuring it's properly merged
+      footer: processedDto.footer ?? existingEcommerce.footer,
     } as EcommerceSettings;
 
     // 3. Sanitize URLs to S3 keys before storage
@@ -190,45 +169,11 @@ export class EcommerceService {
       mergedEcommerce.inicio.logo_url = extractS3KeyFromUrl(mergedEcommerce.inicio.logo_url) ?? undefined;
     }
 
-    // 4. Handle ecommerce-specific branding (NO sync to store branding)
-    if (processedDto.branding) {
-      // Merge with existing ecommerce branding
-      const newBranding: EcommerceBrandingSettings = {
-        ...mergedEcommerce.branding,
-        ...processedDto.branding,
-      };
-
-      // Sanitize S3 URLs in ecommerce branding
-      if (newBranding.logo_url) {
-        newBranding.logo_url = extractS3KeyFromUrl(newBranding.logo_url) ?? undefined;
-      }
-      if (newBranding.favicon_url) {
-        newBranding.favicon_url = extractS3KeyFromUrl(newBranding.favicon_url) ?? undefined;
-      }
-
-      mergedEcommerce.branding = newBranding;
-    }
-
-    // 4.1. Migration: If branding doesn't exist but inicio.colores does, initialize from legacy
-    if (!mergedEcommerce.branding && mergedEcommerce.inicio?.colores) {
-      mergedEcommerce.branding = {
-        primary_color: mergedEcommerce.inicio.colores.primary_color,
-        secondary_color: mergedEcommerce.inicio.colores.secondary_color,
-        accent_color: mergedEcommerce.inicio.colores.accent_color,
-        background_color: '#F4F4F4',
-        surface_color: '#FFFFFF',
-        text_color: '#222222',
-        text_secondary_color: '#666666',
-        text_muted_color: '#999999',
-      };
-    }
-
-    // 5. Check if logo changed for favicon generation
+    // 4. Check if logo changed for favicon generation
     const logoChanged = mergedEcommerce.inicio?.logo_url &&
       mergedEcommerce.inicio.logo_url !== existingEcommerce.inicio?.logo_url;
 
-    // 6. Save to store_settings.settings.ecommerce (single source of truth)
-    // NOTE: We NO LONGER sync ecommerce colors to store branding - they are independent
+    // 5. Save to store_settings.settings.ecommerce (single source of truth)
     const updatedSettings = {
       ...currentSettings,
       // Keep store branding unchanged (no sync from ecommerce)
@@ -247,7 +192,7 @@ export class EcommerceService {
       },
     });
 
-    // 7. Sync store name and organization name if titulo changed
+    // 6. Sync store name and organization name if titulo changed
     if (mergedEcommerce.inicio?.titulo) {
       try {
         const store = await this.prisma.stores.findUnique({
@@ -271,7 +216,7 @@ export class EcommerceService {
       }
     }
 
-    // 8. Ensure ecommerce domain exists (for hostname only, no config duplication)
+    // 7. Ensure ecommerce domain exists (for hostname only, no config duplication)
     let domain = await this.prisma.domain_settings.findFirst({
       where: { store_id, domain_type: 'ecommerce' },
     });
@@ -286,7 +231,7 @@ export class EcommerceService {
       });
     }
 
-    // 9. Generate favicon if logo changed
+    // 8. Generate favicon if logo changed
     if (logoChanged && mergedEcommerce.inicio?.logo_url) {
       this.generateFaviconForEcommerce(mergedEcommerce.inicio.logo_url).catch((error) =>
         this.logger.warn(`Favicon generation failed: ${error.message}`),
