@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, of } from 'rxjs';
+import { Observable, catchError, throwError, map } from 'rxjs';
+import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import {
     Customer,
@@ -20,23 +21,52 @@ export interface PaginatedResponse<T> {
     };
 }
 
+// Caché estático global (persiste entre instancias del servicio)
+interface CacheEntry<T> {
+  observable: T;
+  lastFetch: number;
+}
+
+const storeCustomersStatsCache = new Map<number, CacheEntry<Observable<CustomerStats>>>();
+
 @Injectable({
     providedIn: 'root',
 })
 export class CustomersService {
     private apiUrl = `${environment.apiUrl}/store/customers`;
+    private readonly CACHE_TTL = 30000; // 30 segundos
 
     constructor(private http: HttpClient) { }
 
-    getStats(): Observable<CustomerStats> {
-        // Mock implementation until endpoint exists
-        return of({
-            total_customers: 1250,
-            active_customers: 980,
-            new_customers_this_month: 45,
-            total_revenue: 154000,
+    getStats(storeId: number): Observable<CustomerStats> {
+        const now = Date.now();
+        const cached = storeCustomersStatsCache.get(storeId);
+
+        if (cached && (now - cached.lastFetch) < this.CACHE_TTL) {
+            return cached.observable;
+        }
+
+        const observable$ = this.http.get<any>(`${this.apiUrl}/stats/store/${storeId}`).pipe(
+            shareReplay({ bufferSize: 1, refCount: false }),
+            map((response: any) => response.data || response),
+            tap(() => {
+                const entry = storeCustomersStatsCache.get(storeId);
+                if (entry) {
+                    entry.lastFetch = Date.now();
+                }
+            }),
+            catchError((error) => {
+                console.error('Error fetching customer stats:', error);
+                return throwError(() => new Error('Failed to fetch customer stats'));
+            }),
+        );
+
+        storeCustomersStatsCache.set(storeId, {
+            observable: observable$,
+            lastFetch: now,
         });
-        // return this.http.get<CustomerStats>(`${this.apiUrl}/stats`);
+
+        return observable$;
     }
 
     getCustomers(
@@ -74,5 +104,18 @@ export class CustomersService {
 
     deleteCustomer(id: number): Observable<void> {
         return this.http.delete<void>(`${this.apiUrl}/${id}`);
+    }
+
+    /**
+     * Invalida el caché de estadísticas
+     * Útil después de crear/editar/eliminar clientes
+     * @param storeId - ID de la tienda. Si no se proporciona, se limpia todo el caché
+     */
+    invalidateCache(storeId?: number): void {
+        if (storeId) {
+            storeCustomersStatsCache.delete(storeId);
+        } else {
+            storeCustomersStatsCache.clear();
+        }
     }
 }

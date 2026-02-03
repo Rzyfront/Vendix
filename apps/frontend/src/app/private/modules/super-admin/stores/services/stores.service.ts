@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { BehaviorSubject, Observable, finalize } from 'rxjs';
+import { BehaviorSubject, Observable, finalize, tap, shareReplay } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 
 import {
@@ -34,12 +34,21 @@ export interface PaginatedResponse<T> {
   };
 }
 
+// Caché estático global (persiste entre instancias del servicio)
+interface CacheEntry<T> {
+  observable: T;
+  lastFetch: number;
+}
+
+let storesStatsCache: CacheEntry<Observable<any>> | null = null;
+
 @Injectable({
   providedIn: 'root',
 })
 export class StoresService {
   private readonly apiUrl = environment.apiUrl;
   private readonly http = inject(HttpClient);
+  private readonly CACHE_TTL = 30000; // 30 segundos
 
   // States
   private isLoading$$ = new BehaviorSubject<boolean>(false);
@@ -169,9 +178,29 @@ export class StoresService {
       recentStores: any[];
     }>
   > {
-    return this.http.get<ApiResponse<any>>(
+    const now = Date.now();
+
+    if (storesStatsCache && (now - storesStatsCache.lastFetch) < this.CACHE_TTL) {
+      return storesStatsCache.observable;
+    }
+
+    const observable$ = this.http.get<ApiResponse<any>>(
       `${this.apiUrl}/superadmin/stores/dashboard`,
+    ).pipe(
+      tap(() => {
+        if (storesStatsCache) {
+          storesStatsCache.lastFetch = Date.now();
+        }
+      }),
+      shareReplay({ bufferSize: 1, refCount: false }),
     );
+
+    storesStatsCache = {
+      observable: observable$,
+      lastFetch: now,
+    };
+
+    return observable$;
   }
 
   /**
@@ -283,5 +312,13 @@ export class StoresService {
       `${this.apiUrl}/superadmin/stores/${id}/archive`,
       {},
     );
+  }
+
+  /**
+   * Invalida el caché de estadísticas
+   * Útil después de crear/editar/eliminar tiendas
+   */
+  invalidateCache(): void {
+    storesStatsCache = null;
   }
 }

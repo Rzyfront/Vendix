@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { throwError } from 'rxjs';
+import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
 import {
@@ -18,11 +19,20 @@ import {
   UpdatePaymentStatusDto,
 } from '../interfaces/order.interface';
 
+// Caché estático global (persiste entre instancias del servicio)
+interface CacheEntry<T> {
+  observable: T;
+  lastFetch: number;
+}
+
+let storeOrdersStatsCache: CacheEntry<Observable<OrderStats>> | null = null;
+
 @Injectable({
   providedIn: 'root',
 })
 export class StoreOrdersService {
   private readonly apiUrl = environment.apiUrl;
+  private readonly CACHE_TTL = 30000; // 30 segundos
 
   constructor(
     private http: HttpClient,
@@ -167,14 +177,32 @@ export class StoreOrdersService {
   }
 
   getOrderStats(): Observable<OrderStats> {
-    const url = `${this.apiUrl}/store/orders/stats`;
+    const now = Date.now();
 
-    return this.http.get<OrderStats>(url).pipe(
+    if (storeOrdersStatsCache && (now - storeOrdersStatsCache.lastFetch) < this.CACHE_TTL) {
+      return storeOrdersStatsCache.observable;
+    }
+
+    const url = `${this.apiUrl}/store/orders/stats`;
+    const observable$ = this.http.get<OrderStats>(url).pipe(
+      shareReplay({ bufferSize: 1, refCount: false }),
+      tap(() => {
+        if (storeOrdersStatsCache) {
+          storeOrdersStatsCache.lastFetch = Date.now();
+        }
+      }),
       catchError((error) => {
         console.error('Error fetching order stats:', error);
         return throwError(() => new Error('Failed to fetch order stats'));
       }),
     );
+
+    storeOrdersStatsCache = {
+      observable: observable$,
+      lastFetch: now,
+    };
+
+    return observable$;
   }
 
   getOrderById(orderId: string): Observable<Order> {
@@ -318,5 +346,13 @@ export class StoreOrdersService {
       return error;
     }
     return 'Unknown error occurred';
+  }
+
+  /**
+   * Invalida el caché de estadísticas
+   * Útil después de crear/editar/eliminar órdenes
+   */
+  invalidateCache(): void {
+    storeOrdersStatsCache = null;
   }
 }

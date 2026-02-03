@@ -272,12 +272,13 @@ export class OrganizationsService {
       totalOrganizations,
       activeOrganizations,
       inactiveOrganizations,
+      suspendedOrganizations,
       recentOrganizations,
-      organizationsByStatus,
     ] = await Promise.all([
       this.prisma.organizations.count(),
       this.prisma.organizations.count({ where: { state: 'active' } }),
       this.prisma.organizations.count({ where: { state: 'inactive' } }),
+      this.prisma.organizations.count({ where: { state: 'suspended' } }),
       this.prisma.organizations.findMany({
         take: 5,
         orderBy: { created_at: 'desc' },
@@ -294,24 +295,19 @@ export class OrganizationsService {
           },
         },
       }),
-      this.prisma.organizations.groupBy({
-        by: ['state'],
-        _count: true,
-      }),
     ]);
 
     return {
       totalOrganizations,
       activeOrganizations,
       inactiveOrganizations,
+      suspendedOrganizations,
       recentOrganizations,
-      organizationsByStatus: organizationsByStatus.reduce(
-        (acc: Record<string, number>, item: any) => {
-          acc[item.state] = item._count;
-          return acc;
-        },
-        {} as Record<string, number>,
-      ),
+      organizationsByStatus: {
+        active: activeOrganizations,
+        inactive: inactiveOrganizations,
+        suspended: suspendedOrganizations,
+      },
     };
   }
 

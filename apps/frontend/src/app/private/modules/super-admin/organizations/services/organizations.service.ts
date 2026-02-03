@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 
 import { Organization } from '../../../../../core/models/organization.model';
@@ -68,11 +69,20 @@ export interface PaginatedResponse<T> {
   };
 }
 
+// Caché estático global (persiste entre instancias del servicio)
+interface CacheEntry<T> {
+  observable: T;
+  lastFetch: number;
+}
+
+let organizationsStatsCache: CacheEntry<Observable<any>> | null = null;
+
 @Injectable({
   providedIn: 'root',
 })
 export class OrganizationsService {
   private readonly apiUrl = environment.apiUrl;
+  private readonly CACHE_TTL = 30000; // 30 segundos
 
   constructor(private http: HttpClient) {}
 
@@ -181,8 +191,37 @@ export class OrganizationsService {
       recentOrganizations: any[];
     }>
   > {
-    return this.http.get<ApiResponse<any>>(
+    const now = Date.now();
+
+    if (organizationsStatsCache && (now - organizationsStatsCache.lastFetch) < this.CACHE_TTL) {
+      return organizationsStatsCache.observable;
+    }
+
+    const observable$ = this.http.get<ApiResponse<any>>(
       `${this.apiUrl}/superadmin/organizations/dashboard`,
+    ).pipe(
+      tap(() => {
+        if (organizationsStatsCache) {
+          organizationsStatsCache.lastFetch = Date.now();
+        }
+      }),
+      shareReplay({ bufferSize: 1, refCount: false }),
     );
+
+    // Guardar en caché estático
+    organizationsStatsCache = {
+      observable: observable$,
+      lastFetch: now,
+    };
+
+    return observable$;
+  }
+
+  /**
+   * Invalida el caché de estadísticas
+   * Útil después de crear/editar/eliminar organizaciones
+   */
+  invalidateCache(): void {
+    organizationsStatsCache = null;
   }
 }

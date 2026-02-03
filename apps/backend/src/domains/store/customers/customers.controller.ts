@@ -18,11 +18,15 @@ import { RolesGuard } from '../../auth/guards/roles.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { ResponseService } from '@common/responses/response.service';
 
 @Controller('store/customers')
 @UseGuards(RolesGuard, PermissionsGuard)
 export class CustomersController {
-    constructor(private readonly customersService: CustomersService) { }
+    constructor(
+        private readonly customersService: CustomersService,
+        private readonly responseService: ResponseService,
+    ) { }
 
     @Post()
     @Permissions('store:customers:create')
@@ -66,5 +70,23 @@ export class CustomersController {
     remove(@Req() req: AuthenticatedRequest, @Param('id', ParseIntPipe) id: number) {
         if (!req.user.store_id) throw new Error('Store context required');
         return this.customersService.remove(req.user.store_id, id);
+    }
+
+    @Get('stats/store/:storeId')
+    @Permissions('store:customers:read')
+    async getCustomerStats(@Param('storeId', ParseIntPipe) storeId: number) {
+        try {
+            const result = await this.customersService.getStats(storeId);
+            return this.responseService.success(
+                result,
+                'Estadísticas de clientes obtenidas exitosamente',
+            );
+        } catch (error) {
+            return this.responseService.error(
+                error.message || 'Error al obtener las estadísticas de clientes',
+                error.response?.message || error.message,
+                error.status || 400,
+            );
+        }
     }
 }

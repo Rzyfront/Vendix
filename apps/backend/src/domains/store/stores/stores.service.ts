@@ -297,6 +297,192 @@ export class StoresService {
     });
   }
 
+  async getDashboardStats(storeId: number) {
+    const now = new Date();
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+
+    // Get current month and last month data for growth calculation
+    const [
+      // Current month metrics
+      currentMonthOrders,
+      currentMonthRevenue,
+      totalProducts,
+      currentMonthCustomers,
+
+      // Last month metrics (for growth calculation)
+      lastMonthOrders,
+      lastMonthRevenue,
+      lastMonthCustomers,
+
+      // Recent orders
+      recentOrders,
+
+      // Sales data for chart (last 7 days)
+      salesData,
+    ] = await Promise.all([
+      // Current month orders
+      this.prisma.orders.count({
+        where: {
+          store_id: storeId,
+          created_at: { gte: currentMonthStart },
+          state: { not: 'cancelled' },
+        },
+      }),
+
+      // Current month revenue (only finished orders)
+      this.prisma.orders.aggregate({
+        where: {
+          store_id: storeId,
+          created_at: { gte: currentMonthStart },
+          state: 'finished',
+        },
+        _sum: { grand_total: true },
+      }),
+
+      // Total products (active)
+      this.prisma.products.count({
+        where: {
+          store_id: storeId,
+          state: 'active',
+        },
+      }),
+
+      // Current month unique customers
+      this.prisma.orders
+        .findMany({
+          where: {
+            store_id: storeId,
+            created_at: { gte: currentMonthStart },
+            state: { not: 'cancelled' },
+          },
+          select: { customer_id: true },
+          distinct: ['customer_id'],
+        })
+        .then((orders) => orders.length),
+
+      // Last month orders (for growth)
+      this.prisma.orders.count({
+        where: {
+          store_id: storeId,
+          created_at: { gte: lastMonthStart, lte: lastMonthEnd },
+          state: { not: 'cancelled' },
+        },
+      }),
+
+      // Last month revenue (for growth, only finished orders)
+      this.prisma.orders.aggregate({
+        where: {
+          store_id: storeId,
+          created_at: { gte: lastMonthStart, lte: lastMonthEnd },
+          state: 'finished',
+        },
+        _sum: { grand_total: true },
+      }),
+
+      // Last month customers (for growth)
+      this.prisma.orders
+        .findMany({
+          where: {
+            store_id: storeId,
+            created_at: { gte: lastMonthStart, lte: lastMonthEnd },
+            state: { not: 'cancelled' },
+          },
+          select: { customer_id: true },
+          distinct: ['customer_id'],
+        })
+        .then((orders) => orders.length),
+
+      // Recent orders (last 5)
+      this.prisma.orders.findMany({
+        where: { store_id: storeId, state: { not: 'cancelled' } },
+        include: {
+          addresses_orders_billing_address_idToaddresses: {
+            select: { city: true, country_code: true },
+          },
+          users: {
+            select: { first_name: true, last_name: true, email: true },
+          },
+        },
+        orderBy: { created_at: 'desc' },
+        take: 5,
+      }),
+
+      // Sales data by day for last 7 days
+      this.prisma.orders.findMany({
+        where: {
+          store_id: storeId,
+          created_at: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+          state: { not: 'cancelled' },
+        },
+        select: {
+          created_at: true,
+          grand_total: true,
+        },
+        orderBy: { created_at: 'asc' },
+      }),
+    ]);
+
+    // Calculate growth percentages
+    const calculateGrowth = (current: number, previous: number): number => {
+      if (previous === 0) return current > 0 ? 100 : 0;
+      return Math.round(((current - previous) / previous) * 100);
+    };
+
+    const monthlyOrders = currentMonthOrders;
+    const monthlyRevenue = Number(currentMonthRevenue._sum.grand_total || 0);
+    const totalCustomers = currentMonthCustomers;
+
+    const lastMonthOrdersValue = lastMonthOrders;
+    const lastMonthRevenueValue = Number(lastMonthRevenue._sum.grand_total || 0);
+    const lastMonthCustomersValue = lastMonthCustomers;
+
+    // Process sales data for chart
+    const salesChart = salesData.reduce(
+      (acc: Record<string, { date: string; orders: number; revenue: number; customers: number }>, order: any) => {
+        const date = order.created_at.toISOString().split('T')[0];
+        if (!acc[date]) {
+          acc[date] = { date, orders: 0, revenue: 0, customers: 0 };
+        }
+        acc[date].orders += 1;
+        acc[date].revenue += Number(order.grand_total || 0);
+        return acc;
+      },
+      {} as Record<string, { date: string; orders: number; revenue: number; customers: number }>,
+    );
+
+    const salesDataArray = Object.values(salesChart);
+
+    // Format recent orders
+    const formattedRecentOrders = recentOrders.map((order) => ({
+      id: String(order.id),
+      customerName: order.users
+        ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim() || 'Cliente'
+        : 'Cliente Anónimo',
+      customerEmail: order.users?.email || '',
+      amount: Number(order.grand_total || 0),
+      status: order.state as 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled',
+      items: 0, // Will need to fetch from order_items if needed
+      timestamp: order.created_at,
+    }));
+
+    return {
+      totalProducts,
+      totalCustomers,
+      monthlyOrders,
+      monthlyRevenue,
+      productsGrowth: 0, // No previous data for products growth
+      customersGrowth: calculateGrowth(totalCustomers, lastMonthCustomersValue),
+      ordersGrowth: calculateGrowth(monthlyOrders, lastMonthOrdersValue),
+      revenueGrowth: calculateGrowth(monthlyRevenue, lastMonthRevenueValue),
+      salesData: salesDataArray,
+      topProducts: [], // Can be populated if needed
+      recentOrders: formattedRecentOrders,
+      customerActivity: [], // Can be populated if needed
+    };
+  }
+
   async getDashboard(id: number, query: StoreDashboardDto) {
     const { start_date, end_date } = query;
 

@@ -161,16 +161,20 @@ export interface DomainTableAction {
 }
 
 export interface DomainStats {
-  total_domains: number;
-  active_domains: number;
-  pending_domains: number;
-  verified_domains: number;
-  customer_domains: number;
-  primary_domains: number;
-  alias_domains: number;
-  vendix_subdomains: number;
-  customer_custom_domains: number;
-  customer_subdomains: number;
+  // Backend response uses camelCase
+  totalDomains: number;
+  activeDomains: number;
+  pendingDomains: number;
+  verifiedDomains: number;
+  customerDomains: number;
+  primaryDomains: number;
+  aliasDomains: number;
+  vendixSubdomains: number;
+  customerCustomDomains: number;
+  customerSubdomains: number;
+  domainsByType?: Record<string, number>;
+  domainsByOwnership?: Record<string, number>;
+  recentDomains?: any[];
 }
 
 export interface PaginatedDomainsResponse {

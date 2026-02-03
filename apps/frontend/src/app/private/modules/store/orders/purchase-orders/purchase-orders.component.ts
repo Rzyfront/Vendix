@@ -142,7 +142,12 @@ export class PurchaseOrdersComponent implements OnInit, OnDestroy {
     ).length;
     this.stats.received = this.orders.filter((o) => o.status === 'received').length;
     this.stats.total_value = this.orders.reduce(
-      (sum, o) => sum + (o.total_amount || 0),
+      (sum, o) => {
+        const amount = typeof o.total_amount === 'string'
+          ? parseFloat(o.total_amount)
+          : (o.total_amount || 0);
+        return sum + amount;
+      },
       0
     );
   }

@@ -7,6 +7,8 @@ import {
   catchError,
   throwError,
   map,
+  tap,
+  shareReplay,
 } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
@@ -29,12 +31,21 @@ import {
   HttpMethod,
 } from '../interfaces/role.interface';
 
+// Caché estático global (persiste entre instancias del servicio)
+interface CacheEntry<T> {
+  observable: T;
+  lastFetch: number;
+}
+
+let rolesStatsCache: CacheEntry<Observable<RoleStats>> | null = null;
+
 @Injectable({
   providedIn: 'root',
 })
 export class RolesService {
   private http = inject(HttpClient);
   private apiUrl = environment.apiUrl;
+  private readonly CACHE_TTL = 30000; // 30 segundos
 
   // Estado de carga
   private isLoading$ = new BehaviorSubject<boolean>(false);
@@ -450,7 +461,14 @@ export class RolesService {
    * Obtener estadísticas de roles y permisos
    */
   getRolesStats(): Observable<RoleStats> {
-    return this.http.get<any>(`${this.apiUrl}/superadmin/roles/dashboard`).pipe(
+    const now = Date.now();
+
+    if (rolesStatsCache && (now - rolesStatsCache.lastFetch) < this.CACHE_TTL) {
+      return rolesStatsCache.observable;
+    }
+
+    const observable$ = this.http.get<any>(`${this.apiUrl}/superadmin/roles/dashboard`).pipe(
+      shareReplay({ bufferSize: 1, refCount: false }),
       map(
         (response) =>
           response.data || {
@@ -464,6 +482,26 @@ export class RolesService {
         console.error('Error getting roles stats:', error);
         return throwError(() => error);
       }),
+      tap(() => {
+        if (rolesStatsCache) {
+          rolesStatsCache.lastFetch = Date.now();
+        }
+      }),
     );
+
+    rolesStatsCache = {
+      observable: observable$,
+      lastFetch: now,
+    };
+
+    return observable$;
+  }
+
+  /**
+   * Invalida el caché de estadísticas
+   * Útil después de crear/editar/eliminar roles
+   */
+  invalidateCache(): void {
+    rolesStatsCache = null;
   }
 }
