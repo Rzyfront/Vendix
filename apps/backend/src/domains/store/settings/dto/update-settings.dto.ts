@@ -5,12 +5,16 @@ import {
   GeneralSettingsDto,
   InventorySettingsDto,
   CheckoutSettingsDto,
-
   NotificationsSettingsDto,
   PosSettingsDto,
   ReceiptsSettingsDto,
   AppSettingsDto,
+  BrandingSettingsDto,
+  FontsSettingsDto,
+  PublicationSettingsDto,
+  PanelUISettingsDto,
 } from './settings-schemas.dto';
+import { EcommerceSettingsDto } from '../../ecommerce/dto/ecommerce-settings.dto';
 
 export class UpdateSettingsDto {
   @ApiProperty({ type: GeneralSettingsDto, required: false })
@@ -30,8 +34,6 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => CheckoutSettingsDto)
   checkout?: CheckoutSettingsDto;
-
-
 
   @ApiProperty({ type: NotificationsSettingsDto, required: false })
   @IsOptional()
@@ -56,4 +58,34 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => AppSettingsDto)
   app?: AppSettingsDto;
+
+  @ApiProperty({ type: BrandingSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BrandingSettingsDto)
+  branding?: BrandingSettingsDto;
+
+  @ApiProperty({ type: FontsSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FontsSettingsDto)
+  fonts?: FontsSettingsDto;
+
+  @ApiProperty({ type: PublicationSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PublicationSettingsDto)
+  publication?: PublicationSettingsDto;
+
+  @ApiProperty({ type: PanelUISettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PanelUISettingsDto)
+  panel_ui?: PanelUISettingsDto;
+
+  @ApiProperty({ type: EcommerceSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EcommerceSettingsDto)
+  ecommerce?: EcommerceSettingsDto;
 }

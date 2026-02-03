@@ -11,7 +11,7 @@ import { StatsComponent } from '../../../../../../shared/components/stats/stats.
   standalone: true,
   imports: [CommonModule, StatsComponent],
   template: `
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+    <div class="stats-container mb-8">
       <app-stats
         title="Total Gastos"
         [value]="((totalAmount$ | async) | currency) || '$0.00'"

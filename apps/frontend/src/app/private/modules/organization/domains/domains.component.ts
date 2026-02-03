@@ -27,13 +27,14 @@ import {
 import {
   InputsearchComponent,
   IconComponent,
-  TableComponent,
   ButtonComponent,
   ToastService,
   TableColumn,
   TableAction,
   StatsComponent,
   SelectorOption,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
 } from '../../../../shared/components/index';
 
 interface StatItem {
@@ -66,7 +67,7 @@ interface StoreOption {
     DomainVerifyModalComponent,
     InputsearchComponent,
     IconComponent,
-    TableComponent,
+    ResponsiveDataViewComponent,
     ButtonComponent,
   ],
   template: `
@@ -192,18 +193,17 @@ interface StoreOption {
 
         <!-- Domains Table -->
         <div *ngIf="!isLoading && domains.length > 0" class="p-6">
-          <app-table
+          <app-responsive-data-view
             [data]="domains"
             [columns]="tableColumns"
+            [cardConfig]="cardConfig"
             [actions]="tableActions"
             [loading]="isLoading"
-            [sortable]="true"
-            [hoverable]="true"
-            [striped]="true"
-            size="md"
+            emptyMessage="No hay dominios registrados"
+            emptyIcon="globe"
             (sort)="onTableSort($event)"
           >
-          </app-table>
+          </app-responsive-data-view>
         </div>
       </div>
 
@@ -427,6 +427,37 @@ export class DomainsComponent implements OnInit, OnDestroy {
 
   isDeleteModalOpen = false;
   selectedDomainForDelete: Domain | null = null;
+
+  // Card Config for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'hostname',
+    subtitleKey: 'store.name',
+    subtitleTransform: (val: any) => val || 'Organización',
+    badgeKey: 'status',
+    badgeConfig: {
+      type: 'custom',
+      size: 'sm',
+      colorMap: {
+        active: '#22c55e',
+        pending_dns: '#f59e0b',
+        pending_ssl: '#f97316',
+        disabled: '#ef4444',
+      },
+    },
+    badgeTransform: (val: string) => this.formatStatus(val),
+    detailKeys: [
+      {
+        key: 'app_type',
+        label: 'Tipo App',
+        transform: (val: string) => this.formatAppType(val),
+      },
+      {
+        key: 'ownership',
+        label: 'Propiedad',
+        transform: (val: string) => this.formatOwnership(val),
+      },
+    ],
+  };
 
   statsItems: StatItem[] = [];
 

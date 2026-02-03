@@ -7,6 +7,7 @@ import { SalesOrdersModule } from './sales-orders/sales-orders.module';
 import { StockTransfersModule } from './stock-transfers/stock-transfers.module';
 import { ReturnOrdersModule } from './return-orders/return-orders.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { OrderFlowModule } from './order-flow/order-flow.module';
 
 @Module({
   imports: [
@@ -16,9 +17,10 @@ import { PaymentsModule } from '../payments/payments.module';
     StockTransfersModule,
     ReturnOrdersModule,
     forwardRef(() => PaymentsModule),
+    OrderFlowModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService],
-  exports: [OrdersService],
+  exports: [OrdersService, OrderFlowModule],
 })
-export class OrdersModule { }
+export class OrdersModule {}

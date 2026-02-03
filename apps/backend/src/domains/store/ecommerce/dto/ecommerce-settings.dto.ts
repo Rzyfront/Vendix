@@ -16,7 +16,111 @@ import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
+ * DTO para branding independiente del ecommerce
+ * Separado del branding de tienda (STORE_ADMIN)
+ */
+export class EcommerceBrandingDto {
+  @ApiPropertyOptional({
+    example: 'Mi Tienda Online',
+    description: 'Nombre de la tienda para el ecommerce',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  name?: string;
+
+  @ApiPropertyOptional({
+    example: '#3B82F6',
+    description: 'Primary color',
+  })
+  @IsOptional()
+  @IsHexColor()
+  primary_color?: string;
+
+  @ApiPropertyOptional({
+    example: '#10B981',
+    description: 'Secondary color',
+  })
+  @IsOptional()
+  @IsHexColor()
+  secondary_color?: string;
+
+  @ApiPropertyOptional({
+    example: '#F59E0B',
+    description: 'Accent color',
+  })
+  @IsOptional()
+  @IsHexColor()
+  accent_color?: string;
+
+  @ApiPropertyOptional({
+    example: '#F4F4F4',
+    description: 'Background color',
+  })
+  @IsOptional()
+  @IsHexColor()
+  background_color?: string;
+
+  @ApiPropertyOptional({
+    example: '#FFFFFF',
+    description: 'Surface color',
+  })
+  @IsOptional()
+  @IsHexColor()
+  surface_color?: string;
+
+  @ApiPropertyOptional({
+    example: '#222222',
+    description: 'Text color',
+  })
+  @IsOptional()
+  @IsHexColor()
+  text_color?: string;
+
+  @ApiPropertyOptional({
+    example: '#666666',
+    description: 'Text secondary color',
+  })
+  @IsOptional()
+  @IsHexColor()
+  text_secondary_color?: string;
+
+  @ApiPropertyOptional({
+    example: '#999999',
+    description: 'Text muted color',
+  })
+  @IsOptional()
+  @IsHexColor()
+  text_muted_color?: string;
+
+  @ApiPropertyOptional({
+    example: 'https://ejemplo.com/logo.png',
+    description: 'URL del logo',
+  })
+  @IsOptional()
+  @IsString()
+  logo_url?: string;
+
+  @ApiPropertyOptional({
+    example: 'https://ejemplo.com/favicon.ico',
+    description: 'URL del favicon',
+  })
+  @IsOptional()
+  @IsString()
+  favicon_url?: string;
+
+  @ApiPropertyOptional({
+    example: '.custom-class { color: red; }',
+    description: 'Custom CSS',
+  })
+  @IsOptional()
+  @IsString()
+  custom_css?: string;
+}
+
+/**
  * DTO para los colores de la sección inicio
+ * @deprecated Use EcommerceBrandingDto instead
  */
 export class InicioColoresDto {
   @ApiPropertyOptional({
@@ -312,6 +416,16 @@ export class EcommerceSettingsDto {
   @IsIn(['STORE_ECOMMERCE'])
   app?: string;
 
+  // Branding independiente del ecommerce (separado del branding de tienda)
+  @ApiPropertyOptional({
+    description: 'Branding settings for ecommerce (independent from store branding)',
+    type: EcommerceBrandingDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EcommerceBrandingDto)
+  branding?: EcommerceBrandingDto;
+
   // Sección Inicio
   @ApiPropertyOptional({
     description: 'Configuración de inicio (título, párrafo, logo, colores)',
@@ -379,13 +493,6 @@ export class EcommerceSettingsDto {
   @Type(() => EcommerceShippingDto)
   shipping?: EcommerceShippingDto;
 
-  // Branding (deprecated - migrado a inicio.colores)
-  @ApiPropertyOptional({
-    description: 'Branding settings (colors, logo, theme) - DEPRECATED',
-  })
-  @IsOptional()
-  @IsObject()
-  branding?: any;
 }
 
 export class UpdateEcommerceSettingsDto {

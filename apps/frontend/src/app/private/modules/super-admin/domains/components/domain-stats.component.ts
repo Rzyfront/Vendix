@@ -10,7 +10,7 @@ import { StatsComponent } from '../../../../../shared/components/index';
   template: `
     <div class="space-y-6">
       <!-- Primary Stats - Total and Status -->
-      <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
+      <div class="stats-container">
         <app-stats
           title="Total Domains"
           [value]="stats.totalDomains || 0"
@@ -45,7 +45,7 @@ import { StatsComponent } from '../../../../../shared/components/index';
       </div>
 
       <!-- Ownership Stats -->
-      <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
+      <div class="stats-container">
         <app-stats
           title="Platform Subdomains"
           [value]="stats.vendixSubdomains || stats.primaryDomains || 0"

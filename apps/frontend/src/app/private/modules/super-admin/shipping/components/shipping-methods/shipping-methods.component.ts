@@ -6,12 +6,13 @@ import { ShippingMethodModalComponent } from '../shipping-method-modal/shipping-
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
-import { TableComponent, TableColumn, TableAction } from '../../../../../../shared/components/table/table.component';
+import { TableColumn, TableAction } from '../../../../../../shared/components/table/table.component';
+import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../../../shared/components/index';
 
 @Component({
   selector: 'app-superadmin-shipping-methods',
   standalone: true,
-  imports: [CommonModule, ShippingMethodModalComponent, IconComponent, ButtonComponent, TableComponent],
+  imports: [CommonModule, ShippingMethodModalComponent, IconComponent, ButtonComponent, ResponsiveDataViewComponent],
   template: `
     <div class="space-y-6">
       <!-- Stats Cards -->
@@ -64,13 +65,15 @@ import { TableComponent, TableColumn, TableAction } from '../../../../../../shar
           </app-button>
         </div>
         <div class="p-2 md:p-4">
-          <app-table
+          <app-responsive-data-view
             [data]="methods"
             [columns]="columns"
+            [cardConfig]="cardConfig"
             [actions]="actions"
             emptyMessage="No hay métodos de envío del sistema configurados"
+            emptyIcon="truck"
             *ngIf="methods.length > 0; else emptyState"
-          ></app-table>
+          ></app-responsive-data-view>
         </div>
 
         <ng-template #emptyState>
@@ -119,8 +122,21 @@ export class ShippingMethodsComponent implements OnInit {
 
   actions: TableAction[] = [
     { label: 'Editar', icon: 'edit', variant: 'ghost', action: (method) => this.openEditModal(method) },
-    { label: 'Eliminar', icon: 'trash', variant: 'danger', action: (method) => this.deleteMethod(method) },
+    { label: 'Eliminar', icon: 'trash-2', variant: 'danger', action: (method) => this.deleteMethod(method) },
   ];
+
+  // Card configuration for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'name',
+    subtitleKey: 'code',
+    badgeKey: 'is_active',
+    badgeConfig: { type: 'status', size: 'sm' },
+    badgeTransform: (val: boolean) => val ? 'Activo' : 'Inactivo',
+    detailKeys: [
+      { key: 'type', label: 'Tipo' },
+      { key: 'is_system', label: 'Origen', transform: (val: boolean) => val ? 'Sistema' : 'Tienda' },
+    ],
+  };
 
   ngOnInit() {
     this.loadData();

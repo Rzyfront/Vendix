@@ -540,3 +540,48 @@ footer {
 .modal-smooth-transition {
   transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
+
+/* Hide scrollbar utility - for horizontal scroll containers */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ============================================
+ * STATS CONTAINER - Mobile Horizontal Scroll
+ * Use this class for stat card containers
+ * ============================================ */
+.stats-container {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-bottom: 2rem;
+
+  @media (min-width: 1024px) {
+    gap: 1.5rem;
+  }
+
+  /* Mobile: Horizontal scroll like iOS cards */
+  @media (max-width: 639px) {
+    display: flex;
+    gap: 0.75rem;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+    margin-left: -1rem;
+    margin-right: -1rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
+    margin-bottom: 1.5rem;
+
+    /* Hide scrollbar for cleaner look */
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+}

@@ -6,7 +6,6 @@ import { Subscription } from 'rxjs';
 // Shared Components
 import {
   ButtonComponent,
-  TableComponent,
   TableColumn,
   TableAction,
   InputsearchComponent,
@@ -16,6 +15,8 @@ import {
   IconComponent,
   SelectorComponent,
   SelectorOption,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
 } from '../../../../../shared/components/index';
 
 // Services
@@ -34,7 +35,7 @@ import { SupplierFormModalComponent } from './components/supplier-form-modal.com
     CommonModule,
     FormsModule,
     ButtonComponent,
-    TableComponent,
+    ResponsiveDataViewComponent,
     InputsearchComponent,
     StatsComponent,
     IconComponent,
@@ -151,18 +152,17 @@ import { SupplierFormModalComponent } from './components/supplier-form-modal.com
 
         <!-- Table -->
         <div *ngIf="!is_loading && filtered_suppliers.length > 0" class="p-6">
-          <app-table
+          <app-responsive-data-view
             [data]="filtered_suppliers"
             [columns]="table_columns"
+            [cardConfig]="cardConfig"
             [actions]="table_actions"
             [loading]="is_loading"
-            [hoverable]="true"
-            [striped]="true"
-            size="md"
             emptyMessage="No hay proveedores registrados"
+            emptyIcon="users"
             (sort)="onSort($event)"
             (rowClick)="onRowClick($event)"
-          ></app-table>
+          ></app-responsive-data-view>
         </div>
       </div>
 
@@ -224,7 +224,7 @@ export class SuppliersComponent implements OnInit, OnDestroy {
     {
       label: 'Editar',
       icon: 'edit',
-      variant: 'ghost',
+      variant: 'primary',
       action: (item: Supplier) => this.openEditModal(item),
     },
     {
@@ -234,6 +234,20 @@ export class SuppliersComponent implements OnInit, OnDestroy {
       action: (item: Supplier) => this.confirmDelete(item),
     },
   ];
+
+  // Card Config for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'name',
+    subtitleKey: 'contact_person',
+    badgeKey: 'is_active',
+    badgeConfig: { type: 'status', size: 'sm' },
+    badgeTransform: (val: boolean) => (val ? 'Activo' : 'Inactivo'),
+    detailKeys: [
+      { key: 'code', label: 'Código', icon: 'hash' },
+      { key: 'email', label: 'Email', icon: 'mail' },
+      { key: 'phone', label: 'Teléfono', icon: 'phone' },
+    ],
+  };
 
   // UI State
   is_loading = false;

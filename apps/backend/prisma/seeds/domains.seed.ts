@@ -99,6 +99,22 @@ export async function seedDomains(
         },
       },
     },
+    {
+      hostname: 'vendix.online',
+      organization_id: vendixOrg.id,
+      store_id: null,
+      app_type: app_type_enum.VENDIX_LANDING,
+      domain_type: 'vendix_core',
+      is_primary: true,
+      status: 'active',
+      ssl_status: 'issued',
+      config: {
+        security: {
+          session_timeout: 3600000,
+          max_login_attempts: 5,
+        },
+      },
+    },
 
     // ============================================================================
     // Organization domains - Tech Solutions

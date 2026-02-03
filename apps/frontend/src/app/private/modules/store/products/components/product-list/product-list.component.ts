@@ -15,10 +15,11 @@ import {
 import {
   InputsearchComponent,
   IconComponent,
-  TableComponent,
   ButtonComponent,
   TableColumn,
   TableAction,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
 } from '../../../../../../shared/components/index';
 
 import { ProductFilterDropdownComponent } from '../product-filter-dropdown/product-filter-dropdown.component';
@@ -36,10 +37,10 @@ import './product-list.component.css';
     FormsModule,
     InputsearchComponent,
     IconComponent,
-    TableComponent,
     ButtonComponent,
     ProductFilterDropdownComponent,
     ProductEmptyStateComponent,
+    ResponsiveDataViewComponent,
   ],
   templateUrl: './product-list.component.html',
 })
@@ -148,6 +149,39 @@ export class ProductListComponent {
       variant: 'danger',
     },
   ];
+
+  // Card Config
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'name',
+    subtitleKey: 'brand',
+    subtitleTransform: (val: any) => val?.name || '-',
+    avatarKey: 'image_url',
+    badgeKey: 'state',
+    badgeConfig: {
+      type: 'custom',
+      size: 'sm',
+      colorMap: {
+        active: '#22c55e',
+        inactive: '#f59e0b',
+        archived: '#ef4444',
+      },
+    },
+    badgeTransform: (val: any) => this.formatProductState(val),
+    footerKey: 'base_price',
+    footerLabel: 'Precio',
+    footerTransform: (val: any) => this.formatCurrency(val),
+    detailKeys: [
+      {
+        key: 'sku',
+        label: 'SKU',
+      },
+      {
+        key: 'stock_quantity',
+        label: 'Stock',
+        transform: (val: any) => val?.toString() || '0'
+      }
+    ]
+  };
 
   // Event Handlers
   onSearchChange(term: string): void {

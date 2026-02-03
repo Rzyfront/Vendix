@@ -18,7 +18,6 @@ import {
 
 // Import components from shared
 import {
-  TableComponent,
   TableColumn,
   TableAction,
   InputsearchComponent,
@@ -26,6 +25,8 @@ import {
   ButtonComponent,
   SelectorComponent,
   ToastService,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
 } from '../../../../shared/components/index';
 import {
   FormsModule,
@@ -44,7 +45,7 @@ import {
     AuditStatsComponent,
     AuditEmptyStateComponent,
     AuditDetailsModalComponent,
-    TableComponent,
+    ResponsiveDataViewComponent,
     InputsearchComponent,
     IconComponent,
     ButtonComponent,
@@ -167,6 +168,33 @@ export class AuditComponent implements OnInit, OnDestroy {
     { value: AuditResource.ORDERS, label: 'Órdenes' },
     { value: AuditResource.CATEGORIES, label: 'Categorías' },
   ];
+
+  // Card configuration for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'users',
+    titleTransform: (value: any) =>
+      value ? `${value.first_name} ${value.last_name}` : 'Sistema',
+    subtitleKey: 'action',
+    badgeKey: 'action',
+    badgeConfig: {
+      type: 'custom',
+      size: 'sm',
+      colorMap: {
+        CREATE: '#10b981', // green-500
+        UPDATE: '#3b82f6', // blue-500
+        DELETE: '#ef4444', // red-500
+        LOGIN: '#34d399',  // emerald-400
+        LOGOUT: '#6b7280', // gray-500
+        READ: '#f59e0b',   // amber-500
+        PERMISSION_CHANGE: '#8b5cf6', // violet-500
+      },
+    },
+    badgeTransform: (value: AuditAction) => this.getActionLabel(value),
+    detailKeys: [
+      { key: 'resource', label: 'Recurso', transform: (v) => this.getResourceDisplay(v) },
+      { key: 'created_at', label: 'Fecha', transform: (v) => this.formatDate(v) },
+    ],
+  };
 
   constructor() {
     this.filterForm = this.fb.group({

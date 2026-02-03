@@ -15,7 +15,6 @@ import {
   UserEditModalComponent,
   UserConfigModalComponent,
   UserEmptyStateComponent,
-  UserCardComponent,
 } from './components/index';
 
 // Import components from shared
@@ -29,6 +28,8 @@ import {
   ButtonComponent,
   IconComponent,
   InputsearchComponent,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
 } from '../../../../shared/components/index';
 import {
   FormsModule,
@@ -57,12 +58,11 @@ interface StatItem {
     UserEditModalComponent,
     UserConfigModalComponent,
     UserEmptyStateComponent,
-    UserCardComponent,
-    TableComponent,
-    ButtonComponent,
-    IconComponent,
+    ResponsiveDataViewComponent,
     InputsearchComponent,
     StatsComponent,
+    IconComponent,
+    ButtonComponent,
   ],
   templateUrl: './users.component.html',
   styleUrls: ['./users.component.css'],
@@ -130,7 +130,33 @@ export class UsersComponent implements OnInit, OnDestroy {
       priority: 3,
       transform: (value: string) => this.formatDate(value),
     },
+    {
+      key: 'created_at',
+      label: 'Fecha Creación',
+      sortable: true,
+      width: '140px',
+      priority: 3,
+      transform: (value: string) => this.formatDate(value),
+    },
   ];
+
+  // Card configuration for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'first_name',
+    titleTransform: (item: User) => `${item.first_name} ${item.last_name}`,
+    subtitleKey: 'email',
+    badgeKey: 'state',
+    badgeConfig: {
+      type: 'status',
+      size: 'sm',
+    },
+    badgeTransform: (value: UserState) => this.getStateDisplay(value).text,
+    detailKeys: [
+      { key: 'username', label: 'Usuario', icon: 'user' },
+      { key: 'app', label: 'App', icon: 'grid' },
+      { key: 'created_at', label: 'Fecha', transform: (v) => this.formatDate(v) },
+    ],
+  };
 
   tableActions: TableAction[] = [
     {

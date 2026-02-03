@@ -17,7 +17,6 @@ import {
 
 // Import components from shared
 import {
-  TableComponent,
   TableColumn,
   TableAction,
   InputsearchComponent,
@@ -26,6 +25,8 @@ import {
   ToastService,
   StatsComponent,
   SelectorComponent,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
 } from '../../../../shared/components/index';
 
 import {
@@ -46,11 +47,11 @@ import {
     RoleEditModalComponent,
     RoleEmptyStateComponent,
     RolePermissionsModalComponent,
-    TableComponent,
     InputsearchComponent,
     ButtonComponent,
     StatsComponent,
     SelectorComponent,
+    ResponsiveDataViewComponent,
   ],
   templateUrl: './roles.component.html',
   styleUrls: ['./roles.component.css'],
@@ -141,6 +142,26 @@ export class RolesComponent implements OnInit, OnDestroy {
       transform: (value: string) => this.formatDate(value),
     },
   ];
+
+  // Card configuration for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'name',
+    subtitleKey: 'description',
+    badgeKey: 'is_system_role',
+    badgeConfig: {
+      type: 'custom',
+      size: 'sm',
+      colorMap: {
+        true: '#3b82f6', // Blue for system roles
+        false: '#10b981', // Green for custom roles
+      },
+    },
+    badgeTransform: (value: boolean) => (value ? 'Sistema' : 'Personalizado'),
+    detailKeys: [
+      { key: '_count.user_roles', label: 'Usuarios', icon: 'users' },
+      { key: 'created_at', label: 'Fecha', transform: (v) => this.formatDate(v) },
+    ],
+  };
 
   tableActions: TableAction[] = [
     {

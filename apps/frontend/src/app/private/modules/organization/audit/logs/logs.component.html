@@ -36,9 +36,9 @@
 
     <!-- Table -->
     <div class="p-2 md:p-4">
-      <app-table [columns]="tableColumns" [data]="logs" [loading]="isLoading" [actions]="tableActions">
-        <!-- Custom Templates could go here if needed -->
-      </app-table>
+      <app-responsive-data-view [columns]="tableColumns" [data]="logs" [actions]="tableActions"
+        [cardConfig]="cardConfig" [loading]="isLoading">
+      </app-responsive-data-view>
     </div>
 
     <!-- Pagination Footer -->

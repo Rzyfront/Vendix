@@ -517,10 +517,11 @@ export class PaymentsService {
         }));
 
         // Build order data - only include customer_id if provided (for anonymous sales)
+        // Initial state is 'created' - state transitions handled by OrderFlowService
         const orderData: any = {
           store_id: dto.store_id,
           order_number: orderNumber,
-          state: 'processing', // Match enum order_state_enum
+          state: 'created', // Orders start in 'created' state, flow service handles transitions
           subtotal_amount: dto.subtotal,
           tax_amount: dto.tax_amount || 0,
           discount_amount: dto.discount_amount || 0,
@@ -637,7 +638,9 @@ export class PaymentsService {
   }
 
   /**
-   * Update order payment status
+   * Update order payment status for POS transactions
+   * For POS with direct payment: created -> finished (immediate sale)
+   * For POS without payment (credit sale): stays in 'created'
    */
   private async updateOrderPaymentStatus(
     tx: any,
@@ -645,29 +648,36 @@ export class PaymentsService {
     paymentState: string,
   ) {
     // Update order state based on payment state
+    // POS direct payments go straight to 'finished' (immediate sale)
     let orderState: string;
+    let additionalData: any = { updated_at: new Date() };
+
     switch (paymentState) {
       case 'succeeded':
-        orderState = 'processing';
+        // POS direct payment completed - order is finished
+        orderState = 'finished';
+        additionalData.completed_at = new Date();
         break;
       case 'pending':
-        orderState = 'pending_payment';
+        // No payment made yet - order stays in 'created'
+        orderState = 'created';
         break;
       case 'failed':
         orderState = 'created';
         break;
       case 'refunded':
         orderState = 'refunded';
+        additionalData.completed_at = new Date();
         break;
       default:
-        orderState = 'processing';
+        orderState = 'created';
     }
 
     await tx.orders.update({
       where: { id: orderId },
       data: {
         state: orderState,
-        updated_at: new Date(),
+        ...additionalData,
       },
     });
   }

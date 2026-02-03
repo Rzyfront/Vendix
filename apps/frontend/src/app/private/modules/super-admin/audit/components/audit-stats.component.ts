@@ -12,50 +12,14 @@ import {
   standalone: true,
   imports: [CommonModule, StatsComponent],
   template: `
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-      <app-stats
-        title="Total Registros"
-        [value]="stats()?.total_logs || 0"
-        iconName="list"
-        iconBgColor="bg-blue-100"
-        iconColor="text-blue-600"
-      ></app-stats>
-
-      <app-stats
-        title="Sesiones (Login)"
-        [value]="getActionCount('LOGIN')"
-        [smallText]="calculatePercentage(getActionCount('LOGIN')) + '% del total'"
-        iconName="log-in"
-        iconBgColor="bg-purple-100"
-        iconColor="text-purple-600"
-      ></app-stats>
-
-      <app-stats
-        title="Búsquedas"
-        [value]="getActionCount('SEARCH')"
-        [smallText]="calculatePercentage(getActionCount('SEARCH')) + '% del total'"
-        iconName="search"
-        iconBgColor="bg-green-100"
-        iconColor="text-green-600"
-      ></app-stats>
-
-      <app-stats
-        title="Visualizaciones"
-        [value]="getActionCount('VIEW')"
-        [smallText]="calculatePercentage(getActionCount('VIEW')) + '% del total'"
-        iconName="eye"
-        iconBgColor="bg-yellow-100"
-        iconColor="text-yellow-600"
-      ></app-stats>
-
-      @if (showExtendedStats()) {
+    <div class="space-y-6">
+      <div class="stats-container">
         <app-stats
-          title="Actualizaciones"
-          [value]="getActionCount('UPDATE')"
-          [smallText]="calculatePercentage(getActionCount('UPDATE')) + '% del total'"
-          iconName="edit"
-          iconBgColor="bg-indigo-100"
-          iconColor="text-indigo-600"
+          title="Total Registros"
+          [value]="stats()?.total_logs || 0"
+          iconName="list"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-500"
         ></app-stats>
 
         <app-stats
@@ -64,7 +28,16 @@ import {
           [smallText]="calculatePercentage(getActionCount('CREATE')) + '% del total'"
           iconName="plus"
           iconBgColor="bg-emerald-100"
-          iconColor="text-emerald-600"
+          iconColor="text-emerald-500"
+        ></app-stats>
+
+        <app-stats
+          title="Actualizaciones"
+          [value]="getActionCount('UPDATE')"
+          [smallText]="calculatePercentage(getActionCount('UPDATE')) + '% del total'"
+          iconName="edit"
+          iconBgColor="bg-indigo-100"
+          iconColor="text-indigo-500"
         ></app-stats>
 
         <app-stats
@@ -73,17 +46,46 @@ import {
           [smallText]="calculatePercentage(getActionCount('DELETE')) + '% del total'"
           iconName="trash-2"
           iconBgColor="bg-red-100"
-          iconColor="text-red-600"
+          iconColor="text-red-500"
         ></app-stats>
+      </div>
 
-        <app-stats
-          title="Recurso Top"
-          [value]="topResourceName()"
-          [smallText]="topResourceCount() + ' acciones'"
-          iconName="database"
-          iconBgColor="bg-gray-100"
-          iconColor="text-gray-600"
-        ></app-stats>
+      @if (showExtendedStats()) {
+        <div class="stats-container">
+          <app-stats
+            title="Sesiones (Login)"
+            [value]="getActionCount('LOGIN')"
+            iconName="log-in"
+            iconBgColor="bg-purple-100"
+            iconColor="text-purple-500"
+          ></app-stats>
+
+          <app-stats
+            title="Lecturas"
+            [value]="getActionCount('READ')"
+            iconName="eye"
+            iconBgColor="bg-amber-100"
+            iconColor="text-amber-500"
+          ></app-stats>
+
+          <app-stats
+            title="Recurso Top"
+            [value]="topResourceName()"
+            [smallText]="topResourceCount() + ' acciones'"
+            iconName="database"
+            iconBgColor="bg-gray-100"
+            iconColor="text-gray-500"
+          ></app-stats>
+
+          <app-stats
+            title="Fecha Logs"
+            [value]="stats()?.logs_by_day?.length || 0"
+            smallText="Días con actividad"
+            iconName="calendar"
+            iconBgColor="bg-orange-100"
+            iconColor="text-orange-500"
+          ></app-stats>
+        </div>
       }
     </div>
   `,

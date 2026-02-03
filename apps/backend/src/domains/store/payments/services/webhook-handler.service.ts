@@ -1,12 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { WebhookEvent } from '../interfaces';
+import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
 
 @Injectable()
 export class WebhookHandlerService {
   private readonly logger = new Logger(WebhookHandlerService.name);
 
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    @Inject(forwardRef(() => OrderFlowService))
+    private orderFlowService: OrderFlowService,
+  ) {}
 
   async handleWebhook(event: WebhookEvent): Promise<void> {
     try {
@@ -158,28 +163,13 @@ export class WebhookHandlerService {
         .filter((p: any) => p.state === 'succeeded' || p.state === 'captured')
         .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
 
-      let newOrderState = order.state;
-
+      // Use OrderFlowService for state transitions
       if (totalPaid >= Number(order.grand_total)) {
-        if (order.state === 'pending_payment' || order.state === 'created') {
-          newOrderState = 'processing';
+        if (order.state === 'pending_payment') {
+          // Confirm payment through the flow service
+          await this.orderFlowService.confirmPayment(orderId);
+          this.logger.log(`Order ${orderId} payment confirmed via OrderFlowService`);
         }
-      } else if (totalPaid > 0) {
-        if (order.state === 'created') {
-          newOrderState = 'pending_payment';
-        }
-      }
-
-      if (newOrderState !== order.state) {
-        await this.prisma.orders.update({
-          where: { id: orderId },
-          data: {
-            state: newOrderState,
-            updated_at: new Date(),
-          },
-        });
-
-        this.logger.log(`Order ${orderId} updated to status: ${newOrderState}`);
       }
     } catch (error) {
       this.logger.error(

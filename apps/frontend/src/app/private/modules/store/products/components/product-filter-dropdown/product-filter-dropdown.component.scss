@@ -16,7 +16,7 @@
   font-family: var(--font-primary);
   background-color: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 0.375rem;
+  border-radius: 0.5rem;
   color: var(--color-text-primary);
   min-width: 120px;
   transition: all 0.2s ease;
@@ -35,7 +35,46 @@
   }
 
   &:active {
-    transform: translateY(1px);
+    transform: scale(0.97);
+  }
+
+  .filter-label-text {
+    display: inline;
+  }
+
+  .chevron-icon {
+    margin-left: auto;
+  }
+}
+
+// Compact mode for mobile
+@media (max-width: 1023px) {
+  .filter-dropdown-trigger {
+    min-width: auto;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 10px;
+
+    .filter-label-text {
+      display: none;
+    }
+
+    .chevron-icon {
+      display: none;
+    }
+
+    .filter-count-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      margin-left: 0;
+    }
+  }
+
+  .filter-dropdown-container {
+    position: relative;
   }
 }
 

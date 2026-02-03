@@ -1,71 +1,37 @@
 <div class="space-y-2 md:space-y-4">
   <!-- Lista de Productos -->
-  <div
-    class="bg-surface rounded-card shadow-card border border-border min-h-[600px]"
-  >
+  <div class="bg-surface rounded-card shadow-card border border-border min-h-[600px]">
     <div class="p-2 md:px-6 md:py-4 border-b border-border">
-      <div
-        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 md:gap-4"
-      >
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 md:gap-4">
         <div class="flex-1 min-w-0">
           <h2 class="text-lg font-semibold text-text-primary">
             Todos los Productos ({{ products.length }})
           </h2>
         </div>
 
-        <div
-          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
-        >
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
           <!-- Quick search input -->
-          <app-inputsearch
-            class="w-full sm:w-64 flex-shrink-0"
-            size="sm"
-            placeholder="Buscar productos..."
-            [debounceTime]="1000"
-            [ngModel]="searchTerm"
-            (ngModelChange)="onSearchChange($event)"
-          ></app-inputsearch>
+          <app-inputsearch class="w-full sm:w-64 flex-shrink-0" size="sm" placeholder="Buscar productos..."
+            [debounceTime]="1000" [ngModel]="searchTerm" (ngModelChange)="onSearchChange($event)"></app-inputsearch>
 
           <!-- Filter dropdown -->
-          <app-product-filter-dropdown
-            [searchTerm]="searchTerm"
-            [selectedState]="selectedState"
-            [selectedCategory]="selectedCategory"
-            [selectedBrand]="selectedBrand"
-            [categories]="categories"
-            [brands]="brands"
-            [isLoading]="isLoading"
-            (filterChange)="onFilterDropdownChange($event)"
-            (clearAllFilters)="clearFilters()"
-          ></app-product-filter-dropdown>
+          <app-product-filter-dropdown [searchTerm]="searchTerm" [selectedState]="selectedState"
+            [selectedCategory]="selectedCategory" [selectedBrand]="selectedBrand" [categories]="categories"
+            [brands]="brands" [isLoading]="isLoading" (filterChange)="onFilterDropdownChange($event)"
+            (clearAllFilters)="clearFilters()"></app-product-filter-dropdown>
 
           <!-- Action buttons -->
           <div class="flex gap-2 items-center ml-auto">
-            <app-button
-              variant="outline"
-              size="sm"
-              (clicked)="refresh.emit()"
-              [disabled]="isLoading"
-              title="Actualizar"
-            >
+            <app-button variant="outline" size="sm" (clicked)="refresh.emit()" [disabled]="isLoading"
+              title="Actualizar">
               <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
             </app-button>
-            <app-button
-              variant="outline"
-              size="sm"
-              (clicked)="bulkUpload.emit()"
-              [disabled]="isLoading"
-              title="Carga Masiva"
-            >
+            <app-button variant="outline" size="sm" (clicked)="bulkUpload.emit()" [disabled]="isLoading"
+              title="Carga Masiva">
               <app-icon name="upload-cloud" [size]="16" slot="icon"></app-icon>
               <span class="hidden sm:inline">Bulk</span>
             </app-button>
-            <app-button
-              variant="primary"
-              size="sm"
-              (clicked)="create.emit()"
-              title="Nuevo Producto"
-            >
+            <app-button variant="primary" size="sm" (clicked)="create.emit()" title="Nuevo Producto">
               <app-icon name="plus" [size]="16" slot="icon"></app-icon>
               <span class="hidden sm:inline">Nuevo Producto</span>
             </app-button>
@@ -76,39 +42,22 @@
 
     <!-- Estado de Carga -->
     <div *ngIf="isLoading" class="p-2 md:p-6 text-center">
-      <div
-        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-      ></div>
+      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
       <p class="mt-2 text-text-secondary">Cargando productos...</p>
     </div>
 
     <!-- Estado Vacío -->
-    <app-product-empty-state
-      *ngIf="!isLoading && products.length === 0"
-      [title]="getEmptyStateTitle()"
-      [description]="getEmptyStateDescription()"
-      [showAdditionalActions]="hasFilters"
-      (actionClick)="create.emit()"
-      (refreshClick)="refresh.emit()"
-      (clearFiltersClick)="clearFilters()"
-    >
+    <app-product-empty-state *ngIf="!isLoading && products.length === 0" [title]="getEmptyStateTitle()"
+      [description]="getEmptyStateDescription()" [showAdditionalActions]="hasFilters" (actionClick)="create.emit()"
+      (refreshClick)="refresh.emit()" (clearFiltersClick)="clearFilters()">
     </app-product-empty-state>
 
     <!-- Tabla de Productos -->
     <div *ngIf="!isLoading && products.length > 0" class="p-2 md:p-4">
-      <app-table
-        [data]="products"
-        [columns]="tableColumns"
-        [actions]="tableActions"
-        [loading]="isLoading"
-        [sortable]="true"
-        [hoverable]="true"
-        [striped]="true"
-        size="md"
-        (sort)="sort.emit($event)"
-        (rowClick)="edit.emit($event)"
-      >
-      </app-table>
+      <app-responsive-data-view [data]="products" [columns]="tableColumns" [actions]="tableActions"
+        [cardConfig]="cardConfig" [loading]="isLoading" [sortable]="true" (sort)="sort.emit($event)"
+        (rowClick)="edit.emit($event)">
+      </app-responsive-data-view>
     </div>
   </div>
 </div>

@@ -7,7 +7,6 @@ import { Subscription } from 'rxjs';
 // Shared Components
 import {
   ButtonComponent,
-  TableComponent,
   TableColumn,
   TableAction,
   InputsearchComponent,
@@ -16,6 +15,8 @@ import {
   SelectorComponent,
   SelectorOption,
   ToastService,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
 } from '../../../../../shared/components/index';
 import { ConfirmationModalComponent } from '../../../../../shared/components/confirmation-modal/confirmation-modal.component';
 
@@ -35,7 +36,7 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
     CommonModule,
     FormsModule,
     ButtonComponent,
-    TableComponent,
+    ResponsiveDataViewComponent,
     InputsearchComponent,
     StatsComponent,
     IconComponent,
@@ -172,16 +173,15 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
 
         <!-- Table -->
         <div *ngIf="!is_loading && filtered_adjustments.length > 0" class="p-6">
-          <app-table
+          <app-responsive-data-view
             [data]="filtered_adjustments"
             [columns]="table_columns"
+            [cardConfig]="cardConfig"
             [actions]="table_actions"
             [loading]="is_loading"
-            [hoverable]="true"
-            [striped]="true"
-            size="md"
             emptyMessage="No hay ajustes de inventario"
-          ></app-table>
+            emptyIcon="clipboard-list"
+          ></app-responsive-data-view>
         </div>
       </div>
 
@@ -299,6 +299,32 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
       action: (item: InventoryAdjustment) => this.viewDetail(item),
     },
   ];
+
+  // Card Config for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'products.name',
+    titleTransform: (val: any) => val || 'Sin producto',
+    subtitleKey: 'adjustment_type',
+    subtitleTransform: (val: AdjustmentType) => this.getTypeLabel(val),
+    detailKeys: [
+      {
+        key: 'quantity_change',
+        label: 'Cambio',
+        transform: (val: number) => (val > 0 ? `+${val}` : `${val}`),
+      },
+      {
+        key: 'created_at',
+        label: 'Fecha',
+        icon: 'calendar',
+        transform: (val: string) => new Date(val).toLocaleDateString('es-CO'),
+      },
+      {
+        key: 'inventory_locations.name',
+        label: 'Ubicación',
+        icon: 'map-pin',
+      },
+    ],
+  };
 
   // UI State
   is_loading = false;

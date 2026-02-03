@@ -4,18 +4,24 @@
     [actions]="productHeaderActions()" (actionClicked)="onHeaderAction($event)" variant="default">
 </app-sticky-header>
 
-<div class="p-2 md:p-4 space-y-2 md:space-y-4 max-w-[1600px] mx-auto">
+<div class="p-3 md:p-4 space-y-4 md:space-y-6 max-w-[1600px] mx-auto">
 
-    <form [formGroup]="productForm" class="space-y-2 md:space-y-4">
-        <!-- Main Grid: General Info + Images -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-2 md:p-4">
+    <form [formGroup]="productForm" class="space-y-4 md:space-y-6">
 
-            <!-- Left Column: General Information (2 cols) -->
-            <div class="lg:col-span-2 flex flex-col h-full">
-                <div class="bg-white rounded-xl border border-gray-200 p-2 md:p-4 shadow-sm flex-1">
-                    <h2 class="text-lg font-semibold text-gray-900 mb-6">Información General</h2>
+        <!-- Main Grid: General Info + Images (Desktop layout) -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
 
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4">
+            <!-- Left Column: General Information (2 cols on desktop) -->
+            <div class="lg:col-span-2 space-y-4 md:space-y-6">
+
+                <!-- Información General Section -->
+                <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4 md:space-y-5">
+                    <div class="flex items-center gap-2">
+                        <app-icon name="info" size="18" class="text-primary-600"></app-icon>
+                        <h2 class="text-base font-bold text-gray-900">Información General</h2>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
                         <!-- Name -->
                         <div class="md:col-span-2">
                             <app-input label="Nombre del Producto" formControlName="name"
@@ -41,241 +47,314 @@
                                 placeholder="Describe tu producto..." [rows]="3"
                                 [control]="$any(productForm).get('description')"></app-textarea>
                         </div>
+                    </div>
+                </section>
 
+                <!-- Precios y Rentabilidad Section -->
+                <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4 md:space-y-5">
+                    <div class="flex items-center gap-2">
+                        <app-icon name="dollar-sign" size="18" class="text-primary-600"></app-icon>
+                        <h2 class="text-base font-bold text-gray-900">Precios y Rentabilidad</h2>
+                    </div>
 
+                    <!-- First Row: Core pricing -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+                        <!-- Cost Price -->
+                        <app-input label="Precio de Costo" type="number" formControlName="cost_price"
+                            [error]="getErrorMessage('cost_price')" prefix="$" placeholder="0.00"
+                            helperText="Inversión por unidad" customWrapperClass="!mt-0"></app-input>
 
-                        <!-- Pricing & Profitability Section -->
-                        <div class="md:col-span-2 bg-bg rounded-xl border border-border p-6 space-y-6">
-                            <h3 class="text-sm font-bold text-text-primary flex items-center gap-2">
-                                <app-icon name="dollar-sign" size="16" class="text-primary-600"></app-icon>
-                                Precios y Rentabilidad
-                            </h3>
+                        <!-- Margin -->
+                        <app-input label="Margen (%)" type="number" formControlName="profit_margin"
+                            [error]="getErrorMessage('profit_margin')" suffix="%" placeholder="0.00"
+                            helperText="Rentabilidad deseada" customWrapperClass="!mt-0"></app-input>
 
-                            <!-- First Row: Core pricing -->
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                <!-- Cost Price -->
-                                <app-input label="Precio de Costo" type="number" formControlName="cost_price"
-                                    [error]="getErrorMessage('cost_price')" prefix="$" placeholder="0.00"
-                                    helperText="Inversión por unidad" customWrapperClass="!mt-0"></app-input>
+                        <!-- Base Price (Sale Price before tax) -->
+                        <app-input label="Precio Base (PVP)" type="number" formControlName="base_price"
+                            [error]="getErrorMessage('base_price')" prefix="$" placeholder="0.00"
+                            helperText="Precio antes de impuestos" [required]="true"
+                            customWrapperClass="!mt-0"></app-input>
+                    </div>
 
-                                <!-- Margin -->
-                                <app-input label="Margen (%)" type="number" formControlName="profit_margin"
-                                    [error]="getErrorMessage('profit_margin')" suffix="%" placeholder="0.00"
-                                    helperText="Rentabilidad deseada" customWrapperClass="!mt-0"></app-input>
+                    <!-- Second Row: Taxes and Final Result -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 pt-4 md:pt-6 border-t border-gray-100">
+                        <!-- Tax Categories (Multi-select) -->
+                        <div class="md:col-span-2">
+                            <div class="flex gap-2 items-end h-full">
+                                <app-multi-selector class="flex-1" label="Impuestos Aplicables"
+                                    [options]="taxCategoryOptions" formControlName="tax_category_ids"
+                                    placeholder="Seleccionar impuestos..."
+                                    helpText="Afectan al precio final"></app-multi-selector>
 
-                                <!-- Base Price (Sale Price before tax) -->
-                                <app-input label="Precio Base (PVP)" type="number" formControlName="base_price"
-                                    [error]="getErrorMessage('base_price')" prefix="$" placeholder="0.00"
-                                    helperText="Precio antes de impuestos" [required]="true"
-                                    customWrapperClass="!mt-0"></app-input>
-                            </div>
-
-                            <!-- Second Row: Taxes and Final Result -->
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6 border-t border-border">
-                                <!-- Tax Categories (Multi-select) -->
-                                <div class="md:col-span-2">
-                                    <div class="flex gap-2 items-end h-full">
-                                        <app-multi-selector class="flex-1" label="Impuestos Aplicables"
-                                            [options]="taxCategoryOptions" formControlName="tax_category_ids"
-                                            placeholder="Seleccionar impuestos..."
-                                            helpText="Afectan al precio final"></app-multi-selector>
-
-                                        <app-button variant="outline" (clicked)="isTaxCategoryCreateOpen = true"
-                                            customClasses="!w-[42px] !h-[42px] !p-0 flex items-center justify-center mb-[26px]">
-                                            <app-icon name="plus" size="20"></app-icon>
-                                        </app-button>
-                                    </div>
-                                </div>
-
-                                <!-- Calculated Price with Tax (Visual Result) -->
-                                <div class="flex flex-col justify-end h-full">
-                                    <div class="space-y-1.5">
-                                        <label class="block text-sm font-bold text-text-primary">Precio Final (PVP +
-                                            Imp)</label>
-                                        <div
-                                            class="h-[42px] px-4 flex items-center bg-surface border-2 border-primary-500/20 rounded-lg text-xl font-black text-primary-600 shadow-sm">
-                                            {{ priceWithTax | currency }}
-                                        </div>
-                                        <p class="text-[10px] text-text-secondary font-medium italic">Calculado
-                                            automáticamente</p>
-                                    </div>
-                                </div>
+                                <app-button variant="outline" (clicked)="isTaxCategoryCreateOpen = true"
+                                    customClasses="!w-[42px] !h-[42px] !p-0 flex items-center justify-center mb-[26px]">
+                                    <app-icon name="plus" size="20"></app-icon>
+                                </app-button>
                             </div>
                         </div>
 
-                        <!-- Availability & E-commerce Section -->
-                        <div class="md:col-span-2 bg-bg rounded-xl border border-border p-6 space-y-6">
-                            <h3 class="text-sm font-bold text-text-primary flex items-center gap-2">
-                                <app-icon name="check-circle" size="16" class="text-primary-600"></app-icon>
-                                Disponibilidad y Estado
-                            </h3>
-
-                            <div class="space-y-6">
-                                <!-- First Row: Status & Stock -->
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <!-- Product State -->
-                                    <div class="bg-surface rounded-xl p-4 border border-border shadow-sm">
-                                        <h3 class="text-xs font-bold text-text-secondary uppercase tracking-wider mb-3">
-                                            Estado del Producto</h3>
-                                        <div class="flex flex-wrap gap-2">
-                                            <button *ngFor="let status of productStateOptions" type="button"
-                                                (click)="updateProductState(status)"
-                                                [disabled]="productForm.get('state')?.value === status"
-                                                [class.bg-primary-600]="productForm.get('state')?.value === status"
-                                                [class.text-white]="productForm.get('state')?.value === status"
-                                                [class.bg-bg]="productForm.get('state')?.value !== status"
-                                                [class.text-text-secondary]="productForm.get('state')?.value !== status"
-                                                class="px-4 py-2 text-xs border border-border rounded-lg font-bold disabled:opacity-100 transition-all hover:bg-surface-hover">
-                                                {{ formatStatus(status) }}
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    <!-- Stock (only if no variants) -->
-                                    <div *ngIf="!hasVariants" class="animate-fadeIn">
-                                        <!-- Create mode: editable initial stock -->
-                                        <div *ngIf="!isEditMode()">
-                                            <app-input label="Stock Inicial" type="number"
-                                                formControlName="stock_quantity"
-                                                [error]="getErrorMessage('stock_quantity')" placeholder="0"
-                                                helperText="Cantidad inicial disponible" customWrapperClass="!mt-0"
-                                                [tooltipText]="'Define la cantidad inicial de unidades disponibles.'"></app-input>
-                                        </div>
-
-                                        <!-- Edit mode: read-only, click to adjust -->
-                                        <div *ngIf="isEditMode()" class="relative">
-                                            <div (click)="openStockAdjustment()" class="cursor-pointer group"
-                                                title="Click para ajustar stock">
-                                                <app-input label="Stock Actual" type="number"
-                                                    formControlName="stock_quantity" [disabled]="true"
-                                                    placeholder="Click para ajustar stock"
-                                                    class="opacity-75 cursor-pointer" [suffixIcon]="true"
-                                                    customWrapperClass="!mt-0"
-                                                    [tooltipText]="'El stock no se puede editar directamente. Haz clic para ajustar.'">
-                                                    <ng-container slot="suffix-icon">
-                                                        <app-icon name="plus" size="16"
-                                                            class="text-text-muted group-hover:text-primary-600"></app-icon>
-                                                    </ng-container>
-                                                </app-input>
-                                            </div>
-                                        </div>
-                                    </div>
+                        <!-- Calculated Price with Tax (Visual Result) -->
+                        <div class="flex flex-col justify-end h-full">
+                            <div class="space-y-1.5">
+                                <label class="block text-sm font-bold text-text-primary">Precio Final (PVP + Imp)</label>
+                                <div class="h-[42px] px-4 flex items-center bg-surface border-2 border-primary-500/20 rounded-lg text-xl font-black text-primary-600 shadow-sm">
+                                    {{ priceWithTax | currency }}
                                 </div>
-
-                                <!-- Variants Toggle -->
-                                <div class="pt-2 border-t border-border mt-2">
-                                    <app-setting-toggle [ngModel]="hasVariants" (ngModelChange)="toggleVariants($event)"
-                                        [ngModelOptions]="{standalone: true}" label="Este producto tiene variantes"
-                                        description="Agrega opciones como tamaño, color o material">
-                                    </app-setting-toggle>
-                                </div>
-
-                                <!-- Second Row: Toggles -->
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <!-- Ecommerce Visibility -->
-                                    <app-setting-toggle formControlName="available_for_ecommerce"
-                                        label="Disponible en E-commerce" description="Visible en tu tienda online">
-                                    </app-setting-toggle>
-
-                                    <!-- Offers Section -->
-                                    <div class="space-y-3">
-                                        <app-setting-toggle formControlName="is_on_sale" label="Producto en Oferta"
-                                            description="Activa un precio promocional">
-                                        </app-setting-toggle>
-
-                                        <div *ngIf="productForm.get('is_on_sale')?.value" class="animate-fadeIn pl-3">
-                                            <app-input label="Precio de Oferta" type="number"
-                                                formControlName="sale_price" [error]="getErrorMessage('sale_price')"
-                                                prefix="$" placeholder="0.00"
-                                                helperText="Se mostrará junto al precio base"></app-input>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Classification & Tags Section -->
-                        <div class="md:col-span-2 bg-bg rounded-xl border border-border p-6 space-y-4">
-                            <h3 class="text-sm font-bold text-text-primary flex items-center gap-2">
-                                <app-icon name="tag" size="16" class="text-primary-600"></app-icon>
-                                Clasificación y Etiquetas
-                            </h3>
-
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <!-- Brand -->
-                                <div>
-                                    <div class="flex gap-2 items-end">
-                                        <app-selector class="flex-1" label="Marca" [options]="brandOptions"
-                                            formControlName="brand_id" placeholder="Seleccionar marca"></app-selector>
-
-                                        <app-button variant="outline" (clicked)="isBrandCreateOpen = true"
-                                            customClasses="!w-[42px] !h-[42px] !p-0 flex items-center justify-center mb-0.5">
-                                            <app-icon name="plus" size="20"></app-icon>
-                                        </app-button>
-                                    </div>
-                                </div>
-
-                                <!-- Categories (Multi-select) -->
-                                <div>
-                                    <div class="flex gap-2 items-end">
-                                        <app-multi-selector class="flex-1" label="Categorías"
-                                            [options]="categoryOptions" formControlName="category_ids"
-                                            placeholder="Seleccionar categorías..."></app-multi-selector>
-
-                                        <app-button variant="outline" (clicked)="isCategoryCreateOpen = true"
-                                            customClasses="!w-[42px] !h-[42px] !p-0 flex items-center justify-center mb-0.5">
-                                            <app-icon name="plus" size="20"></app-icon>
-                                        </app-button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Dimensions & Weight Section -->
-                        <div class="md:col-span-2 bg-bg rounded-xl border border-border p-6 space-y-4">
-                            <h3 class="text-sm font-bold text-text-primary flex items-center gap-2">
-                                <app-icon name="package" size="16" class="text-primary-600"></app-icon>
-                                Dimensiones y Peso
-                            </h3>
-
-                            <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
-                                <ng-container formGroupName="dimensions">
-                                    <!-- Length -->
-                                    <app-input label="Largo" type="number" formControlName="length"
-                                        [control]="$any(productForm.get('dimensions'))?.get('length')"
-                                        placeholder="0.00" helperText="cm" customWrapperClass="!mt-0"></app-input>
-
-                                    <!-- Width -->
-                                    <app-input label="Ancho" type="number" formControlName="width"
-                                        [control]="$any(productForm.get('dimensions'))?.get('width')" placeholder="0.00"
-                                        helperText="cm" customWrapperClass="!mt-0"></app-input>
-
-                                    <!-- Height -->
-                                    <app-input label="Alto" type="number" formControlName="height"
-                                        [control]="$any(productForm.get('dimensions'))?.get('height')"
-                                        placeholder="0.00" helperText="cm" customWrapperClass="!mt-0"></app-input>
-                                </ng-container>
-
-                                <!-- Weight -->
-                                <app-input label="Peso" type="number" formControlName="weight" placeholder="0.00"
-                                    helperText="kg" customWrapperClass="!mt-0"></app-input>
+                                <p class="text-[10px] text-text-secondary font-medium italic">Calculado automáticamente</p>
                             </div>
                         </div>
                     </div>
-                </div>
+                </section>
+
+                <!-- MOBILE: Images Section (visible only on mobile, after pricing) -->
+                <section class="lg:hidden bg-white rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4">
+                    <div class="flex items-center gap-2">
+                        <app-icon name="image" size="18" class="text-primary-600"></app-icon>
+                        <h2 class="text-base font-bold text-gray-900">Imágenes del Producto</h2>
+                        <span class="text-xs text-gray-400 ml-auto">{{ imageUrls.length }}/5</span>
+                    </div>
+
+                    <!-- Mobile Image Carousel -->
+                    <div class="space-y-3">
+                        <!-- Main Preview -->
+                        <div class="relative aspect-square w-full max-w-[280px] mx-auto bg-gray-50 rounded-xl border border-gray-200 overflow-hidden group">
+                            <ng-container *ngIf="imageUrls.length > 0; else mobileEmptyState">
+                                <img [src]="imageUrls[activeImageIndex]"
+                                    class="w-full h-full object-contain p-3 bg-white" (error)="onImageError($event)">
+
+                                <!-- Carousel Controls -->
+                                <button *ngIf="imageUrls.length > 1" type="button" (click)="prevImage()"
+                                    class="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 bg-white/90 hover:bg-white rounded-full shadow-md text-gray-700 z-10">
+                                    <app-icon name="chevron-left" size="18"></app-icon>
+                                </button>
+                                <button *ngIf="imageUrls.length > 1" type="button" (click)="nextImage()"
+                                    class="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-white/90 hover:bg-white rounded-full shadow-md text-gray-700 z-10">
+                                    <app-icon name="chevron-right" size="18"></app-icon>
+                                </button>
+
+                                <!-- Badge & Delete -->
+                                <div class="absolute top-2 left-2">
+                                    <div *ngIf="activeImageIndex === 0"
+                                        class="px-1.5 py-0.5 bg-primary-600/90 text-white text-[9px] font-bold uppercase rounded tracking-wider">
+                                        Principal
+                                    </div>
+                                </div>
+                                <button type="button" (click)="removeImage(activeImageIndex)"
+                                    class="absolute top-2 right-2 p-1.5 bg-red-500/90 text-white rounded-full shadow-sm hover:bg-red-600">
+                                    <app-icon name="trash-2" size="14"></app-icon>
+                                </button>
+
+                                <!-- Pagination -->
+                                <div class="absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-black/40 text-white text-[10px] rounded-full">
+                                    {{ activeImageIndex + 1 }} / {{ imageUrls.length }}
+                                </div>
+                            </ng-container>
+
+                            <ng-template #mobileEmptyState>
+                                <div (click)="triggerFileUpload()" class="w-full h-full flex flex-col items-center justify-center text-gray-400 p-4 text-center cursor-pointer">
+                                    <div class="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm mb-2">
+                                        <app-icon name="image" size="24" class="opacity-20"></app-icon>
+                                    </div>
+                                    <p class="text-sm font-medium text-gray-600">Sin imágenes</p>
+                                    <p class="text-xs text-gray-400">Toca para agregar</p>
+                                </div>
+                            </ng-template>
+                        </div>
+
+                        <!-- Horizontal Thumbnails Carousel -->
+                        <div class="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
+                            <!-- Upload Button -->
+                            <button *ngIf="imageUrls.length < 5" type="button" (click)="triggerFileUpload()"
+                                class="flex-shrink-0 w-16 h-16 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:bg-white hover:border-primary-400 transition-all">
+                                <app-icon name="plus" size="20" class="text-gray-400"></app-icon>
+                                <span class="text-[9px] text-gray-400 mt-0.5">Subir</span>
+                            </button>
+
+                            <!-- Thumbnails -->
+                            <div *ngFor="let url of imageUrls; let i = index" (click)="setActiveImage(i)"
+                                [class.ring-2]="activeImageIndex === i" [class.ring-primary-500]="activeImageIndex === i"
+                                class="relative flex-shrink-0 w-16 h-16 bg-white rounded-xl overflow-hidden border border-gray-200 cursor-pointer shadow-sm">
+                                <img [src]="url" class="w-full h-full object-cover" (error)="onImageError($event)">
+                                <div *ngIf="i === 0" class="absolute top-0 left-0 w-2.5 h-2.5 bg-primary-500 rounded-br"></div>
+                            </div>
+                        </div>
+
+                        <input type="file" class="hidden file-input" accept="image/*" multiple (change)="onFileSelect($event)">
+                    </div>
+                </section>
+
+                <!-- Disponibilidad y Estado Section -->
+                <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4 md:space-y-5">
+                    <div class="flex items-center gap-2">
+                        <app-icon name="check-circle" size="18" class="text-primary-600"></app-icon>
+                        <h2 class="text-base font-bold text-gray-900">Disponibilidad y Estado</h2>
+                    </div>
+
+                    <div class="space-y-4 md:space-y-6">
+                        <!-- First Row: Status & Stock -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Product State -->
+                            <div class="bg-surface rounded-xl p-4 border border-border shadow-sm">
+                                <h3 class="text-xs font-bold text-text-secondary uppercase tracking-wider mb-3">
+                                    Estado del Producto</h3>
+                                <div class="flex flex-wrap gap-2">
+                                    <button *ngFor="let status of productStateOptions" type="button"
+                                        (click)="updateProductState(status)"
+                                        [disabled]="productForm.get('state')?.value === status"
+                                        [class.bg-primary-600]="productForm.get('state')?.value === status"
+                                        [class.text-white]="productForm.get('state')?.value === status"
+                                        [class.bg-bg]="productForm.get('state')?.value !== status"
+                                        [class.text-text-secondary]="productForm.get('state')?.value !== status"
+                                        class="px-3 py-1.5 md:px-4 md:py-2 text-xs border border-border rounded-lg font-bold disabled:opacity-100 transition-all hover:bg-surface-hover">
+                                        {{ formatStatus(status) }}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Stock (only if no variants) -->
+                            <div *ngIf="!hasVariants" class="animate-fadeIn">
+                                <!-- Create mode: editable initial stock -->
+                                <div *ngIf="!isEditMode()">
+                                    <app-input label="Stock Inicial" type="number"
+                                        formControlName="stock_quantity"
+                                        [error]="getErrorMessage('stock_quantity')" placeholder="0"
+                                        helperText="Cantidad inicial disponible" customWrapperClass="!mt-0"
+                                        [tooltipText]="'Define la cantidad inicial de unidades disponibles.'"></app-input>
+                                </div>
+
+                                <!-- Edit mode: read-only, click to adjust -->
+                                <div *ngIf="isEditMode()" class="relative">
+                                    <div (click)="openStockAdjustment()" class="cursor-pointer group"
+                                        title="Click para ajustar stock">
+                                        <app-input label="Stock Actual" type="number"
+                                            formControlName="stock_quantity" [disabled]="true"
+                                            placeholder="Click para ajustar stock"
+                                            class="opacity-75 cursor-pointer" [suffixIcon]="true"
+                                            customWrapperClass="!mt-0"
+                                            [tooltipText]="'El stock no se puede editar directamente. Haz clic para ajustar.'">
+                                            <ng-container slot="suffix-icon">
+                                                <app-icon name="plus" size="16"
+                                                    class="text-text-muted group-hover:text-primary-600"></app-icon>
+                                            </ng-container>
+                                        </app-input>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Variants Toggle -->
+                        <div class="pt-2 border-t border-border mt-2">
+                            <app-setting-toggle [ngModel]="hasVariants" (ngModelChange)="toggleVariants($event)"
+                                [ngModelOptions]="{standalone: true}" label="Este producto tiene variantes"
+                                description="Agrega opciones como tamaño, color o material">
+                            </app-setting-toggle>
+                        </div>
+
+                        <!-- Second Row: Toggles -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Ecommerce Visibility -->
+                            <app-setting-toggle formControlName="available_for_ecommerce"
+                                label="Disponible en E-commerce" description="Visible en tu tienda online">
+                            </app-setting-toggle>
+
+                            <!-- Offers Section -->
+                            <div class="space-y-3">
+                                <app-setting-toggle formControlName="is_on_sale" label="Producto en Oferta"
+                                    description="Activa un precio promocional">
+                                </app-setting-toggle>
+
+                                <div *ngIf="productForm.get('is_on_sale')?.value" class="animate-fadeIn pl-3">
+                                    <app-input label="Precio de Oferta" type="number"
+                                        formControlName="sale_price" [error]="getErrorMessage('sale_price')"
+                                        prefix="$" placeholder="0.00"
+                                        helperText="Se mostrará junto al precio base"></app-input>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Clasificación y Etiquetas Section -->
+                <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4">
+                    <div class="flex items-center gap-2">
+                        <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
+                        <h2 class="text-base font-bold text-gray-900">Clasificación y Etiquetas</h2>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+                        <!-- Brand -->
+                        <div>
+                            <div class="flex gap-2 items-end">
+                                <app-selector class="flex-1" label="Marca" [options]="brandOptions"
+                                    formControlName="brand_id" placeholder="Seleccionar marca"></app-selector>
+
+                                <app-button variant="outline" (clicked)="isBrandCreateOpen = true"
+                                    customClasses="!w-[42px] !h-[42px] !p-0 flex items-center justify-center mb-0.5">
+                                    <app-icon name="plus" size="20"></app-icon>
+                                </app-button>
+                            </div>
+                        </div>
+
+                        <!-- Categories (Multi-select) -->
+                        <div>
+                            <div class="flex gap-2 items-end">
+                                <app-multi-selector class="flex-1" label="Categorías"
+                                    [options]="categoryOptions" formControlName="category_ids"
+                                    placeholder="Seleccionar categorías..."></app-multi-selector>
+
+                                <app-button variant="outline" (clicked)="isCategoryCreateOpen = true"
+                                    customClasses="!w-[42px] !h-[42px] !p-0 flex items-center justify-center mb-0.5">
+                                    <app-icon name="plus" size="20"></app-icon>
+                                </app-button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Dimensiones y Peso Section -->
+                <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4">
+                    <div class="flex items-center gap-2">
+                        <app-icon name="package" size="18" class="text-primary-600"></app-icon>
+                        <h2 class="text-base font-bold text-gray-900">Dimensiones y Peso</h2>
+                    </div>
+
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6">
+                        <ng-container formGroupName="dimensions">
+                            <!-- Length -->
+                            <app-input label="Largo" type="number" formControlName="length"
+                                [control]="$any(productForm.get('dimensions'))?.get('length')"
+                                placeholder="0.00" helperText="cm" customWrapperClass="!mt-0"></app-input>
+
+                            <!-- Width -->
+                            <app-input label="Ancho" type="number" formControlName="width"
+                                [control]="$any(productForm.get('dimensions'))?.get('width')" placeholder="0.00"
+                                helperText="cm" customWrapperClass="!mt-0"></app-input>
+
+                            <!-- Height -->
+                            <app-input label="Alto" type="number" formControlName="height"
+                                [control]="$any(productForm.get('dimensions'))?.get('height')"
+                                placeholder="0.00" helperText="cm" customWrapperClass="!mt-0"></app-input>
+                        </ng-container>
+
+                        <!-- Weight -->
+                        <app-input label="Peso" type="number" formControlName="weight" placeholder="0.00"
+                            helperText="kg" customWrapperClass="!mt-0"></app-input>
+                    </div>
+                </section>
             </div>
 
-            <!-- Right Column: Images & Stock -->
-            <div class="flex flex-col gap-2 md:p-4 h-full">
-                <!-- Images Section -->
-                <div
-                    class="bg-white rounded-xl border border-gray-200 p-2 md:p-4 shadow-sm lg:flex-1 lg:flex lg:flex-col">
-                    <h2 class="text-lg font-semibold text-gray-900 mb-4 flex-none">Imágenes del Producto</h2>
+            <!-- Right Column: Images & Stock (Desktop only) -->
+            <div class="hidden lg:flex flex-col gap-4 md:gap-6 h-full">
+                <!-- Images Section (Desktop) -->
+                <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm flex-1 flex flex-col">
+                    <div class="flex items-center gap-2 mb-4">
+                        <app-icon name="image" size="18" class="text-primary-600"></app-icon>
+                        <h2 class="text-base font-bold text-gray-900">Imágenes del Producto</h2>
+                    </div>
 
-                    <div class="space-y-2 md:space-y-4 flex-1">
+                    <div class="space-y-4 flex-1">
                         <!-- Main Preview / Carousel Area -->
-                        <div
-                            class="relative aspect-video w-full bg-gray-50 rounded-xl border border-gray-200 overflow-hidden group">
+                        <div class="relative aspect-video w-full bg-gray-50 rounded-xl border border-gray-200 overflow-hidden group">
                             <ng-container *ngIf="imageUrls.length > 0; else emptyState">
                                 <img [src]="imageUrls[activeImageIndex]"
                                     class="w-full h-full object-contain p-4 bg-white" (error)="onImageError($event)">
@@ -307,22 +386,18 @@
                                 </div>
 
                                 <!-- Pagination Indicator -->
-                                <div
-                                    class="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 items-center px-3 py-1 bg-black/40 text-white text-[11px] rounded-full backdrop-blur-sm font-medium">
+                                <div class="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 items-center px-3 py-1 bg-black/40 text-white text-[11px] rounded-full backdrop-blur-sm font-medium">
                                     {{ activeImageIndex + 1 }} / {{ imageUrls.length }}
                                 </div>
                             </ng-container>
 
                             <ng-template #emptyState>
-                                <div
-                                    class="w-full h-full flex flex-col items-center justify-center text-gray-400 p-2 md:p-6 text-center bg-gray-50/50">
-                                    <div
-                                        class="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm mb-4">
+                                <div class="w-full h-full flex flex-col items-center justify-center text-gray-400 p-6 text-center bg-gray-50/50">
+                                    <div class="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm mb-4">
                                         <app-icon name="image" size="32" class="opacity-20 text-gray-400"></app-icon>
                                     </div>
                                     <p class="text-sm font-semibold text-gray-600">Sin imágenes aún</p>
-                                    <p class="text-xs mt-1 text-gray-500">Agrega hasta 5 fotos para cautivar a tus
-                                        clientes</p>
+                                    <p class="text-xs mt-1 text-gray-500">Agrega hasta 5 fotos para cautivar a tus clientes</p>
                                 </div>
                             </ng-template>
                         </div>
@@ -349,8 +424,7 @@
                         <div *ngIf="imageUrls.length < 5" class="group mt-4 relative">
                             <div (click)="triggerFileUpload()"
                                 class="w-full py-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-white hover:border-primary-300 hover:shadow-md">
-                                <div
-                                    class="p-2 bg-white rounded-full shadow-sm mb-2 group-hover:scale-110 transition-transform">
+                                <div class="p-2 bg-white rounded-full shadow-sm mb-2 group-hover:scale-110 transition-transform">
                                     <app-icon name="upload-cloud" size="24" class="text-primary-500"></app-icon>
                                 </div>
                                 <p class="text-[13px] font-semibold text-gray-700">Subir imágenes</p>
@@ -368,21 +442,20 @@
                             </p>
                         </div>
                     </div>
-                </div>
+                </section>
 
-                <!-- Stock Section -->
-                <div
-                    class="bg-white rounded-xl border border-gray-200 p-2 md:p-4 shadow-sm lg:flex-1 lg:flex lg:flex-col">
+                <!-- Stock Section (Desktop) -->
+                <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm flex-1 flex flex-col">
                     <!-- Header -->
-                    <div class="mb-4 flex-none">
-                        <h2 class="text-lg font-semibold text-gray-900">Inventario / Stock</h2>
+                    <div class="flex items-center gap-2 mb-4">
+                        <app-icon name="archive" size="18" class="text-primary-600"></app-icon>
+                        <h2 class="text-base font-bold text-gray-900">Inventario / Stock</h2>
                     </div>
 
                     <div class="flex-1 space-y-4">
                         <!-- Action Section -->
                         <div class="p-3 bg-bg rounded-xl border border-border space-y-2">
-                            <p class="text-[10px] text-text-muted uppercase font-bold tracking-wider">Acciones Rápidas
-                            </p>
+                            <p class="text-[10px] text-text-muted uppercase font-bold tracking-wider">Acciones Rápidas</p>
                             <div class="flex flex-wrap gap-2">
                                 <button type="button" (click)="goToPurchase()"
                                     class="flex-1 min-w-[120px] text-xs font-bold text-primary-700 bg-primary-50 hover:bg-primary-100 border border-primary/20 px-3 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm">
@@ -404,37 +477,29 @@
 
                         <!-- Information Section -->
                         <div class="space-y-2">
-                            <p class="text-[10px] text-text-muted uppercase font-bold tracking-wider px-1">Resumen de
-                                Existencias</p>
+                            <p class="text-[10px] text-text-muted uppercase font-bold tracking-wider px-1">Resumen de Existencias</p>
                             <div class="grid grid-cols-2 gap-2">
                                 <div class="p-3 bg-surface rounded-lg border border-border">
-                                    <span
-                                        class="block text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Total
-                                        Físico</span>
+                                    <span class="block text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Total Físico</span>
                                     <span class="text-xl font-bold text-text-primary">{{ totalStockOnHand }}</span>
                                 </div>
                                 <div class="p-3 bg-surface rounded-lg border border-border">
-                                    <span
-                                        class="block text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Disponible</span>
+                                    <span class="block text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Disponible</span>
                                     <span class="text-xl font-bold text-primary-600">{{ totalStockAvailable }}</span>
                                 </div>
                                 <div class="p-3 bg-surface rounded-lg border border-border">
-                                    <span
-                                        class="block text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Stock
-                                        Bajo</span>
+                                    <span class="block text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Stock Bajo</span>
                                     <span class="text-xl font-bold" [class.text-destructive]="lowStockCount > 0"
                                         [class.text-text-muted]="lowStockCount === 0">
                                         {{ lowStockCount }}
                                     </span>
                                 </div>
                                 <div class="p-3 bg-surface rounded-lg border border-border">
-                                    <span
-                                        class="block text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Bodegas</span>
+                                    <span class="block text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Bodegas</span>
                                     <span class="text-xl font-bold text-text-primary">{{ warehouseCount }}</span>
                                 </div>
                             </div>
-                            <div
-                                class="p-3 bg-surface rounded-lg border border-border flex items-center justify-between">
+                            <div class="p-3 bg-surface rounded-lg border border-border flex items-center justify-between">
                                 <div class="flex items-center gap-2">
                                     <app-icon name="package" size="16" class="text-primary-600"></app-icon>
                                     <span class="text-xs text-text-secondary font-medium">Reservado para órdenes</span>
@@ -443,38 +508,76 @@
                             </div>
                         </div>
                     </div>
-                </div>
+                </section>
             </div>
         </div>
+
+        <!-- MOBILE: Inventario Section (visible only on mobile) -->
+        <section class="lg:hidden bg-white rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4">
+            <div class="flex items-center gap-2">
+                <app-icon name="archive" size="18" class="text-primary-600"></app-icon>
+                <h2 class="text-base font-bold text-gray-900">Inventario / Stock</h2>
+            </div>
+
+            <!-- Quick Stats Grid -->
+            <div class="grid grid-cols-2 gap-2">
+                <div class="p-3 bg-surface rounded-lg border border-border">
+                    <span class="block text-[9px] text-text-muted uppercase font-bold tracking-wider mb-1">Físico</span>
+                    <span class="text-lg font-bold text-text-primary">{{ totalStockOnHand }}</span>
+                </div>
+                <div class="p-3 bg-surface rounded-lg border border-border">
+                    <span class="block text-[9px] text-text-muted uppercase font-bold tracking-wider mb-1">Disponible</span>
+                    <span class="text-lg font-bold text-primary-600">{{ totalStockAvailable }}</span>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex gap-2">
+                <button type="button" (click)="goToPurchase()"
+                    class="flex-1 text-xs font-bold text-primary-700 bg-primary-50 hover:bg-primary-100 border border-primary/20 px-3 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors">
+                    <app-icon name="cart" size="14"></app-icon>
+                    Inventario
+                </button>
+                <button *ngIf="isEditMode()" type="button" (click)="openAdjustmentModal()"
+                    class="flex-1 text-xs font-bold text-white bg-primary-600 hover:bg-primary-700 px-3 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors">
+                    <app-icon name="sliders" size="14"></app-icon>
+                    Ajustar
+                </button>
+            </div>
+
+            <button *ngIf="isEditMode()" type="button" (click)="isStockDetailsOpen = true"
+                class="w-full text-xs font-medium text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors">
+                <app-icon name="list" size="14"></app-icon>
+                Ver detalle completo
+            </button>
+        </section>
+
         <!-- Variants Section (Full Width) -->
-        <div *ngIf="hasVariants" class="bg-white rounded-xl border border-gray-200 p-2 md:p-4 shadow-sm animate-fadeIn">
-            <div class="flex items-center justify-between mb-4">
+        <section *ngIf="hasVariants" class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm animate-fadeIn space-y-4 md:space-y-5">
+            <div class="flex items-center gap-2">
+                <app-icon name="layers" size="18" class="text-primary-600"></app-icon>
                 <div>
-                    <h2 class="text-lg font-semibold text-gray-900">Variantes</h2>
-                    <p class="text-sm text-gray-500">
-                        Configura las combinaciones de tu producto
-                    </p>
+                    <h2 class="text-base font-bold text-gray-900">Variantes</h2>
+                    <p class="text-xs text-gray-500">Configura las combinaciones de tu producto</p>
                 </div>
             </div>
 
             <!-- Variants UI -->
-            <div class="space-y-2 md:space-y-4">
+            <div class="space-y-4 md:space-y-5">
                 <!-- Attribute Manager -->
-                <div class="space-y-2 md:space-y-4">
+                <div class="space-y-3 md:space-y-4">
                     <div *ngFor="let attr of variantAttributes; let i = index"
-                        class="p-4 bg-bg rounded-lg border border-border">
-                        <div class="flex items-start gap-2 md:gap-4">
-                            <div class="w-1/3">
+                        class="p-3 md:p-4 bg-bg rounded-xl border border-border">
+                        <div class="flex flex-col md:flex-row md:items-start gap-3 md:gap-4">
+                            <div class="w-full md:w-1/3">
                                 <app-input label="Nombre del Atributo" size="sm" [(ngModel)]="attr.name"
                                     [ngModelOptions]="{standalone: true}" placeholder="Ej. Talla, Color"
                                     (inputBlur)="generateVariants()" customWrapperClass="!mt-0"></app-input>
                             </div>
 
                             <div class="flex-1">
-                                <label class="block text-sm font-medium text-text-primary mb-2">Valores
-                                    (Enter para agregar)</label>
-                                <div
-                                    class="flex flex-wrap gap-2 px-3 py-1.5 bg-surface rounded-sm border border-border min-h-[34px] focus-within:ring-2 focus-within:ring-primary/50 focus-within:border-primary transition-colors">
+                                <label class="block text-sm font-medium text-text-primary mb-2">Valores (Enter para agregar)</label>
+                                <div class="flex flex-wrap gap-2 px-3 py-1.5 bg-surface rounded-sm border border-border min-h-[34px] focus-within:ring-2 focus-within:ring-primary/50 focus-within:border-primary transition-colors">
                                     <span *ngFor="let val of attr.values; let j = index"
                                         class="inline-flex items-center px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 text-xs font-medium">
                                         {{ val }}
@@ -490,7 +593,7 @@
                             </div>
 
                             <button (click)="removeAttribute(i)"
-                                class="mt-6 text-destructive hover:text-destructive/80">
+                                class="self-end md:mt-6 text-destructive hover:text-destructive/80 p-2">
                                 <app-icon name="trash-2" size="18"></app-icon>
                             </button>
                         </div>
@@ -503,25 +606,51 @@
                     </button>
                 </div>
 
-                <!-- Generated Variants Table -->
-                <div *ngIf="generatedVariants.length > 0" class="border border-gray-200 rounded-lg overflow-hidden">
+                <!-- Generated Variants - Mobile Cards View -->
+                <div *ngIf="generatedVariants.length > 0" class="lg:hidden space-y-3">
+                    <p class="text-xs font-bold text-text-muted uppercase tracking-wider">{{ generatedVariants.length }} Variantes</p>
+                    <div *ngFor="let variant of generatedVariants; let idx = index"
+                        class="p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-3">
+                        <div class="flex items-center justify-between">
+                            <p class="font-bold text-sm text-gray-900">{{ variant.name }}</p>
+                            <div class="flex gap-1">
+                                <span *ngFor="let item of variant.attributes | keyvalue"
+                                    class="text-[10px] text-gray-500 bg-white px-1.5 py-0.5 rounded border border-gray-200">
+                                    {{ item.value }}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <app-input label="Precio" type="number" size="sm" [(ngModel)]="variant.price"
+                                [ngModelOptions]="{standalone: true}" placeholder="0.00"
+                                customWrapperClass="!mt-0" prefix="$"></app-input>
+                            <app-input label="Costo" type="number" size="sm" [(ngModel)]="variant.cost_price"
+                                [ngModelOptions]="{standalone: true}" placeholder="0.00"
+                                customWrapperClass="!mt-0" prefix="$"></app-input>
+                            <app-input label="Stock" type="number" size="sm" [(ngModel)]="variant.stock"
+                                [ngModelOptions]="{standalone: true}" placeholder="0"
+                                customWrapperClass="!mt-0"></app-input>
+                            <app-input label="SKU" type="text" size="sm" [(ngModel)]="variant.sku"
+                                [ngModelOptions]="{standalone: true}" placeholder="SKU"
+                                customWrapperClass="!mt-0"></app-input>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Generated Variants Table - Desktop View -->
+                <div *ngIf="generatedVariants.length > 0" class="hidden lg:block border border-gray-200 rounded-lg overflow-hidden">
                     <table class="min-w-full divide-y divide-gray-200">
                         <thead class="bg-gray-50">
                             <tr>
-                                <th
-                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Variante</th>
-                                <th
-                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Precio Venta</th>
-                                <th
-                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Costo</th>
-                                <th
-                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Stock</th>
-                                <th
-                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     SKU</th>
                             </tr>
                         </thead>
@@ -561,7 +690,7 @@
                     </table>
                 </div>
             </div>
-        </div>
+        </section>
     </form>
 </div>
 
@@ -577,9 +706,9 @@
 <!-- Stock Details Modal -->
 <app-modal [isOpen]="isStockDetailsOpen" (closed)="isStockDetailsOpen = false" [title]="'Detalle de Inventario'"
     size="lg">
-    <div class="space-y-2 md:space-y-4">
+    <div class="space-y-4 md:space-y-6">
         <!-- Summary Cards -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
             <div class="p-4 bg-bg rounded-xl border border-border">
                 <p class="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Total en Sistema</p>
                 <p class="text-2xl font-bold text-text-primary">{{ totalStockOnHand }}</p>
@@ -600,24 +729,54 @@
                 <app-icon name="building-2" size="16" class="text-gray-400"></app-icon>
                 Existencias por Bodega
             </h3>
-            <div class="border border-gray-200 rounded-lg overflow-hidden bg-white">
+            <!-- Mobile: Cards view -->
+            <div class="lg:hidden space-y-2">
+                <div *ngFor="let sl of product?.stock_levels"
+                    class="p-3 bg-white rounded-lg border border-gray-200"
+                    [class.bg-destructive/5]="sl.quantity_available <= (sl.reorder_point || 0)">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <span class="text-sm font-semibold text-text-primary">{{ sl.inventory_locations.name }}</span>
+                            <span class="block text-[10px] text-text-secondary uppercase">{{ sl.inventory_locations.type }}</span>
+                        </div>
+                        <span class="px-2 py-1 rounded-md text-xs font-bold"
+                            [class.bg-primary-50]="sl.quantity_available > (sl.reorder_point || 0)"
+                            [class.text-primary-700]="sl.quantity_available > (sl.reorder_point || 0)"
+                            [class.bg-destructive/10]="sl.quantity_available <= (sl.reorder_point || 0)"
+                            [class.text-destructive]="sl.quantity_available <= (sl.reorder_point || 0)">
+                            {{ sl.quantity_available }} disp.
+                        </span>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 text-xs">
+                        <div>
+                            <span class="text-text-muted">Físico:</span>
+                            <span class="font-medium ml-1">{{ sl.quantity_on_hand }}</span>
+                        </div>
+                        <div>
+                            <span class="text-text-muted">Reservado:</span>
+                            <span class="font-medium ml-1 text-primary-600">{{ sl.quantity_reserved }}</span>
+                        </div>
+                        <div>
+                            <span class="text-text-muted">Reorden:</span>
+                            <span class="font-medium ml-1">{{ sl.reorder_point || '-' }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Desktop: Table view -->
+            <div class="hidden lg:block border border-gray-200 rounded-lg overflow-hidden bg-white">
                 <table class="min-w-full divide-y divide-gray-200">
                     <thead class="bg-bg">
                         <tr>
-                            <th
-                                class="px-4 py-3 text-left text-[11px] font-bold text-text-muted uppercase tracking-wider">
+                            <th class="px-4 py-3 text-left text-[11px] font-bold text-text-muted uppercase tracking-wider">
                                 Bodega</th>
-                            <th
-                                class="px-4 py-3 text-center text-[11px] font-bold text-text-muted uppercase tracking-wider">
+                            <th class="px-4 py-3 text-center text-[11px] font-bold text-text-muted uppercase tracking-wider">
                                 Físico</th>
-                            <th
-                                class="px-4 py-3 text-center text-[11px] font-bold text-text-muted uppercase tracking-wider">
+                            <th class="px-4 py-3 text-center text-[11px] font-bold text-text-muted uppercase tracking-wider">
                                 Reservado</th>
-                            <th
-                                class="px-4 py-3 text-center text-[11px] font-bold text-text-muted uppercase tracking-wider">
+                            <th class="px-4 py-3 text-center text-[11px] font-bold text-text-muted uppercase tracking-wider">
                                 Disponible</th>
-                            <th
-                                class="px-4 py-3 text-right text-[11px] font-bold text-text-muted uppercase tracking-wider">
+                            <th class="px-4 py-3 text-right text-[11px] font-bold text-text-muted uppercase tracking-wider">
                                 Próx. Reorden</th>
                         </tr>
                     </thead>
@@ -625,18 +784,11 @@
                         <tr *ngFor="let sl of product!.stock_levels"
                             [class.bg-destructive/5]="sl.quantity_available <= (sl.reorder_point || 0)">
                             <td class="px-4 py-3">
-                                <span class="text-sm font-semibold text-text-primary">{{ sl.inventory_locations.name
-                                    }}</span>
-                                <span class="block text-[10px] text-text-secondary uppercase">{{
-                                    sl.inventory_locations.type
-                                    }}</span>
+                                <span class="text-sm font-semibold text-text-primary">{{ sl.inventory_locations.name }}</span>
+                                <span class="block text-[10px] text-text-secondary uppercase">{{ sl.inventory_locations.type }}</span>
                             </td>
-                            <td class="px-4 py-3 text-center text-sm text-text-secondary font-medium">{{
-                                sl.quantity_on_hand
-                                }}</td>
-                            <td class="px-4 py-3 text-center text-sm text-primary-600 font-medium">{{
-                                sl.quantity_reserved
-                                }}</td>
+                            <td class="px-4 py-3 text-center text-sm text-text-secondary font-medium">{{ sl.quantity_on_hand }}</td>
+                            <td class="px-4 py-3 text-center text-sm text-primary-600 font-medium">{{ sl.quantity_reserved }}</td>
                             <td class="px-4 py-3 text-center">
                                 <span class="px-2 py-1 rounded-md text-xs font-bold"
                                     [class.bg-primary-50]="sl.quantity_available > (sl.reorder_point || 0)"
@@ -646,8 +798,7 @@
                                     {{ sl.quantity_available }}
                                 </span>
                             </td>
-                            <td class="px-4 py-3 text-right text-sm text-text-secondary">{{ sl.reorder_point || '-' }}
-                            </td>
+                            <td class="px-4 py-3 text-right text-sm text-text-secondary">{{ sl.reorder_point || '-' }}</td>
                         </tr>
                     </tbody>
                 </table>
@@ -660,31 +811,42 @@
                 <app-icon name="barcode" size="16" class="text-gray-400"></app-icon>
                 Lotes y Vencimientos
             </h3>
-            <div class="border border-gray-200 rounded-lg overflow-hidden bg-white">
+            <!-- Mobile: Cards view -->
+            <div class="lg:hidden space-y-2">
+                <div *ngFor="let batch of product?.inventory_batches"
+                    class="p-3 bg-white rounded-lg border border-gray-200">
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="text-sm font-bold text-text-primary underline decoration-primary/30">{{ batch.batch_number }}</span>
+                        <span class="text-sm font-semibold text-primary-700 bg-primary-50 px-2 py-0.5 rounded">{{ batch.quantity_remaining }}</span>
+                    </div>
+                    <div class="flex justify-between text-xs">
+                        <span class="text-text-secondary">{{ batch.inventory_locations.name }}</span>
+                        <span [class.text-destructive]="batch.expiry_date && isExpired(batch.expiry_date)">
+                            {{ batch.expiry_date ? (batch.expiry_date | date:'dd/MM/yyyy') : 'N/A' }}
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <!-- Desktop: Table view -->
+            <div class="hidden lg:block border border-gray-200 rounded-lg overflow-hidden bg-white">
                 <table class="min-w-full divide-y divide-gray-200">
                     <thead class="bg-bg">
                         <tr>
-                            <th
-                                class="px-4 py-3 text-left text-[11px] font-bold text-text-muted uppercase tracking-wider">
+                            <th class="px-4 py-3 text-left text-[11px] font-bold text-text-muted uppercase tracking-wider">
                                 Lote #</th>
-                            <th
-                                class="px-4 py-3 text-left text-[11px] font-bold text-text-muted uppercase tracking-wider">
+                            <th class="px-4 py-3 text-left text-[11px] font-bold text-text-muted uppercase tracking-wider">
                                 Bodega</th>
-                            <th
-                                class="px-4 py-3 text-center text-[11px] font-bold text-text-muted uppercase tracking-wider">
+                            <th class="px-4 py-3 text-center text-[11px] font-bold text-text-muted uppercase tracking-wider">
                                 Remanente</th>
-                            <th
-                                class="px-4 py-3 text-right text-[11px] font-bold text-text-muted uppercase tracking-wider">
+                            <th class="px-4 py-3 text-right text-[11px] font-bold text-text-muted uppercase tracking-wider">
                                 Vencimiento</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-border">
                         <tr *ngFor="let batch of product?.inventory_batches">
-                            <td class="px-4 py-3 text-sm font-bold text-text-primary underline decoration-primary/30">{{
-                                batch.batch_number }}</td>
+                            <td class="px-4 py-3 text-sm font-bold text-text-primary underline decoration-primary/30">{{ batch.batch_number }}</td>
                             <td class="px-4 py-3 text-sm text-text-secondary">{{ batch.inventory_locations.name }}</td>
-                            <td class="px-4 py-3 text-center text-sm font-semibold text-primary-700 bg-primary-50">{{
-                                batch.quantity_remaining }}</td>
+                            <td class="px-4 py-3 text-center text-sm font-semibold text-primary-700 bg-primary-50">{{ batch.quantity_remaining }}</td>
                             <td class="px-4 py-3 text-right">
                                 <span class="text-sm font-medium"
                                     [class.text-destructive]="batch.expiry_date && isExpired(batch.expiry_date)">

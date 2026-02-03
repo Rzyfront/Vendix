@@ -1,49 +1,38 @@
-<div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-4 md:mb-6 lg:mb-8">
-  <!-- Total de Órdenes -->
+<!-- Mobile: Horizontal scroll | Desktop: Grid -->
+<div class="stats-container">
   <app-stats
-    title="Total de Órdenes"
+    title="Órdenes"
     [value]="formatNumber(stats.total_orders)"
-    [smallText]="
-      getGrowthPercentage(stats.ordersGrowthRate || 0) + ' vs mes anterior'
-    "
+    [smallText]="getGrowthPercentage(stats.ordersGrowthRate || 0) + ' vs mes ant.'"
     iconName="shopping-cart"
-    iconBgColor="bg-primary/10"
-    iconColor="text-primary"
+    iconBgColor="bg-blue-100"
+    iconColor="text-blue-500"
   ></app-stats>
 
-  <!-- Órdenes Pendientes -->
   <app-stats
-    title="Órdenes Pendientes"
+    title="Pendientes"
     [value]="formatNumber(stats.pending_orders)"
-    [smallText]="
-      getGrowthPercentage(stats.pendingGrowthRate || 0) + ' vs mes anterior'
-    "
+    [smallText]="getGrowthPercentage(stats.pendingGrowthRate || 0) + ' vs mes ant.'"
     iconName="clock"
-    iconBgColor="bg-yellow-100"
-    iconColor="text-yellow-600"
+    iconBgColor="bg-amber-100"
+    iconColor="text-amber-500"
   ></app-stats>
 
-  <!-- Órdenes Completadas -->
   <app-stats
-    title="Órdenes Completadas"
+    title="Completadas"
     [value]="formatNumber(stats.completed_orders)"
-    [smallText]="
-      getGrowthPercentage(stats.completedGrowthRate || 0) + ' vs mes anterior'
-    "
+    [smallText]="getGrowthPercentage(stats.completedGrowthRate || 0) + ' vs mes ant.'"
     iconName="check-circle"
-    iconBgColor="bg-green-100"
-    iconColor="text-green-600"
+    iconBgColor="bg-emerald-100"
+    iconColor="text-emerald-500"
   ></app-stats>
 
-  <!-- Ingreso Total -->
   <app-stats
-    title="Ingreso Total"
+    title="Ingresos"
     [value]="formatCurrency(stats.total_revenue)"
-    [smallText]="
-      getGrowthPercentage(stats.revenueGrowthRate || 0) + ' vs mes anterior'
-    "
+    [smallText]="getGrowthPercentage(stats.revenueGrowthRate || 0) + ' vs mes ant.'"
     iconName="dollar-sign"
-    iconBgColor="bg-emerald-100"
-    iconColor="text-emerald-600"
+    iconBgColor="bg-purple-100"
+    iconColor="text-purple-500"
   ></app-stats>
 </div>

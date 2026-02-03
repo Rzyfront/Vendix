@@ -12,12 +12,13 @@ import {
 } from '../interfaces/audit.interface';
 import { AuditService } from '../services/audit.service';
 import {
-  TableComponent,
   TableColumn,
   TableAction,
   StatsComponent,
   ModalComponent,
-  ButtonComponent
+  ButtonComponent,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
 } from '../../../../../shared/components/index';
 
 interface StatItem {
@@ -35,10 +36,10 @@ interface StatItem {
   imports: [
     CommonModule,
     ReactiveFormsModule,
-    TableComponent,
     StatsComponent,
     ModalComponent,
-    ButtonComponent
+    ButtonComponent,
+    ResponsiveDataViewComponent,
   ],
   templateUrl: './logs.component.html',
 })
@@ -96,6 +97,18 @@ export class LogsComponent implements OnInit, OnDestroy {
       variant: 'ghost'
     }
   ];
+
+  // Card configuration for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'action',
+    titleTransform: (val: string) => val.replace('_', ' '),
+    subtitleKey: 'resource',
+    subtitleTransform: (val: string) => val.charAt(0).toUpperCase() + val.slice(1),
+    detailKeys: [
+      { key: 'users', label: 'Usuario', transform: (u: any) => u ? `${u.first_name} ${u.last_name}` : 'Sistema' },
+      { key: 'created_at', label: 'Fecha', transform: (val: string) => new Date(val).toLocaleString() },
+    ],
+  };
 
   pagination = {
     page: 1,
@@ -210,13 +223,13 @@ export class LogsComponent implements OnInit, OnDestroy {
 
     // Para "Usuarios", solo contar cambios reales (CREATE, UPDATE, DELETE), no vistas (VIEW, SEARCH)
     const userChanges = (combined['CREATE_users'] || 0) +
-                        (combined['UPDATE_users'] || 0) +
-                        (combined['DELETE_users'] || 0);
+      (combined['UPDATE_users'] || 0) +
+      (combined['DELETE_users'] || 0);
 
     // Para "Cambios Config", solo contar cambios reales en settings
     const settingsChanges = (combined['CREATE_settings'] || 0) +
-                            (combined['UPDATE_settings'] || 0) +
-                            (combined['DELETE_settings'] || 0);
+      (combined['UPDATE_settings'] || 0) +
+      (combined['DELETE_settings'] || 0);
 
     this.statsItems = [
       {

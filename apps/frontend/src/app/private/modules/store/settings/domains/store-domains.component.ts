@@ -13,13 +13,14 @@ import { takeUntil } from 'rxjs/operators';
 
 import {
   ButtonComponent,
-  TableComponent,
   TableColumn,
   TableAction,
   IconComponent,
   StatsComponent,
   InputsearchComponent,
   ConfirmationModalComponent,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
 } from '../../../../../shared/components/index';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { StoreDomainsService } from './store-domains.service';
@@ -39,7 +40,7 @@ import { DomainFormModalComponent } from './components/domain-form-modal.compone
     CommonModule,
     FormsModule,
     ButtonComponent,
-    TableComponent,
+    ResponsiveDataViewComponent,
     IconComponent,
     StatsComponent,
     InputsearchComponent,
@@ -156,14 +157,17 @@ import { DomainFormModalComponent } from './components/domain-form-modal.compone
             </app-button>
           </div>
 
-          <app-table
+          <app-responsive-data-view
             *ngIf="!is_loading && domains.length > 0"
             [columns]="table_columns"
             [data]="domains"
+            [cardConfig]="card_config"
             [actions]="table_actions"
             [loading]="is_loading"
+            emptyMessage="No hay dominios configurados"
+            emptyIcon="globe"
           >
-          </app-table>
+          </app-responsive-data-view>
         </div>
       </div>
 
@@ -233,6 +237,28 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
 
   domain_to_delete: StoreDomain | null = null;
   editing_domain: StoreDomain | null = null;
+
+  // Card Config for mobile
+  card_config: ItemListCardConfig = {
+    titleKey: 'hostname',
+    subtitleKey: 'domain_type',
+    subtitleTransform: (val: string) => this.getDomainTypeLabel(val),
+    badgeKey: 'status',
+    badgeConfig: { type: 'status' },
+    badgeTransform: (val: string) => this.getStatusLabel(val),
+    detailKeys: [
+      {
+        key: 'is_primary',
+        label: 'Principal',
+        transform: (val: boolean) => (val ? 'Sí' : 'No'),
+      },
+      {
+        key: 'ownership',
+        label: 'Propiedad',
+        transform: (val: string) => this.getOwnershipLabel(val),
+      },
+    ],
+  };
 
   stats = {
     total: 0,

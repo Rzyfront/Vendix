@@ -18,7 +18,6 @@ import {
 
 // Import components from shared
 import {
-  TableComponent,
   TableColumn,
   TableAction,
   InputsearchComponent,
@@ -26,6 +25,8 @@ import {
   ButtonComponent,
   DialogService,
   ToastService,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
 } from '../../../../shared/components/index';
 import {
   FormsModule,
@@ -45,7 +46,7 @@ import {
     UserCreateModalComponent,
     UserEditModalComponent,
     UserEmptyStateComponent,
-    TableComponent,
+    ResponsiveDataViewComponent,
     InputsearchComponent,
     IconComponent,
     ButtonComponent,
@@ -140,6 +141,20 @@ export class UsersComponent implements OnInit, OnDestroy {
     { value: UserState.SUSPENDED, label: 'Suspendido' },
     { value: UserState.ARCHIVED, label: 'Archivado' },
   ];
+
+  // Card configuration for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'name',
+    titleTransform: (item: User) => `${item.first_name} ${item.last_name}`,
+    subtitleKey: 'email',
+    badgeKey: 'state',
+    badgeConfig: { type: 'status', size: 'sm' },
+    badgeTransform: (value: UserState) => this.getStateDisplay(value).text,
+    detailKeys: [
+      { key: 'username', label: 'Usuario', icon: 'user' },
+      { key: 'created_at', label: 'Registro', transform: (v) => this.formatDate(v) },
+    ],
+  };
 
   constructor() {
     // Setup search debounce

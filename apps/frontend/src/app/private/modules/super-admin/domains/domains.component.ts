@@ -26,12 +26,14 @@ import {
 import {
   InputsearchComponent,
   IconComponent,
-  TableComponent,
   ButtonComponent,
   DialogService,
   ToastService,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
+  TableColumn,
+  TableAction,
 } from '../../../../shared/components/index';
-import { TableColumn, TableAction } from '../../../../shared/components/index';
 
 // Import styles (CSS instead of SCSS to avoid loader issues)
 import './domains.component.css';
@@ -46,7 +48,7 @@ import './domains.component.css';
     ReactiveFormsModule,
     InputsearchComponent,
     IconComponent,
-    TableComponent,
+    ResponsiveDataViewComponent,
     ButtonComponent,
     DomainCreateModalComponent,
     DomainEditModalComponent,
@@ -145,19 +147,16 @@ import './domains.component.css';
 
         <!-- Domains Table -->
         <div *ngIf="!isLoading && domains.length > 0" class="p-6">
-          <app-table
+          <app-responsive-data-view
             [data]="domains"
             [columns]="tableColumns"
+            [cardConfig]="cardConfig"
             [actions]="tableActions"
             [loading]="isLoading"
-            [sortable]="true"
-            [hoverable]="true"
-            [striped]="true"
-            size="md"
-            (sort)="onTableSort($event)"
-            (rowClick)="viewDomain($event)"
+            emptyMessage="No hay dominios"
+            emptyIcon="globe"
           >
-          </app-table>
+          </app-responsive-data-view>
 
           <!-- Pagination -->
           <div class="mt-6 flex justify-between items-center">
@@ -305,6 +304,20 @@ export class DomainsComponent implements OnInit, OnDestroy {
       variant: 'danger',
     },
   ];
+
+  // Card configuration for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'hostname',
+    subtitleKey: 'organization.name',
+    subtitleTransform: (val: any) => val || 'N/A',
+    badgeKey: 'status',
+    badgeConfig: { type: 'status', size: 'sm' },
+    badgeTransform: (value: DomainStatus) => this.formatDomainStatus(value),
+    detailKeys: [
+      { key: 'domain_type', label: 'Tipo', transform: (val: DomainType) => this.formatDomainType(val) },
+      { key: 'store.name', label: 'Tienda', transform: (val: any) => val || 'N/A' },
+    ],
+  };
 
   stats: DomainStats = {
     totalDomains: 0,

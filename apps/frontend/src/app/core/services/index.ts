@@ -2,5 +2,6 @@
 export { AppConfigService } from './app-config.service';
 export { AuthService } from './auth.service';
 export { ThemeService } from './theme.service';
+export { TokenRefreshTimerService } from './token-refresh-timer.service';
 
 export { NavigationService } from './navigation.service';

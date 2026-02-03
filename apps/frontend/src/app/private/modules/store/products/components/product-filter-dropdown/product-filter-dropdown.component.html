@@ -6,9 +6,10 @@
     (click)="toggleDropdown()"
     [attr.aria-expanded]="isOpen"
     [attr.aria-haspopup]="true"
+    [class.compact]="true"
   >
-    <app-icon name="filter" [size]="16"></app-icon>
-    <span>Filtros</span>
+    <app-icon name="sliders-horizontal" [size]="18"></app-icon>
+    <span class="filter-label-text">Filtros</span>
     <span
       *ngIf="activeFiltersCount > 0"
       class="filter-count-badge"
@@ -16,7 +17,7 @@
     >
       {{ activeFiltersCount }}
     </span>
-    <app-icon name="chevron-down" [size]="14" class="ml-auto"></app-icon>
+    <app-icon name="chevron-down" [size]="14" class="chevron-icon"></app-icon>
   </button>
 
   <!-- Dropdown Content -->

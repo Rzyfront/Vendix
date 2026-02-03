@@ -9,7 +9,7 @@ export type ButtonVariant =
   | 'ghost'
   | 'danger'
   | 'success';
-export type ButtonSize = 'sm' | 'md' | 'lg';
+export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
 
 @Component({
   selector: 'app-button',
@@ -65,6 +65,10 @@ export type ButtonSize = 'sm' | 'md' | 'lg';
       .h-13 {
         height: 3.25rem; /* 52px */
       }
+
+      .h-7 {
+        height: 1.75rem; /* 28px */
+      }
     `,
   ],
 })
@@ -104,6 +108,7 @@ export class ButtonComponent {
 
     // Size classes - alturas consistentes con inputs y selectors
     const sizeClasses = {
+      xsm: ['h-7', 'px-2', 'text-xs'], // 28px - extra small
       sm: ['h-9', 'px-3', 'text-sm'], // 36px
       md: ['h-11', 'px-4', 'text-base'], // 44px
       lg: ['h-13', 'px-6', 'text-lg'], // 52px

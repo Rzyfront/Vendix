@@ -4,24 +4,27 @@ import { StorePaymentMethod } from '../interfaces/payment-methods.interface';
 import {
   ButtonComponent,
   IconComponent,
-  TableComponent,
   TableColumn,
   TableAction,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
 } from '../../../../../../shared/components/index';
 
 @Component({
   selector: 'app-payment-methods-list',
   standalone: true,
-  imports: [CommonModule, TableComponent],
+  imports: [CommonModule, ResponsiveDataViewComponent],
   template: `
-    <app-table
+    <app-responsive-data-view
       [data]="payment_methods"
       [columns]="table_columns"
+      [cardConfig]="card_config"
       [actions]="table_actions"
       [loading]="is_loading"
-      empty_message="No payment methods configured"
+      emptyMessage="No payment methods configured"
+      emptyIcon="credit-card"
     >
-    </app-table>
+    </app-responsive-data-view>
   `,
   styles: [
     `
@@ -40,6 +43,27 @@ export class PaymentMethodsListComponent {
   @Output() toggle = new EventEmitter<StorePaymentMethod>();
   @Output() delete = new EventEmitter<StorePaymentMethod>();
   @Output() reorder = new EventEmitter<string[]>();
+
+  card_config: ItemListCardConfig = {
+    titleKey: 'system_payment_method.display_name',
+    subtitleKey: 'display_order',
+    subtitleTransform: (val: number) => `Orden #${val + 1}`,
+    badgeKey: 'state',
+    badgeConfig: { type: 'status' },
+    badgeTransform: (val: string) => this.getStateLabel(val),
+    detailKeys: [
+      {
+        key: 'system_payment_method.type',
+        label: 'Tipo',
+        transform: (val: string) => this.getPaymentMethodTypeLabel(val),
+      },
+      {
+        key: 'created_at',
+        label: 'Agregado',
+        transform: (val: string) => new Date(val).toLocaleDateString(),
+      },
+    ],
+  };
 
   table_columns: TableColumn[] = [
     {
