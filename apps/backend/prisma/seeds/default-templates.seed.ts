@@ -80,7 +80,6 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
           titulo: '',
           parrafo: '',
           logo_url: null,
-          favicon_url: null,
           colores: {
             primary_color: '#3B82F6',
             secondary_color: '#10B981',
@@ -127,6 +126,46 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
           free_shipping_threshold: null,
           calculate_tax_before_shipping: true,
           multiple_shipping_addresses: false,
+        },
+        footer: {
+          store_info: {
+            about_us: '',
+            support_email: '',
+            tagline: 'Tu tienda de confianza para productos de calidad',
+          },
+          links: [
+            { label: 'Productos', url: '/products', is_external: false },
+            { label: 'Novedades', url: '/new', is_external: false },
+            { label: 'Ofertas', url: '/sale', is_external: false },
+          ],
+          help: {
+            faq: [
+              {
+                question: '¿Cómo puedo realizar un pedido?',
+                answer:
+                  'Navega por nuestro catálogo, agrega los productos que desees al carrito y sigue el proceso de checkout. Puedes pagar con diferentes métodos de pago disponibles.',
+              },
+              {
+                question: '¿Cuáles son los métodos de pago disponibles?',
+                answer:
+                  'Aceptamos tarjetas de crédito, débito, transferencias bancarias y pagos en efectivo contra entrega según tu ubicación.',
+              },
+              {
+                question: '¿Cuánto tiempo tarda el envío?',
+                answer:
+                  'El tiempo de entrega varía según tu ubicación. Generalmente los pedidos se entregan entre 3 a 7 días hábiles.',
+              },
+            ],
+            shipping_info:
+              'Realizamos envíos a todo el país. El tiempo de entrega varía según tu ubicación, generalmente entre 3 a 7 días hábiles. Puedes verificar el estado de tu pedido en la sección "Mis Pedidos" de tu cuenta.',
+            returns_info:
+              'Si no estás satisfecho con tu compra, puedes solicitar una devolución dentro de los 30 días posteriores a la recepción. Ten en cuenta que si tu pedido ya está en camino, no es posible cancelarlo. Deberás esperar a recibirlo para luego procesar la devolución contactando a nuestro equipo de soporte.',
+          },
+          social: {
+            facebook: { username: '', url: '' },
+            instagram: { username: '', url: '' },
+            tiktok: { username: '', url: '' },
+          },
         },
       },
       description: 'Configuración por defecto de e-commerce',

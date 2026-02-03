@@ -78,36 +78,22 @@ export class PublicDomainsService {
         publicationSettings = settingsData?.publication;
         fontsSettings = settingsData?.fonts;
 
-        // CLAVE: Para dominios STORE_ECOMMERCE, usar el branding del ecommerce
-        if (domain.app_type === 'STORE_ECOMMERCE' && ecommerceSettings?.branding) {
-          // Use ecommerce-specific branding
-          branding = { ...ecommerceSettings.branding };
-
-          // Migration: If ecommerce branding doesn't have all fields, fill from inicio.colores
-          if (!branding.primary_color && ecommerceSettings.inicio?.colores) {
-            branding.primary_color = ecommerceSettings.inicio.colores.primary_color;
-            branding.secondary_color = ecommerceSettings.inicio.colores.secondary_color;
-            branding.accent_color = ecommerceSettings.inicio.colores.accent_color;
-          }
-
-          // Fill missing fields with defaults
-          branding.background_color = branding.background_color || '#F4F4F4';
-          branding.surface_color = branding.surface_color || '#FFFFFF';
-          branding.text_color = branding.text_color || '#222222';
-          branding.text_secondary_color = branding.text_secondary_color || '#666666';
-          branding.text_muted_color = branding.text_muted_color || '#999999';
-        } else if (domain.app_type === 'STORE_ECOMMERCE' && ecommerceSettings?.inicio?.colores) {
-          // Migration fallback: Use inicio.colores if no dedicated ecommerce branding exists
+        // CLAVE: Para dominios STORE_ECOMMERCE, usar ecommerce.inicio como fuente de verdad
+        if (domain.app_type === 'STORE_ECOMMERCE' && ecommerceSettings?.inicio) {
+          // Construir branding desde inicio (única fuente de verdad para ecommerce)
+          const inicioColores = ecommerceSettings.inicio.colores || {};
           branding = {
-            primary_color: ecommerceSettings.inicio.colores.primary_color,
-            secondary_color: ecommerceSettings.inicio.colores.secondary_color,
-            accent_color: ecommerceSettings.inicio.colores.accent_color,
+            // Colores desde inicio.colores
+            primary_color: inicioColores.primary_color || storeBranding?.primary_color || '#3B82F6',
+            secondary_color: inicioColores.secondary_color || storeBranding?.secondary_color || '#10B981',
+            accent_color: inicioColores.accent_color || storeBranding?.accent_color || '#F59E0B',
+            // Colores de fondo/texto con defaults
             background_color: '#F4F4F4',
             surface_color: '#FFFFFF',
             text_color: '#222222',
             text_secondary_color: '#666666',
             text_muted_color: '#999999',
-            // Copy name and logo from store branding if available
+            // Logo y favicon desde inicio o store branding
             name: storeBranding?.name,
             logo_url: ecommerceSettings.inicio.logo_url || storeBranding?.logo_url,
             favicon_url: storeBranding?.favicon_url,
@@ -234,30 +220,10 @@ export class PublicDomainsService {
       }
     }
 
-    // 2. Firmar Logo en Inicio
+    // 2. Firmar Logo en Inicio (fuente de verdad para ecommerce)
     if (config.inicio?.logo_url && !config.inicio.logo_url.startsWith('http')) {
       config.inicio.logo_url = await this.s3Service.signUrl(
         config.inicio.logo_url,
-      );
-    }
-
-    // 3. Firmar Logo en Branding (Source of Truth para el tema)
-    if (
-      config.branding?.logo_url &&
-      !config.branding.logo_url.startsWith('http')
-    ) {
-      config.branding.logo_url = await this.s3Service.signUrl(
-        config.branding.logo_url,
-      );
-    }
-
-    // 4. Firmar Favicon en Branding
-    if (
-      config.branding?.favicon_url &&
-      !config.branding.favicon_url.startsWith('http')
-    ) {
-      config.branding.favicon_url = await this.s3Service.signUrl(
-        config.branding.favicon_url,
       );
     }
   }

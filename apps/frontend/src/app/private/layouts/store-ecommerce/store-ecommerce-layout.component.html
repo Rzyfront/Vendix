@@ -186,36 +186,79 @@
     <router-outlet></router-outlet>
   </main>
 
-  <!-- Footer -->
+  <!-- Footer (Dynamic) -->
   <footer class="ecommerce-footer">
     <div class="footer-container">
+      <!-- Sección 1: Información de la Tienda -->
       <div class="footer-section">
         <h4>{{ store_name }}</h4>
-        <p>Tu tienda de confianza</p>
+        <p>{{ getTagline() }}</p>
+        @if (hasAboutUs()) {
+        <a class="cursor-pointer hover:text-[var(--color-primary)]" (click)="show_about_modal = true">Sobre Nosotros</a>
+        }
+        @if (footer_settings?.store_info?.support_email) {
+        <a [href]="'mailto:' + footer_settings!.store_info!.support_email" class="hover:text-[var(--color-primary)]">
+          {{ footer_settings!.store_info!.support_email }}
+        </a>
+        }
       </div>
+
+      <!-- Sección 2: Enlaces -->
       <div class="footer-section">
         <h4>Enlaces</h4>
-        <a routerLink="/catalog">Productos</a>
-        <a routerLink="/about">Nosotros</a>
-        <a routerLink="/contact">Contacto</a>
+        @for (link of getFooterLinks(); track link.url) {
+          @if (link.is_external) {
+          <a [href]="link.url" target="_blank" rel="noopener noreferrer">{{ link.label }}</a>
+          } @else {
+          <a [routerLink]="link.url">{{ link.label }}</a>
+          }
+        }
       </div>
+
+      <!-- Sección 3: Ayuda -->
       <div class="footer-section">
         <h4>Ayuda</h4>
-        <a routerLink="/faq">Preguntas Frecuentes</a>
-        <a routerLink="/shipping">Envíos</a>
-        <a routerLink="/returns">Devoluciones</a>
+        @if (hasFaq()) {
+        <a class="cursor-pointer hover:text-[var(--color-primary)]" (click)="show_faq_modal = true">Preguntas Frecuentes</a>
+        }
+        @if (hasShippingInfo()) {
+        <a class="cursor-pointer hover:text-[var(--color-primary)]" (click)="show_shipping_modal = true">Envíos</a>
+        }
+        @if (hasReturnsInfo()) {
+        <a class="cursor-pointer hover:text-[var(--color-primary)]" (click)="show_returns_modal = true">Devoluciones</a>
+        }
+        @if (!hasFaq() && !hasShippingInfo() && !hasReturnsInfo()) {
+        <p class="text-sm text-[var(--color-text-muted)]">Contáctanos para ayuda</p>
+        }
       </div>
+
+      <!-- Sección 4: Redes Sociales -->
       <div class="footer-section">
         <h4>Síguenos</h4>
         <div class="social-links">
-          <a href="#" target="_blank"><i class="pi pi-facebook"></i></a>
-          <a href="#" target="_blank"><i class="pi pi-instagram"></i></a>
-          <a href="#" target="_blank"><i class="pi pi-twitter"></i></a>
+          @if (hasValidSocialLink('facebook')) {
+          <a [href]="footer_settings!.social!.facebook!.url" target="_blank" rel="noopener noreferrer">
+            <i class="pi pi-facebook"></i>
+          </a>
+          }
+          @if (hasValidSocialLink('instagram')) {
+          <a [href]="footer_settings!.social!.instagram!.url" target="_blank" rel="noopener noreferrer">
+            <i class="pi pi-instagram"></i>
+          </a>
+          }
+          @if (hasValidSocialLink('tiktok')) {
+          <a [href]="footer_settings!.social!.tiktok!.url" target="_blank" rel="noopener noreferrer">
+            <app-icon name="brand-tiktok" [size]="16"></app-icon>
+          </a>
+          }
+          @if (!hasValidSocialLink('facebook') && !hasValidSocialLink('instagram') && !hasValidSocialLink('tiktok')) {
+          <p class="text-sm text-[var(--color-text-muted)]">Próximamente</p>
+          }
         </div>
       </div>
     </div>
     <div class="footer-bottom">
-      <p>&copy; {{ store_name }} 2025. Todos los derechos reservados.</p>
+      <p>&copy; {{ store_name }} {{ current_year }}. Todos los derechos reservados.</p>
     </div>
   </footer>
 </div>
@@ -292,3 +335,39 @@
 
 <app-auth-modal [isOpen]="is_auth_modal_open" [initialMode]="auth_modal_mode" [storeLogo]="store_logo"
   [storeName]="store_name" (closed)="is_auth_modal_open = false"></app-auth-modal>
+
+<!-- Footer Modals -->
+@if (show_about_modal) {
+<app-info-modal
+  [isOpen]="true"
+  title="Sobre Nosotros"
+  [content]="footer_settings?.store_info?.about_us || ''"
+  (closed)="show_about_modal = false">
+</app-info-modal>
+}
+
+@if (show_faq_modal) {
+<app-faq-modal
+  [isOpen]="true"
+  [items]="footer_settings?.help?.faq || []"
+  (closed)="show_faq_modal = false">
+</app-faq-modal>
+}
+
+@if (show_shipping_modal) {
+<app-info-modal
+  [isOpen]="true"
+  title="Información de Envíos"
+  [content]="footer_settings?.help?.shipping_info || ''"
+  (closed)="show_shipping_modal = false">
+</app-info-modal>
+}
+
+@if (show_returns_modal) {
+<app-info-modal
+  [isOpen]="true"
+  title="Política de Devoluciones"
+  [content]="footer_settings?.help?.returns_info || ''"
+  (closed)="show_returns_modal = false">
+</app-info-modal>
+}

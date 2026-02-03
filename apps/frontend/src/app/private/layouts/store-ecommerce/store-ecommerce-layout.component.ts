@@ -19,6 +19,50 @@ import { SearchAutocompleteComponent } from '../../modules/ecommerce/components/
 import { IconComponent } from '../../../shared/components/icon/icon.component';
 import { AuthModalComponent } from './components/auth-modal/auth-modal.component';
 import { QuantityControlComponent } from '../../../shared/components/quantity-control/quantity-control.component';
+import { InfoModalComponent } from './components/info-modal';
+import { FaqModalComponent } from './components/faq-modal';
+
+// Footer types (matching backend interfaces)
+interface FooterStoreInfo {
+  about_us?: string;
+  support_email?: string;
+  tagline?: string;
+}
+
+interface FooterLink {
+  label: string;
+  url: string;
+  is_external?: boolean;
+}
+
+interface FooterFaqItem {
+  question: string;
+  answer: string;
+}
+
+interface FooterHelp {
+  faq?: FooterFaqItem[];
+  shipping_info?: string;
+  returns_info?: string;
+}
+
+interface FooterSocialAccount {
+  username?: string;
+  url?: string;
+}
+
+interface FooterSocial {
+  facebook?: FooterSocialAccount;
+  instagram?: FooterSocialAccount;
+  tiktok?: FooterSocialAccount;
+}
+
+interface FooterSettings {
+  store_info?: FooterStoreInfo;
+  links?: FooterLink[];
+  help?: FooterHelp;
+  social?: FooterSocial;
+}
 
 @Component({
   selector: 'app-store-ecommerce-layout',
@@ -30,6 +74,8 @@ import { QuantityControlComponent } from '../../../shared/components/quantity-co
     IconComponent,
     AuthModalComponent,
     QuantityControlComponent,
+    InfoModalComponent,
+    FaqModalComponent,
   ],
   templateUrl: './store-ecommerce-layout.component.html',
   styleUrls: ['./store-ecommerce-layout.component.scss'],
@@ -41,6 +87,23 @@ export class StoreEcommerceLayoutComponent implements OnInit {
   show_mobile_menu = false;
   is_auth_modal_open = false;
   auth_modal_mode: 'login' | 'register' = 'login';
+
+  // Footer settings
+  footer_settings: FooterSettings | null = null;
+  show_about_modal = false;
+  show_faq_modal = false;
+  show_shipping_modal = false;
+  show_returns_modal = false;
+
+  // Default links when no footer config exists
+  default_links: FooterLink[] = [
+    { label: 'Productos', url: '/products', is_external: false },
+    { label: 'Novedades', url: '/new', is_external: false },
+    { label: 'Ofertas', url: '/sale', is_external: false },
+  ];
+
+  // Current year for copyright
+  current_year = new Date().getFullYear();
 
   // Inject dependencies first, then create observables
   private auth_facade = inject(AuthFacade);
@@ -109,9 +172,16 @@ export class StoreEcommerceLayoutComponent implements OnInit {
 
         this.store_logo = inicioLogo || brandingLogo || tenantLogo || null;
 
+        // Load footer settings
+        const ecommerceSettings = domainConfig.ecommerce || config;
+        if (ecommerceSettings?.footer) {
+          this.footer_settings = ecommerceSettings.footer;
+        }
+
         console.log('Layout Resolved Config:', {
           storeName: this.store_name,
           storeLogo: this.store_logo,
+          footerSettings: this.footer_settings ? 'loaded' : 'not configured',
           source: inicioLogo
             ? 'inicio.logo_url'
             : brandingLogo
@@ -282,5 +352,50 @@ export class StoreEcommerceLayoutComponent implements OnInit {
       }
     });
     sub.unsubscribe();
+  }
+
+  // Footer helper methods
+  hasValidSocialLink(platform: 'facebook' | 'instagram' | 'tiktok'): boolean {
+    const account = this.footer_settings?.social?.[platform];
+    return !!(account?.url && account.url.trim() !== '' && account.url !== '#');
+  }
+
+  getFooterLinks(): FooterLink[] {
+    return this.footer_settings?.links?.length
+      ? this.footer_settings.links
+      : this.default_links;
+  }
+
+  hasAboutUs(): boolean {
+    return !!(
+      this.footer_settings?.store_info?.about_us &&
+      this.footer_settings.store_info.about_us.trim() !== ''
+    );
+  }
+
+  hasFaq(): boolean {
+    return !!(
+      this.footer_settings?.help?.faq && this.footer_settings.help.faq.length > 0
+    );
+  }
+
+  hasShippingInfo(): boolean {
+    return !!(
+      this.footer_settings?.help?.shipping_info &&
+      this.footer_settings.help.shipping_info.trim() !== ''
+    );
+  }
+
+  hasReturnsInfo(): boolean {
+    return !!(
+      this.footer_settings?.help?.returns_info &&
+      this.footer_settings.help.returns_info.trim() !== ''
+    );
+  }
+
+  getTagline(): string {
+    return (
+      this.footer_settings?.store_info?.tagline || 'Tu tienda de confianza'
+    );
   }
 }

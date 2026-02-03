@@ -20,6 +20,7 @@ import { StoreDomainsModule } from './domains/domains.module';
 import { ShippingModule } from './shipping/shipping.module';
 import { ExpensesModule } from './expenses/expenses.module';
 import { StoreLegalDocumentsModule } from './legal-documents/legal-documents.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { StoreLegalDocumentsModule } from './legal-documents/legal-documents.mod
     ShippingModule,
     ExpensesModule,
     StoreLegalDocumentsModule,
+    AnalyticsModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],

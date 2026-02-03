@@ -29,7 +29,7 @@ export class ToastService {
       title: input.title,
       description: input.description,
       variant: input.variant ?? 'default',
-      duration: input.duration ?? 3500,
+      duration: input.duration ?? 1750,
       leaving: false,
     };
     this.toastsSig.update((arr) => [toast, ...arr]);
@@ -64,17 +64,17 @@ export class ToastService {
     this.toastsSig.set([]);
   }
 
-  // helpers
-  success(msg: string, title?: string, duration = 3000) {
+  // helpers (durations reduced 50% for snappier UX)
+  success(msg: string, title?: string, duration = 1500) {
     this.show({ title, description: msg, variant: 'success', duration });
   }
-  error(msg: string, title?: string, duration = 4000) {
+  error(msg: string, title?: string, duration = 2000) {
     this.show({ title, description: msg, variant: 'error', duration });
   }
-  warning(msg: string, title?: string, duration = 3500) {
+  warning(msg: string, title?: string, duration = 1750) {
     this.show({ title, description: msg, variant: 'warning', duration });
   }
-  info(msg: string, title?: string, duration = 3000) {
+  info(msg: string, title?: string, duration = 1500) {
     this.show({ title, description: msg, variant: 'info', duration });
   }
 }

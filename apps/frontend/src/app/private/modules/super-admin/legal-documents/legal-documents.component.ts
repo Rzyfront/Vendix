@@ -23,6 +23,7 @@ import {
   TableAction,
 } from '../../../../shared/components/table/table.component';
 import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../shared/components/index';
+import { ConfirmationModalComponent } from '../../../../shared/components/confirmation-modal/confirmation-modal.component';
 
 @Component({
   selector: 'app-legal-documents',
@@ -37,12 +38,13 @@ import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../sha
     StatsComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
+    ConfirmationModalComponent,
   ],
   template: `
     <!-- Standard Module Layout -->
     <div class="flex flex-col gap-6 p-6">
       <!-- Stats Grid -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="stats-container">
         <app-stats
           title="Total Documentos"
           [value]="totalDocuments()"
@@ -165,9 +167,23 @@ import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../sha
     <app-legal-document-modal
       [(isOpen)]="isModalOpen"
       [document]="selectedDocument"
+      [submitting]="isModalSubmitting"
       (save)="onSaveDocument($event)"
       (cancel)="closeModal()"
     ></app-legal-document-modal>
+
+    <!-- Confirmation Modal -->
+    <app-confirmation-modal
+      [(isOpen)]="isConfirmOpen"
+      [title]="confirmAction === 'activate' ? 'Activar Documento' : 'Desactivar Documento'"
+      [message]="confirmAction === 'activate'
+        ? 'Al activar este documento, se desactivarán otras versiones del mismo tipo. ¿Continuar?'
+        : '¿Estás seguro de desactivar este documento?'"
+      [confirmText]="confirmAction === 'activate' ? 'Activar' : 'Desactivar'"
+      [confirmVariant]="confirmAction === 'activate' ? 'primary' : 'danger'"
+      (confirm)="onConfirmAction()"
+      (cancel)="onCancelConfirm()"
+    ></app-confirmation-modal>
   `,
 })
 export class LegalDocumentsComponent implements OnInit {
@@ -219,7 +235,13 @@ export class LegalDocumentsComponent implements OnInit {
 
   // Modal State
   isModalOpen = false;
+  isModalSubmitting = false;
   selectedDocument?: LegalDocument;
+
+  // Confirmation Modal State
+  isConfirmOpen = false;
+  confirmAction: 'activate' | 'deactivate' | null = null;
+  confirmDocument?: LegalDocument;
 
   // Options
   typeFilterOptions: SelectorOption[] = [];
@@ -297,7 +319,7 @@ export class LegalDocumentsComponent implements OnInit {
   cardConfig: ItemListCardConfig = {
     titleKey: 'title',
     subtitleKey: 'document_type',
-    subtitleTransform: (val: string) => this.formatEnumLabel(val),
+    subtitleTransform: (item: LegalDocument) => this.formatEnumLabel(item.document_type),
     badgeKey: 'is_active',
     badgeConfig: { type: 'status', size: 'sm' },
     badgeTransform: (val: boolean) => val ? 'Activo' : 'Inactivo',
@@ -371,10 +393,13 @@ export class LegalDocumentsComponent implements OnInit {
 
   closeModal() {
     this.isModalOpen = false;
+    this.isModalSubmitting = false;
     this.selectedDocument = undefined;
   }
 
   onSaveDocument(dto: CreateSystemDocumentDto | UpdateSystemDocumentDto) {
+    this.isModalSubmitting = true;
+
     if (this.selectedDocument) {
       // Edit
       this.service
@@ -390,7 +415,8 @@ export class LegalDocumentsComponent implements OnInit {
           },
           error: (err) => {
             console.error(err);
-            this.toast.error('Error al actualizar el documento');
+            this.isModalSubmitting = false;
+            this.toast.error(this.extractErrorMessage(err, 'Error al actualizar el documento'));
           },
         });
     } else {
@@ -405,44 +431,76 @@ export class LegalDocumentsComponent implements OnInit {
           },
           error: (err) => {
             console.error(err);
-            this.toast.error(
-              err.error?.message || 'Error al crear el documento',
-            );
+            this.isModalSubmitting = false;
+            this.toast.error(this.extractErrorMessage(err, 'Error al crear el documento'));
           },
         });
     }
   }
 
   toggleActivation(doc: LegalDocument) {
-    if (doc.is_active) {
-      if (!confirm('¿Estás seguro de desactivar este documento?')) return;
+    this.confirmDocument = doc;
+    this.confirmAction = doc.is_active ? 'deactivate' : 'activate';
+    this.isConfirmOpen = true;
+  }
 
-      this.service.deactivateDocument(doc.id).subscribe({
+  onConfirmAction() {
+    if (!this.confirmDocument || !this.confirmAction) return;
+
+    if (this.confirmAction === 'deactivate') {
+      this.service.deactivateDocument(this.confirmDocument.id).subscribe({
         next: () => {
           this.toast.success('Documento desactivado');
           this.loadDocuments();
         },
-        error: () => this.toast.error('Error al desactivar'),
+        error: (err) => this.toast.error(this.extractErrorMessage(err, 'Error al desactivar')),
       });
     } else {
-      if (
-        !confirm(
-          'Al activar este documento, se desactivarán otras versiones del mismo tipo. ¿Continuar?',
-        )
-      )
-        return;
-
-      this.service.activateDocument(doc.id).subscribe({
+      this.service.activateDocument(this.confirmDocument.id).subscribe({
         next: () => {
           this.toast.success('Documento activado');
           this.loadDocuments();
         },
-        error: () => this.toast.error('Error al activar'),
+        error: (err) => this.toast.error(this.extractErrorMessage(err, 'Error al activar')),
       });
     }
+
+    this.resetConfirmState();
+  }
+
+  onCancelConfirm() {
+    this.resetConfirmState();
+  }
+
+  private resetConfirmState() {
+    this.isConfirmOpen = false;
+    this.confirmAction = null;
+    this.confirmDocument = undefined;
   }
 
   formatEnumLabel(type: string): string {
+    if (!type) return '';
     return type.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+  }
+
+  /**
+   * Extract error message from HTTP error response
+   * Handles nested message structures from NestJS
+   */
+  private extractErrorMessage(err: any, fallback: string): string {
+    const errorBody = err?.error;
+    if (!errorBody) return fallback;
+
+    // Handle nested message object: { message: { message: "actual error" } }
+    if (typeof errorBody.message === 'object' && errorBody.message?.message) {
+      return errorBody.message.message;
+    }
+
+    // Handle direct message string: { message: "actual error" }
+    if (typeof errorBody.message === 'string') {
+      return errorBody.message;
+    }
+
+    return fallback;
   }
 }

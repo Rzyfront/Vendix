@@ -118,7 +118,8 @@ export class AuthEffects {
             this.tokenRefreshTimer.startTimer(expires_in);
           }
 
-          if (message) this.toast.success(message);
+          // NOTA: El toast de bienvenida lo muestra el componente de login (contextual-login)
+          // para dar un mensaje más personalizado según el contexto
           try {
             const currentConfig = this.configFacade.getCurrentConfig();
             // Si no hay environment actualizado, asumimos que no hay cambio de entorno
@@ -249,24 +250,22 @@ export class AuthEffects {
     () =>
       this.actions$.pipe(
         ofType(AuthActions.logoutSuccess),
-        tap(({ redirect }) => {
+        tap(() => {
           // Stop the token refresh timer
           this.tokenRefreshTimer.stopTimer();
 
-          // CRITICAL: Clear store state FIRST before clearing localStorage
+          // Clear store state
           this.store.dispatch(AuthActions.clearAuthState());
 
-          // Limpiar específicamente todas las claves de autenticación
+          // Limpiar localStorage
           if (typeof localStorage !== 'undefined') {
-            // Eliminar todas las claves de autenticación específicas
             const keysToRemove = [
               'vendix_auth_state',
               'vendix_user_environment',
             ];
-
             keysToRemove.forEach((key) => localStorage.removeItem(key));
 
-            // Also try to remove legacy keys for cleanup (if they exist)
+            // Limpiar claves legacy
             const legacyKeysToRemove = [
               'access_token',
               'refresh_token',
@@ -275,23 +274,18 @@ export class AuthEffects {
               'permissions',
               'roles',
             ];
-
             legacyKeysToRemove.forEach((key) => localStorage.removeItem(key));
 
-            // Establecer bandera temporal para prevenir restauración automática
+            // Establecer bandera de logout reciente
             localStorage.setItem(
               'vendix_logged_out_recently',
               Date.now().toString(),
             );
 
-            console.log('[LOGOUT] All auth data cleared from localStorage');
+            console.log('[AuthEffects] Logout completed - localStorage cleared');
           }
 
-          // Navigate AFTER everything is cleared, only if redirect is true (default)
-          // Explicit check against false because undefined should be treated as true (backward compatibility)
-          if (redirect !== false) {
-            this.router.navigateByUrl('/auth/login');
-          }
+          // NOTA: La navegación y toast son manejados por SessionService
         }),
       ),
     { dispatch: false },

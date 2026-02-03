@@ -46,26 +46,8 @@ export interface EcommerceSliderPhoto {
   caption?: string;
 }
 
-// Branding independiente para ecommerce (separado del branding de tienda)
-export interface EcommerceBrandingSettings {
-  name?: string;
-  primary_color?: string;
-  secondary_color?: string;
-  accent_color?: string;
-  background_color?: string;
-  surface_color?: string;
-  text_color?: string;
-  text_secondary_color?: string;
-  text_muted_color?: string;
-  logo_url?: string;
-  favicon_url?: string;
-  custom_css?: string;
-}
-
 export interface EcommerceSettings {
   enabled: boolean;
-  // Branding independiente del ecommerce (separado del branding de tienda)
-  branding?: EcommerceBrandingSettings;
   slider?: {
     enable: boolean;
     photos: EcommerceSliderPhoto[];
@@ -107,6 +89,51 @@ export interface EcommerceSettings {
     calculate_tax_before_shipping: boolean;
     multiple_shipping_addresses: boolean;
   };
+  footer?: FooterSettings;
+}
+
+// ============================================================================
+// FOOTER - Configuración del pie de página del ecommerce
+// ============================================================================
+export interface FooterStoreInfo {
+  about_us?: string;
+  support_email?: string;
+  tagline?: string;
+}
+
+export interface FooterLink {
+  label: string;
+  url: string;
+  is_external?: boolean;
+}
+
+export interface FooterFaqItem {
+  question: string;
+  answer: string;
+}
+
+export interface FooterHelp {
+  faq?: FooterFaqItem[];
+  shipping_info?: string;
+  returns_info?: string;
+}
+
+export interface FooterSocialAccount {
+  username?: string;
+  url?: string;
+}
+
+export interface FooterSocial {
+  facebook?: FooterSocialAccount;
+  instagram?: FooterSocialAccount;
+  tiktok?: FooterSocialAccount;
+}
+
+export interface FooterSettings {
+  store_info?: FooterStoreInfo;
+  links?: FooterLink[];
+  help?: FooterHelp;
+  social?: FooterSocial;
 }
 
 // Legacy: Mantener por compatibilidad temporal

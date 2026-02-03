@@ -1,6 +1,6 @@
 <div class="flex flex-col gap-2 md:p-4 ">
   <!-- Stats Section -->
-  <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6" *ngIf="statsItems.length > 0">
+  <div class="stats-container" *ngIf="statsItems.length > 0">
     <app-stats *ngFor="let item of statsItems" [title]="item.title" [value]="item.value" [smallText]="item.smallText"
       [iconName]="item.iconName" [iconBgColor]="item.iconBgColor" [iconColor]="item.iconColor">
     </app-stats>

@@ -47,94 +47,94 @@ interface RegistrationError {
   ],
   template: `
     <div
-      class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-[var(--color-background)]"
+      class="min-h-screen flex flex-col justify-center px-4 py-6 sm:px-6 sm:py-12 lg:px-8 bg-[var(--color-background)]"
     >
-      <div class="max-w-2xl w-full space-y-8">
+      <div class="w-full max-w-md sm:max-w-lg md:max-w-xl lg:max-w-2xl mx-auto space-y-4 sm:space-y-6">
         <!-- Branding -->
-        <div class="text-center my-3">
-          <div class="mx-auto flex items-center justify-center space-x-3 mb-4">
+        <div class="text-center">
+          <div class="mx-auto flex items-center justify-center space-x-2 sm:space-x-3 mb-3 sm:mb-4">
             <div
-              class="w-10 h-10 bg-[var(--color-primary)] rounded-xl flex items-center justify-center"
+              class="w-8 h-8 sm:w-10 sm:h-10 bg-[var(--color-primary)] rounded-xl flex items-center justify-center"
             >
-              <app-icon name="cart" [size]="24" color="white"></app-icon>
+              <app-icon name="cart" [size]="20" class="sm:hidden" color="white"></app-icon>
+              <app-icon name="cart" [size]="24" class="hidden sm:block" color="white"></app-icon>
             </div>
-            <h1 class="text-xl font-semibold text-[var(--color-text-primary)]">
+            <h1 class="text-lg sm:text-xl font-semibold text-[var(--color-text-primary)]">
               Vendix
             </h1>
           </div>
           <h2
-            class="mt-6 text-3xl font-extrabold text-[var(--color-text-primary)]"
+            class="mt-4 sm:mt-6 text-xl sm:text-2xl md:text-3xl font-extrabold text-[var(--color-text-primary)]"
           >
             Crear tu organización
           </h2>
-          <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
-            Comienza tu viaje empresarial con Vendix
+          <p class="mt-1 sm:mt-2 mb-2 text-xs sm:text-sm text-[var(--color-text-secondary)]">
+            Comienza tu viaje empresarial
           </p>
         </div>
 
         <!-- Registration Form -->
-        <app-card [animateOnLoad]="true" shadow="lg">
-          <form [formGroup]="registerForm" (ngSubmit)="onSubmit()">
-            <div>
-              <!-- Información de la organización -->
+        <app-card class="!mt-6 sm:!mt-8" [animateOnLoad]="true" shadow="lg" [responsivePadding]="true">
+          <form [formGroup]="registerForm" (ngSubmit)="onSubmit()" class="space-y-1">
+            <!-- Información de la organización -->
+            <app-input
+              label="Nombre de la organización"
+              formControlName="organization_name"
+              [control]="registerForm.get('organization_name')"
+              type="text"
+              placeholder="Mi Empresa S.A.S"
+            ></app-input>
+
+            <!-- Información personal -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 sm:gap-x-4">
               <app-input
-                label="Nombre de la organización"
-                formControlName="organization_name"
-                [control]="registerForm.get('organization_name')"
+                label="Nombre"
+                formControlName="first_name"
+                [control]="registerForm.get('first_name')"
                 type="text"
-                placeholder="Mi Empresa S.A.S"
+                placeholder="Juan"
               ></app-input>
 
-              <!-- Información personal -->
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <app-input
-                  label="Nombre"
-                  formControlName="first_name"
-                  [control]="registerForm.get('first_name')"
-                  type="text"
-                  placeholder="Juan"
-                ></app-input>
-
-                <app-input
-                  label="Apellido"
-                  formControlName="last_name"
-                  [control]="registerForm.get('last_name')"
-                  type="text"
-                  placeholder="Pérez"
-                ></app-input>
-              </div>
-
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <app-input
-                  label="Correo electrónico"
-                  formControlName="email"
-                  [control]="registerForm.get('email')"
-                  type="email"
-                  placeholder="usuario@email.com"
-                ></app-input>
-
-                <app-input
-                  label="Teléfono (opcional)"
-                  formControlName="phone"
-                  type="tel"
-                  placeholder="+57 123 456 7890"
-                ></app-input>
-              </div>
-
               <app-input
-                label="Contraseña"
-                formControlName="password"
-                [control]="registerForm.get('password')"
-                type="password"
-                placeholder="••••••••"
-                helperText="La contraseña debe tener al menos 8 caracteres, una letra mayúscula y un carácter especial."
+                label="Apellido"
+                formControlName="last_name"
+                [control]="registerForm.get('last_name')"
+                type="text"
+                placeholder="Pérez"
               ></app-input>
             </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 sm:gap-x-4">
+              <app-input
+                label="Email"
+                formControlName="email"
+                [control]="registerForm.get('email')"
+                type="email"
+                placeholder="usuario@email.com"
+              ></app-input>
+
+              <app-input
+                label="Teléfono"
+                formControlName="phone"
+                type="tel"
+                placeholder="+57 123 456 7890"
+                helperText="Opcional"
+              ></app-input>
+            </div>
+
+            <app-input
+              label="Contraseña"
+              formControlName="password"
+              [control]="registerForm.get('password')"
+              type="password"
+              placeholder="••••••••"
+              helperText="Mín. 8 caracteres, 1 mayúscula y 1 especial"
+            ></app-input>
 
             <!-- Error Display -->
             @if (hasError) {
               <div
-                class="rounded-md bg-[rgba(239, 68, 68, 0.1)] p-4 border border-[rgba(239, 68, 68, 0.2)] mt-4"
+                class="rounded-md bg-[rgba(239,68,68,0.1)] p-3 sm:p-4 border border-[rgba(239,68,68,0.2)] mt-3 sm:mt-4"
               >
                 <div class="flex">
                   <div class="flex-shrink-0">
@@ -152,7 +152,7 @@ interface RegistrationError {
                   </div>
                   <div class="ml-3">
                     <h3
-                      class="text-sm font-medium text-[var(--color-destructive)]"
+                      class="text-xs sm:text-sm font-medium text-[var(--color-destructive)]"
                     >
                       {{ errorMessage }}
                     </h3>
@@ -161,7 +161,7 @@ interface RegistrationError {
               </div>
             }
 
-            <div class="pt-4">
+            <div class="pt-3 sm:pt-4">
               <app-button
                 type="submit"
                 variant="primary"
@@ -170,25 +170,24 @@ interface RegistrationError {
                 [loading]="isLoading"
                 [fullWidth]="true"
                 [showTextWhileLoading]="true"
-                class="mt-4 w-full"
               >
                 @if (!isLoading) {
                   <span>Crear cuenta</span>
                 }
                 @if (isLoading) {
-                  <span>Creando cuenta...</span>
+                  <span>Creando...</span>
                 }
               </app-button>
             </div>
 
             <div
-              class="flex justify-center items-center text-sm text-[var(--color-text-secondary)] pt-4"
+              class="flex justify-center items-center text-xs sm:text-sm text-[var(--color-text-secondary)] pt-3 sm:pt-4"
             >
               <p>
-                ¿Ya tienes una cuenta?
+                ¿Ya tienes cuenta?
                 <a
                   [routerLink]="['/auth', 'login']"
-                  class="font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)]"
+                  class="font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)] active:opacity-70 transition-opacity"
                 >
                   Inicia sesión
                 </a>
@@ -198,19 +197,19 @@ interface RegistrationError {
         </app-card>
 
         <!-- Back to Landing -->
-        <div class="text-center mt-6">
+        <div class="text-center mt-4 sm:mt-6">
           <a
             routerLink="/"
-            class="font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-primary)]"
+            class="inline-block py-2 px-1 text-sm sm:text-base font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] active:opacity-70 transition-opacity"
           >
             ← Volver al inicio
           </a>
         </div>
 
         <!-- Context Info -->
-        <div class="text-center text-xs text-[var(--color-text-muted)] mt-4">
+        <div class="text-center text-xs text-[var(--color-text-muted)] mt-3 sm:mt-4">
           <p>Acceso a Vendix Platform</p>
-          <p>Powered by Vendix</p>
+          <p class="mt-1">Powered by Vendix</p>
         </div>
       </div>
     </div>

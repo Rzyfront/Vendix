@@ -1,15 +1,9 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, tap, map, mergeMap, take } from 'rxjs';
-import { Router } from '@angular/router';
-import { Store } from '@ngrx/store';
+import { Observable, map, mergeMap, take } from 'rxjs';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { TenantFacade } from '../store/tenant/tenant.facade';
-import { ConfigFacade } from '../store/config';
-import { AppConfigService } from './app-config.service';
-import { NavigationService } from './navigation.service';
 import { environment } from '../../../environments/environment';
-import { AppEnvironment } from '../models/domain-config.interface';
 
 // Interfaces...
 export interface LoginDto {
@@ -78,11 +72,7 @@ export interface RegisterOwnerDto {
 export class AuthService {
   private readonly API_URL = `${environment.apiUrl}/auth`;
 
-  private appConfigService = inject(AppConfigService);
-  private navigationService = inject(NavigationService);
-  private configFacade = inject(ConfigFacade);
   private http = inject(HttpClient);
-  private router = inject(Router);
   private authFacade = inject(AuthFacade);
   private tenantFacade = inject(TenantFacade);
 
@@ -271,30 +261,24 @@ export class AuthService {
   }
 
   /**
-   * Cierra la sesión limpiando datos locales, estado de NgRx y notificando al backend.
-   * La limpieza local es síncrona para garantizar que el usuario salga inmediatamente.
+   * Limpia datos locales de autenticación y notifica al backend.
+   * La navegación y toasts son manejados por SessionService.
    */
   logout(options?: { redirect?: boolean }): void {
     const refreshToken = this.getRefreshToken();
-    const shouldRedirect = options?.redirect ?? true;
 
     // 1. Limpieza Local Inmediata
     this.authFacade.clearAuthState();
     this.clearAllAuthData();
 
-    // Bandera de logout explícito
+    // Bandera de logout
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem('vendix_logged_out_recently', Date.now().toString());
     }
 
-    console.log('[AuthService] Logout triggered - local state cleared');
+    console.log('[AuthService] Logout - local state cleared');
 
-    // 2. Redirección (Solo si se solicita)
-    if (shouldRedirect) {
-      this.router.navigate(['/auth/login']);
-    }
-
-    // 3. Notificación Backend (Fire and forget)
+    // 2. Notificación Backend (Fire and forget)
     // No esperamos la respuesta para bloquear la UI
     if (refreshToken) {
       this.http.post(`${this.API_URL}/logout`, {
@@ -305,6 +289,8 @@ export class AuthService {
         error: (err) => console.warn('[AuthService] Backend logout signaling failed', err)
       });
     }
+
+    // NOTA: La navegación es manejada por SessionService
   }
 
   registerCustomer(

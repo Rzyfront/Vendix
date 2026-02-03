@@ -11,116 +11,14 @@ import {
   ValidateNested,
   IsInt,
   Min,
+  IsEmail,
+  IsUrl,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
- * DTO para branding independiente del ecommerce
- * Separado del branding de tienda (STORE_ADMIN)
- */
-export class EcommerceBrandingDto {
-  @ApiPropertyOptional({
-    example: 'Mi Tienda Online',
-    description: 'Nombre de la tienda para el ecommerce',
-  })
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  name?: string;
-
-  @ApiPropertyOptional({
-    example: '#3B82F6',
-    description: 'Primary color',
-  })
-  @IsOptional()
-  @IsHexColor()
-  primary_color?: string;
-
-  @ApiPropertyOptional({
-    example: '#10B981',
-    description: 'Secondary color',
-  })
-  @IsOptional()
-  @IsHexColor()
-  secondary_color?: string;
-
-  @ApiPropertyOptional({
-    example: '#F59E0B',
-    description: 'Accent color',
-  })
-  @IsOptional()
-  @IsHexColor()
-  accent_color?: string;
-
-  @ApiPropertyOptional({
-    example: '#F4F4F4',
-    description: 'Background color',
-  })
-  @IsOptional()
-  @IsHexColor()
-  background_color?: string;
-
-  @ApiPropertyOptional({
-    example: '#FFFFFF',
-    description: 'Surface color',
-  })
-  @IsOptional()
-  @IsHexColor()
-  surface_color?: string;
-
-  @ApiPropertyOptional({
-    example: '#222222',
-    description: 'Text color',
-  })
-  @IsOptional()
-  @IsHexColor()
-  text_color?: string;
-
-  @ApiPropertyOptional({
-    example: '#666666',
-    description: 'Text secondary color',
-  })
-  @IsOptional()
-  @IsHexColor()
-  text_secondary_color?: string;
-
-  @ApiPropertyOptional({
-    example: '#999999',
-    description: 'Text muted color',
-  })
-  @IsOptional()
-  @IsHexColor()
-  text_muted_color?: string;
-
-  @ApiPropertyOptional({
-    example: 'https://ejemplo.com/logo.png',
-    description: 'URL del logo',
-  })
-  @IsOptional()
-  @IsString()
-  logo_url?: string;
-
-  @ApiPropertyOptional({
-    example: 'https://ejemplo.com/favicon.ico',
-    description: 'URL del favicon',
-  })
-  @IsOptional()
-  @IsString()
-  favicon_url?: string;
-
-  @ApiPropertyOptional({
-    example: '.custom-class { color: red; }',
-    description: 'Custom CSS',
-  })
-  @IsOptional()
-  @IsString()
-  custom_css?: string;
-}
-
-/**
- * DTO para los colores de la sección inicio
- * @deprecated Use EcommerceBrandingDto instead
+ * DTO para los colores de la sección inicio (única fuente de verdad para branding ecommerce)
  */
 export class InicioColoresDto {
   @ApiPropertyOptional({
@@ -402,6 +300,221 @@ export class EcommerceWishlistDto {
   share_wishlist?: boolean;
 }
 
+// ============================================================================
+// FOOTER DTOs - Configuración del pie de página del ecommerce
+// ============================================================================
+
+/**
+ * DTO para información de la tienda en el footer
+ */
+export class FooterStoreInfoDto {
+  @ApiPropertyOptional({
+    example: 'Somos una tienda dedicada a ofrecer productos de alta calidad...',
+    description: 'Descripción sobre la tienda (se muestra en modal About Us)',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  about_us?: string;
+
+  @ApiPropertyOptional({
+    example: 'soporte@mitienda.com',
+    description: 'Email de soporte para customers',
+  })
+  @IsOptional()
+  @IsEmail()
+  support_email?: string;
+
+  @ApiPropertyOptional({
+    example: 'Tu tienda de confianza para productos de calidad',
+    description: 'Frase corta que aparece en el footer',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  tagline?: string;
+}
+
+/**
+ * DTO para un enlace del footer
+ */
+export class FooterLinkDto {
+  @ApiPropertyOptional({
+    example: 'Productos',
+    description: 'Texto del enlace',
+  })
+  @IsString()
+  @MaxLength(50)
+  label: string;
+
+  @ApiPropertyOptional({
+    example: '/products',
+    description: 'URL del enlace (interna o externa)',
+  })
+  @IsString()
+  @MaxLength(500)
+  url: string;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Si es un enlace externo (abre en nueva ventana)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  is_external?: boolean;
+}
+
+/**
+ * DTO para un item de FAQ
+ */
+export class FooterFaqItemDto {
+  @ApiPropertyOptional({
+    example: '¿Cómo puedo realizar un pedido?',
+    description: 'Pregunta frecuente',
+  })
+  @IsString()
+  @MaxLength(300)
+  question: string;
+
+  @ApiPropertyOptional({
+    example: 'Puedes realizar tu pedido navegando por nuestro catálogo...',
+    description: 'Respuesta a la pregunta',
+  })
+  @IsString()
+  @MaxLength(2000)
+  answer: string;
+}
+
+/**
+ * DTO para la sección de ayuda del footer
+ */
+export class FooterHelpDto {
+  @ApiPropertyOptional({
+    description: 'Lista de preguntas frecuentes',
+    type: [FooterFaqItemDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => FooterFaqItemDto)
+  faq?: FooterFaqItemDto[];
+
+  @ApiPropertyOptional({
+    example: 'Realizamos envíos a todo el país. El tiempo de entrega varía...',
+    description: 'Información sobre envíos',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  shipping_info?: string;
+
+  @ApiPropertyOptional({
+    example: 'Si no estás satisfecho con tu compra, puedes solicitar una devolución...',
+    description: 'Política de devoluciones',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  returns_info?: string;
+}
+
+/**
+ * DTO para una cuenta de red social
+ */
+export class FooterSocialAccountDto {
+  @ApiPropertyOptional({
+    example: 'mitienda',
+    description: 'Nombre de usuario en la red social',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  username?: string;
+
+  @ApiPropertyOptional({
+    example: 'https://facebook.com/mitienda',
+    description: 'URL del perfil en la red social',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  url?: string;
+}
+
+/**
+ * DTO para las redes sociales del footer
+ */
+export class FooterSocialDto {
+  @ApiPropertyOptional({
+    description: 'Cuenta de Facebook',
+    type: FooterSocialAccountDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FooterSocialAccountDto)
+  facebook?: FooterSocialAccountDto;
+
+  @ApiPropertyOptional({
+    description: 'Cuenta de Instagram',
+    type: FooterSocialAccountDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FooterSocialAccountDto)
+  instagram?: FooterSocialAccountDto;
+
+  @ApiPropertyOptional({
+    description: 'Cuenta de TikTok',
+    type: FooterSocialAccountDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FooterSocialAccountDto)
+  tiktok?: FooterSocialAccountDto;
+}
+
+/**
+ * DTO principal para la configuración del footer
+ */
+export class FooterSettingsDto {
+  @ApiPropertyOptional({
+    description: 'Información de la tienda',
+    type: FooterStoreInfoDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FooterStoreInfoDto)
+  store_info?: FooterStoreInfoDto;
+
+  @ApiPropertyOptional({
+    description: 'Enlaces de interés (máx 5)',
+    type: [FooterLinkDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => FooterLinkDto)
+  links?: FooterLinkDto[];
+
+  @ApiPropertyOptional({
+    description: 'Sección de ayuda (FAQ, envíos, devoluciones)',
+    type: FooterHelpDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FooterHelpDto)
+  help?: FooterHelpDto;
+
+  @ApiPropertyOptional({
+    description: 'Redes sociales',
+    type: FooterSocialDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FooterSocialDto)
+  social?: FooterSocialDto;
+}
+
 /**
  * DTO principal para configuración de e-commerce
  * Contiene todas las secciones de configuración
@@ -416,17 +529,7 @@ export class EcommerceSettingsDto {
   @IsIn(['STORE_ECOMMERCE'])
   app?: string;
 
-  // Branding independiente del ecommerce (separado del branding de tienda)
-  @ApiPropertyOptional({
-    description: 'Branding settings for ecommerce (independent from store branding)',
-    type: EcommerceBrandingDto,
-  })
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => EcommerceBrandingDto)
-  branding?: EcommerceBrandingDto;
-
-  // Sección Inicio
+  // Sección Inicio - Contiene colores (único source of truth para branding)
   @ApiPropertyOptional({
     description: 'Configuración de inicio (título, párrafo, logo, colores)',
     type: InicioDto,
@@ -493,6 +596,15 @@ export class EcommerceSettingsDto {
   @Type(() => EcommerceShippingDto)
   shipping?: EcommerceShippingDto;
 
+  // Footer
+  @ApiPropertyOptional({
+    description: 'Footer settings',
+    type: FooterSettingsDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FooterSettingsDto)
+  footer?: FooterSettingsDto;
 }
 
 export class UpdateEcommerceSettingsDto {

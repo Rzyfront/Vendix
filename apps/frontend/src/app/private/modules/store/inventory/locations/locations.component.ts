@@ -45,7 +45,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
     template: `
     <div class="w-full">
       <!-- Stats Grid -->
-      <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-4 md:mb-6 lg:mb-8">
+      <div class="stats-container">
         <app-stats
           title="Total Ubicaciones"
           [value]="stats.total"

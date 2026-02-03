@@ -6,51 +6,98 @@ import {
   ChangeDetectionStrategy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ButtonComponent, IconComponent } from '../../index';
+import { IconComponent } from '../../index';
 
 @Component({
   selector: 'app-completion-step',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, IconComponent],
+  imports: [CommonModule, IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
-      .completion-step {
-        padding: 0;
-        min-height: auto;
+      /* ============================================
+         MOBILE-FIRST COMPLETION STEP
+         Bottom-sheet style with modern cards
+         ============================================ */
+
+      :host {
         display: block;
+        height: 100%;
       }
 
-      .completion-container {
-        max-width: 100%;
-        margin: 0;
-        padding: 0;
-        text-align: center;
+      .completion-step {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        max-height: 70vh;
+        overflow: hidden;
       }
 
-      .success-animation {
-        margin-bottom: 1rem;
+      /* Handle bar - bottom sheet indicator */
+      .handle-bar {
         display: flex;
         justify-content: center;
+        padding: 0.5rem 0 1rem 0;
       }
 
-      .success-icon-wrapper {
-        position: relative;
-        display: inline-block;
+      .handle-indicator {
+        width: 2.5rem;
+        height: 0.375rem;
+        background: var(--color-border);
+        border-radius: 9999px;
       }
 
-      .success-icon-bg {
-        width: 64px;
-        height: 64px;
-        background: linear-gradient(135deg, var(--color-success) 0%, #16a34a 100%);
+      /* Scrollable content */
+      .completion-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0 1.5rem 2rem 1.5rem;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .completion-content::-webkit-scrollbar {
+        width: 4px;
+      }
+
+      .completion-content::-webkit-scrollbar-thumb {
+        background: var(--color-border);
+        border-radius: 10px;
+      }
+
+      /* ============================================
+         SUCCESS ICON - Double circle design
+         ============================================ */
+
+      .success-icon-container {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 1.25rem;
+      }
+
+      .success-icon-outer {
+        width: 5rem;
+        height: 5rem;
+        background: color-mix(in srgb, var(--color-primary) 10%, transparent);
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
-        box-shadow: var(--shadow-lg);
-        position: relative;
-        z-index: 2;
         animation: successPop 0.6s ease-out;
+      }
+
+      .success-icon-inner {
+        width: 3.5rem;
+        height: 3.5rem;
+        background: var(--color-primary);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 10px 25px -5px color-mix(in srgb, var(--color-primary) 30%, transparent);
+      }
+
+      .success-icon-inner app-icon {
+        color: var(--color-text-on-primary);
       }
 
       @keyframes successPop {
@@ -67,509 +114,436 @@ import { ButtonComponent, IconComponent } from '../../index';
         }
       }
 
-      .success-icon {
-        color: var(--color-text-on-primary);
-      }
+      /* ============================================
+         TITLE SECTION
+         ============================================ */
 
-      .success-ripple {
-        position: absolute;
-        top: -12px;
-        left: -12px;
-        right: -12px;
-        bottom: -12px;
-        border: 2px solid rgba(34, 197, 94, 0.2);
-        border-radius: 50%;
-        animation: ripple 2s ease-out infinite;
-      }
-
-      @keyframes ripple {
-        0% {
-          transform: scale(1);
-          opacity: 1;
-        }
-        50% {
-          transform: scale(1.15);
-          opacity: 0.5;
-        }
-        100% {
-          transform: scale(1);
-          opacity: 1;
-        }
+      .completion-header {
+        text-align: center;
+        margin-bottom: 1rem;
       }
 
       .completion-title {
-        font-size: var(--fs-xl);
-        font-weight: var(--fw-bold);
+        font-size: 1.5rem;
+        font-weight: 700;
         color: var(--color-text-primary);
-        margin-bottom: 0.5rem;
-        background: linear-gradient(135deg, var(--color-success) 0%, #16a34a 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
+        margin: 0 0 0.25rem 0;
       }
 
       .completion-subtitle {
-        font-size: var(--fs-sm);
+        font-size: 0.875rem;
         color: var(--color-text-secondary);
-        line-height: 1.5;
-        margin-bottom: 1rem;
+        margin: 0;
       }
 
-      .success-stats {
+      /* ============================================
+         STATS with vertical separator
+         ============================================ */
+
+      .stats-container {
         display: flex;
+        align-items: center;
         justify-content: center;
-        gap: 1.5rem;
-        margin-bottom: 1rem;
+        gap: 2rem;
+        padding: 0.75rem 0;
+        margin-bottom: 1.25rem;
       }
 
       .stat-item {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 0.25rem;
+        text-align: center;
       }
 
       .stat-number {
-        font-size: var(--fs-2xl);
-        font-weight: var(--fw-bold);
-        color: var(--color-success);
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--color-text-primary);
         line-height: 1;
       }
 
+      .stat-number.primary {
+        color: var(--color-primary);
+      }
+
       .stat-label {
-        font-size: var(--fs-xs);
-        font-weight: var(--fw-semibold);
-        color: var(--color-text-secondary);
+        font-size: 0.625rem;
+        font-weight: 600;
+        color: var(--color-text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-top: 0.25rem;
       }
 
-      .completion-summary {
-        background: var(--color-surface);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg);
-        padding: 1rem;
-        margin-bottom: 1rem;
-        box-shadow: var(--shadow-sm);
-        text-align: left;
-        cursor: pointer;
-        transition: all var(--transition-fast) ease;
+      .stat-divider {
+        width: 1px;
+        height: 2rem;
+        background: var(--color-border);
       }
 
-      .completion-summary:hover {
-        border-color: var(--color-success);
-        background: var(--color-background);
-      }
+      /* ============================================
+         SUMMARY SECTION
+         ============================================ */
 
-      .summary-header {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
+      .section-label {
+        font-size: 0.625rem;
+        font-weight: 600;
+        color: var(--color-text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
         margin-bottom: 0.75rem;
-        padding-bottom: 0.5rem;
-        border-bottom: 1px solid var(--color-border);
       }
 
-      .summary-icon {
-        width: 28px;
-        height: 28px;
-        background: var(--color-success-light);
-        border-radius: var(--radius-sm);
+      .summary-section {
+        margin-bottom: 1.5rem;
+      }
+
+      .summary-cards {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .summary-card {
         display: flex;
         align-items: center;
-        justify-content: center;
-      }
-
-      .summary-icon-element {
-        color: var(--color-success);
-      }
-
-      .summary-title {
-        font-size: var(--fs-base);
-        font-weight: var(--fw-semibold);
-        color: var(--color-text-primary);
-        margin: 0;
-      }
-
-      .summary-items {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 0.5rem;
-      }
-
-      .summary-item {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.5rem;
-        border-radius: var(--radius-md);
+        justify-content: space-between;
+        padding: 1rem;
         background: var(--color-background);
+        border-radius: 1rem;
+        border: 1px solid var(--color-border);
       }
 
-      .item-icon {
-        width: 28px;
-        height: 28px;
+      .summary-card-left {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .summary-card-icon {
+        width: 2.5rem;
+        height: 2.5rem;
         background: var(--color-surface);
-        border-radius: var(--radius-sm);
+        border-radius: 0.5rem;
         display: flex;
         align-items: center;
         justify-content: center;
-        flex-shrink: 0;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
       }
 
-      .item-icon-element {
-        color: var(--color-success);
+      .summary-card-icon app-icon {
+        color: var(--color-primary);
       }
 
-      .item-content {
-        flex: 1;
-        text-align: left;
+      .summary-card-info {
+        display: flex;
+        flex-direction: column;
       }
 
-      .item-label {
-        display: block;
-        font-size: var(--fs-xs);
-        font-weight: var(--fw-medium);
+      .summary-card-title {
+        font-size: 0.875rem;
+        font-weight: 600;
         color: var(--color-text-primary);
-        margin-bottom: 0.125rem;
+        line-height: 1.2;
       }
 
-      .item-value {
-        display: block;
-        font-size: var(--fs-xs);
+      .summary-card-subtitle {
+        font-size: 0.75rem;
         color: var(--color-text-muted);
       }
 
-      .item-check {
-        flex-shrink: 0;
+      .summary-card-check app-icon {
+        color: var(--color-primary);
       }
 
-      .check-icon {
-        color: var(--color-success);
+      /* ============================================
+         NEXT STEPS - Color-coded cards
+         ============================================ */
+
+      .next-steps-section {
+        margin-bottom: 1.5rem;
       }
 
-      .next-steps {
-        background: var(--color-background);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg);
-        padding: 1rem;
-        margin-bottom: 1rem;
-        cursor: pointer;
-        transition: all var(--transition-fast) ease;
-      }
-
-      .next-steps:hover {
-        border-color: var(--color-info);
-        background: var(--color-surface);
-      }
-
-      .next-steps-header {
+      .next-steps-cards {
         display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.5rem;
-        margin-bottom: 0.75rem;
-      }
-
-      .next-steps-icon {
-        width: 28px;
-        height: 28px;
-        background: var(--color-info-light);
-        border-radius: var(--radius-sm);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-
-      .next-steps-icon-element {
-        color: var(--color-info);
-      }
-
-      .next-steps-title {
-        font-size: var(--fs-base);
-        font-weight: var(--fw-semibold);
-        color: var(--color-text-primary);
-        margin: 0;
-      }
-
-      .next-steps-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        flex-direction: column;
         gap: 0.75rem;
       }
 
       .next-step-card {
         display: flex;
-        flex-direction: column;
         align-items: center;
-        gap: 0.5rem;
-        padding: 0.75rem;
-        background: var(--color-surface);
-        border-radius: var(--radius-md);
-        border: 1px solid var(--color-border);
-        text-align: center;
-        cursor: default;
+        gap: 0.75rem;
+        padding: 1rem;
+        border-radius: 1rem;
+        border: 1px solid transparent;
       }
 
-      .step-card-icon {
-        width: 36px;
-        height: 36px;
-        background: var(--color-info-light);
-        border-radius: var(--radius-md);
+      /* Blue - Products */
+      .next-step-card.blue {
+        background: color-mix(in srgb, var(--color-info) 10%, transparent);
+        border-color: color-mix(in srgb, var(--color-info) 20%, transparent);
+      }
+
+      .next-step-card.blue .next-step-icon {
+        background: var(--color-surface);
+      }
+
+      .next-step-card.blue .next-step-icon app-icon {
+        color: var(--color-info);
+      }
+
+      /* Amber - Sales */
+      .next-step-card.amber {
+        background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+        border-color: color-mix(in srgb, var(--color-warning) 20%, transparent);
+      }
+
+      .next-step-card.amber .next-step-icon {
+        background: var(--color-surface);
+      }
+
+      .next-step-card.amber .next-step-icon app-icon {
+        color: var(--color-warning);
+      }
+
+      /* Purple - Reports */
+      .next-step-card.purple {
+        background: color-mix(in srgb, #8b5cf6 10%, transparent);
+        border-color: color-mix(in srgb, #8b5cf6 20%, transparent);
+      }
+
+      .next-step-card.purple .next-step-icon {
+        background: var(--color-surface);
+      }
+
+      .next-step-card.purple .next-step-icon app-icon {
+        color: #8b5cf6;
+      }
+
+      .next-step-icon {
+        width: 2.5rem;
+        height: 2.5rem;
+        border-radius: 0.75rem;
         display: flex;
         align-items: center;
         justify-content: center;
         flex-shrink: 0;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
       }
 
-      .step-card-icon-element {
-        color: var(--color-info);
-      }
-
-      .step-card-content {
+      .next-step-info {
         flex: 1;
       }
 
-      .step-card-title {
-        font-size: var(--fs-sm);
-        font-weight: var(--fw-semibold);
+      .next-step-title {
+        font-size: 0.875rem;
+        font-weight: 600;
         color: var(--color-text-primary);
+        line-height: 1.2;
         margin-bottom: 0.125rem;
       }
 
-      .step-card-description {
-        font-size: var(--fs-xs);
+      .next-step-description {
+        font-size: 0.75rem;
         color: var(--color-text-muted);
-        line-height: 1.3;
       }
 
-      .completion-action {
-        margin-top: 1rem;
-        padding-top: 1rem;
-        border-top: 1px solid var(--color-border);
-        display: flex;
-        justify-content: center;
+      .next-step-arrow app-icon {
+        color: var(--color-text-muted);
       }
 
-      .action-button {
-        min-width: 180px;
-        height: 44px;
-        font-size: var(--fs-base);
-        font-weight: var(--fw-semibold);
-      }
+      /* ============================================
+         DESKTOP ADJUSTMENTS (≥640px)
+         ============================================ */
 
-      @media (max-width: 1024px) {
-        .next-steps-grid {
-          grid-template-columns: 1fr;
+      @media (min-width: 640px) {
+        .handle-bar {
+          padding-top: 0.25rem;
+          padding-bottom: 0.75rem;
         }
-        .summary-items {
-          grid-template-columns: 1fr;
+
+        .handle-indicator {
+          width: 2rem;
+          height: 0.25rem;
+          opacity: 0.5;
         }
+
+        .completion-content {
+          padding: 0 2rem 1.5rem 2rem;
+        }
+
+        .success-icon-outer {
+          width: 5.5rem;
+          height: 5.5rem;
+        }
+
+        .success-icon-inner {
+          width: 4rem;
+          height: 4rem;
+        }
+
+        .stats-container {
+          gap: 3rem;
+        }
+
+        .stat-number {
+          font-size: 1.5rem;
+        }
+
+        .stat-label {
+          font-size: 0.6875rem;
+        }
+
       }
     `,
   ],
   template: `
     <div class="step-content completion-step">
-      <div class="completion-container">
-        <!-- Success Animation -->
-        <div class="success-animation">
-          <div class="success-icon-wrapper">
-            <div class="success-icon-bg">
-              <app-icon name="check" size="32" class="success-icon"></app-icon>
+      <!-- Handle Bar (Bottom Sheet Indicator) -->
+      <div class="handle-bar">
+        <div class="handle-indicator"></div>
+      </div>
+
+      <!-- Scrollable Content -->
+      <div class="completion-content">
+        <!-- Success Icon - Double Circle -->
+        <div class="success-icon-container">
+          <div class="success-icon-outer">
+            <div class="success-icon-inner">
+              <app-icon name="check" size="28"></app-icon>
             </div>
-            <div class="success-ripple"></div>
           </div>
         </div>
 
-        <!-- Title -->
-        <h2 class="completion-title">¡Configuración completada!</h2>
-        <div class="completion-messages">
-          <p *ngFor="let msg of messages" class="completion-subtitle">
-            {{ msg }}
-          </p>
+        <!-- Title & Subtitle -->
+        <div class="completion-header">
+          <h2 class="completion-title">¡Configuración completada!</h2>
+          <p class="completion-subtitle">Tu tienda está lista para comenzar</p>
         </div>
 
-        <!-- Action Button (Moved to top) -->
-        <div class="flex justify-center mb-6">
-          <app-button
-            variant="primary"
-            size="md"
-            [disabled]="isCompleting"
-            (click)="complete.emit()"
-            class="action-button"
-          >
-            <span>{{ isCompleting ? 'Finalizando...' : 'Ir a mi tienda' }}</span>
-          </app-button>
-        </div>
-
-        <!-- Success Stats -->
-        <div class="success-stats">
+        <!-- Stats with Separator -->
+        <div class="stats-container">
           <div class="stat-item">
-            <span class="stat-number">7</span>
-            <span class="stat-label">Pasos</span>
+            <div class="stat-number">7</div>
+            <div class="stat-label">Pasos</div>
           </div>
+          <div class="stat-divider"></div>
           <div class="stat-item">
-            <span class="stat-number">100%</span>
-            <span class="stat-label">Completado</span>
+            <div class="stat-number primary">100%</div>
+            <div class="stat-label">Completado</div>
           </div>
         </div>
 
-        <!-- Configuration Summary -->
-        <div class="completion-summary" (click)="complete.emit()">
-          <div class="summary-header">
-            <div class="summary-icon">
-              <app-icon
-                name="clipboard-check"
-                size="16"
-                class="summary-icon-element"
-              ></app-icon>
-            </div>
-            <h3 class="summary-title">Resumen de configuración</h3>
-          </div>
-          <div class="summary-items">
-            <div class="summary-item">
-              <div class="item-icon">
-                <app-icon
-                  name="user"
-                  size="14"
-                  class="item-icon-element"
-                ></app-icon>
+        <!-- Summary Section -->
+        <div class="summary-section">
+          <div class="section-label">Resumen de configuración</div>
+          <div class="summary-cards">
+            <!-- Usuario -->
+            <div class="summary-card">
+              <div class="summary-card-left">
+                <div class="summary-card-icon">
+                  <app-icon name="user" size="18"></app-icon>
+                </div>
+                <div class="summary-card-info">
+                  <span class="summary-card-title">Usuario</span>
+                  <span class="summary-card-subtitle">{{
+                    wizardData.user?.email || 'Configurado'
+                  }}</span>
+                </div>
               </div>
-              <div class="item-content">
-                <span class="item-label">Usuario</span>
-                <span class="item-value">{{ wizardData.user?.email || 'Configurado' }}</span>
-              </div>
-              <div class="item-check">
-                <app-icon name="check" size="14" class="check-icon"></app-icon>
+              <div class="summary-card-check">
+                <app-icon name="check-circle" size="20"></app-icon>
               </div>
             </div>
-            <div class="summary-item">
-              <div class="item-icon">
-                <app-icon
-                  name="building"
-                  size="14"
-                  class="item-icon-element"
-                ></app-icon>
+
+            <!-- Tienda -->
+            <div class="summary-card">
+              <div class="summary-card-left">
+                <div class="summary-card-icon">
+                  <app-icon name="store" size="18"></app-icon>
+                </div>
+                <div class="summary-card-info">
+                  <span class="summary-card-title">Tienda</span>
+                  <span class="summary-card-subtitle">{{
+                    wizardData.store?.name || 'Configurada'
+                  }}</span>
+                </div>
               </div>
-              <div class="item-content">
-                <span class="item-label">Organización</span>
-                <span class="item-value">{{ wizardData.organization?.name || 'Configurada' }}</span>
-              </div>
-              <div class="item-check">
-                <app-icon name="check" size="14" class="check-icon"></app-icon>
-              </div>
-            </div>
-            <div class="summary-item">
-              <div class="item-icon">
-                <app-icon
-                  name="store"
-                  size="14"
-                  class="item-icon-element"
-                ></app-icon>
-              </div>
-              <div class="item-content">
-                <span class="item-label">Tienda</span>
-                <span class="item-value">{{ wizardData.store?.name || 'Configurada' }}</span>
-              </div>
-              <div class="item-check">
-                <app-icon name="check" size="14" class="check-icon"></app-icon>
+              <div class="summary-card-check">
+                <app-icon name="check-circle" size="20"></app-icon>
               </div>
             </div>
-            <div class="summary-item">
-              <div class="item-icon">
-                <app-icon
-                  name="palette"
-                  size="14"
-                  class="item-icon-element"
-                ></app-icon>
+
+            <!-- Ubicación -->
+            <div class="summary-card">
+              <div class="summary-card-left">
+                <div class="summary-card-icon">
+                  <app-icon name="map-pin" size="18"></app-icon>
+                </div>
+                <div class="summary-card-info">
+                  <span class="summary-card-title">Ubicación</span>
+                  <span class="summary-card-subtitle"
+                    >Creada automáticamente</span
+                  >
+                </div>
               </div>
-              <div class="item-content">
-                <span class="item-label">Personalización</span>
-                <span class="item-value">Aplicada</span>
-              </div>
-              <div class="item-check">
-                <app-icon name="check" size="14" class="check-icon"></app-icon>
-              </div>
-            </div>
-            <div class="summary-item">
-              <div class="item-icon">
-                <app-icon
-                  name="map-pin"
-                  size="14"
-                  class="item-icon-element"
-                ></app-icon>
-              </div>
-              <div class="item-content">
-                <span class="item-label">Ubicación</span>
-                <span class="item-value">Creada automáticamente</span>
-              </div>
-              <div class="item-check">
-                <app-icon name="check" size="14" class="check-icon"></app-icon>
+              <div class="summary-card-check">
+                <app-icon name="check-circle" size="20"></app-icon>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- Next Steps -->
-        <div class="next-steps" (click)="complete.emit()">
-          <div class="next-steps-header">
-            <div class="next-steps-icon">
-              <app-icon
-                name="arrow-right"
-                size="16"
-                class="next-steps-icon-element"
-              ></app-icon>
-            </div>
-            <h3 class="next-steps-title">Próximos pasos</h3>
-          </div>
-          <div class="next-steps-grid">
-            <div class="next-step-card">
-              <div class="step-card-icon">
-                <app-icon
-                  name="package"
-                  size="18"
-                  class="step-card-icon-element"
-                ></app-icon>
+        <!-- Next Steps Section -->
+        <div class="next-steps-section">
+          <div class="section-label">Próximos pasos</div>
+          <div class="next-steps-cards">
+            <!-- Add Products - Blue -->
+            <div class="next-step-card blue">
+              <div class="next-step-icon">
+                <app-icon name="package" size="18"></app-icon>
               </div>
-              <div class="step-card-content">
-                <h4 class="step-card-title">Agregar productos</h4>
-                <p class="step-card-description">
+              <div class="next-step-info">
+                <div class="next-step-title">Agregar productos</div>
+                <div class="next-step-description">
                   Crea tu catálogo de productos
-                </p>
+                </div>
+              </div>
+              <div class="next-step-arrow">
+                <app-icon name="chevron-right" size="18"></app-icon>
               </div>
             </div>
-            <div class="next-step-card">
-              <div class="step-card-icon">
-                <app-icon
-                  name="shopping-cart"
-                  size="18"
-                  class="step-card-icon-element"
-                ></app-icon>
+
+            <!-- First Sale - Amber -->
+            <div class="next-step-card amber">
+              <div class="next-step-icon">
+                <app-icon name="shopping-cart" size="18"></app-icon>
               </div>
-              <div class="step-card-content">
-                <h4 class="step-card-title">Primera venta</h4>
-                <p class="step-card-description">
+              <div class="next-step-info">
+                <div class="next-step-title">Primera venta</div>
+                <div class="next-step-description">
                   Realiza tu primera transacción
-                </p>
+                </div>
+              </div>
+              <div class="next-step-arrow">
+                <app-icon name="chevron-right" size="18"></app-icon>
               </div>
             </div>
-            <div class="next-step-card">
-              <div class="step-card-icon">
-                <app-icon
-                  name="chart-bar"
-                  size="18"
-                  class="step-card-icon-element"
-                ></app-icon>
+
+            <!-- View Reports - Purple -->
+            <div class="next-step-card purple">
+              <div class="next-step-icon">
+                <app-icon name="chart-bar" size="18"></app-icon>
               </div>
-              <div class="step-card-content">
-                <h4 class="step-card-title">Ver reportes</h4>
-                <p class="step-card-description">
-                  Analiza tus ventas
-                </p>
+              <div class="next-step-info">
+                <div class="next-step-title">Ver reportes</div>
+                <div class="next-step-description">Analiza tus ventas</div>
+              </div>
+              <div class="next-step-arrow">
+                <app-icon name="chevron-right" size="18"></app-icon>
               </div>
             </div>
           </div>
         </div>
-
-        <!-- Action Button removed from bottom -->
       </div>
     </div>
   `,
@@ -578,10 +552,5 @@ export class CompletionStepComponent {
   @Input() wizardData: any = {};
   @Input() isCompleting = false;
   @Output() complete = new EventEmitter<void>();
-
-  messages = [
-    'Tienda creada exitosamente',
-    'Se ha creado una ubicación por defecto para tu tienda',
-    'Puedes gestionar tus ubicaciones desde el panel de inventario'
-  ];
+  @Output() goBack = new EventEmitter<void>();
 }

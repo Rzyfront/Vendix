@@ -225,34 +225,10 @@ export const storeAdminRoutes: Routes = [
       // Analytics Routes
       {
         path: 'analytics',
-        children: [
-          {
-            path: '',
-            pathMatch: 'full',
-            redirectTo: 'sales',
-          },
-          {
-            path: 'sales',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/analytics/sales/sales-analytics.component'
-              ).then((c) => c.SalesAnalyticsComponent),
-          },
-          {
-            path: 'traffic',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/analytics/traffic/traffic-analytics.component'
-              ).then((c) => c.TrafficAnalyticsComponent),
-          },
-          {
-            path: 'performance',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/analytics/performance/performance-analytics.component'
-              ).then((c) => c.PerformanceAnalyticsComponent),
-          },
-        ],
+        loadChildren: () =>
+          import('../../private/modules/store/analytics/analytics.routes').then(
+            (m) => m.analyticsRoutes,
+          ),
       },
       // E-commerce Routes
       {

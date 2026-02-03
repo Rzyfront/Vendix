@@ -76,8 +76,74 @@ export interface EcommerceSettings {
     multiple_shipping_addresses?: boolean;
   };
 
-  // Branding (deprecated - migrado a inicio.colores)
-  branding?: any;
+  // Footer
+  footer?: FooterSettings;
+}
+
+// ============================================================================
+// FOOTER SETTINGS - Configuración del pie de página del ecommerce
+// ============================================================================
+
+/**
+ * Información de la tienda para el footer
+ */
+export interface FooterStoreInfo {
+  about_us?: string;
+  support_email?: string;
+  tagline?: string;
+}
+
+/**
+ * Enlace del footer
+ */
+export interface FooterLink {
+  label: string;
+  url: string;
+  is_external?: boolean;
+}
+
+/**
+ * Item de FAQ
+ */
+export interface FooterFaqItem {
+  question: string;
+  answer: string;
+}
+
+/**
+ * Sección de ayuda del footer
+ */
+export interface FooterHelp {
+  faq?: FooterFaqItem[];
+  shipping_info?: string;
+  returns_info?: string;
+}
+
+/**
+ * Cuenta de red social
+ */
+export interface FooterSocialAccount {
+  username?: string;
+  url?: string;
+}
+
+/**
+ * Redes sociales del footer
+ */
+export interface FooterSocial {
+  facebook?: FooterSocialAccount;
+  instagram?: FooterSocialAccount;
+  tiktok?: FooterSocialAccount;
+}
+
+/**
+ * Configuración completa del footer
+ */
+export interface FooterSettings {
+  store_info?: FooterStoreInfo;
+  links?: FooterLink[];
+  help?: FooterHelp;
+  social?: FooterSocial;
 }
 
 /**

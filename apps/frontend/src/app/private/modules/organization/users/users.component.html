@@ -1,7 +1,6 @@
 <div class="space-y-2 md:space-y-2 md:space-y-4">
   <!-- Stats Cards -->
-  <!-- Stats Cards -->
-  <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
+  <div class="stats-container">
     <app-stats *ngFor="let item of statsItems" [title]="item.title" [value]="item.value" [smallText]="item.smallText"
       [iconName]="item.iconName" [iconBgColor]="item.iconBgColor" [iconColor]="item.iconColor"></app-stats>
   </div>

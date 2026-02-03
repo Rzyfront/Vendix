@@ -11,10 +11,12 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { EcommerceService } from './services/ecommerce.service';
 import {
   EcommerceSettings,
+  FooterSettings,
   SettingsResponse,
   SliderImage,
   SliderPhoto,
 } from './interfaces';
+import { FooterSettingsFormComponent } from './components/footer-settings-form';
 import {
   ToastService,
   IconComponent,
@@ -38,6 +40,7 @@ import {
     SelectorComponent,
     SettingToggleComponent,
     StickyHeaderComponent,
+    FooterSettingsFormComponent,
   ],
   templateUrl: './ecommerce.component.html',
   styleUrls: ['./ecommerce.component.scss'],
@@ -80,6 +83,9 @@ export class EcommerceComponent implements OnInit, OnDestroy {
 
   // Ecommerce URL for "Open Store" button
   ecommerceUrl: string | null = null;
+
+  // Footer settings (managed separately from the main form)
+  footerSettings: FooterSettings | undefined;
 
   readonly ecommerceHeaderActions = computed<StickyHeaderActionButton[]>(() => {
     this.formUpdateTrigger(); // Dependency
@@ -267,6 +273,11 @@ export class EcommerceComponent implements OnInit, OnDestroy {
                 }));
             }
 
+            // Cargar configuración del footer
+            if (response.config.footer) {
+              this.footerSettings = response.config.footer;
+            }
+
             // Obtener la URL de la Ecommerce desde la respuesta del endpoint
             this.ecommerceUrl = response.ecommerceUrl || null;
           } else {
@@ -300,6 +311,10 @@ export class EcommerceComponent implements OnInit, OnDestroy {
           this.settingsForm.patchValue(template);
           this.sliderImages = [];
           this.activeImageIndex = 0;
+          // Cargar defaults del footer
+          if (template.footer) {
+            this.footerSettings = template.footer;
+          }
           this.isLoading = false;
         },
         error: (error) => {
@@ -569,6 +584,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
           caption: img.caption || '',
         })),
       },
+      footer: this.footerSettings,
     };
 
     this.ecommerceService
@@ -628,6 +644,15 @@ export class EcommerceComponent implements OnInit, OnDestroy {
     if (actionId === 'reset') this.onReset();
     else if (actionId === 'open') this.openEcommerceStore();
     else if (actionId === 'save') this.onSubmit();
+  }
+
+  /**
+   * Handle footer settings changes from FooterSettingsFormComponent
+   */
+  onFooterChange(footer: FooterSettings): void {
+    this.footerSettings = footer;
+    this.settingsForm.markAsDirty();
+    this.formUpdateTrigger.update((v) => v + 1);
   }
 
   /**

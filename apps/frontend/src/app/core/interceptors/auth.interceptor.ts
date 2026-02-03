@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import {
   HttpInterceptor,
   HttpRequest,
@@ -6,10 +6,11 @@ import {
   HttpEvent,
   HttpErrorResponse,
 } from '@angular/common/http';
-import { Observable, throwError, BehaviorSubject } from 'rxjs';
+import { Observable, throwError, BehaviorSubject, EMPTY } from 'rxjs';
 import { catchError, filter, take, switchMap } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../services/auth.service';
+import { SessionService } from '../services/session.service';
 
 @Injectable()
 export class AuthInterceptor implements HttpInterceptor {
@@ -17,12 +18,20 @@ export class AuthInterceptor implements HttpInterceptor {
   private refreshTokenSubject: BehaviorSubject<string | null> =
     new BehaviorSubject<string | null>(null);
 
+  private sessionService = inject(SessionService);
+
   constructor(private authService: AuthService) { }
 
   intercept(
     req: HttpRequest<any>,
     next: HttpHandler,
   ): Observable<HttpEvent<any>> {
+    // Si la sesión se está terminando, cancelar requests pendientes
+    if (this.sessionService.isTerminating()) {
+      console.log('[AUTH INTERCEPTOR] Session terminating, cancelling request:', req.url);
+      return EMPTY;
+    }
+
     // Add auth token to request if available and URL starts with API base
     const authToken = this.authService.getToken();
 
@@ -98,6 +107,11 @@ export class AuthInterceptor implements HttpInterceptor {
     request: HttpRequest<any>,
     next: HttpHandler,
   ): Observable<HttpEvent<any>> {
+    // Si la sesión ya se está terminando, no procesar más
+    if (this.sessionService.isTerminating()) {
+      return EMPTY;
+    }
+
     if (!this.isRefreshing) {
       this.isRefreshing = true;
       this.refreshTokenSubject.next(null);
@@ -117,31 +131,38 @@ export class AuthInterceptor implements HttpInterceptor {
               return next.handle(this.addTokenToRequest(request, newToken));
             }
 
-            // If refresh failed, logout user
-            console.warn(
-              '[AUTH INTERCEPTOR] Token refresh failed, logging out user',
-            );
-            this.authService.logout();
-            return throwError(() => new Error('Token refresh failed'));
+            // Si refresh falló, terminar sesión limpiamente
+            console.warn('[AUTH INTERCEPTOR] Token refresh failed, terminating session');
+            this.sessionService.terminateSession('token_refresh_failed');
+            return EMPTY; // No propagar error
           }),
           catchError((error) => {
             this.isRefreshing = false;
-            console.warn(
-              '[AUTH INTERCEPTOR] Error during token refresh, logging out user',
-              error,
-            );
-            this.authService.logout();
-            return throwError(() => error);
+            console.warn('[AUTH INTERCEPTOR] Error during token refresh', error);
+            // Terminar sesión limpiamente
+            this.sessionService.terminateSession('token_refresh_failed');
+            return EMPTY; // No propagar error
           }),
         );
+      } else {
+        // No hay refresh token - sesión expirada
+        this.isRefreshing = false;
+        this.sessionService.terminateSession('session_expired');
+        return EMPTY;
       }
     }
 
-    // If already refreshing, wait for the new token
+    // Si ya estamos refrescando, esperar el nuevo token
     return this.refreshTokenSubject.pipe(
       filter((token) => token !== null),
       take(1),
-      switchMap((token) => next.handle(this.addTokenToRequest(request, token))),
+      switchMap((token) => {
+        // Verificar si la sesión terminó mientras esperábamos
+        if (this.sessionService.isTerminating()) {
+          return EMPTY;
+        }
+        return next.handle(this.addTokenToRequest(request, token));
+      }),
     );
   }
 
