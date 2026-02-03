@@ -21,6 +21,8 @@ import {
   IconComponent,
   DialogService,
   ToastService,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
 } from '../../../../../../shared/components/index';
 
 import { StoreOrdersService } from '../../services/store-orders.service';
@@ -35,7 +37,7 @@ import {
 @Component({
   selector: 'app-orders-list',
   standalone: true,
-  imports: [CommonModule, FormsModule, TableComponent],
+  imports: [CommonModule, FormsModule, ResponsiveDataViewComponent],
   templateUrl: './orders-list.component.html',
   styleUrls: ['./orders-list.component.css'],
 })
@@ -126,6 +128,41 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
       show: (order: Order) => ['created', 'pending_payment', 'processing'].includes(order.state),
     },
   ];
+
+  // Card configuration for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'order_number',
+    titleTransform: (val: string) => `Order #${val}`,
+    subtitleKey: 'customer_name',
+    badgeKey: 'state',
+    badgeConfig: {
+      type: 'custom',
+      size: 'sm',
+      colorMap: {
+        created: '#6b7280',
+        pending_payment: '#f59e0b',
+        processing: '#3b82f6',
+        shipped: '#06b6d4',
+        delivered: '#10b981',
+        cancelled: '#ef4444',
+        refunded: '#f97316',
+        finished: '#8b5cf6',
+      },
+    },
+    badgeTransform: (value: any) => this.formatStatus(value),
+    detailKeys: [
+      { key: 'grand_total', label: 'Total', transform: (value: any) => `$${(value || 0).toFixed(2)}` },
+      {
+        key: 'created_at',
+        label: 'Date',
+        transform: (value: any) => {
+          if (!value) return 'N/A';
+          const date = new Date(value);
+          return isNaN(date.getTime()) ? 'Invalid Date' : date.toLocaleDateString();
+        },
+      },
+    ],
+  };
 
   // Filter options (now handled by parent component)
 

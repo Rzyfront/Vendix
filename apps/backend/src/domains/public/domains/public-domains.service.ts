@@ -73,10 +73,49 @@ export class PublicDomainsService {
 
       if (storeSettings) {
         const settingsData = storeSettings.settings as any;
-        branding = settingsData?.branding;
+        const storeBranding = settingsData?.branding;
         ecommerceSettings = settingsData?.ecommerce;
         publicationSettings = settingsData?.publication;
         fontsSettings = settingsData?.fonts;
+
+        // CLAVE: Para dominios STORE_ECOMMERCE, usar el branding del ecommerce
+        if (domain.app_type === 'STORE_ECOMMERCE' && ecommerceSettings?.branding) {
+          // Use ecommerce-specific branding
+          branding = { ...ecommerceSettings.branding };
+
+          // Migration: If ecommerce branding doesn't have all fields, fill from inicio.colores
+          if (!branding.primary_color && ecommerceSettings.inicio?.colores) {
+            branding.primary_color = ecommerceSettings.inicio.colores.primary_color;
+            branding.secondary_color = ecommerceSettings.inicio.colores.secondary_color;
+            branding.accent_color = ecommerceSettings.inicio.colores.accent_color;
+          }
+
+          // Fill missing fields with defaults
+          branding.background_color = branding.background_color || '#F4F4F4';
+          branding.surface_color = branding.surface_color || '#FFFFFF';
+          branding.text_color = branding.text_color || '#222222';
+          branding.text_secondary_color = branding.text_secondary_color || '#666666';
+          branding.text_muted_color = branding.text_muted_color || '#999999';
+        } else if (domain.app_type === 'STORE_ECOMMERCE' && ecommerceSettings?.inicio?.colores) {
+          // Migration fallback: Use inicio.colores if no dedicated ecommerce branding exists
+          branding = {
+            primary_color: ecommerceSettings.inicio.colores.primary_color,
+            secondary_color: ecommerceSettings.inicio.colores.secondary_color,
+            accent_color: ecommerceSettings.inicio.colores.accent_color,
+            background_color: '#F4F4F4',
+            surface_color: '#FFFFFF',
+            text_color: '#222222',
+            text_secondary_color: '#666666',
+            text_muted_color: '#999999',
+            // Copy name and logo from store branding if available
+            name: storeBranding?.name,
+            logo_url: ecommerceSettings.inicio.logo_url || storeBranding?.logo_url,
+            favicon_url: storeBranding?.favicon_url,
+          };
+        } else {
+          // For non-ecommerce domains (STORE_ADMIN, etc.), use store branding
+          branding = storeBranding;
+        }
 
         // Sign branding images
         if (branding?.logo_url && !branding.logo_url.startsWith('http')) {

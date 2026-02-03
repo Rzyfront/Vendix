@@ -28,29 +28,24 @@ import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
       class="h-full flex flex-col bg-surface rounded-card shadow-card border border-border overflow-hidden"
     >
       <!-- Products Header -->
-      <div class="px-6 py-4 border-b border-border">
-        <div
-          class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
-        >
+      <div class="products-header px-4 lg:px-6 py-3 lg:py-4 border-b border-border">
+        <!-- Desktop Header -->
+        <div class="hidden lg:flex justify-between items-center gap-4">
           <div class="flex-1 min-w-0">
             <h2 class="text-lg font-semibold text-text-primary">
               Productos Disponibles ({{ filteredProducts.length }})
             </h2>
           </div>
 
-          <div
-            class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
-          >
-            <!-- Input de búsqueda compacto -->
+          <div class="flex items-center gap-3">
             <app-inputsearch
-              class="w-full sm:w-64"
+              class="w-64"
               size="sm"
               placeholder="Buscar productos..."
               [debounceTime]="300"
               (searchChange)="onSearch($event)"
             />
 
-            <!-- Bulk Import Button -->
             <app-button
               variant="outline"
               size="sm"
@@ -60,8 +55,7 @@ import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
               <app-icon name="upload-cloud" [size]="18" slot="icon"></app-icon>
               Bulk
             </app-button>
-            
-            <!-- Manual Add Button (New Product not in catalog) -->
+
             <app-button
               variant="outline"
               size="sm"
@@ -72,6 +66,39 @@ import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
               Nuevo
             </app-button>
           </div>
+        </div>
+
+        <!-- Mobile Header (Compact) -->
+        <div class="lg:hidden flex items-center gap-2">
+          <app-inputsearch
+            class="flex-1"
+            size="sm"
+            placeholder="Buscar..."
+            [debounceTime]="300"
+            (searchChange)="onSearch($event)"
+          />
+
+          <!-- Bulk Import - Icon only on mobile -->
+          <app-button
+            variant="outline"
+            size="sm"
+            (clicked)="bulkModalOpen = true"
+            customClasses="!px-2"
+            title="Importar Masivo"
+          >
+            <app-icon name="upload-cloud" [size]="18" slot="icon"></app-icon>
+          </app-button>
+
+          <!-- Manual Add - Icon only on mobile -->
+          <app-button
+            variant="outline"
+            size="sm"
+            (clicked)="requestManualAdd.emit()"
+            customClasses="!px-2"
+            title="Nuevo Producto"
+          >
+            <app-icon name="plus" [size]="18" slot="icon"></app-icon>
+          </app-button>
         </div>
       </div>
 
@@ -107,10 +134,10 @@ import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
           </p>
         </div>
 
-        <!-- Modern Compact Products Grid -->
+        <!-- Modern Compact Products Grid (Responsive) -->
         <div
           *ngIf="!loading && filteredProducts.length > 0"
-          class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3"
+          class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-3"
         >
           <!-- Modern Product Card -->
           <div
@@ -199,6 +226,28 @@ import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
+      }
+
+      /* Sticky header with blur */
+      .products-header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: rgba(var(--color-surface-rgb, 255, 255, 255), 0.85);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+      }
+
+      /* Touch feedback for mobile */
+      @media (max-width: 1023px) {
+        :host ::ng-deep .group {
+          transition: transform 0.15s ease;
+          -webkit-tap-highlight-color: transparent;
+        }
+
+        :host ::ng-deep .group:active {
+          transform: scale(0.97);
+        }
       }
     `,
   ],

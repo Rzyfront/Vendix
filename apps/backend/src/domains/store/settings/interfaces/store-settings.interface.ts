@@ -46,8 +46,26 @@ export interface EcommerceSliderPhoto {
   caption?: string;
 }
 
+// Branding independiente para ecommerce (separado del branding de tienda)
+export interface EcommerceBrandingSettings {
+  name?: string;
+  primary_color?: string;
+  secondary_color?: string;
+  accent_color?: string;
+  background_color?: string;
+  surface_color?: string;
+  text_color?: string;
+  text_secondary_color?: string;
+  text_muted_color?: string;
+  logo_url?: string;
+  favicon_url?: string;
+  custom_css?: string;
+}
+
 export interface EcommerceSettings {
   enabled: boolean;
+  // Branding independiente del ecommerce (separado del branding de tienda)
+  branding?: EcommerceBrandingSettings;
   slider?: {
     enable: boolean;
     photos: EcommerceSliderPhoto[];
@@ -56,6 +74,7 @@ export interface EcommerceSettings {
     titulo?: string;
     parrafo?: string;
     logo_url?: string;
+    // Legacy: colores para compatibilidad (migrar a branding)
     colores?: {
       primary_color: string;
       secondary_color: string;

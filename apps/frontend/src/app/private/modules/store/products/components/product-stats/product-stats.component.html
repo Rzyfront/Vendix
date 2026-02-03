@@ -1,17 +1,18 @@
-<div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-8">
-  <app-stats title="Total de Productos" [value]="stats?.total_products || 0"
-    [smallText]="getGrowthPercentage(stats?.productsGrowthRate || 0) + ' vs mes anterior'" iconName="package"
-    iconBgColor="bg-blue-100" iconColor="text-blue-600"></app-stats>
+<!-- Mobile: Horizontal scroll | Desktop: Grid -->
+<div class="stats-container">
+  <app-stats title="Totales" [value]="stats?.total_products || 0"
+    [smallText]="getGrowthPercentage(stats?.productsGrowthRate || 0) + ' vs mes ant.'" iconName="package"
+    iconBgColor="bg-blue-100" iconColor="text-blue-500"></app-stats>
 
-  <app-stats title="Productos Activos" [value]="stats?.active_products || 0"
-    [smallText]="getGrowthPercentage(stats?.activeProductsGrowthRate || 0) + ' vs mes anterior'" iconName="check-circle"
-    iconBgColor="bg-green-100" iconColor="text-green-600"></app-stats>
+  <app-stats title="Activos" [value]="stats?.active_products || 0"
+    [smallText]="getGrowthPercentage(stats?.activeProductsGrowthRate || 0) + ' vs mes ant.'" iconName="check-circle"
+    iconBgColor="bg-emerald-100" iconColor="text-emerald-500"></app-stats>
 
-  <app-stats title="Productos con Stock Bajo" [value]="stats?.low_stock_products || 0"
-    [smallText]="getGrowthPercentage(stats?.lowStockGrowthRate || 0) + ' vs mes anterior'" iconName="alert-triangle"
-    iconBgColor="bg-yellow-100" iconColor="text-yellow-600"></app-stats>
+  <app-stats title="Stock Bajo" [value]="stats?.low_stock_products || 0"
+    [smallText]="getGrowthPercentage(stats?.lowStockGrowthRate || 0) + ' vs mes ant.'" iconName="alert-triangle"
+    iconBgColor="bg-amber-100" iconColor="text-amber-500"></app-stats>
 
-  <app-stats title="Productos sin Imágenes" [value]="stats?.products_without_images || 0"
-    [smallText]="getGrowthPercentage(stats?.noImagesGrowthRate || 0) + ' vs mes anterior'" iconName="image-off"
-    iconBgColor="bg-red-100" iconColor="text-red-600"></app-stats>
+  <app-stats title="Sin Imágenes" [value]="stats?.products_without_images || 0"
+    [smallText]="getGrowthPercentage(stats?.noImagesGrowthRate || 0) + ' vs mes ant.'" iconName="image-off"
+    iconBgColor="bg-red-100" iconColor="text-red-400"></app-stats>
 </div>

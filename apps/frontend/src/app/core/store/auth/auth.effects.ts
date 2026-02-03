@@ -6,6 +6,7 @@ import { Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { AuthService } from '../../services/auth.service';
 import { OnboardingWizardService } from '../../services/onboarding-wizard.service';
+import { TokenRefreshTimerService } from '../../services/token-refresh-timer.service';
 import { ToastService } from '../../../shared/components/toast/toast.service';
 import {
   extractApiErrorMessage,
@@ -31,6 +32,7 @@ export class AuthEffects {
   private appConfigService = inject(AppConfigService);
   private themeService = inject(ThemeService);
   private onboardingWizardService = inject(OnboardingWizardService);
+  private tokenRefreshTimer = inject(TokenRefreshTimerService);
   private store = inject(Store);
 
   login$ = createEffect(() =>
@@ -54,6 +56,7 @@ export class AuthEffects {
                 roles: response.data.user.roles || [],
                 message: response.message,
                 updated_environment: response.updatedEnvironment,
+                expires_in: response.data.expires_in,
               });
             }),
             catchError((error) =>
@@ -85,6 +88,7 @@ export class AuthEffects {
               roles: response.data.user.roles || [],
               message: response.message,
               updated_environment: response.updatedEnvironment,
+              expires_in: response.data.expires_in,
             });
           }),
           catchError((error) =>
@@ -103,10 +107,15 @@ export class AuthEffects {
     () =>
       this.actions$.pipe(
         ofType(AuthActions.loginSuccess, AuthActions.loginCustomerSuccess),
-        tap(async ({ roles, message, updated_environment }) => {
+        tap(async ({ roles, message, updated_environment, expires_in }) => {
           // CRITICAL: Clear the logout flag on successful login
           if (typeof localStorage !== 'undefined') {
             localStorage.removeItem('vendix_logged_out_recently');
+          }
+
+          // Start proactive token refresh timer
+          if (expires_in && expires_in > 0) {
+            this.tokenRefreshTimer.startTimer(expires_in);
           }
 
           if (message) this.toast.success(message);
@@ -241,6 +250,9 @@ export class AuthEffects {
       this.actions$.pipe(
         ofType(AuthActions.logoutSuccess),
         tap(({ redirect }) => {
+          // Stop the token refresh timer
+          this.tokenRefreshTimer.stopTimer();
+
           // CRITICAL: Clear store state FIRST before clearing localStorage
           this.store.dispatch(AuthActions.clearAuthState());
 

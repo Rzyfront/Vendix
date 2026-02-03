@@ -26,6 +26,8 @@ import {
   SelectorOption,
   DialogService,
   ToastService,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
 } from '../../../../shared/components/index';
 
 import {
@@ -45,7 +47,7 @@ import {
     CurrencyCreateModalComponent,
     CurrencyEditModalComponent,
     CurrencyEmptyStateComponent,
-    TableComponent,
+    ResponsiveDataViewComponent,
     InputsearchComponent,
     ButtonComponent,
     StatsComponent,
@@ -99,6 +101,19 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
       transform: (value: string) => this.formatState(value),
     },
   ];
+
+  // Card configuration for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'name',
+    subtitleKey: 'code',
+    badgeKey: 'state',
+    badgeConfig: { type: 'status', size: 'sm' },
+    badgeTransform: (value: string) => this.formatState(value),
+    detailKeys: [
+      { key: 'symbol', label: 'Símbolo' },
+      { key: 'decimal_places', label: 'Decimales' },
+    ],
+  };
 
   tableActions: TableAction[] = [
     {

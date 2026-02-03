@@ -16,12 +16,13 @@ import {
 
 // Import shared components
 import {
-  TableComponent,
   TableColumn,
   TableAction,
   InputsearchComponent,
   ButtonComponent,
   IconComponent,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
 } from '../../../../shared/components/index';
 
 // Import order components
@@ -38,12 +39,12 @@ import './orders-list.component.css';
     CommonModule,
     FormsModule,
     ReactiveFormsModule,
-    TableComponent,
     InputsearchComponent,
     ButtonComponent,
     OrderStatsComponent,
     OrderCreateModalComponent,
     IconComponent,
+    ResponsiveDataViewComponent,
   ],
   templateUrl: './orders-list.component.html',
 })
@@ -75,6 +76,8 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     orders_by_store: [],
     recent_orders: [],
   };
+
+  cardConfig!: ItemListCardConfig;
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -281,6 +284,34 @@ export class OrdersListComponent implements OnInit, OnDestroy {
         variant: 'ghost',
       },
     ];
+
+    // Card configuration for mobile
+    this.cardConfig = {
+      titleKey: 'order_number',
+      subtitleKey: 'customer',
+      subtitleTransform: (c: any) => `${c.first_name} ${c.last_name}`,
+      badgeKey: 'status',
+      badgeConfig: {
+        type: 'custom',
+        size: 'sm',
+        colorMap: {
+          pending: '#eab308',
+          confirmed: '#3b82f6',
+          processing: '#8b5cf6',
+          shipped: '#6366f1',
+          delivered: '#22c55e',
+          cancelled: '#ef4444',
+          refunded: '#f97316',
+        },
+      },
+      badgeTransform: (value: string) =>
+        value.charAt(0).toUpperCase() + value.slice(1).toLowerCase(),
+      detailKeys: [
+        { key: 'store.name', label: 'Store', icon: 'shopping-bag' },
+        { key: 'total_amount', label: 'Total', transform: (v: number) => `$${v.toFixed(2)}` },
+        { key: 'order_date', label: 'Date', transform: (v: string) => this.formatDate(v) },
+      ],
+    };
   }
 
   ngOnInit(): void {

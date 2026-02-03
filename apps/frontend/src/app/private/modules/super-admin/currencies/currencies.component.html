@@ -67,8 +67,9 @@
       </div>
 
       <!-- Table -->
-      <app-table [columns]="tableColumns" [data]="currencies()" [actions]="tableActions" [loading]="isLoading()"
-        (sort)="onSortChange($event.column, $event.direction)">
+      <!-- Table -->
+      <app-responsive-data-view [columns]="tableColumns" [data]="currencies()" [actions]="tableActions"
+        [cardConfig]="cardConfig" [loading]="isLoading()" (sort)="onSortChange($event.column, $event.direction)">
         <!-- Empty State Slot (if table supports it, otherwise after table) -->
         <div class="p-8 flex justify-center w-full" *ngIf="!isLoading() && currencies().length === 0">
           <app-currency-empty-state
@@ -77,7 +78,7 @@
             [showAction]="!filterForm.get('search')?.value && !filterForm.get('state')?.value"
             (actionClick)="openCreateModal()"></app-currency-empty-state>
         </div>
-      </app-table>
+      </app-responsive-data-view>
     </div>
   </div>
 </div>

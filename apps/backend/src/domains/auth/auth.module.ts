@@ -20,6 +20,7 @@ import {
   RefreshRateLimitMiddleware,
   SessionValidationMiddleware,
 } from '@common/middleware';
+import { TOKEN_DEFAULTS } from './constants/token.constants';
 
 @Module({
   imports: [
@@ -36,13 +37,19 @@ import {
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: async (configService: ConfigService) => {
+        const secret = configService.get<string>('JWT_SECRET');
+        const isProduction = configService.get<string>('NODE_ENV') === 'production';
+
+        // In production, require a proper secret
+        if (isProduction && (!secret || secret === 'your-super-secret-jwt-key')) {
+          throw new Error('JWT_SECRET must be configured with a secure value in production');
+        }
+
         return {
-          secret:
-            configService.get<string>('JWT_SECRET') ||
-            'your-super-secret-jwt-key',
+          secret: secret || 'your-super-secret-jwt-key',
           signOptions: {
             expiresIn: (configService.get<string>('JWT_EXPIRES_IN') ||
-              '15m') as any,
+              TOKEN_DEFAULTS.ACCESS_TOKEN_EXPIRY) as any,
           },
         };
       },

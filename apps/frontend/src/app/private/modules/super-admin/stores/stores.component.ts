@@ -35,13 +35,15 @@ import { StoreSettingsModalComponent } from './components/store-settings-modal.c
 import {
   InputsearchComponent,
   IconComponent,
-  TableComponent,
   ButtonComponent,
   SelectorComponent,
   DialogService,
   ToastService,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
+  TableColumn,
+  TableAction,
 } from '../../../../shared/components/index';
-import { TableColumn, TableAction } from '../../../../shared/components/index';
 
 // Import styles (CSS instead of SCSS to avoid loader issues)
 import './stores.component.css';
@@ -62,7 +64,7 @@ import './stores.component.css';
     InputsearchComponent,
     SelectorComponent,
     IconComponent,
-    TableComponent,
+    ResponsiveDataViewComponent,
     ButtonComponent,
   ],
   providers: [StoresService],
@@ -176,6 +178,37 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       transform: (value: boolean) => this.formatActiveStatus(value),
     },
   ];
+
+  // Card configuration for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'name',
+    subtitleKey: 'organizations.name',
+    badgeKey: 'store_type',
+    badgeConfig: {
+      type: 'custom',
+      size: 'sm',
+      colorMap: {
+        physical: '#22c55e',
+        online: '#3b82f6',
+        hybrid: '#8b5cf6',
+        popup: '#f59e0b',
+        kiosko: '#ef4444',
+      },
+    },
+    badgeTransform: (value: StoreType) => this.formatStoreType(value),
+    detailKeys: [
+      { key: 'slug', label: 'Slug' },
+      {
+        key: 'addresses', label: 'Ciudad', transform: (v) => {
+          if (!v || v.length === 0) return 'N/A';
+          return v[0].city || 'N/A';
+        }
+      },
+      { key: '_count.store_users', label: 'Usuarios', icon: 'users' },
+    ],
+    footerKey: 'is_active',
+    footerTransform: (val) => (val ? 'Activo' : 'Inactivo'),
+  };
 
   tableActions: TableAction[] = [
     {

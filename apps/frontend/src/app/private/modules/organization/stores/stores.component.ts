@@ -36,14 +36,13 @@ import { DialogService } from '../../../../shared/components/dialog/dialog.servi
 import {
   InputsearchComponent,
   IconComponent,
-  TableComponent,
   ButtonComponent,
   ToastService,
-} from '../../../../shared/components/index';
-import {
   TableColumn,
   TableAction,
   StatsComponent,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
 } from '../../../../shared/components/index';
 
 interface StatItem {
@@ -70,7 +69,7 @@ interface StatItem {
     StoreConfigurationModalComponent,
     InputsearchComponent,
     IconComponent,
-    TableComponent,
+    ResponsiveDataViewComponent,
     ButtonComponent,
   ],
   template: `
@@ -184,19 +183,18 @@ interface StatItem {
 
         <!-- Stores Table -->
         <div *ngIf="!isLoading && stores.length > 0" class="p-6">
-          <app-table
+          <app-responsive-data-view
             [data]="stores"
             [columns]="tableColumns"
+            [cardConfig]="cardConfig"
             [actions]="tableActions"
             [loading]="isLoading"
-            [sortable]="true"
-            [hoverable]="true"
-            [striped]="true"
-            size="md"
+            emptyMessage="No hay tiendas registradas"
+            emptyIcon="store"
             (sort)="onTableSort($event)"
             (rowClick)="viewStore($event)"
           >
-          </app-table>
+          </app-responsive-data-view>
         </div>
       </div>
 
@@ -343,7 +341,24 @@ export class StoresComponent implements OnInit, OnDestroy {
     },
   ];
 
-
+  // Card Config for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'name',
+    subtitleKey: 'organizations.name',
+    subtitleTransform: (val: any) => val || 'N/A',
+    badgeKey: 'is_active',
+    badgeConfig: { type: 'status', size: 'sm' },
+    badgeTransform: (val: boolean) => (val ? 'active' : 'inactive'),
+    detailKeys: [
+      { key: 'slug', label: 'Slug' },
+      {
+        key: 'store_type',
+        label: 'Tipo',
+        transform: (val: StoreType) => this.formatStoreType(val),
+      },
+      { key: '_count.store_users', label: 'Usuarios', icon: 'users' },
+    ],
+  };
 
   // Modal state
   isCreateModalOpen = false;

@@ -19,11 +19,10 @@ import {
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { InputsearchComponent } from '../../../../shared/components/inputsearch/inputsearch.component';
 import {
-  TableComponent,
   TableColumn,
   TableAction,
 } from '../../../../shared/components/table/table.component';
-import { IconComponent } from '../../../../shared/components/icon/icon.component';
+import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../shared/components/index';
 
 @Component({
   selector: 'app-legal-documents',
@@ -37,8 +36,7 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
     SelectorComponent,
     StatsComponent,
     InputsearchComponent,
-    TableComponent,
-    IconComponent,
+    ResponsiveDataViewComponent,
   ],
   template: `
     <!-- Standard Module Layout -->
@@ -149,46 +147,16 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
             ></div>
           </div>
 
-          <app-table
+          <app-responsive-data-view
             [data]="filteredDocuments()"
             [columns]="columns"
+            [cardConfig]="cardConfig"
             [actions]="actions"
             [loading]="loading()"
-            [showHeader]="true"
-            [hoverable]="true"
             emptyMessage="No se encontraron documentos"
+            emptyIcon="file-text"
           >
-            <!-- Custom Empty State inside table if needed, though app-table handles emptyMessage -->
-            <div
-              class="p-12 flex flex-col items-center justify-center text-center"
-              *ngIf="!loading() && filteredDocuments().length === 0"
-            >
-              <div
-                class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4"
-              >
-                <app-icon
-                  name="file-text"
-                  size="32"
-                  class="text-gray-400"
-                ></app-icon>
-              </div>
-              <h3 class="text-lg font-medium text-gray-900 mb-1">
-                No hay documentos
-              </h3>
-              <p class="text-gray-500 max-w-sm mb-6">
-                No se encontraron documentos que coincidan con tus filtros o
-                búsqueda.
-              </p>
-              <app-button
-                variant="primary"
-                size="sm"
-                iconName="plus"
-                (clicked)="openCreateModal()"
-              >
-                Crear Documento
-              </app-button>
-            </div>
-          </app-table>
+          </app-responsive-data-view>
         </div>
       </div>
     </div>
@@ -324,6 +292,20 @@ export class LegalDocumentsComponent implements OnInit {
       action: (item) => this.toggleActivation(item),
     },
   ];
+
+  // Card configuration for mobile
+  cardConfig: ItemListCardConfig = {
+    titleKey: 'title',
+    subtitleKey: 'document_type',
+    subtitleTransform: (val: string) => this.formatEnumLabel(val),
+    badgeKey: 'is_active',
+    badgeConfig: { type: 'status', size: 'sm' },
+    badgeTransform: (val: boolean) => val ? 'Activo' : 'Inactivo',
+    detailKeys: [
+      { key: 'version', label: 'Versión' },
+      { key: 'effective_date', label: 'Fecha Efectiva', transform: (val: string) => new Date(val).toLocaleDateString() },
+    ],
+  };
 
   ngOnInit() {
     this.initFilters();

@@ -71,10 +71,12 @@
       </div>
 
       <!-- Payment Methods Table -->
-      <app-table *ngIf="!isLoading && paymentMethods.length > 0" [data]="paymentMethods" [columns]="tableColumns"
-        [actions]="tableActions" [loading]="isLoading" [sortable]="true" [hoverable]="true" [striped]="true" size="md"
-        (sort)="onSortChange($event)" (rowClick)="editPaymentMethod($event)">
-      </app-table>
+      <!-- Payment Methods Table -->
+      <app-responsive-data-view *ngIf="!isLoading && paymentMethods.length > 0" [data]="paymentMethods"
+        [columns]="tableColumns" [actions]="tableActions" [cardConfig]="cardConfig" [loading]="isLoading"
+        [sortable]="true" [hoverable]="true" [striped]="true" size="md" (sort)="onSortChange($event)"
+        (rowClick)="editPaymentMethod($event)">
+      </app-responsive-data-view>
     </div>
   </div>
 

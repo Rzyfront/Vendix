@@ -1,20 +1,26 @@
 :host {
   display: block;
+
+  // Mobile: Fixed width for horizontal scroll container
+  @media (max-width: 639px) {
+    width: 160px; // w-40
+    flex-shrink: 0;
+  }
 }
 
 // ============================================
-// STAT CARD - Compact Responsive Design
+// STAT CARD - Mobile-First Horizontal Scroll Design
 // ============================================
 
 .stat-card {
   @apply bg-surface rounded-2xl shadow-sm border border-border transition-shadow overflow-hidden;
 
-  // Desktop layout: horizontal with icon on right, compact
+  // Desktop layout: horizontal with icon on right
   @apply p-3.5 flex items-center;
 
-  // Mobile layout (< 640px): icon in top-right corner
+  // Mobile layout (< 640px): Block layout with icon in corner
   @media (max-width: 639px) {
-    @apply p-2 relative block;
+    @apply p-3 block relative w-full h-full;
   }
 }
 
@@ -28,9 +34,13 @@
   // Desktop: compact icon container on right (use order to move visually)
   @apply w-8 h-8 ml-1.5 order-2;
 
-  // Mobile: absolute positioning in top-right corner
+  // Mobile: absolute positioning in top-right corner, inline with title
   @media (max-width: 639px) {
-    @apply absolute top-2 right-2 w-7 h-7 ml-0 order-none;
+    @apply absolute top-3 right-3 w-auto h-auto ml-0 order-none bg-transparent !important;
+
+    app-icon {
+      @apply text-lg;
+    }
   }
 }
 
@@ -40,13 +50,10 @@
 
 .stat-content {
   @apply flex-1 overflow-hidden order-1;
-  min-width: 0; // Allows flex children to shrink below content size
+  min-width: 0;
 
-  // Mobile: fade effect on container to blend with icon area
   @media (max-width: 639px) {
-    @apply pr-9 order-none;
-    mask-image: linear-gradient(to right, black 80%, transparent 100%);
-    -webkit-mask-image: linear-gradient(to right, black 80%, transparent 100%);
+    @apply order-none;
   }
 }
 
@@ -60,9 +67,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
 
-  // Mobile: smaller text
+  // Mobile: uppercase bold like reference design
   @media (max-width: 639px) {
-    @apply text-[10px];
+    @apply text-[10px] font-bold uppercase tracking-wide;
+    max-width: calc(100% - 24px); // Leave space for icon
   }
 }
 
@@ -76,9 +84,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
 
-  // Mobile: smaller value
+  // Mobile: same size as reference
   @media (max-width: 639px) {
-    @apply text-lg mt-0;
+    @apply text-xl mt-1;
   }
 }
 
@@ -87,16 +95,13 @@
 // ============================================
 
 .stat-small {
-  @apply text-[10px] font-medium text-text-secondary mt-1;
+  @apply text-[10px] font-medium mt-1;
   white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
 
-  // Fade effect for long text
-  mask-image: linear-gradient(to right, black 85%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
-
-  // Mobile: even smaller
+  // Mobile: emerald color for positive growth like reference
   @media (max-width: 639px) {
-    @apply text-[9px] mt-0.5;
+    @apply text-[10px] mt-0.5 text-emerald-500;
   }
 }

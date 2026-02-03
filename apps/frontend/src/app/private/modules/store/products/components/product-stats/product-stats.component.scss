@@ -2,28 +2,7 @@
   display: block;
 }
 
-.grid {
-  --grid-cols: 1;
-
-  @media (min-width: 48em) {
-    /* 768px */
-    --grid-cols: 2;
-  }
-
-  @media (min-width: 64em) {
-    /* 1024px */
-    --grid-cols: 4;
-  }
-}
-
-.stat-card {
-  transition: all 0.2s ease-in-out;
-
-  &:hover {
-    transform: translateY(-2px);
-  }
-}
-
+// Growth color utilities (for dynamic growth text colors)
 .growth-positive {
   color: var(--color-success, #10b981);
 }

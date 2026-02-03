@@ -33,26 +33,39 @@ export interface UserMenuOption {
   imports: [CommonModule, IconComponent],
   template: `
     <div class="user-dropdown-container" [class.open]="isOpen">
+      <!-- Desktop: Full trigger with user info -->
       <button
-        class="user-trigger"
+        class="user-trigger user-trigger-full hidden md:flex"
         (click)="toggleDropdown()"
         [attr.aria-expanded]="isOpen"
         aria-label="Menú de usuario"
       >
+        <div class="user-avatar">
+          <span class="user-initials">{{ user.initials || 'US' }}</span>
+        </div>
         <div class="user-info">
           <span class="user-name">{{ user.name || 'Usuario' }}</span>
           <span class="user-role">{{ user.role || 'Administrador' }}</span>
         </div>
-        <div class="user-avatar">
-          <span class="user-initials">{{ user.initials || 'US' }}</span>
-        </div>
         <app-icon
           name="chevron"
-          [size]="16"
+          [size]="14"
           class="chevron-icon"
           [class.rotate]="isOpen"
         >
         </app-icon>
+      </button>
+
+      <!-- Mobile: Minimal trigger -->
+      <button
+        class="user-trigger user-trigger-minimal flex md:hidden"
+        (click)="toggleDropdown()"
+        [attr.aria-expanded]="isOpen"
+        aria-label="Menú de usuario"
+      >
+        <div class="user-avatar-minimal">
+          <span class="user-initials">{{ user.initials || 'US' }}</span>
+        </div>
       </button>
 
       <div class="dropdown-menu" [class.show]="isOpen">
@@ -144,12 +157,17 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
     }
 
     const { user } = context;
-    const name = user.name || user.email || 'Usuario';
-    const initials = this.generateInitials(name);
+    // Build full name from first_name and last_name
+    const firstName = user.first_name || '';
+    const lastName = user.last_name || '';
+    const fullName = [firstName, lastName].filter(Boolean).join(' ');
+    const name = fullName || user.name || 'Usuario';
+    const email = user.email || 'user@example.com';
+    const initials = this.generateInitials(name !== 'Usuario' ? name : email);
 
     return {
       name,
-      email: user.email || 'user@example.com',
+      email,
       role: this.getRoleDisplay(context),
       initials,
     };

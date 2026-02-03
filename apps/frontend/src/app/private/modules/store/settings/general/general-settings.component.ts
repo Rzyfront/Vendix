@@ -1,5 +1,6 @@
 import { Component, inject, OnInit, OnDestroy, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Subject, filter, takeUntil } from 'rxjs';
 import { StoreSettingsService } from './services/store-settings.service';
 import { StoreSettings } from '../../../../../core/models/store-settings.interface';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
@@ -34,6 +35,7 @@ import { StickyHeaderComponent, StickyHeaderBadgeColor, StickyHeaderActionButton
 export class GeneralSettingsComponent implements OnInit, OnDestroy {
   private settings_service = inject(StoreSettingsService);
   private toast_service = inject(ToastService);
+  private destroy$ = new Subject<void>();
 
   settings: StoreSettings = {} as StoreSettings;
   isLoading = signal(true);
@@ -74,6 +76,36 @@ export class GeneralSettingsComponent implements OnInit, OnDestroy {
 
   ngOnInit() {
     this.loadSettings();
+    this.subscribeToAutoSave();
+  }
+
+  private subscribeToAutoSave() {
+    // Suscribirse a actualizaciones exitosas del auto-save
+    this.settings_service.settings$.pipe(
+      filter((s): s is StoreSettings => s !== null),
+      takeUntil(this.destroy$),
+    ).subscribe({
+      next: (settings) => {
+        this.settings = settings;
+        this.hasUnsavedChanges.set(false);
+        this.lastSaved.set(new Date());
+        this.isAutoSaving.set(false);
+        this.saveError.set(null);
+        this.toast_service.success('Cambios guardados automáticamente');
+      },
+    });
+
+    // Suscribirse a errores del auto-save
+    this.settings_service.autoSaveError$.pipe(
+      takeUntil(this.destroy$),
+    ).subscribe({
+      next: (error) => {
+        this.hasUnsavedChanges.set(true);
+        this.saveError.set(error.message || 'Error al guardar cambios');
+        this.isAutoSaving.set(false);
+        this.toast_service.error('Error al guardar cambios');
+      },
+    });
   }
 
   loadSettings() {
@@ -115,22 +147,11 @@ export class GeneralSettingsComponent implements OnInit, OnDestroy {
     this.hasUnsavedChanges.set(true);
     this.lastSaved.set(null);
     this.saveError.set(null);
+    this.isAutoSaving.set(true);
 
-    // Suscribirse para recibir feedback del auto-guardado
-    this.settings_service.saveSettings({ [section]: new_settings }).subscribe({
-      next: (response) => {
-        this.hasUnsavedChanges.set(false);
-        this.lastSaved.set(new Date());
-        this.isAutoSaving.set(false);
-        this.toast_service.success('Cambios guardados automáticamente');
-      },
-      error: (error) => {
-        this.hasUnsavedChanges.set(true);
-        this.saveError.set(error.message || 'Error al guardar cambios');
-        this.isAutoSaving.set(false);
-        this.toast_service.error('Error al guardar cambios');
-      }
-    });
+    // Disparar auto-save (fire-and-forget)
+    // El feedback se recibe vía subscribeToAutoSave()
+    this.settings_service.triggerAutoSave({ [section]: new_settings });
   }
 
   onHeaderAction(actionId: string): void {
@@ -208,5 +229,8 @@ export class GeneralSettingsComponent implements OnInit, OnDestroy {
     }
   }
 
-  ngOnDestroy() { }
+  ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
 }

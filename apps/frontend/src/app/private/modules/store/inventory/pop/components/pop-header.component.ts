@@ -50,32 +50,97 @@ import { InventoryService } from '../../services/inventory.service';
     BadgeComponent,
   ],
   template: `
-    <div class="px-6 py-5 bg-surface rounded-t-xl">
-      <div class="flex flex-col gap-6">
-        <!-- Top Row: Title -->
-        <div class="flex items-center gap-3">
-          <div
-            class="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center"
-          >
-            <app-icon
-              name="shopping-bag"
-              [size]="24"
-              class="text-primary"
-            ></app-icon>
+    <div class="px-4 lg:px-6 py-4 lg:py-5 bg-surface rounded-t-xl">
+      <div class="flex flex-col gap-4 lg:gap-6">
+        <!-- Top Row: Title + Mobile Settings Toggle -->
+        <div class="flex items-center justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <div
+              class="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-primary/10 flex items-center justify-center"
+            >
+              <app-icon
+                name="shopping-bag"
+                [size]="20"
+                class="text-primary lg:hidden"
+              ></app-icon>
+              <app-icon
+                name="shopping-bag"
+                [size]="24"
+                class="text-primary hidden lg:block"
+              ></app-icon>
+            </div>
+            <div class="flex flex-col">
+              <h1 class="font-bold text-text-primary text-base lg:text-lg leading-none flex items-center gap-2">
+                <span class="hidden sm:inline">Vendix</span> POP
+                <app-badge variant="primary" class="text-xs">Compra</app-badge>
+              </h1>
+              <span class="text-xs text-text-secondary font-medium hidden sm:block">
+                Punto de Compra
+              </span>
+            </div>
           </div>
-          <div class="flex flex-col">
-            <h1 class="font-bold text-text-primary text-lg leading-none flex items-center gap-2">
-              Vendix POP
-              <app-badge variant="primary">Compra</app-badge>
-            </h1>
-            <span class="text-xs text-text-secondary font-medium">
-              Punto de Compra
-            </span>
+
+          <!-- Mobile Settings Toggle -->
+          <button
+            class="lg:hidden flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-surface hover:bg-muted transition-colors"
+            (click)="toggleMobileSettings()"
+          >
+            <app-icon [name]="showMobileSettings ? 'chevron-up' : 'settings'" [size]="18"></app-icon>
+            <span class="text-xs font-medium">{{ showMobileSettings ? 'Ocultar' : 'Ajustes' }}</span>
+          </button>
+        </div>
+
+        <!-- Mobile: Quick Summary Badges (when settings collapsed) -->
+        <div
+          class="lg:hidden flex items-center gap-1.5 overflow-x-auto pb-1 -mx-1 px-1"
+          *ngIf="!showMobileSettings && (selectedSupplierId || selectedLocationId || expectedDate)"
+        >
+          <!-- Proveedor Badge -->
+          <div
+            *ngIf="getSupplierName()"
+            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-primary/10 text-primary shrink-0"
+          >
+            <app-icon name="truck" [size]="14"></app-icon>
+            <span class="text-xs font-medium truncate max-w-[80px]">{{ getSupplierName() }}</span>
+          </div>
+
+          <!-- Arrow -->
+          <app-icon
+            *ngIf="getSupplierName() && getLocationName()"
+            name="chevron-right"
+            [size]="14"
+            class="text-text-muted shrink-0"
+          ></app-icon>
+
+          <!-- Bodega Badge -->
+          <div
+            *ngIf="getLocationName()"
+            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-emerald-500/10 text-emerald-600 shrink-0"
+          >
+            <app-icon name="warehouse" [size]="14"></app-icon>
+            <span class="text-xs font-medium truncate max-w-[80px]">{{ getLocationName() }}</span>
+          </div>
+
+          <!-- Arrow -->
+          <app-icon
+            *ngIf="getLocationName() && expectedDate"
+            name="chevron-right"
+            [size]="14"
+            class="text-text-muted shrink-0"
+          ></app-icon>
+
+          <!-- Fecha Entrega Badge -->
+          <div
+            *ngIf="expectedDate"
+            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-amber-500/10 text-amber-600 shrink-0"
+          >
+            <app-icon name="calendar" [size]="14"></app-icon>
+            <span class="text-xs font-medium">{{ formatDateShort(expectedDate) }}</span>
           </div>
         </div>
 
-        <!-- Filters / Inputs Grid -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <!-- Desktop: Full Filters Grid (always visible) -->
+        <div class="hidden lg:grid lg:grid-cols-5 gap-4">
           <!-- 1. Supplier Selector -->
           <div class="flex flex-col gap-1.5 min-w-0">
             <label
@@ -178,6 +243,97 @@ import { InventoryService } from '../../services/inventory.service';
             </div>
           </div>
         </div>
+
+        <!-- Mobile: Collapsible Settings -->
+        <div class="lg:hidden" *ngIf="showMobileSettings">
+          <!-- Row 1: Supplier + Warehouse -->
+          <div class="grid grid-cols-2 gap-3 mb-3">
+            <div class="flex flex-col gap-1.5 min-w-0">
+              <label class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1">
+                Proveedor <span class="text-destructive">*</span>
+              </label>
+              <div class="flex gap-1">
+                <app-selector
+                  class="flex-1 min-w-0"
+                  size="sm"
+                  [options]="supplierOptions"
+                  [(ngModel)]="selectedSupplierId"
+                  (ngModelChange)="onSupplierChange($event)"
+                  placeholder="Seleccionar..."
+                ></app-selector>
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  customClasses="!px-2 flex items-center justify-center"
+                  (clicked)="openSupplierModal.emit()"
+                >
+                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                </app-button>
+              </div>
+            </div>
+            <div class="flex flex-col gap-1.5 min-w-0">
+              <label class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1">
+                Bodega <span class="text-destructive">*</span>
+              </label>
+              <div class="flex gap-1">
+                <app-selector
+                  class="flex-1 min-w-0"
+                  size="sm"
+                  [options]="locationOptions"
+                  [(ngModel)]="selectedLocationId"
+                  (ngModelChange)="onLocationChange($event)"
+                  placeholder="Seleccionar..."
+                ></app-selector>
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  customClasses="!px-2 flex items-center justify-center"
+                  (clicked)="openWarehouseModal.emit()"
+                >
+                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                </app-button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Row 2: Dates -->
+          <div class="grid grid-cols-2 gap-3 mb-3">
+            <div class="flex flex-col gap-1.5 min-w-0">
+              <label class="text-xs font-semibold text-text-secondary pl-0.5">Fecha Orden</label>
+              <app-input
+                type="date"
+                size="sm"
+                [(ngModel)]="orderDate"
+                (ngModelChange)="onOrderDateChange($event)"
+                customWrapperClass="!mt-0"
+              ></app-input>
+            </div>
+            <div class="flex flex-col gap-1.5 min-w-0">
+              <label class="text-xs font-semibold text-text-secondary pl-0.5">Fecha Entrega</label>
+              <app-input
+                type="date"
+                size="sm"
+                [(ngModel)]="expectedDate"
+                (ngModelChange)="onExpectedDateChange($event)"
+                [min]="minExpectedDate"
+                customWrapperClass="!mt-0"
+              ></app-input>
+            </div>
+          </div>
+
+          <!-- Row 3: Shipping Method -->
+          <div class="flex flex-col gap-1.5 min-w-0">
+            <label class="text-xs font-semibold text-text-secondary pl-0.5">Método Envío</label>
+            <app-selector
+              class="w-full"
+              size="sm"
+              [options]="shippingMethodOptions"
+              [(ngModel)]="shippingMethod"
+              (ngModelChange)="onShippingMethodChange($event)"
+              placeholder="Elegir método..."
+            ></app-selector>
+          </div>
+        </div>
       </div>
     </div>
   `,
@@ -210,6 +366,9 @@ export class PopHeaderComponent implements OnInit, OnDestroy {
 
   // Computed
   minExpectedDate: string = '';
+
+  // Mobile state
+  showMobileSettings = false;
 
   @Output() openSupplierModal = new EventEmitter<void>();
   @Output() openWarehouseModal = new EventEmitter<void>();
@@ -377,5 +536,31 @@ export class PopHeaderComponent implements OnInit, OnDestroy {
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+  }
+
+  formatDateShort(dateStr: string): string {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+  }
+
+  // ============================================================
+  // Mobile Helpers
+  // ============================================================
+
+  toggleMobileSettings(): void {
+    this.showMobileSettings = !this.showMobileSettings;
+  }
+
+  getSupplierName(): string {
+    if (!this.selectedSupplierId) return '';
+    const supplier = this.suppliers.find(s => s.id === this.selectedSupplierId);
+    return supplier?.name || '';
+  }
+
+  getLocationName(): string {
+    if (!this.selectedLocationId) return '';
+    const location = this.locations.find(l => l.id === this.selectedLocationId);
+    return location?.name || '';
   }
 }

@@ -9,7 +9,7 @@ import { StatsComponent } from '../../../../../shared/components';
   standalone: true,
   imports: [CommonModule, StatsComponent],
   template: `
-    <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
+    <div class="stats-container">
       <app-stats
         title="Total Organizations"
         [value]="stats.total"
