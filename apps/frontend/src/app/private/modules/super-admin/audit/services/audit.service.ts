@@ -7,6 +7,8 @@ import {
   catchError,
   throwError,
   map,
+  tap,
+  shareReplay,
 } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
@@ -16,12 +18,21 @@ import {
   AuditLogsResponse,
 } from '../interfaces/audit.interface';
 
+// Caché estático global (persiste entre instancias del servicio)
+interface CacheEntry<T> {
+  observable: T;
+  lastFetch: number;
+}
+
+let auditStatsCache: CacheEntry<Observable<AuditStats>> | null = null;
+
 @Injectable({
   providedIn: 'root',
 })
 export class AuditService {
   private http = inject(HttpClient);
   private apiUrl = environment.apiUrl;
+  private readonly CACHE_TTL = 30000; // 30 segundos
 
   // Loading states
   private readonly isLoading$$ = new BehaviorSubject<boolean>(false);
@@ -74,15 +85,41 @@ export class AuditService {
    * Obtener estadísticas de auditoría
    */
   getAuditStats(fromDate?: string, toDate?: string): Observable<AuditStats> {
+    // Si hay parámetros de fecha, no usar caché
+    if (fromDate || toDate) {
+      this.isLoadingStats$$.next(true);
+
+      let params = new HttpParams();
+      if (fromDate) params = params.set('fromDate', fromDate);
+      if (toDate) params = params.set('toDate', toDate);
+
+      return this.http
+        .get<any>(`${this.apiUrl}/superadmin/admin/audit/stats`, { params })
+        .pipe(
+          map((response) => {
+            return response.data as AuditStats;
+          }),
+          finalize(() => this.isLoadingStats$$.next(false)),
+          catchError((error) => {
+            console.error('Error loading audit stats:', error);
+            return throwError(() => error);
+          }),
+        );
+    }
+
+    // Sin parámetros - usar caché
+    const now = Date.now();
+
+    if (auditStatsCache && (now - auditStatsCache.lastFetch) < this.CACHE_TTL) {
+      return auditStatsCache.observable;
+    }
+
     this.isLoadingStats$$.next(true);
 
-    let params = new HttpParams();
-    if (fromDate) params = params.set('fromDate', fromDate);
-    if (toDate) params = params.set('toDate', toDate);
-
-    return this.http
-      .get<any>(`${this.apiUrl}/superadmin/admin/audit/dashboard`, { params })
+    const observable$ = this.http
+      .get<any>(`${this.apiUrl}/superadmin/admin/audit/stats`)
       .pipe(
+        shareReplay({ bufferSize: 1, refCount: false }),
         map((response) => {
           return response.data as AuditStats;
         }),
@@ -91,7 +128,19 @@ export class AuditService {
           console.error('Error loading audit stats:', error);
           return throwError(() => error);
         }),
+        tap(() => {
+          if (auditStatsCache) {
+            auditStatsCache.lastFetch = Date.now();
+          }
+        }),
       );
+
+    auditStatsCache = {
+      observable: observable$,
+      lastFetch: now,
+    };
+
+    return observable$;
   }
 
   /**

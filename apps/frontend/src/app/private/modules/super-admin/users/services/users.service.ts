@@ -7,6 +7,8 @@ import {
   catchError,
   throwError,
   map,
+  tap,
+  shareReplay,
 } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
@@ -25,6 +27,11 @@ import {
 export class UsersService {
   private http = inject(HttpClient);
   private apiUrl = environment.apiUrl;
+  private readonly CACHE_TTL = 30000; // 30 segundos
+
+  // Caché para stats generales (sin parámetros)
+  private statsCache$: Observable<UserStats> | undefined;
+  private statsLastFetch = 0;
 
   // Estado de carga
   private isLoading$ = new BehaviorSubject<boolean>(false);
@@ -186,6 +193,39 @@ export class UsersService {
    * Obtener estadísticas de usuarios
    */
   getUsersStats(dashboardQuery: UsersDashboardDto = {}): Observable<UserStats> {
+    // Determinar si hay parámetros específicos (no usar caché en ese caso)
+    const hasParams =
+      (dashboardQuery.store_id && dashboardQuery.store_id.trim() !== '') ||
+      (dashboardQuery.search && dashboardQuery.search.trim() !== '') ||
+      (dashboardQuery.role && dashboardQuery.role.trim() !== '') ||
+      (dashboardQuery.page && dashboardQuery.page > 0) ||
+      (dashboardQuery.limit && dashboardQuery.limit > 0) ||
+      (dashboardQuery.include_inactive !== undefined);
+
+    // Si no hay parámetros, usar caché
+    if (!hasParams) {
+      const now = Date.now();
+
+      if (this.statsCache$ && (now - this.statsLastFetch) < this.CACHE_TTL) {
+        return this.statsCache$;
+      }
+
+      this.statsCache$ = this.http
+        .get<{ data: UserStats }>(`${this.apiUrl}/superadmin/users/dashboard`)
+        .pipe(
+          tap(() => this.statsLastFetch = Date.now()),
+          shareReplay({ bufferSize: 1, refCount: true }),
+          map((response) => response.data),
+          catchError((error) => {
+            console.error('Error getting users stats:', error);
+            return throwError(() => error);
+          }),
+        );
+
+      return this.statsCache$;
+    }
+
+    // Con parámetros, no usar caché
     let params = new HttpParams();
 
     // Solo agregar parámetros si tienen valores válidos
@@ -214,9 +254,7 @@ export class UsersService {
     console.log('Making stats request with params:', params.toString());
 
     return this.http
-      .get<{
-        data: UserStats;
-      }>(`${this.apiUrl}/superadmin/users/dashboard`, { params })
+      .get<{ data: UserStats }>(`${this.apiUrl}/superadmin/users/dashboard`, { params })
       .pipe(
         map((response) => response.data),
         catchError((error) => {
@@ -291,5 +329,14 @@ export class UsersService {
           return throwError(() => error);
         }),
       );
+  }
+
+  /**
+   * Invalida el caché de estadísticas
+   * Útil después de crear/editar/eliminar usuarios
+   */
+  invalidateCache(): void {
+    this.statsCache$ = undefined;
+    this.statsLastFetch = 0;
   }
 }

@@ -1,7 +1,7 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Subscription } from 'rxjs';
-import { Router } from '@angular/router'; // Import Router
+import { Router } from '@angular/router';
 
 // Services
 import { ProductsService } from './services/products.service';
@@ -9,7 +9,7 @@ import { CategoriesService } from './services/categories.service';
 import { BrandsService } from './services/brands.service';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../shared/components/dialog/dialog.service';
-import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
+import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 
 // Models
@@ -119,6 +119,7 @@ export class ProductsComponent implements OnInit, OnDestroy {
   categories: ProductCategory[] = [];
   brands: Brand[] = [];
   isLoading = false;
+  storeId: string | null = null;
 
   // Stats
   stats: ProductStats = {
@@ -150,13 +151,22 @@ export class ProductsComponent implements OnInit, OnDestroy {
     private brandsService: BrandsService,
     private toastService: ToastService,
     private dialogService: DialogService,
-    private tenantFacade: TenantFacade,
-    private router: Router, // Inject Router
+    private authFacade: AuthFacade,
+    private router: Router,
   ) { }
 
   ngOnInit(): void {
+    // Subscribe to userStore$ observable to get the store ID
+    const storeSub = this.authFacade.userStore$.subscribe((store: any) => {
+      const storeId = store?.id;
+      if (storeId && !this.storeId) {
+        this.storeId = String(storeId);
+        this.loadStats();
+      }
+    });
+    this.subscriptions.push(storeSub);
+
     this.loadProducts();
-    this.loadStats();
     this.loadCategories();
     this.loadBrands();
   }
@@ -192,13 +202,9 @@ export class ProductsComponent implements OnInit, OnDestroy {
   }
 
   loadStats(): void {
-    const currentStore = this.tenantFacade.getCurrentStore();
-    if (!currentStore || !currentStore.id) return;
+    if (!this.storeId) return;
 
-    const storeId = parseInt(currentStore.id, 10);
-    if (isNaN(storeId)) return;
-
-    const sub = this.productsService.getProductStats(storeId).subscribe({
+    const sub = this.productsService.getProductStats(parseInt(this.storeId, 10)).subscribe({
       next: (response: any) => {
         if (response) this.stats = response;
       },

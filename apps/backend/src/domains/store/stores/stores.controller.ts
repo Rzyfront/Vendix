@@ -17,7 +17,6 @@ import {
   UpdateStoreDto,
   StoreQueryDto,
   UpdateStoreSettingsDto,
-  StoreDashboardDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -197,10 +196,9 @@ export class StoresController {
   @Permissions('store:stores:read')
   async getStoreStats(
     @Param('id', ParseIntPipe) id: number,
-    @Query() query: StoreDashboardDto,
   ) {
     try {
-      const result = await this.storesService.getDashboard(id, query);
+      const result = await this.storesService.getDashboardStats(id);
       return this.responseService.success(
         result,
         'Estadísticas de tienda obtenidas exitosamente',

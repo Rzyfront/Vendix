@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import {
@@ -14,11 +15,20 @@ import {
   ApiResponse,
 } from '../interfaces/expense.interface';
 
+// Caché estático global (persiste entre instancias del servicio)
+interface CacheEntry<T> {
+  observable: T;
+  lastFetch: number;
+}
+
+let expensesSummaryCache: CacheEntry<Observable<ApiResponse<ExpenseSummary>>> | null = null;
+
 @Injectable({
   providedIn: 'root',
 })
 export class ExpensesService {
   private http = inject(HttpClient);
+  private readonly CACHE_TTL = 30000; // 30 segundos
   // private authFacade = inject(AuthFacade); // Not used currently but ready for dynamic domain ID
 
   /**
@@ -64,13 +74,41 @@ export class ExpensesService {
     dateFrom?: Date,
     dateTo?: Date,
   ): Observable<ApiResponse<ExpenseSummary>> {
-    const params: any = {};
-    if (dateFrom) params.date_from = dateFrom.toISOString();
-    if (dateTo) params.date_to = dateTo.toISOString();
+    // Si hay parámetros de fecha, no usar caché
+    if (dateFrom || dateTo) {
+      const params: any = {};
+      if (dateFrom) params.date_from = dateFrom.toISOString();
+      if (dateTo) params.date_to = dateTo.toISOString();
 
-    return this.http.get<ApiResponse<ExpenseSummary>>(this.getApiUrl('summary'), {
-      params,
-    });
+      return this.http.get<ApiResponse<ExpenseSummary>>(this.getApiUrl('summary'), {
+        params,
+      });
+    }
+
+    // Sin parámetros - usar caché
+    const now = Date.now();
+
+    if (expensesSummaryCache && (now - expensesSummaryCache.lastFetch) < this.CACHE_TTL) {
+      return expensesSummaryCache.observable;
+    }
+
+    const observable$ = this.http
+      .get<ApiResponse<ExpenseSummary>>(this.getApiUrl('summary'))
+      .pipe(
+        shareReplay({ bufferSize: 1, refCount: false }),
+        tap(() => {
+          if (expensesSummaryCache) {
+            expensesSummaryCache.lastFetch = Date.now();
+          }
+        }),
+      );
+
+    expensesSummaryCache = {
+      observable: observable$,
+      lastFetch: now,
+    };
+
+    return observable$;
   }
 
   // Expense Categories
@@ -101,5 +139,13 @@ export class ExpensesService {
 
   deleteExpenseCategory(id: number): Observable<ApiResponse<null>> {
     return this.http.delete<ApiResponse<null>>(this.getApiUrl(`categories/${id}`));
+  }
+
+  /**
+   * Invalida el caché de estadísticas
+   * Útil después de crear/editar/eliminar gastos
+   */
+  invalidateCache(): void {
+    expensesSummaryCache = null;
   }
 }

@@ -11,6 +11,7 @@ import {
   UpdateCustomerRequest,
 } from './models/customer.model';
 import { ToastService, DialogService } from '../../../../shared/components';
+import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 
 @Component({
   selector: 'app-customers',
@@ -93,6 +94,7 @@ export class CustomersComponent implements OnInit, OnDestroy {
 
   loading = false;
   actionLoading = false;
+  storeId: string | null = null;
 
   // Pagination
   page = 1;
@@ -110,10 +112,21 @@ export class CustomersComponent implements OnInit, OnDestroy {
     private customersService: CustomersService,
     private toastService: ToastService,
     private dialogService: DialogService,
+    private authFacade: AuthFacade,
   ) { }
 
   ngOnInit(): void {
-    this.loadStats();
+    // Subscribe to userStore$ observable to get the store ID
+    this.authFacade.userStore$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((store: any) => {
+        const storeId = store?.id;
+        if (storeId && !this.storeId) {
+          this.storeId = String(storeId);
+          this.loadStats();
+        }
+      });
+
     this.loadCustomers();
   }
 
@@ -123,10 +136,18 @@ export class CustomersComponent implements OnInit, OnDestroy {
   }
 
   loadStats() {
+    if (!this.storeId) return;
+
     this.customersService
-      .getStats()
+      .getStats(parseInt(this.storeId, 10))
       .pipe(takeUntil(this.destroy$))
-      .subscribe((stats) => (this.stats = stats));
+      .subscribe({
+        next: (stats: CustomerStats) => (this.stats = stats),
+        error: (error: any) => {
+          console.error('Error loading stats:', error);
+          this.toastService.error('Error al cargar estadísticas');
+        },
+      });
   }
 
   loadCustomers() {

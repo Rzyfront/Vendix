@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Body, Query, Param, UseGuards } from '@nestjs/common';
 import { OrganizationsService } from './organizations.service';
 import {
   UpdateOrganizationDto,
@@ -76,5 +76,26 @@ export class OrganizationsController {
   async upgradeAccountType(@Body() dto: UpgradeAccountTypeDto) {
     const result = await this.organizationsService.upgradeAccountType(dto);
     return this.responseService.success(result, result.message);
+  }
+
+  @Get(':id/stats')
+  @Permissions('organization:organizations:read')
+  async getStats(@Param('id') organizationId: string, @Query() dashboard_query: OrganizationDashboardDto) {
+    try {
+      const result =
+        await this.organizationsService.getOrganizationStats(
+          Number(organizationId),
+          dashboard_query,
+        );
+      return this.responseService.success(
+        result,
+        'Estadísticas de organización obtenidas exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener las estadísticas de la organización',
+        error.message,
+      );
+    }
   }
 }

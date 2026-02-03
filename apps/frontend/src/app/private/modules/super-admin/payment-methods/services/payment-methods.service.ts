@@ -8,6 +8,7 @@ import {
   BehaviorSubject,
   finalize,
 } from 'rxjs';
+import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import {
   PaymentMethod,
@@ -17,12 +18,21 @@ import {
   PaymentMethodQueryDto,
 } from '../interfaces/payment-method.interface';
 
+// Caché estático global (persiste entre instancias del servicio)
+interface CacheEntry<T> {
+  observable: T;
+  lastFetch: number;
+}
+
+let paymentMethodsStatsCache: CacheEntry<Observable<PaymentMethodStats>> | null = null;
+
 @Injectable({
   providedIn: 'root',
 })
 export class SuperAdminPaymentMethodsService {
   private readonly http = inject(HttpClient);
   private readonly apiBaseUrl = `${environment.apiUrl}/admin/payment-methods`;
+  private readonly CACHE_TTL = 30000; // 30 segundos
 
   private readonly isLoading$$ = new BehaviorSubject<boolean>(false);
   private readonly isCreatingPaymentMethod$$ = new BehaviorSubject<boolean>(false);
@@ -109,15 +119,36 @@ export class SuperAdminPaymentMethodsService {
   }
 
   getPaymentMethodsStats(): Observable<PaymentMethodStats> {
-    return this.http.get<any>(`${this.apiBaseUrl}/stats`).pipe(
-      map((response) => {
-        if (response.success && response.data) {
-          return response.data;
-        }
-        return response;
-      }),
-      catchError(this.handleError),
-    );
+    const now = Date.now();
+
+    if (paymentMethodsStatsCache && (now - paymentMethodsStatsCache.lastFetch) < this.CACHE_TTL) {
+      return paymentMethodsStatsCache.observable;
+    }
+
+    const observable$ = this.http
+      .get<any>(`${this.apiBaseUrl}/stats`)
+      .pipe(
+        shareReplay({ bufferSize: 1, refCount: false }),
+        map((response) => {
+          if (response.success && response.data) {
+            return response.data;
+          }
+          return response;
+        }),
+        catchError(this.handleError),
+        tap(() => {
+          if (paymentMethodsStatsCache) {
+            paymentMethodsStatsCache.lastFetch = Date.now();
+          }
+        }),
+      );
+
+    paymentMethodsStatsCache = {
+      observable: observable$,
+      lastFetch: now,
+    };
+
+    return observable$;
   }
 
   getPaymentMethodIcon(type: string): string {
@@ -166,5 +197,13 @@ export class SuperAdminPaymentMethodsService {
 
     console.error('SuperAdminPaymentMethodsService error:', error);
     return throwError(() => new Error(errorMessage));
+  }
+
+  /**
+   * Invalida el caché de estadísticas
+   * Útil después de crear/editar/eliminar métodos de pago
+   */
+  invalidateCache(): void {
+    paymentMethodsStatsCache = null;
   }
 }

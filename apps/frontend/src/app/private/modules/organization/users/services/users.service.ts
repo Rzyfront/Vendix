@@ -8,6 +8,7 @@ import {
   throwError,
   map,
 } from 'rxjs';
+import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import {
   User,
@@ -19,12 +20,21 @@ import {
   PaginatedUsersResponse,
 } from '../interfaces/user.interface';
 
+// Caché estático global (persiste entre instancias del servicio)
+interface CacheEntry<T> {
+  observable: T;
+  lastFetch: number;
+}
+
+let orgUsersStatsCache: CacheEntry<Observable<UserStats>> | null = null;
+
 @Injectable({
   providedIn: 'root',
 })
 export class UsersService {
   private http = inject(HttpClient);
   private apiUrl = environment.apiUrl;
+  private readonly CACHE_TTL = 30000; // 30 segundos
 
   // Estado de carga
   private isLoading$ = new BehaviorSubject<boolean>(false);
@@ -182,6 +192,47 @@ export class UsersService {
    * Obtener estadísticas de usuarios de la organización
    */
   getUsersStats(dashboardQuery: UsersDashboardDto = {}): Observable<UserStats> {
+    // Determinar si hay parámetros específicos (no usar caché en ese caso)
+    const hasParams =
+      (dashboardQuery.search && dashboardQuery.search.trim() !== '') ||
+      (dashboardQuery.role && dashboardQuery.role.trim() !== '') ||
+      (dashboardQuery.page && dashboardQuery.page > 0) ||
+      (dashboardQuery.limit && dashboardQuery.limit > 0) ||
+      (dashboardQuery.include_inactive !== undefined);
+
+    // Si no hay parámetros, usar caché
+    if (!hasParams) {
+      const now = Date.now();
+
+      if (orgUsersStatsCache && (now - orgUsersStatsCache.lastFetch) < this.CACHE_TTL) {
+        return orgUsersStatsCache.observable;
+      }
+
+      const observable$ = this.http
+        .get<{ data: UserStats }>(`${this.apiUrl}/organization/users/stats`)
+        .pipe(
+          shareReplay({ bufferSize: 1, refCount: false }),
+          map((response) => response.data),
+          tap(() => {
+            if (orgUsersStatsCache) {
+              orgUsersStatsCache.lastFetch = Date.now();
+            }
+          }),
+          catchError((error) => {
+            console.error('Error getting organization users stats:', error);
+            return throwError(() => error);
+          }),
+        );
+
+      orgUsersStatsCache = {
+        observable: observable$,
+        lastFetch: Date.now(),
+      };
+
+      return observable$;
+    }
+
+    // Con parámetros, no usar caché
     let params = new HttpParams();
 
     // Solo agregar parámetros si tienen valores válidos
@@ -268,5 +319,13 @@ export class UsersService {
           return throwError(() => error);
         }),
       );
+  }
+
+  /**
+   * Invalida el caché de estadísticas
+   * Útil después de crear/editar/eliminar usuarios
+   */
+  invalidateCache(): void {
+    orgUsersStatsCache = null;
   }
 }
