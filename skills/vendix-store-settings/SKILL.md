@@ -1,5 +1,11 @@
 # Vendix Store Settings
 
+> **DEPRECATED**: This skill has been superseded by `vendix-settings-system` which provides a more complete guide for both `store_settings` and `organization_settings`.
+>
+> See: [vendix-settings-system](../vendix-settings-system/SKILL.md)
+
+---
+
 > **Store Settings Module** - Sistema de configuración multi-sección para tiendas con sincronización cross-domain.
 
 ## 🎯 Cuándo Usar
@@ -7,7 +13,7 @@
 Usa esta skill cuando:
 - Trabajes en el módulo de configuración general de tiendas (`/admin/settings/general`)
 - Crees o modifiques secciones de configuración (general, inventory, notifications, pos, receipts, app, checkout, shipping)
-- Modifies la sincronización entre `store_settings`, `stores`, y `domain_settings`
+- Modifies la sincronización entre `store_settings`, `stores`, y `store_settings.settings.branding` (source of truth)
 - Implementes funcionalidad de auto-guardado con debounce
 - Trabajes con plantillas de configuración (`default_templates`)
 

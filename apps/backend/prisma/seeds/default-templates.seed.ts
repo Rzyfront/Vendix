@@ -22,7 +22,7 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
       template_data: {
         general: {
           timezone: 'America/Bogota',
-          currency: 'USD',
+          currency: 'COP',
           language: 'es',
           tax_included: false,
         },
