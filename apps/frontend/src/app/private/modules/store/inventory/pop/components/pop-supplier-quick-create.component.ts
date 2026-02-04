@@ -42,17 +42,18 @@ import { SuppliersService } from '../../services/suppliers.service';
   template: `
     <app-modal
       [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onClose()"
       size="md"
       title="Crear Proveedor Rápido"
       subtitle="Agrega un nuevo proveedor sin salir del punto de compra"
-      (close)="onClose()"
     >
       <form
         [formGroup]="supplierForm"
         (ngSubmit)="onSubmit()"
-        class="mt-4 h-full flex flex-col"
+        class="mt-4"
       >
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <!-- Name -->
           <div class="md:col-span-2">
             <app-input
@@ -116,22 +117,24 @@ import { SuppliersService } from '../../services/suppliers.service';
             ></app-input>
           </div>
         </div>
+      </form>
 
-        <!-- Footer Actions -->
-        <div slot="footer" class="flex justify-end gap-3">
+      <!-- Footer Actions -->
+      <div slot="footer">
+        <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
           <app-button variant="outline" (clicked)="onClose()">
             Cancelar
           </app-button>
           <app-button
             variant="primary"
-            type="submit"
             [disabled]="supplierForm.invalid || isLoading"
+            [loading]="isLoading"
+            (clicked)="onSubmit()"
           >
-            <span *ngIf="!isLoading">Crear Proveedor</span>
-            <span *ngIf="isLoading">Creando...</span>
+            Crear Proveedor
           </app-button>
         </div>
-      </form>
+      </div>
     </app-modal>
   `,
   styleUrls: ['./pop-supplier-quick-create.component.scss'],

@@ -1,0 +1,110 @@
+<div class="options-dropdown-container" #dropdownContainer>
+  <!-- Trigger Button -->
+  <button
+    type="button"
+    class="options-dropdown-trigger"
+    (click)="toggleDropdown()"
+    [attr.aria-expanded]="isOpen"
+    [attr.aria-haspopup]="true"
+  >
+    <app-icon name="sliders-horizontal" [size]="18"></app-icon>
+    <span class="trigger-label-text">{{ triggerLabel }}</span>
+    <span
+      *ngIf="activeFiltersCount > 0"
+      class="filter-count-badge"
+      [attr.aria-label]="activeFiltersCount + ' filtros activos'"
+    >
+      {{ activeFiltersCount }}
+    </span>
+    <app-icon name="chevron-down" [size]="14" class="chevron-icon"></app-icon>
+  </button>
+
+  <!-- Dropdown Content -->
+  <div
+    *ngIf="isOpen"
+    class="options-dropdown-content"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="dropdown-header">
+      <h3 class="dropdown-title">{{ title }}</h3>
+      <button
+        *ngIf="activeFiltersCount > 0"
+        class="clear-all-btn"
+        (click)="onClearAllFilters()"
+        type="button"
+      >
+        <app-icon name="x" [size]="14"></app-icon>
+        Limpiar todos
+      </button>
+    </div>
+
+    <!-- Filters Section -->
+    <div *ngIf="filters.length > 0" class="filters-body">
+      <ng-container *ngFor="let filter of filters">
+        <div class="filter-section">
+          <div class="filter-section-header">
+            <label class="filter-label">{{ filter.label }}</label>
+            <button
+              *ngIf="hasActiveFilter(filter.key)"
+              class="clear-filter-btn"
+              (click)="onClearFilter(filter.key)"
+              type="button"
+              [title]="'Limpiar ' + filter.label.toLowerCase()"
+            >
+              <app-icon name="x" [size]="12"></app-icon>
+            </button>
+          </div>
+
+          <!-- Single Select Filter -->
+          <ng-container *ngIf="filter.type === 'select'">
+            <app-selector
+              [options]="filter.options"
+              [ngModel]="getFilterValue(filter.key)"
+              (valueChange)="onFilterChange(filter.key, $event)"
+              size="sm"
+              [placeholder]="filter.placeholder || 'Seleccionar'"
+              [disabled]="filter.disabled || false"
+            ></app-selector>
+          </ng-container>
+
+          <!-- Multi Select Filter -->
+          <ng-container *ngIf="filter.type === 'multi-select'">
+            <app-multi-selector
+              [options]="filter.options"
+              [ngModel]="getMultiFilterValues(filter.key)"
+              (valueChange)="onMultiFilterChange(filter.key, $event)"
+              size="sm"
+              [placeholder]="filter.placeholder || 'Seleccionar'"
+              [disabled]="filter.disabled || false"
+            ></app-multi-selector>
+          </ng-container>
+
+          <div *ngIf="filter.helpText" class="filter-help-text">
+            {{ filter.helpText }}
+          </div>
+        </div>
+      </ng-container>
+    </div>
+
+    <!-- Actions Section -->
+    <div *ngIf="actions.length > 0" class="actions-section">
+      <div class="actions-header">
+        <span class="actions-title">Acciones</span>
+      </div>
+      <div class="actions-list">
+        <button
+          *ngFor="let action of actions"
+          class="action-item"
+          [class.action-primary]="action.variant === 'primary'"
+          [class.action-destructive]="action.variant === 'destructive'"
+          [disabled]="action.disabled || false"
+          (click)="onActionClick(action.action)"
+          type="button"
+        >
+          <app-icon [name]="action.icon" [size]="16"></app-icon>
+          <span>{{ action.label }}</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

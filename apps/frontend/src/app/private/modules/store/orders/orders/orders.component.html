@@ -30,14 +30,15 @@
           ></app-inputsearch>
 
           <!-- Filter dropdown -->
-          <app-order-filter-dropdown
-            [selectedStatus]="selectedStatus"
-            [selectedPaymentStatus]="selectedPaymentStatus"
-            [selectedDateRange]="selectedDateRange"
+          <app-options-dropdown
+            [filters]="filterConfigs"
+            [filterValues]="filterValues"
             [isLoading]="isLoading"
-            (filterChange)="onFilterDropdownChange($event)"
+            title="Filtros"
+            triggerLabel="Filtros"
+            (filterChange)="onFilterChange($event)"
             (clearAllFilters)="clearFilters()"
-          ></app-order-filter-dropdown>
+          ></app-options-dropdown>
 
           <!-- Action buttons -->
           <div class="flex gap-2 items-center ml-auto">

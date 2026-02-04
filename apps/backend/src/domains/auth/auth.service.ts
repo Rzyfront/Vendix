@@ -4,6 +4,7 @@ import {
   UnauthorizedException,
   BadRequestException,
   NotFoundException,
+  HttpException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -26,6 +27,50 @@ import { DefaultPanelUIService } from '../../common/services/default-panel-ui.se
 import { toTitleCase } from '@common/utils/format.util';
 import { TOKEN_DEFAULTS } from './constants/token.constants';
 import { S3Service } from '@common/services/s3.service';
+import { organizations } from '@prisma/client';
+
+/**
+ * Result of organization lookup with smart fallback logic
+ */
+export interface OrganizationLookupResult {
+  organization: organizations | null;
+  candidates: Array<{
+    id: number;
+    name: string;
+    slug: string;
+    logo_url: string | null;
+  }> | null;
+  matchType:
+    | 'slug_exact'
+    | 'name_single'
+    | 'name_filtered_by_email'
+    | 'disambiguation_required'
+    | 'not_found';
+}
+
+/**
+ * Result of user account lookup for multi-account support
+ * Handles cases where a single email has accounts in multiple organizations
+ */
+export interface UserAccountLookupResult {
+  /** The resolved user account (null if disambiguation required or not found) */
+  user: any | null;
+  /** List of accounts for disambiguation (null if single account or resolved) */
+  accounts: Array<{
+    id: number;
+    organization_id: number;
+    organization_name: string;
+    organization_slug: string;
+    organization_logo_url: string | null;
+  }> | null;
+  /** Type of match result */
+  matchType:
+    | 'single_account'         // Only one account exists → direct login
+    | 'account_resolved'       // Multi-account + org specified → resolved to specific account
+    | 'account_disambiguation' // Multi-account + no org → show selector
+    | 'no_account_in_org'      // User has no account in requested organization
+    | 'not_found';             // Email doesn't exist in system
+}
 
 @Injectable()
 export class AuthService {
@@ -40,6 +85,263 @@ export class AuthService {
     private readonly defaultPanelUIService: DefaultPanelUIService,
     private readonly s3Service: S3Service,
   ) { }
+
+  /**
+   * Smart Fallback: Find organization by identifier (slug or name)
+   * 1. First tries exact slug match
+   * 2. If no slug match, searches by name (case-insensitive)
+   * 3. If multiple matches, filters by user's email domain
+   * 4. Returns disambiguation candidates if still ambiguous
+   */
+  async findOrganizationByIdentifier(
+    identifier: string,
+    userEmail: string,
+  ): Promise<OrganizationLookupResult> {
+    const normalizedIdentifier = identifier.toLowerCase().trim();
+
+    // 1. Try exact slug match first (most common case)
+    const bySlug = await this.prismaService.organizations.findUnique({
+      where: { slug: normalizedIdentifier },
+    });
+
+    if (bySlug) {
+      return { organization: bySlug, candidates: null, matchType: 'slug_exact' };
+    }
+
+    // 2. Search by name (case-insensitive, partial match)
+    const byName = await this.prismaService.organizations.findMany({
+      where: {
+        name: { contains: identifier.trim(), mode: 'insensitive' },
+        state: { in: ['active', 'draft'] },
+      },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        email: true,
+        logo_url: true,
+      },
+    });
+
+    if (byName.length === 0) {
+      return { organization: null, candidates: null, matchType: 'not_found' };
+    }
+
+    if (byName.length === 1) {
+      const fullOrg = await this.prismaService.organizations.findUnique({
+        where: { id: byName[0].id },
+      });
+      return {
+        organization: fullOrg,
+        candidates: null,
+        matchType: 'name_single',
+      };
+    }
+
+    // 3. Multiple results: filter by user's email domain
+    const emailDomain = userEmail.split('@')[1]?.toLowerCase();
+
+    if (emailDomain) {
+      const filtered = byName.filter((org) =>
+        org.email?.toLowerCase().endsWith(`@${emailDomain}`),
+      );
+
+      if (filtered.length === 1) {
+        const fullOrg = await this.prismaService.organizations.findUnique({
+          where: { id: filtered[0].id },
+        });
+        return {
+          organization: fullOrg,
+          candidates: null,
+          matchType: 'name_filtered_by_email',
+        };
+      }
+
+      // If filter reduced candidates, use filtered list for disambiguation
+      if (filtered.length > 0 && filtered.length < byName.length) {
+        return {
+          organization: null,
+          candidates: filtered.map((org) => ({
+            id: org.id,
+            name: org.name,
+            slug: org.slug,
+            logo_url: org.logo_url,
+          })),
+          matchType: 'disambiguation_required',
+        };
+      }
+    }
+
+    // 4. Requires manual disambiguation (return all candidates without email)
+    return {
+      organization: null,
+      candidates: byName.map((org) => ({
+        id: org.id,
+        name: org.name,
+        slug: org.slug,
+        logo_url: org.logo_url,
+      })),
+      matchType: 'disambiguation_required',
+    };
+  }
+
+  /**
+   * Find ALL user accounts by email address
+   * Handles multi-account scenarios where one email exists in multiple organizations
+   *
+   * @param email - User's email address
+   * @param organizationIdentifier - Optional org slug/name to filter by
+   * @returns UserAccountLookupResult with resolved user or disambiguation candidates
+   */
+  async findUserAccountsByEmail(
+    email: string,
+    organizationIdentifier?: string,
+  ): Promise<UserAccountLookupResult> {
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // 1. Find ALL accounts with this email (excluding suspended/archived)
+    const accounts = await this.prismaService.users.findMany({
+      where: {
+        email: normalizedEmail,
+        state: { notIn: ['suspended', 'archived'] },
+      },
+      include: {
+        user_roles: {
+          include: {
+            roles: true,
+          },
+        },
+        organizations: {
+          include: {
+            domain_settings: {
+              where: {
+                is_primary: true,
+                status: 'active',
+              },
+            },
+          },
+        },
+        addresses: true,
+        main_store: {
+          include: {
+            organizations: {
+              include: {
+                domain_settings: {
+                  where: {
+                    is_primary: true,
+                    status: 'active',
+                  },
+                },
+              },
+            },
+            domain_settings: {
+              where: {
+                is_primary: true,
+                status: 'active',
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // 2. No accounts found → not_found
+    if (accounts.length === 0) {
+      return { user: null, accounts: null, matchType: 'not_found' };
+    }
+
+    // 3. Single account → direct login (no disambiguation needed)
+    if (accounts.length === 1) {
+      return { user: accounts[0], accounts: null, matchType: 'single_account' };
+    }
+
+    // 4. Multiple accounts WITH organizationIdentifier → resolve to specific account
+    if (organizationIdentifier) {
+      // Use existing smart fallback to find the organization
+      const lookupResult = await this.findOrganizationByIdentifier(
+        organizationIdentifier,
+        normalizedEmail,
+      );
+
+      // Organization not found at all
+      if (lookupResult.matchType === 'not_found') {
+        return { user: null, accounts: null, matchType: 'no_account_in_org' };
+      }
+
+      // Organization requires disambiguation (multiple orgs match the identifier)
+      if (lookupResult.matchType === 'disambiguation_required') {
+        // Filter candidates to only include orgs where the user HAS an account
+        const userOrgIds = new Set(accounts.map((a) => a.organization_id));
+        const validCandidates = lookupResult.candidates?.filter((c) =>
+          userOrgIds.has(c.id),
+        );
+
+        // No valid candidates (user has no account in any matching org)
+        if (!validCandidates || validCandidates.length === 0) {
+          return { user: null, accounts: null, matchType: 'no_account_in_org' };
+        }
+
+        // Single valid candidate after filtering → resolve
+        if (validCandidates.length === 1) {
+          const matchedAccount = accounts.find(
+            (a) => a.organization_id === validCandidates[0].id,
+          );
+          if (matchedAccount) {
+            return {
+              user: matchedAccount,
+              accounts: null,
+              matchType: 'account_resolved',
+            };
+          }
+        }
+
+        // Still multiple candidates → return for disambiguation (only orgs where user has account)
+        return {
+          user: null,
+          accounts: accounts
+            .filter((a) => validCandidates.some((c) => c.id === a.organization_id))
+            .map((a: any) => ({
+              id: a.id,
+              organization_id: a.organization_id,
+              organization_name: a.organizations.name,
+              organization_slug: a.organizations.slug,
+              organization_logo_url: a.organizations.logo_url,
+            })),
+          matchType: 'account_disambiguation',
+        };
+      }
+
+      // Organization found → check if user has account in that org
+      const targetOrgId = lookupResult.organization!.id;
+      const matchedAccount = accounts.find(
+        (a) => a.organization_id === targetOrgId,
+      );
+
+      if (!matchedAccount) {
+        // User doesn't have an account in the requested organization
+        return { user: null, accounts: null, matchType: 'no_account_in_org' };
+      }
+
+      return {
+        user: matchedAccount,
+        accounts: null,
+        matchType: 'account_resolved',
+      };
+    }
+
+    // 5. Multiple accounts WITHOUT organizationIdentifier → disambiguation required
+    return {
+      user: null,
+      accounts: accounts.map((a: any) => ({
+        id: a.id,
+        organization_id: a.organization_id,
+        organization_name: a.organizations.name,
+        organization_slug: a.organizations.slug,
+        organization_logo_url: a.organizations.logo_url,
+      })),
+      matchType: 'account_disambiguation',
+    };
+  }
 
   async updateProfile(userId: number, updateProfileDto: any) {
     const {
@@ -1011,53 +1313,58 @@ export class AuthService {
   ) {
     const { email, password, organization_slug, store_slug } = loginDto;
 
-    // Buscar usuario con rol para auto-detección de contexto
-    const user = await this.prismaService.users.findFirst({
-      where: { email },
-      include: {
-        user_roles: {
-          include: {
-            roles: true,
-          },
-        },
-        organizations: {
-          include: {
-            domain_settings: {
-              where: {
-                is_primary: true,
-                status: 'active',
-              },
-            },
-          },
-        },
-        addresses: true, // Agregar direcciones para consistencia con switch environment
-        main_store: {
-          include: {
-            organizations: {
-              include: {
-                domain_settings: {
-                  where: {
-                    is_primary: true,
-                    status: 'active',
-                  },
-                },
-              },
-            },
-            domain_settings: {
-              where: {
-                is_primary: true,
-                status: 'active',
-              },
-            },
-          },
-        },
-      },
-    });
+    // Validar que se proporcione al menos uno de los dos slugs (obligatorio)
+    // IMPORTANT: Must validate BEFORE account lookup to avoid exposing account existence
+    if (!organization_slug && !store_slug) {
+      throw new BadRequestException(
+        'Debe proporcionar organization_slug o store_slug',
+      );
+    }
 
-    if (!user) {
+    if (organization_slug && store_slug) {
+      throw new BadRequestException(
+        'Proporcione solo organization_slug o store_slug, no ambos',
+      );
+    }
+
+    // 🆕 MULTI-ACCOUNT SUPPORT: Find ALL accounts for this email
+    const accountLookup = await this.findUserAccountsByEmail(
+      email,
+      organization_slug, // Pass org identifier for resolution
+    );
+
+    // Handle account lookup results
+    if (accountLookup.matchType === 'not_found') {
       await this.logLoginAttempt(null, false, email);
       throw new UnauthorizedException('Credenciales inválidas');
     }
+
+    if (accountLookup.matchType === 'no_account_in_org') {
+      await this.logLoginAttempt(null, false, email);
+      throw new UnauthorizedException('Credenciales inválidas');
+    }
+
+    if (accountLookup.matchType === 'account_disambiguation') {
+      // HTTP 300 Multiple Choices - Frontend shows account selector
+      const HTTP_MULTIPLE_CHOICES = 300;
+      throw new HttpException(
+        {
+          statusCode: HTTP_MULTIPLE_CHOICES,
+          message: 'Seleccione la organización',
+          disambiguation_required: true,
+          account_type: 'multi_account',
+          candidates: accountLookup.accounts!.map((a) => ({
+            organization_name: a.organization_name,
+            organization_slug: a.organization_slug,
+            organization_logo_url: a.organization_logo_url,
+          })),
+        },
+        HTTP_MULTIPLE_CHOICES,
+      );
+    }
+
+    // Account resolved (single_account or account_resolved) → continue with login
+    const user = accountLookup.user!;
 
     // Obtener user_settings por separado para las validaciones
     let userSettings = await this.prismaService.user_settings.findUnique({
@@ -1066,7 +1373,7 @@ export class AuthService {
 
     // Transformar user_roles a roles array simple para compatibilidad con frontend
     const { user_roles, ...userWithoutRoles } = user;
-    const roles = user_roles?.map((ur) => ur.roles?.name).filter(Boolean) || [];
+    const roles = user_roles?.map((ur: any) => ur.roles?.name).filter(Boolean) || [];
 
     const userWithRolesArray = {
       ...userWithoutRoles,
@@ -1074,44 +1381,28 @@ export class AuthService {
     };
 
     // ✅ Validar que el usuario no esté suspended o archived
+    // Note: findUserAccountsByEmail already filters these, but double-check for safety
     if (user.state === 'suspended' || user.state === 'archived') {
       await this.logLoginAttempt(user.id, false);
       throw new UnauthorizedException('Cuenta suspendida o archivada');
     }
 
-    // Validar que se proporcione al menos uno de los dos slugs (obligatorio)
-    if (!organization_slug && !store_slug) {
-      throw new BadRequestException(
-        'Debe proporcionar organization_slug o store_slug',
-      );
-    }
-
     // Validar consistencia entre slugs y user_settings.app_type
     const user_app_type = userSettings?.app_type;
-    let effective_organization_slug = organization_slug;
+    // Use the resolved organization slug from the user's org (important for name-based lookups)
+    let effective_organization_slug = organization_slug
+      ? user.organizations.slug
+      : undefined;
     let effective_store_slug = store_slug;
-
-    if (organization_slug && store_slug) {
-      throw new BadRequestException(
-        'Proporcione solo organization_slug o store_slug, no ambos',
-      );
-    }
 
     // 🔒 VALIDACIÓN ESTRICTA DE PERTENENCIA (Organizational Chain)
     const hasHighPrivilege = roles.some(
-      (r) => r && ['owner', 'admin', 'super_admin'].includes(r),
+      (r: string) => r && ['owner', 'admin', 'super_admin'].includes(r),
     );
 
-    if (organization_slug) {
-      const targetOrg = await this.prismaService.organizations.findUnique({
-        where: { slug: organization_slug },
-      });
-
-      if (!targetOrg || user.organization_id !== targetOrg.id) {
-        await this.logLoginAttempt(user.id, false);
-        throw new UnauthorizedException('Credenciales inválidas');
-      }
-    } else if (store_slug) {
+    // For organization_slug login, user is already validated by findUserAccountsByEmail
+    // Only need to validate store_slug access
+    if (store_slug) {
       const targetStore = await this.prismaService.stores.findUnique({
         where: {
           organization_id_slug: {

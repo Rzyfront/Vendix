@@ -13,7 +13,6 @@ import { Subject, takeUntil } from 'rxjs';
 // Import components
 import { OrdersListComponent } from '../components/orders-list';
 import { OrderEmptyStateComponent } from '../components/order-empty-state';
-import { OrderFilterDropdownComponent } from '../components/order-filter-dropdown';
 import { OrderStatsComponent } from '../components/order-stats';
 
 // Import shared components
@@ -21,6 +20,9 @@ import {
   InputsearchComponent,
   ButtonComponent,
   IconComponent,
+  OptionsDropdownComponent,
+  FilterConfig,
+  FilterValues,
 } from '../../../../../shared/components';
 
 // Import interfaces and services
@@ -28,6 +30,8 @@ import {
   Order,
   OrderQuery,
   ExtendedOrderStats,
+  OrderState,
+  PaymentStatus,
 } from '../interfaces/order.interface';
 import { StoreOrdersService } from '../services/store-orders.service';
 
@@ -39,7 +43,7 @@ import { StoreOrdersService } from '../services/store-orders.service';
     FormsModule,
     OrdersListComponent,
     OrderEmptyStateComponent,
-    OrderFilterDropdownComponent,
+    OptionsDropdownComponent,
     OrderStatsComponent,
     InputsearchComponent,
     ButtonComponent,
@@ -70,6 +74,59 @@ export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
   selectedPaymentStatus = '';
   selectedDateRange = '';
   isLoading = true;
+
+  // Filter configuration for the options dropdown
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'status',
+      label: 'Estado',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos los Estados' },
+        { value: 'created', label: 'Creada' },
+        { value: 'pending_payment', label: 'Pago Pendiente' },
+        { value: 'processing', label: 'Procesando' },
+        { value: 'shipped', label: 'Enviada' },
+        { value: 'delivered', label: 'Entregada' },
+        { value: 'cancelled', label: 'Cancelada' },
+        { value: 'refunded', label: 'Reembolsada' },
+        { value: 'finished', label: 'Finalizada' },
+      ],
+    },
+    {
+      key: 'payment_status',
+      label: 'Estado de Pago',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos los Estados de Pago' },
+        { value: 'pending', label: 'Pendiente' },
+        { value: 'processing', label: 'Procesando' },
+        { value: 'completed', label: 'Completado' },
+        { value: 'failed', label: 'Fallido' },
+        { value: 'refunded', label: 'Reembolsado' },
+        { value: 'cancelled', label: 'Cancelado' },
+      ],
+    },
+    {
+      key: 'date_range',
+      label: 'Período',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todo el Período' },
+        { value: 'today', label: 'Hoy' },
+        { value: 'yesterday', label: 'Ayer' },
+        { value: 'thisWeek', label: 'Esta Semana' },
+        { value: 'lastWeek', label: 'Semana Pasada' },
+        { value: 'thisMonth', label: 'Este Mes' },
+        { value: 'lastMonth', label: 'Mes Pasado' },
+        { value: 'thisYear', label: 'Este Año' },
+        { value: 'lastYear', label: 'Año Pasado' },
+      ],
+    },
+  ];
+
+  // Current filter values
+  filterValues: FilterValues = {};
 
   // Filters
   filters: OrderQuery = {
@@ -174,14 +231,15 @@ export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   // Filter dropdown change
-  onFilterDropdownChange(query: OrderQuery): void {
-    this.selectedStatus = query.status || '';
-    this.selectedPaymentStatus = query.payment_status || '';
-    this.selectedDateRange = query.date_range || '';
+  onFilterChange(values: FilterValues): void {
+    this.filterValues = values;
+    this.selectedStatus = (values['status'] as string) || '';
+    this.selectedPaymentStatus = (values['payment_status'] as string) || '';
+    this.selectedDateRange = (values['date_range'] as string) || '';
 
-    this.filters.status = query.status;
-    this.filters.payment_status = query.payment_status;
-    this.filters.date_range = query.date_range;
+    this.filters.status = this.selectedStatus ? (this.selectedStatus as OrderState) : undefined;
+    this.filters.payment_status = this.selectedPaymentStatus ? (this.selectedPaymentStatus as PaymentStatus) : undefined;
+    this.filters.date_range = this.selectedDateRange || undefined;
     this.filters.page = 1;
     this.isLoading = true;
 
@@ -196,6 +254,7 @@ export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
     this.selectedStatus = '';
     this.selectedPaymentStatus = '';
     this.selectedDateRange = '';
+    this.filterValues = {};
 
     this.filters.search = '';
     this.filters.status = undefined;

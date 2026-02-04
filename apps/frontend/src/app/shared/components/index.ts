@@ -34,6 +34,7 @@ export { StickyHeaderComponent } from './sticky-header/sticky-header.component';
 export { BadgeComponent } from './badge/badge.component';
 export { ItemListComponent } from './item-list/item-list.component';
 export { ResponsiveDataViewComponent } from './responsive-data-view/responsive-data-view.component';
+export { OptionsDropdownComponent } from './options-dropdown';
 
 // Types
 export type { BadgeVariant } from './badge/badge.component';
@@ -78,4 +79,10 @@ export type {
   ItemListDetailField,
   ItemListSize,
 } from './item-list/item-list.interfaces';
+export type {
+  FilterConfig,
+  FilterType,
+  DropdownAction,
+  FilterValues,
+} from './options-dropdown';
 export { CHART_THEMES } from './chart';

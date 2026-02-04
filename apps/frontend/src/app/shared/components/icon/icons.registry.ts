@@ -127,6 +127,9 @@ import {
   FilterX,
   ClipboardCheck,
   CheckCheck,
+  // Inventory adjustment icons:
+  XCircle,
+  Edit3,
 } from 'lucide-angular';
 
 /**
@@ -299,6 +302,10 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'filter-x': FilterX,
   'clipboard-check': ClipboardCheck,
   'check-check': CheckCheck,
+
+  // Inventory adjustment icons
+  'x-circle': XCircle,
+  'edit-3': Edit3,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

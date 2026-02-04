@@ -13,10 +13,12 @@ import {
     ToastService,
     DialogService,
     IconComponent,
-    SelectorComponent,
-    SelectorOption,
     ResponsiveDataViewComponent,
     ItemListCardConfig,
+    OptionsDropdownComponent,
+    FilterConfig,
+    DropdownAction,
+    FilterValues,
 } from '../../../../../shared/components/index';
 
 // Services
@@ -39,7 +41,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
         InputsearchComponent,
         StatsComponent,
         IconComponent,
-        SelectorComponent,
+        OptionsDropdownComponent,
         LocationFormModalComponent,
     ],
     template: `
@@ -97,36 +99,15 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
                 (search)="onSearch($event)"
               ></app-inputsearch>
 
-              <app-selector
-                class="w-full sm:w-36"
-                [options]="status_options"
-                [(ngModel)]="status_filter"
-                placeholder="Estado"
-                size="sm"
-                (valueChange)="filterByStatus($event)"
-              ></app-selector>
-
-              <div class="flex gap-2 items-center ml-auto">
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  (clicked)="loadLocations()"
-                  [disabled]="is_loading"
-                  title="Refrescar"
-                >
-                  <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
-                </app-button>
-                
-                <app-button
-                  variant="primary"
-                  size="sm"
-                  (clicked)="openCreateModal()"
-                  title="Nueva Ubicación"
-                >
-                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                  <span class="hidden sm:inline">Nueva Ubicación</span>
-                </app-button>
-              </div>
+              <app-options-dropdown
+                [filters]="filterConfigs"
+                [filterValues]="filterValues"
+                [actions]="dropdownActions"
+                [isLoading]="is_loading"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="clearFilters()"
+                (actionClick)="onActionClick($event)"
+              ></app-options-dropdown>
             </div>
           </div>
         </div>
@@ -193,12 +174,42 @@ export class LocationsComponent implements OnInit, OnDestroy {
 
     // Filters
     status_filter: 'all' | 'active' | 'inactive' = 'all';
+    type_filter = '';
     search_term = '';
 
-    status_options: SelectorOption[] = [
-        { value: 'all', label: 'Todos' },
-        { value: 'active', label: 'Activos' },
-        { value: 'inactive', label: 'Inactivos' },
+    // Filter configuration for the options dropdown
+    filterConfigs: FilterConfig[] = [
+        {
+            key: 'is_active',
+            label: 'Estado',
+            type: 'select',
+            options: [
+                { value: '', label: 'Todos' },
+                { value: 'true', label: 'Activas' },
+                { value: 'false', label: 'Inactivas' },
+            ],
+        },
+        {
+            key: 'type',
+            label: 'Tipo',
+            type: 'select',
+            options: [
+                { value: '', label: 'Todos los Tipos' },
+                { value: 'warehouse', label: 'Almacén' },
+                { value: 'store', label: 'Tienda' },
+                { value: 'virtual', label: 'Virtual' },
+                { value: 'transit', label: 'Tránsito' },
+            ],
+        },
+    ];
+
+    // Current filter values
+    filterValues: FilterValues = {};
+
+    // Dropdown actions
+    dropdownActions: DropdownAction[] = [
+        { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
+        { label: 'Nueva Ubicación', icon: 'plus', action: 'create', variant: 'primary' },
     ];
 
     // Table Configuration
@@ -327,6 +338,10 @@ export class LocationsComponent implements OnInit, OnDestroy {
             filtered = filtered.filter((l) => !l.is_active);
         }
 
+        if (this.type_filter) {
+            filtered = filtered.filter((l) => l.type === this.type_filter);
+        }
+
         if (this.search_term) {
             const term = this.search_term.toLowerCase();
             filtered = filtered.filter(
@@ -355,9 +370,39 @@ export class LocationsComponent implements OnInit, OnDestroy {
         this.applyFilters();
     }
 
-    filterByStatus(status: string | number | null): void {
-        this.status_filter = (status as 'all' | 'active' | 'inactive') || 'all';
+    onFilterChange(values: FilterValues): void {
+        this.filterValues = values;
+        const isActiveValue = values['is_active'] as string;
+        this.type_filter = (values['type'] as string) || '';
+
+        if (isActiveValue === 'true') {
+            this.status_filter = 'active';
+        } else if (isActiveValue === 'false') {
+            this.status_filter = 'inactive';
+        } else {
+            this.status_filter = 'all';
+        }
+
         this.applyFilters();
+    }
+
+    clearFilters(): void {
+        this.status_filter = 'all';
+        this.type_filter = '';
+        this.search_term = '';
+        this.filterValues = {};
+        this.applyFilters();
+    }
+
+    onActionClick(action: string): void {
+        switch (action) {
+            case 'create':
+                this.openCreateModal();
+                break;
+            case 'refresh':
+                this.loadLocations();
+                break;
+        }
     }
 
     onSort(event: { column: string; direction: 'asc' | 'desc' | null }): void {

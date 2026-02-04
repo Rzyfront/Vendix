@@ -42,10 +42,8 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
   providers: [ProductsService],
   template: `
     <div class="w-full">
-      <!-- Stats Grid -->
-      <div
-        class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-4 md:mb-6 lg:mb-8"
-      >
+      <!-- Stats Grid: sticky at top on mobile -->
+      <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Productos Totales"
           [value]="stats.total_products"

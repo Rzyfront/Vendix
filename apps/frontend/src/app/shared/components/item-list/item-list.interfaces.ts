@@ -44,6 +44,15 @@ export interface ItemListCardConfig {
   footerLabel?: string;
   /** Transform function for the footer value */
   footerTransform?: (value: any, item?: any) => string;
+  /**
+   * Avatar shape: 'circle' (default, for users/profiles) or 'square' (for products with images)
+   * Only applies when avatarKey or avatarFallbackIcon is defined
+   */
+  avatarShape?: 'circle' | 'square';
+  /**
+   * Footer style: 'default' or 'prominent' (large value, e.g., price/total)
+   */
+  footerStyle?: 'default' | 'prominent';
 }
 
 /**

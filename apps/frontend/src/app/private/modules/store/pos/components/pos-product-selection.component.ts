@@ -17,6 +17,9 @@ import {
   InputsearchComponent,
   ToastService,
   DialogService,
+  OptionsDropdownComponent,
+  FilterConfig,
+  FilterValues,
 } from '../../../../../shared/components';
 import { Router } from '@angular/router';
 
@@ -30,8 +33,7 @@ import {
   selectAccessToken,
   selectUser,
 } from '../../../../../core/store/auth/auth.selectors';
-import { ProductFilterDropdownComponent } from '../../products/components/product-filter-dropdown/product-filter-dropdown.component';
-import { ProductQueryDto, Brand } from '../../products/interfaces';
+import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfaces';
 
 @Component({
   selector: 'app-pos-product-selection',
@@ -42,7 +44,7 @@ import { ProductQueryDto, Brand } from '../../products/interfaces';
     IconComponent,
     ButtonComponent,
     InputsearchComponent,
-    ProductFilterDropdownComponent,
+    OptionsDropdownComponent,
   ],
   schemas: [NO_ERRORS_SCHEMA],
   template: `
@@ -76,16 +78,16 @@ import { ProductQueryDto, Brand } from '../../products/interfaces';
             />
 
             <!-- Componente de filtros -->
-            <app-product-filter-dropdown
-              [categories]="categories"
-              [brands]="brands"
+            <app-options-dropdown
+              [filters]="filterConfigs"
+              [filterValues]="filterValues"
               [isLoading]="loading"
-              [searchTerm]="searchQuery"
-              [selectedCategory]="selectedCategory?.id?.toString() || ''"
-              [selectedBrand]="selectedBrand?.id?.toString() || ''"
-              (filterChange)="onFilterChange($event)"
+              title="Filtros"
+              triggerLabel="Filtros"
+              (filterChange)="onOptionsFilterChange($event)"
+              (clearAllFilters)="onClearFilters()"
               class="shrink-0"
-            ></app-product-filter-dropdown>
+            ></app-options-dropdown>
 
             <!-- Barcode scanner (desktop only) -->
             <app-button
@@ -357,6 +359,27 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   brands: any[] = [];
   addingToCart = new Set<string>();
 
+  // Filter configuration for the options dropdown
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'category_id',
+      label: 'Categoría',
+      type: 'select',
+      options: [{ value: '', label: 'Todas las Categorías' }],
+      placeholder: 'Seleccionar categoría',
+    },
+    {
+      key: 'brand_id',
+      label: 'Marca',
+      type: 'select',
+      options: [{ value: '', label: 'Todas las Marcas' }],
+      placeholder: 'Seleccionar marca',
+    },
+  ];
+
+  // Current filter values
+  filterValues: FilterValues = {};
+
   @Output() productSelected = new EventEmitter<any>();
   @Output() productAddedToCart = new EventEmitter<{
     product: any;
@@ -422,6 +445,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
             icon: 'tag',
           }));
           this.categories = [this.categories[0], ...backendCategories];
+          this.updateFilterOptions();
         },
         error: (error) => {
           // Error loading categories, using defaults
@@ -440,11 +464,41 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
             id: brand.id.toString(),
           }));
           this.brands = [this.brands[0], ...backendBrands];
+          this.updateFilterOptions();
         },
         error: (error) => {
           // Error loading brands, using defaults
         },
       });
+  }
+
+  private updateFilterOptions(): void {
+    // Update category options
+    const categoryFilter = this.filterConfigs.find(f => f.key === 'category_id');
+    if (categoryFilter) {
+      categoryFilter.options = [
+        { value: '', label: 'Todas las Categorías' },
+        ...this.categories.filter(c => c.id !== '').map(cat => ({
+          value: cat.id.toString(),
+          label: cat.name,
+        })),
+      ];
+    }
+
+    // Update brand options
+    const brandFilter = this.filterConfigs.find(f => f.key === 'brand_id');
+    if (brandFilter) {
+      brandFilter.options = [
+        { value: '', label: 'Todas las Marcas' },
+        ...this.brands.filter(b => b.id !== '').map(brand => ({
+          value: brand.id.toString(),
+          label: brand.name,
+        })),
+      ];
+    }
+
+    // Force re-render
+    this.filterConfigs = [...this.filterConfigs];
   }
 
   private setupSearchSubscription(): void {
@@ -523,6 +577,40 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
 
   onSelectBrand(brand: Brand): void {
     this.selectedBrand = brand;
+    this.filterProducts();
+  }
+
+  onOptionsFilterChange(values: FilterValues): void {
+    this.filterValues = values;
+
+    const categoryId = values['category_id'] as string;
+    const brandId = values['brand_id'] as string;
+
+    // Update selected category for filtering
+    if (categoryId) {
+      this.selectedCategory =
+        this.categories.find((c) => c.id === categoryId) ||
+        this.categories[0];
+    } else {
+      this.selectedCategory = this.categories[0];
+    }
+
+    // Update selected brand for filtering
+    if (brandId) {
+      this.selectedBrand =
+        this.brands.find((b) => b.id.toString() === brandId) ||
+        this.brands[0];
+    } else {
+      this.selectedBrand = this.brands[0];
+    }
+
+    this.filterProducts();
+  }
+
+  onClearFilters(): void {
+    this.filterValues = {};
+    this.selectedCategory = this.categories[0];
+    this.selectedBrand = this.brands[0];
     this.filterProducts();
   }
 

@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -14,15 +14,16 @@ import {
 // Import shared components
 import {
   InputsearchComponent,
-  IconComponent,
-  ButtonComponent,
   TableColumn,
   TableAction,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  OptionsDropdownComponent,
+  FilterConfig,
+  DropdownAction,
+  FilterValues,
 } from '../../../../../../shared/components/index';
 
-import { ProductFilterDropdownComponent } from '../product-filter-dropdown/product-filter-dropdown.component';
 import { ProductEmptyStateComponent } from '../product-empty-state.component';
 
 // Import styles
@@ -36,15 +37,13 @@ import './product-list.component.css';
     RouterModule,
     FormsModule,
     InputsearchComponent,
-    IconComponent,
-    ButtonComponent,
-    ProductFilterDropdownComponent,
+    OptionsDropdownComponent,
     ProductEmptyStateComponent,
     ResponsiveDataViewComponent,
   ],
   templateUrl: './product-list.component.html',
 })
-export class ProductListComponent {
+export class ProductListComponent implements OnChanges {
   @Input() products: Product[] = [];
   @Input() isLoading = false;
   @Input() categories: ProductCategory[] = [];
@@ -66,6 +65,44 @@ export class ProductListComponent {
   selectedState = '';
   selectedCategory = '';
   selectedBrand = '';
+
+  // Filter configuration for the options dropdown
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'state',
+      label: 'Estado',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos los Estados' },
+        { value: ProductState.ACTIVE, label: 'Activo' },
+        { value: ProductState.INACTIVE, label: 'Inactivo' },
+        { value: ProductState.ARCHIVED, label: 'Archivado' },
+      ],
+    },
+    {
+      key: 'category_id',
+      label: 'Categoría',
+      type: 'select',
+      options: [],
+      placeholder: 'Seleccionar categoría',
+    },
+    {
+      key: 'brand_id',
+      label: 'Marca',
+      type: 'select',
+      options: [],
+      placeholder: 'Seleccionar marca',
+    },
+  ];
+
+  // Current filter values
+  filterValues: FilterValues = {};
+
+  // Dropdown actions for the filter/options dropdown
+  dropdownActions: DropdownAction[] = [
+    { label: 'Nuevo Producto', icon: 'plus', action: 'create', variant: 'primary' },
+    { label: 'Carga Masiva', icon: 'upload-cloud', action: 'bulk-upload' },
+  ];
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -156,6 +193,7 @@ export class ProductListComponent {
     subtitleKey: 'brand',
     subtitleTransform: (val: any) => val?.name || '-',
     avatarKey: 'image_url',
+    avatarShape: 'square', // Square images for products
     badgeKey: 'state',
     badgeConfig: {
       type: 'custom',
@@ -169,6 +207,7 @@ export class ProductListComponent {
     badgeTransform: (val: any) => this.formatProductState(val),
     footerKey: 'base_price',
     footerLabel: 'Precio',
+    footerStyle: 'prominent', // Large price display
     footerTransform: (val: any) => this.formatCurrency(val),
     detailKeys: [
       {
@@ -183,16 +222,69 @@ export class ProductListComponent {
     ]
   };
 
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['categories'] || changes['brands']) {
+      this.updateFilterOptions();
+    }
+  }
+
+  private updateFilterOptions(): void {
+    // Update category options
+    const categoryFilter = this.filterConfigs.find(f => f.key === 'category_id');
+    if (categoryFilter) {
+      categoryFilter.options = [
+        { value: '', label: 'Todas las Categorías' },
+        ...this.categories.map(cat => ({
+          value: cat.id.toString(),
+          label: cat.name,
+        })),
+      ];
+      categoryFilter.disabled = this.categories.length === 0;
+      categoryFilter.helpText = this.categories.length === 0 ? 'No hay categorías disponibles' : undefined;
+    }
+
+    // Update brand options
+    const brandFilter = this.filterConfigs.find(f => f.key === 'brand_id');
+    if (brandFilter) {
+      brandFilter.options = [
+        { value: '', label: 'Todas las Marcas' },
+        ...this.brands.map(brand => ({
+          value: brand.id.toString(),
+          label: brand.name,
+        })),
+      ];
+      brandFilter.disabled = this.brands.length === 0;
+      brandFilter.helpText = this.brands.length === 0 ? 'No hay marcas disponibles' : undefined;
+    }
+
+    // Force re-render by creating new array reference
+    this.filterConfigs = [...this.filterConfigs];
+  }
+
   // Event Handlers
   onSearchChange(term: string): void {
     this.searchTerm = term;
     this.search.emit(term);
   }
 
-  onFilterDropdownChange(query: ProductQueryDto): void {
-    this.selectedState = query.state || '';
-    this.selectedCategory = query.category_id?.toString() || '';
-    this.selectedBrand = query.brand_id?.toString() || '';
+  onFilterChange(values: FilterValues): void {
+    this.filterValues = values;
+    this.selectedState = (values['state'] as string) || '';
+    this.selectedCategory = (values['category_id'] as string) || '';
+    this.selectedBrand = (values['brand_id'] as string) || '';
+
+    // Build the ProductQueryDto
+    const query: ProductQueryDto = {};
+    if (this.selectedState) {
+      query.state = this.selectedState as ProductState;
+    }
+    if (this.selectedCategory) {
+      query.category_id = parseInt(this.selectedCategory, 10);
+    }
+    if (this.selectedBrand) {
+      query.brand_id = parseInt(this.selectedBrand, 10);
+    }
+
     this.filter.emit(query);
   }
 
@@ -201,8 +293,20 @@ export class ProductListComponent {
     this.selectedState = '';
     this.selectedCategory = '';
     this.selectedBrand = '';
+    this.filterValues = {};
     this.search.emit('');
     this.filter.emit({});
+  }
+
+  onActionClick(action: string): void {
+    switch (action) {
+      case 'create':
+        this.create.emit();
+        break;
+      case 'bulk-upload':
+        this.bulkUpload.emit();
+        break;
+    }
   }
 
   // Helper methods

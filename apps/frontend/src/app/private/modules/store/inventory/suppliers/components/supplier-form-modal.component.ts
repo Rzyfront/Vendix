@@ -158,19 +158,21 @@ import { Supplier, CreateSupplierDto, UpdateSupplierDto } from '../../interfaces
       </form>
 
       <!-- Footer -->
-      <div slot="footer" class="flex justify-end gap-3 w-full">
-        <app-button variant="secondary" type="button" (clicked)="onCancel()">
-          Cancelar
-        </app-button>
-        <app-button
-          variant="primary"
-          type="button"
-          [loading]="isSubmitting"
-          [disabled]="form.invalid || isSubmitting"
-          (clicked)="onSubmit()"
-        >
-          {{ supplier ? 'Guardar Cambios' : 'Crear Proveedor' }}
-        </app-button>
+      <div slot="footer">
+        <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+          <app-button variant="outline" type="button" (clicked)="onCancel()">
+            Cancelar
+          </app-button>
+          <app-button
+            variant="primary"
+            type="button"
+            [loading]="isSubmitting"
+            [disabled]="form.invalid || isSubmitting"
+            (clicked)="onSubmit()"
+          >
+            {{ supplier ? 'Guardar Cambios' : 'Crear Proveedor' }}
+          </app-button>
+        </div>
       </div>
     </app-modal>
   `,

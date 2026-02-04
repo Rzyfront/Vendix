@@ -6,10 +6,15 @@ import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { loadExpenses } from './state/actions/expenses.actions';
 import { selectExpenses, selectExpensesLoading } from './state/selectors/expenses.selectors';
 import { TableColumn, TableAction } from '../../../../shared/components/table/table.component';
-import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../shared/components/index';
-import { ButtonComponent } from '../../../../shared/components/button/button.component';
+import {
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
+  OptionsDropdownComponent,
+  FilterConfig,
+  DropdownAction,
+  FilterValues,
+} from '../../../../shared/components/index';
 import { InputsearchComponent } from '../../../../shared/components/inputsearch/inputsearch.component';
-import { IconComponent } from '../../../../shared/components/icon/icon.component';
 
 import { ExpenseCreateComponent } from './components/expense-create/expense-create.component';
 import { ExpenseEditComponent } from './components/expense-edit/expense-edit.component';
@@ -26,9 +31,8 @@ import { ExpensesStatsComponent } from './components/expenses-stats/expenses-sta
     ReactiveFormsModule,
     FormsModule,
     ExpensesStatsComponent,
-    ButtonComponent,
+    OptionsDropdownComponent,
     InputsearchComponent,
-    IconComponent,
     ExpenseCreateComponent,
     ExpenseEditComponent,
     ExpenseCategoriesComponent
@@ -64,28 +68,16 @@ import { ExpensesStatsComponent } from './components/expenses-stats/expenses-sta
                 (ngModelChange)="onSearchChange($event)"
               ></app-inputsearch>
 
-              <!-- Actions -->
-              <div class="flex gap-2 items-center ml-auto sm:ml-0">
-                 <app-button
-                  variant="outline"
-                  size="sm"
-                  (clicked)="openCategoriesModal()"
-                  title="Gestionar Categorías"
-                >
-                  <app-icon name="tag" [size]="16" slot="icon"></app-icon>
-                  <span class="hidden sm:inline">Categorías</span>
-                </app-button>
-
-                <app-button
-                  variant="primary"
-                  size="sm"
-                  (clicked)="openCreateModal()"
-                  title="Nuevo Gasto"
-                >
-                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                  <span class="hidden sm:inline">Nuevo Gasto</span>
-                </app-button>
-              </div>
+              <!-- Options dropdown -->
+              <app-options-dropdown
+                [filters]="filterConfigs"
+                [filterValues]="filterValues"
+                [actions]="dropdownActions"
+                [isLoading]="(loading$ | async) || false"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="onClearFilters()"
+                (actionClick)="onActionClick($event)"
+              ></app-options-dropdown>
             </div>
           </div>
         </div>
@@ -130,11 +122,38 @@ export class ExpensesComponent implements OnInit {
   loading$!: Observable<boolean>;
 
   searchTerm$ = new BehaviorSubject<string>('');
+  stateFilter$ = new BehaviorSubject<string>('');
 
   isCreateModalOpen = false;
   isEditModalOpen = false;
   isCategoriesModalOpen = false;
   selectedExpense: Expense | null = null;
+
+  // Filter configuration for the options dropdown
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'state',
+      label: 'Estado',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos los Estados' },
+        { value: 'pending', label: 'Pendiente' },
+        { value: 'approved', label: 'Aprobado' },
+        { value: 'paid', label: 'Pagado' },
+        { value: 'rejected', label: 'Rechazado' },
+        { value: 'cancelled', label: 'Cancelado' },
+      ],
+    },
+  ];
+
+  // Current filter values
+  filterValues: FilterValues = {};
+
+  // Dropdown actions
+  dropdownActions: DropdownAction[] = [
+    { label: 'Categorías', icon: 'folder', action: 'categories' },
+    { label: 'Nuevo Gasto', icon: 'plus', action: 'create', variant: 'primary' },
+  ];
 
   tableActions: TableAction[] = [
     {
@@ -226,15 +245,25 @@ export class ExpensesComponent implements OnInit {
     // Filter logic
     this.filteredExpenses$ = combineLatest([
       this.expenses$,
-      this.searchTerm$
+      this.searchTerm$,
+      this.stateFilter$
     ]).pipe(
-      map(([expenses, term]: [Expense[], string]) => {
+      map(([expenses, term, state]: [Expense[], string, string]) => {
+        let filtered = expenses;
         const searchTerm = term?.toLowerCase() || '';
-        if (!searchTerm) return expenses;
-        return expenses.filter((e: Expense) =>
-          e.description?.toLowerCase().includes(searchTerm) ||
-          e.amount.toString().includes(searchTerm)
-        );
+
+        if (searchTerm) {
+          filtered = filtered.filter((e: Expense) =>
+            e.description?.toLowerCase().includes(searchTerm) ||
+            e.amount.toString().includes(searchTerm)
+          );
+        }
+
+        if (state) {
+          filtered = filtered.filter((e: Expense) => e.state === state);
+        }
+
+        return filtered;
       })
     );
   }
@@ -245,6 +274,27 @@ export class ExpensesComponent implements OnInit {
 
   onSearchChange(term: string) {
     this.searchTerm$.next(term);
+  }
+
+  onFilterChange(values: FilterValues): void {
+    this.filterValues = values;
+    this.stateFilter$.next((values['state'] as string) || '');
+  }
+
+  onClearFilters(): void {
+    this.filterValues = {};
+    this.stateFilter$.next('');
+  }
+
+  onActionClick(action: string): void {
+    switch (action) {
+      case 'create':
+        this.openCreateModal();
+        break;
+      case 'categories':
+        this.openCategoriesModal();
+        break;
+    }
   }
 
   openCreateModal() {

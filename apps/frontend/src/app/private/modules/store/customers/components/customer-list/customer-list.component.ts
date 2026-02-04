@@ -4,11 +4,15 @@ import { FormsModule } from '@angular/forms';
 import {
   ResponsiveDataViewComponent,
   InputsearchComponent,
-  ButtonComponent,
   IconComponent,
+  ButtonComponent,
   TableColumn,
   TableAction,
   ItemListCardConfig,
+  OptionsDropdownComponent,
+  FilterConfig,
+  DropdownAction,
+  FilterValues,
 } from '../../../../../../shared/components';
 import { Customer } from '../../models/customer.model';
 
@@ -19,8 +23,9 @@ import { Customer } from '../../models/customer.model';
     CommonModule,
     ResponsiveDataViewComponent,
     InputsearchComponent,
-    ButtonComponent,
+    OptionsDropdownComponent,
     IconComponent,
+    ButtonComponent,
     FormsModule,
   ],
   template: `
@@ -49,28 +54,16 @@ import { Customer } from '../../models/customer.model';
               (search)="onSearch($event)"
             ></app-inputsearch>
 
-            <!-- Action buttons -->
-            <div class="flex gap-2 items-center ml-auto">
-              <app-button
-                variant="outline"
-                size="sm"
-                (clicked)="refresh.emit()"
-                [disabled]="loading"
-                title="Actualizar"
-              >
-                <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
-              </app-button>
-
-              <app-button
-                variant="primary"
-                size="sm"
-                (clicked)="create.emit()"
-                title="Nuevo Cliente"
-              >
-                <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                <span class="hidden sm:inline">Nuevo Cliente</span>
-              </app-button>
-            </div>
+            <!-- Options dropdown -->
+            <app-options-dropdown
+              [filters]="filterConfigs"
+              [filterValues]="filterValues"
+              [actions]="dropdownActions"
+              [isLoading]="loading"
+              (filterChange)="onFilterChange($event)"
+              (clearAllFilters)="onClearFilters()"
+              (actionClick)="onActionClick($event)"
+            ></app-options-dropdown>
           </div>
         </div>
       </div>
@@ -129,10 +122,34 @@ export class CustomerListComponent {
   @Input() totalItems = 0;
 
   @Output() search = new EventEmitter<string>();
+  @Output() filter = new EventEmitter<FilterValues>();
   @Output() create = new EventEmitter<void>();
   @Output() edit = new EventEmitter<Customer>();
   @Output() delete = new EventEmitter<Customer>();
   @Output() refresh = new EventEmitter<void>();
+
+  // Filter configuration for the options dropdown
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'is_active',
+      label: 'Estado',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos' },
+        { value: 'true', label: 'Activos' },
+        { value: 'false', label: 'Inactivos' },
+      ],
+    },
+  ];
+
+  // Current filter values
+  filterValues: FilterValues = {};
+
+  // Dropdown actions
+  dropdownActions: DropdownAction[] = [
+    { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
+    { label: 'Nuevo Cliente', icon: 'plus', action: 'create', variant: 'primary' },
+  ];
 
   columns: TableColumn[] = [
     { key: 'first_name', label: 'Nombre', sortable: true, priority: 1 },
@@ -195,5 +212,26 @@ export class CustomerListComponent {
 
   onSearch(query: string) {
     this.search.emit(query);
+  }
+
+  onFilterChange(values: FilterValues): void {
+    this.filterValues = values;
+    this.filter.emit(values);
+  }
+
+  onClearFilters(): void {
+    this.filterValues = {};
+    this.filter.emit({});
+  }
+
+  onActionClick(action: string): void {
+    switch (action) {
+      case 'create':
+        this.create.emit();
+        break;
+      case 'refresh':
+        this.refresh.emit();
+        break;
+    }
   }
 }

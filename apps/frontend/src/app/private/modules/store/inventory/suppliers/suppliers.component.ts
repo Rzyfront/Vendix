@@ -13,10 +13,12 @@ import {
   ToastService,
   DialogService,
   IconComponent,
-  SelectorComponent,
-  SelectorOption,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  OptionsDropdownComponent,
+  FilterConfig,
+  DropdownAction,
+  FilterValues,
 } from '../../../../../shared/components/index';
 
 // Services
@@ -39,7 +41,7 @@ import { SupplierFormModalComponent } from './components/supplier-form-modal.com
     InputsearchComponent,
     StatsComponent,
     IconComponent,
-    SelectorComponent,
+    OptionsDropdownComponent,
     SupplierFormModalComponent,
   ],
   template: `
@@ -97,36 +99,15 @@ import { SupplierFormModalComponent } from './components/supplier-form-modal.com
                 (search)="onSearch($event)"
               ></app-inputsearch>
 
-              <app-selector
-                class="w-full sm:w-36"
-                [options]="status_options"
-                [(ngModel)]="status_filter"
-                placeholder="Estado"
-                size="sm"
-                (valueChange)="filterByStatus($event)"
-              ></app-selector>
-
-              <div class="flex gap-2 items-center ml-auto">
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  (clicked)="loadSuppliers()"
-                  [disabled]="is_loading"
-                  title="Refrescar"
-                >
-                  <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
-                </app-button>
-                
-                <app-button
-                  variant="primary"
-                  size="sm"
-                  (clicked)="openCreateModal()"
-                  title="Nuevo Proveedor"
-                >
-                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                  <span class="hidden sm:inline">Nuevo Proveedor</span>
-                </app-button>
-              </div>
+              <app-options-dropdown
+                [filters]="filterConfigs"
+                [filterValues]="filterValues"
+                [actions]="dropdownActions"
+                [isLoading]="is_loading"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="clearFilters()"
+                (actionClick)="onActionClick($event)"
+              ></app-options-dropdown>
             </div>
           </div>
         </div>
@@ -195,10 +176,27 @@ export class SuppliersComponent implements OnInit, OnDestroy {
   status_filter: 'all' | 'active' | 'inactive' = 'all';
   search_term = '';
 
-  status_options: SelectorOption[] = [
-    { value: 'all', label: 'Todos' },
-    { value: 'active', label: 'Activos' },
-    { value: 'inactive', label: 'Inactivos' },
+  // Filter configuration for the options dropdown
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'is_active',
+      label: 'Estado',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos' },
+        { value: 'true', label: 'Activos' },
+        { value: 'false', label: 'Inactivos' },
+      ],
+    },
+  ];
+
+  // Current filter values
+  filterValues: FilterValues = {};
+
+  // Dropdown actions
+  dropdownActions: DropdownAction[] = [
+    { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
+    { label: 'Nuevo Proveedor', icon: 'plus', action: 'create', variant: 'primary' },
   ];
 
   // Table Configuration
@@ -333,9 +331,37 @@ export class SuppliersComponent implements OnInit, OnDestroy {
     this.applyFilters();
   }
 
-  filterByStatus(status: string | number | null): void {
-    this.status_filter = (status as 'all' | 'active' | 'inactive') || 'all';
+  onFilterChange(values: FilterValues): void {
+    this.filterValues = values;
+    const isActiveValue = values['is_active'] as string;
+
+    if (isActiveValue === 'true') {
+      this.status_filter = 'active';
+    } else if (isActiveValue === 'false') {
+      this.status_filter = 'inactive';
+    } else {
+      this.status_filter = 'all';
+    }
+
     this.applyFilters();
+  }
+
+  clearFilters(): void {
+    this.status_filter = 'all';
+    this.search_term = '';
+    this.filterValues = {};
+    this.applyFilters();
+  }
+
+  onActionClick(action: string): void {
+    switch (action) {
+      case 'create':
+        this.openCreateModal();
+        break;
+      case 'refresh':
+        this.loadSuppliers();
+        break;
+    }
   }
 
   onSort(event: { column: string; direction: 'asc' | 'desc' | null }): void {

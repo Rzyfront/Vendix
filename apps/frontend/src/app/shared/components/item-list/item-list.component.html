@@ -30,7 +30,8 @@
       <!-- Card Header -->
       <div class="card-header">
         <!-- Avatar (only shown if avatarKey or avatarFallbackIcon is configured) -->
-        <div *ngIf="showAvatar()" class="card-avatar">
+        <div *ngIf="showAvatar()" class="card-avatar"
+          [class.avatar-square]="cardConfig.avatarShape === 'square'">
           <img *ngIf="getAvatarUrl(item)" [src]="getAvatarUrl(item)" [alt]="getTitle(item)" class="avatar-image"
             (error)="$any($event.target).style.display = 'none'" />
           <div *ngIf="!getAvatarUrl(item) && cardConfig.avatarFallbackIcon" class="avatar-placeholder">
@@ -52,15 +53,15 @@
           {{ getBadgeText(item) }}
         </span>
 
-        <!-- Menu Button -->
-        <button *ngIf="actions && actions.length > 0" class="card-menu-button" (click)="toggleMenu(i, $event)"
+        <!-- Menu Button: only show when more than 2 actions -->
+        <button *ngIf="actions && actions.length > 2" class="card-menu-button" (click)="toggleMenu(i, $event)"
           type="button">
           <app-icon name="more-vertical" [size]="18"></app-icon>
         </button>
 
-        <!-- Dropdown Menu -->
-        <div *ngIf="activeMenuIndex === i && actions" class="card-menu-dropdown" (click)="$event.stopPropagation()">
-          <button *ngFor="let action of getVisibleActions(item)" class="menu-item" [ngClass]="{
+        <!-- Dropdown Menu: only for overflow actions (3+) -->
+        <div *ngIf="activeMenuIndex === i && actions && actions.length > 2" class="card-menu-dropdown" (click)="$event.stopPropagation()">
+          <button *ngFor="let action of getVisibleActions(item).slice(2)" class="menu-item" [ngClass]="{
               'menu-item-danger': action.variant === 'danger',
               'menu-item-primary': action.variant === 'primary',
               'menu-item-disabled': isActionDisabled(action, item)
@@ -83,7 +84,8 @@
       </div>
 
       <!-- Card Footer -->
-      <div *ngIf="cardConfig.footerKey" class="card-footer">
+      <div *ngIf="cardConfig.footerKey" class="card-footer"
+        [class.footer-prominent]="cardConfig.footerStyle === 'prominent'">
         <div class="footer-content">
           <span *ngIf="cardConfig.footerLabel" class="footer-label">
             {{ cardConfig.footerLabel }}

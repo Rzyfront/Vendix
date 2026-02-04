@@ -32,13 +32,20 @@ export type LoginState =
   | 'account_locked'
   | 'account_suspended'
   | 'email_not_verified'
-  | 'password_expired';
+  | 'password_expired'
+  | 'disambiguation_required';
 
 export interface LoginError {
   type: LoginState;
   message: string;
   details?: string;
   apiError?: string;
+}
+
+export interface OrganizationCandidate {
+  name: string;
+  slug: string;
+  logo_url?: string | null;
 }
 
 @Component({
@@ -106,8 +113,8 @@ export interface LoginError {
                     [control]="loginForm.get('vlink')"
                     type="text"
                     size="md"
-                    placeholder="mi-organizacion"
-                    tooltipText="Identificador único enviado a tu e-mail o usa tu dominio asignado."
+                    placeholder="Nombre o ID de tu organización"
+                    tooltipText="Puedes usar el nombre de tu organización o su identificador único (V-link)"
                   >
                   </app-input>
                 </div>
@@ -137,7 +144,7 @@ export interface LoginError {
             </div>
 
             <!-- Error Display -->
-            @if (hasError) {
+            @if (hasError && loginState !== 'disambiguation_required') {
               <div
                 class="rounded-md bg-[rgba(239, 68, 68, 0.1)] p-4 border border-[rgba(239, 68, 68, 0.2)]"
               >
@@ -230,6 +237,95 @@ export interface LoginError {
         }
       </div>
     </div>
+
+    <!-- Disambiguation Modal -->
+    @if (showDisambiguationModal && disambiguationCandidates.length > 0) {
+      <div class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <!-- Backdrop -->
+        <div
+          class="fixed inset-0 bg-black/50 transition-opacity"
+          (click)="closeDisambiguationModal()"
+        ></div>
+
+        <!-- Modal -->
+        <div class="flex min-h-full items-center justify-center p-4">
+          <div
+            class="relative transform overflow-hidden rounded-2xl bg-[var(--color-surface)] shadow-xl transition-all w-full max-w-md"
+          >
+            <!-- Header -->
+            <div class="p-6 pb-4 border-b border-[var(--color-border)]">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-[var(--color-primary)]/10 flex items-center justify-center">
+                  <app-icon name="building" [size]="20" color="var(--color-primary)"></app-icon>
+                </div>
+                <div>
+                  <h3 class="text-lg font-semibold text-[var(--color-text-primary)]" id="modal-title">
+                    Selecciona tu organización
+                  </h3>
+                  <p class="text-sm text-[var(--color-text-secondary)]">
+                    Encontramos varias organizaciones
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Body -->
+            <div class="p-4 max-h-80 overflow-y-auto">
+              <ul class="space-y-2">
+                @for (org of disambiguationCandidates; track org.slug) {
+                  <li>
+                    <button
+                      type="button"
+                      (click)="selectOrganization(org.slug)"
+                      class="w-full flex items-center gap-3 p-3 rounded-xl border border-[var(--color-border)] hover:border-[var(--color-primary)] hover:bg-[var(--color-primary)]/5 transition-all group cursor-pointer"
+                    >
+                      <!-- Org Logo/Avatar -->
+                      <div class="w-10 h-10 rounded-lg bg-[var(--color-muted)] flex items-center justify-center overflow-hidden shrink-0">
+                        @if (org.logo_url) {
+                          <img [src]="org.logo_url" [alt]="org.name" class="w-full h-full object-cover" />
+                        } @else {
+                          <span class="text-lg font-semibold text-[var(--color-text-muted)]">
+                            {{ org.name.charAt(0).toUpperCase() }}
+                          </span>
+                        }
+                      </div>
+
+                      <!-- Org Info -->
+                      <div class="flex-1 text-left min-w-0">
+                        <p class="font-medium text-[var(--color-text-primary)] truncate group-hover:text-[var(--color-primary)]">
+                          {{ org.name }}
+                        </p>
+                        <p class="text-xs text-[var(--color-text-muted)] truncate">
+                          ID: {{ org.slug }}
+                        </p>
+                      </div>
+
+                      <!-- Arrow -->
+                      <app-icon
+                        name="chevron-right"
+                        [size]="18"
+                        class="text-[var(--color-text-muted)] group-hover:text-[var(--color-primary)] shrink-0"
+                      ></app-icon>
+                    </button>
+                  </li>
+                }
+              </ul>
+            </div>
+
+            <!-- Footer -->
+            <div class="p-4 pt-2 border-t border-[var(--color-border)]">
+              <button
+                type="button"
+                (click)="closeDisambiguationModal()"
+                class="w-full py-2.5 text-sm font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    }
   `,
   styles: [
     `
@@ -309,6 +405,10 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
   logoUrl: string = '';
   showVlinkTooltip = true;
 
+  // Disambiguation state
+  showDisambiguationModal = false;
+  disambiguationCandidates: OrganizationCandidate[] = [];
+
   private destroy$ = new Subject<void>();
   private toast = inject(ToastService);
   private appConfigFacade = inject(ConfigFacade);
@@ -342,9 +442,14 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
 
     this.authFacade.error$.pipe(takeUntil(this.destroy$)).subscribe((error) => {
       if (error) {
-        const normalizedError =
-          typeof error === 'string' ? error : extractApiErrorMessage(error);
-        this.handleLoginError(normalizedError);
+        // Check for disambiguation required (HTTP 300)
+        if (this.isDisambiguationError(error)) {
+          this.handleDisambiguationRequired(error);
+        } else {
+          const normalizedError =
+            typeof error === 'string' ? error : extractApiErrorMessage(error);
+          this.handleLoginError(normalizedError);
+        }
       } else {
         this.clearError();
       }
@@ -412,6 +517,40 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     }
   }
 
+  /**
+   * Check if the error is a disambiguation required response (HTTP 300)
+   */
+  private isDisambiguationError(error: any): boolean {
+    if (!error) return false;
+
+    // Check for the disambiguation_required flag in the error payload
+    const errorData = error?.error || error?.data || error;
+    return (
+      errorData?.disambiguation_required === true ||
+      errorData?.statusCode === 300 ||
+      error?.status === 300
+    );
+  }
+
+  /**
+   * Handle disambiguation required response
+   */
+  private handleDisambiguationRequired(error: any): void {
+    const errorData = error?.error || error?.data || error;
+    const candidates = errorData?.candidates || [];
+
+    if (candidates.length > 0) {
+      this.disambiguationCandidates = candidates;
+      this.showDisambiguationModal = true;
+      this.loginState = 'disambiguation_required';
+      // Clear loading state since we're showing the modal
+      this.authFacade.setLoading(false);
+    } else {
+      // Fallback to regular error if no candidates
+      this.handleLoginError('No se encontraron organizaciones con ese nombre');
+    }
+  }
+
   private handleLoginError(error: string): void {
     this.setLoginError({ type: 'error', message: error, apiError: error });
   }
@@ -458,6 +597,29 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     }
   }
 
+  /**
+   * Handle organization selection from disambiguation modal
+   */
+  selectOrganization(slug: string): void {
+    this.showDisambiguationModal = false;
+    this.disambiguationCandidates = [];
+    this.loginState = 'idle';
+
+    const { email, password } = this.loginForm.value;
+    // Retry login with the exact slug selected
+    this.authFacade.login(email, password, undefined, slug);
+  }
+
+  /**
+   * Close disambiguation modal without selection
+   */
+  closeDisambiguationModal(): void {
+    this.showDisambiguationModal = false;
+    this.disambiguationCandidates = [];
+    this.loginState = 'idle';
+    this.authFacade.setAuthError(null);
+  }
+
   navigateToForgotPassword(): void {
     this.router.navigate(['/auth/forgot-owner-password']);
   }
@@ -466,7 +628,8 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     return (
       this.loginState !== 'idle' &&
       this.loginState !== 'loading' &&
-      this.loginState !== 'success'
+      this.loginState !== 'success' &&
+      this.loginState !== 'disambiguation_required'
     );
   }
   get isLoading(): boolean {

@@ -12,11 +12,13 @@ import {
   InputsearchComponent,
   StatsComponent,
   IconComponent,
-  SelectorComponent,
-  SelectorOption,
   ToastService,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  OptionsDropdownComponent,
+  FilterConfig,
+  DropdownAction,
+  FilterValues,
 } from '../../../../../shared/components/index';
 import { ConfirmationModalComponent } from '../../../../../shared/components/confirmation-modal/confirmation-modal.component';
 
@@ -40,7 +42,7 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
     InputsearchComponent,
     StatsComponent,
     IconComponent,
-    SelectorComponent,
+    OptionsDropdownComponent,
     ConfirmationModalComponent,
     AdjustmentDetailModalComponent,
   ],
@@ -105,36 +107,15 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
                 (search)="onSearch($event)"
               ></app-inputsearch>
 
-              <app-selector
-                class="w-full sm:w-40"
-                [options]="type_options"
-                [(ngModel)]="current_type"
-                placeholder="Tipo"
-                size="sm"
-                (valueChange)="filterByType($event)"
-              ></app-selector>
-
-              <div class="flex gap-2 items-center ml-auto">
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  (clicked)="loadAdjustments()"
-                  [disabled]="is_loading"
-                  title="Refrescar"
-                >
-                  <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
-                </app-button>
-
-                <app-button
-                  variant="primary"
-                  size="sm"
-                  (clicked)="openCreateModal()"
-                  title="Nuevo Ajuste"
-                >
-                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                  <span class="hidden sm:inline">Nuevo Ajuste</span>
-                </app-button>
-              </div>
+              <app-options-dropdown
+                [filters]="filterConfigs"
+                [filterValues]="filterValues"
+                [actions]="dropdownActions"
+                [isLoading]="is_loading"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="clearFilters()"
+                (actionClick)="onActionClick($event)"
+              ></app-options-dropdown>
             </div>
           </div>
         </div>
@@ -223,14 +204,31 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
   current_type: AdjustmentType | 'all' = 'all';
   search_term = '';
 
-  type_options: SelectorOption[] = [
-    { value: 'all', label: 'Todos los tipos' },
-    { value: 'damage', label: 'Daño' },
-    { value: 'loss', label: 'Pérdida' },
-    { value: 'theft', label: 'Robo' },
-    { value: 'expiration', label: 'Vencido' },
-    { value: 'count_variance', label: 'Conteo' },
-    { value: 'manual_correction', label: 'Corrección' },
+  // Filter configuration for the options dropdown
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'adjustment_type',
+      label: 'Tipo',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos los tipos' },
+        { value: 'damage', label: 'Daño' },
+        { value: 'loss', label: 'Pérdida' },
+        { value: 'theft', label: 'Robo' },
+        { value: 'expiration', label: 'Vencido' },
+        { value: 'count_variance', label: 'Conteo' },
+        { value: 'manual_correction', label: 'Corrección' },
+      ],
+    },
+  ];
+
+  // Current filter values
+  filterValues: FilterValues = {};
+
+  // Dropdown actions
+  dropdownActions: DropdownAction[] = [
+    { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
+    { label: 'Nuevo Ajuste', icon: 'plus', action: 'create', variant: 'primary' },
   ];
 
   // Table Configuration
@@ -416,9 +414,29 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
     this.applyFilters();
   }
 
-  filterByType(type: string | number | null): void {
-    this.current_type = (type as AdjustmentType | 'all') || 'all';
+  onFilterChange(values: FilterValues): void {
+    this.filterValues = values;
+    const typeValue = values['adjustment_type'] as string;
+    this.current_type = typeValue ? (typeValue as AdjustmentType) : 'all';
     this.applyFilters();
+  }
+
+  clearFilters(): void {
+    this.current_type = 'all';
+    this.search_term = '';
+    this.filterValues = {};
+    this.applyFilters();
+  }
+
+  onActionClick(action: string): void {
+    switch (action) {
+      case 'create':
+        this.openCreateModal();
+        break;
+      case 'refresh':
+        this.loadAdjustments();
+        break;
+    }
   }
 
   openCreateModal(): void {
