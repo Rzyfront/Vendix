@@ -247,6 +247,7 @@ export class CheckoutService {
     const order = await this.prisma.orders.create({
       data: {
         order_number,
+        channel: 'ecommerce', // Ecommerce orders are assigned 'ecommerce' channel
         currency: cart.currency,
         subtotal_amount: subtotal,
         tax_amount: total_tax,

@@ -110,6 +110,7 @@ model orders {
     store_id              Int
     customer_id           Int?
     order_number          String
+    channel               order_channel_enum  // 'pos' | 'ecommerce' | 'agent' | 'whatsapp' | 'marketplace'
     shipping_address_id   Int?
     shipping_method_id    Int?
     shipping_cost         Decimal
@@ -119,6 +120,10 @@ model orders {
     // ... relationships
 }
 ```
+
+> **Note:** The `channel` field is auto-assigned:
+> - `'ecommerce'` - Orders from CheckoutService (online storefront)
+> - `'pos'` - Orders from PaymentsService.processPosPayment (point of sale)
 
 ### Related Models
 

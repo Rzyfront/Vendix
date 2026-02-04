@@ -25,7 +25,7 @@ import { AuthFacade } from '../../../../core/store/auth/auth.facade';
   template: `
     <div class="w-full">
       <!-- Stats Grid -->
-      <div class="stats-container">
+      <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Total de Clientes"
           [value]="stats?.total_customers || 0"

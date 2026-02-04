@@ -1,22 +1,13 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
 
 // Shared Components
 import {
-  ButtonComponent,
-  TableColumn,
-  TableAction,
-  InputsearchComponent,
-  StatsComponent,
   ToastService,
   DialogService,
-  IconComponent,
-  SelectorComponent,
-  SelectorOption,
-  ResponsiveDataViewComponent,
-  ItemListCardConfig,
+  StatsComponent,
+  FilterValues,
 } from '../../../../../shared/components/index';
 
 // Services
@@ -27,25 +18,21 @@ import { Supplier, CreateSupplierDto, UpdateSupplierDto } from '../interfaces';
 
 // Child Components
 import { SupplierFormModalComponent } from './components/supplier-form-modal.component';
+import { SupplierListComponent } from './components/supplier-list/supplier-list.component';
 
 @Component({
   selector: 'app-suppliers',
   standalone: true,
   imports: [
     CommonModule,
-    FormsModule,
-    ButtonComponent,
-    ResponsiveDataViewComponent,
-    InputsearchComponent,
     StatsComponent,
-    IconComponent,
-    SelectorComponent,
     SupplierFormModalComponent,
+    SupplierListComponent,
   ],
   template: `
     <div class="w-full">
-      <!-- Stats Grid -->
-      <div class="stats-container">
+      <!-- Stats Grid: sticky at top on mobile -->
+      <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Total Proveedores"
           [value]="stats.total"
@@ -79,92 +66,18 @@ import { SupplierFormModalComponent } from './components/supplier-form-modal.com
         ></app-stats>
       </div>
 
-      <!-- Suppliers List Container -->
-      <div class="bg-surface rounded-card shadow-card border border-border min-h-[600px]">
-        <div class="px-6 py-4 border-b border-border">
-          <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div class="flex-1 min-w-0">
-              <h2 class="text-lg font-semibold text-text-primary">
-                Proveedores ({{ stats.total }})
-              </h2>
-            </div>
-
-            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
-              <app-inputsearch
-                class="w-full sm:w-48 flex-shrink-0"
-                size="sm"
-                placeholder="Buscar proveedor..."
-                (search)="onSearch($event)"
-              ></app-inputsearch>
-
-              <app-selector
-                class="w-full sm:w-36"
-                [options]="status_options"
-                [(ngModel)]="status_filter"
-                placeholder="Estado"
-                size="sm"
-                (valueChange)="filterByStatus($event)"
-              ></app-selector>
-
-              <div class="flex gap-2 items-center ml-auto">
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  (clicked)="loadSuppliers()"
-                  [disabled]="is_loading"
-                  title="Refrescar"
-                >
-                  <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
-                </app-button>
-                
-                <app-button
-                  variant="primary"
-                  size="sm"
-                  (clicked)="openCreateModal()"
-                  title="Nuevo Proveedor"
-                >
-                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                  <span class="hidden sm:inline">Nuevo Proveedor</span>
-                </app-button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Loading State -->
-        <div *ngIf="is_loading" class="p-8 text-center">
-          <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-          <p class="mt-2 text-text-secondary">Cargando proveedores...</p>
-        </div>
-
-        <!-- Empty State -->
-        <div *ngIf="!is_loading && filtered_suppliers.length === 0" class="p-12 text-center text-gray-500">
-          <app-icon name="users" [size]="48" class="mx-auto mb-4 text-gray-300"></app-icon>
-          <h3 class="text-lg font-medium text-gray-900">No hay proveedores</h3>
-          <p class="mt-1">Comienza agregando un nuevo proveedor.</p>
-          <div class="mt-6">
-            <app-button variant="primary" (clicked)="openCreateModal()">
-              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-              Agregar Proveedor
-            </app-button>
-          </div>
-        </div>
-
-        <!-- Table -->
-        <div *ngIf="!is_loading && filtered_suppliers.length > 0" class="p-6">
-          <app-responsive-data-view
-            [data]="filtered_suppliers"
-            [columns]="table_columns"
-            [cardConfig]="cardConfig"
-            [actions]="table_actions"
-            [loading]="is_loading"
-            emptyMessage="No hay proveedores registrados"
-            emptyIcon="users"
-            (sort)="onSort($event)"
-            (rowClick)="onRowClick($event)"
-          ></app-responsive-data-view>
-        </div>
-      </div>
+      <!-- Supplier List -->
+      <app-supplier-list
+        [suppliers]="filtered_suppliers"
+        [isLoading]="is_loading"
+        (refresh)="loadSuppliers()"
+        (search)="onSearch($event)"
+        (filter)="onFilterChange($event)"
+        (create)="openCreateModal()"
+        (edit)="openEditModal($event)"
+        (delete)="confirmDelete($event)"
+        (sort)="onSort($event)"
+      ></app-supplier-list>
 
       <!-- Create/Edit Modal -->
       <app-supplier-form-modal
@@ -195,60 +108,6 @@ export class SuppliersComponent implements OnInit, OnDestroy {
   status_filter: 'all' | 'active' | 'inactive' = 'all';
   search_term = '';
 
-  status_options: SelectorOption[] = [
-    { value: 'all', label: 'Todos' },
-    { value: 'active', label: 'Activos' },
-    { value: 'inactive', label: 'Inactivos' },
-  ];
-
-  // Table Configuration
-  table_columns: TableColumn[] = [
-    { key: 'code', label: 'Código', sortable: true, width: '100px', priority: 3 },
-    { key: 'name', label: 'Nombre', sortable: true, priority: 1 },
-    { key: 'contact_person', label: 'Contacto', defaultValue: '-', priority: 2 },
-    { key: 'email', label: 'Email', defaultValue: '-', priority: 2 },
-    { key: 'phone', label: 'Teléfono', defaultValue: '-', priority: 3 },
-    {
-      key: 'is_active',
-      label: 'Estado',
-      priority: 1,
-      transform: (value: boolean) => (value ? 'Activo' : 'Inactivo'),
-      badge: true,
-      badgeConfig: {
-        type: 'status',
-      },
-    },
-  ];
-
-  table_actions: TableAction[] = [
-    {
-      label: 'Editar',
-      icon: 'edit',
-      variant: 'primary',
-      action: (item: Supplier) => this.openEditModal(item),
-    },
-    {
-      label: 'Eliminar',
-      icon: 'trash-2',
-      variant: 'danger',
-      action: (item: Supplier) => this.confirmDelete(item),
-    },
-  ];
-
-  // Card Config for mobile
-  cardConfig: ItemListCardConfig = {
-    titleKey: 'name',
-    subtitleKey: 'contact_person',
-    badgeKey: 'is_active',
-    badgeConfig: { type: 'status', size: 'sm' },
-    badgeTransform: (val: boolean) => (val ? 'Activo' : 'Inactivo'),
-    detailKeys: [
-      { key: 'code', label: 'Código', icon: 'hash' },
-      { key: 'email', label: 'Email', icon: 'mail' },
-      { key: 'phone', label: 'Teléfono', icon: 'phone' },
-    ],
-  };
-
   // UI State
   is_loading = false;
   is_modal_open = false;
@@ -260,7 +119,7 @@ export class SuppliersComponent implements OnInit, OnDestroy {
     private suppliersService: SuppliersService,
     private toastService: ToastService,
     private dialogService: DialogService
-  ) { }
+  ) {}
 
   ngOnInit(): void {
     this.loadSuppliers();
@@ -333,8 +192,17 @@ export class SuppliersComponent implements OnInit, OnDestroy {
     this.applyFilters();
   }
 
-  filterByStatus(status: string | number | null): void {
-    this.status_filter = (status as 'all' | 'active' | 'inactive') || 'all';
+  onFilterChange(values: FilterValues): void {
+    const isActiveValue = values['is_active'] as string;
+
+    if (isActiveValue === 'true') {
+      this.status_filter = 'active';
+    } else if (isActiveValue === 'false') {
+      this.status_filter = 'inactive';
+    } else {
+      this.status_filter = 'all';
+    }
+
     this.applyFilters();
   }
 
@@ -344,16 +212,12 @@ export class SuppliersComponent implements OnInit, OnDestroy {
       return;
     }
     // Client-side sorting for simplicity
-    this.suppliers = [...this.suppliers].sort((a, b) => {
+    this.filtered_suppliers = [...this.filtered_suppliers].sort((a, b) => {
       const val_a = (a as any)[event.column] || '';
       const val_b = (b as any)[event.column] || '';
       const comparison = String(val_a).localeCompare(String(val_b));
       return event.direction === 'asc' ? comparison : -comparison;
     });
-  }
-
-  onRowClick(supplier: Supplier): void {
-    this.openEditModal(supplier);
   }
 
   // ============================================================

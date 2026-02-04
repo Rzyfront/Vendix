@@ -14,6 +14,7 @@ export class SalesAnalyticsService {
     const currentPeriod = await this.prisma.orders.aggregate({
       where: {
         state: 'finished',
+        ...(query.channel && { channel: query.channel }),
         created_at: {
           gte: startDate,
           lte: endDate,
@@ -31,6 +32,7 @@ export class SalesAnalyticsService {
     const previousPeriod = await this.prisma.orders.aggregate({
       where: {
         state: 'finished',
+        ...(query.channel && { channel: query.channel }),
         created_at: {
           gte: previousStartDate,
           lte: previousEndDate,
@@ -49,6 +51,7 @@ export class SalesAnalyticsService {
       where: {
         orders: {
           state: 'finished',
+          ...(query.channel && { channel: query.channel }),
           created_at: {
             gte: startDate,
             lte: endDate,
@@ -65,6 +68,7 @@ export class SalesAnalyticsService {
       by: ['customer_id'],
       where: {
         state: 'finished',
+        ...(query.channel && { channel: query.channel }),
         created_at: {
           gte: startDate,
           lte: endDate,
@@ -106,6 +110,7 @@ export class SalesAnalyticsService {
       where: {
         orders: {
           state: 'finished',
+          ...(query.channel && { channel: query.channel }),
           created_at: {
             gte: startDate,
             lte: endDate,
@@ -301,6 +306,7 @@ export class SalesAnalyticsService {
     const orders = await this.prisma.orders.findMany({
       where: {
         state: 'finished',
+        ...(query.channel && { channel: query.channel }),
         created_at: {
           gte: startDate,
           lte: endDate,
@@ -402,6 +408,47 @@ export class SalesAnalyticsService {
         last_order_date: r._max.created_at?.toISOString() || null,
       };
     });
+  }
+
+  async getSalesByChannel(query: SalesAnalyticsQueryDto) {
+    const { startDate, endDate } = this.parseDateRange(query);
+
+    const results = await this.prisma.orders.groupBy({
+      by: ['channel'],
+      where: {
+        state: 'finished',
+        created_at: {
+          gte: startDate,
+          lte: endDate,
+        },
+      },
+      _sum: {
+        grand_total: true,
+      },
+      _count: {
+        id: true,
+      },
+    });
+
+    const labels: Record<string, string> = {
+      pos: 'Punto de Venta',
+      ecommerce: 'Tienda Online',
+      agent: 'Agente IA',
+      whatsapp: 'WhatsApp',
+      marketplace: 'Marketplace',
+    };
+
+    const total = results.reduce((sum, r) => sum + Number(r._sum.grand_total || 0), 0);
+
+    return results
+      .map((r) => ({
+        channel: r.channel,
+        channel_name: labels[r.channel] || r.channel,
+        order_count: r._count.id,
+        revenue: Number(r._sum.grand_total || 0),
+        percentage: total > 0 ? (Number(r._sum.grand_total || 0) / total) * 100 : 0,
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
   }
 
   // Helper methods

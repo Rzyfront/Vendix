@@ -1,56 +1,24 @@
-import {
-  Component,
-  ViewChild,
-  OnInit,
-  OnDestroy,
-  AfterViewInit,
-} from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
-import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
 
 // Import components
 import { OrdersListComponent } from '../components/orders-list';
-import { OrderEmptyStateComponent } from '../components/order-empty-state';
-import { OrderFilterDropdownComponent } from '../components/order-filter-dropdown';
 import { OrderStatsComponent } from '../components/order-stats';
 
-// Import shared components
-import {
-  InputsearchComponent,
-  ButtonComponent,
-  IconComponent,
-} from '../../../../../shared/components';
-
 // Import interfaces and services
-import {
-  Order,
-  OrderQuery,
-  ExtendedOrderStats,
-} from '../interfaces/order.interface';
+import { ExtendedOrderStats } from '../interfaces/order.interface';
 import { StoreOrdersService } from '../services/store-orders.service';
 
 @Component({
   selector: 'app-orders',
   standalone: true,
-  imports: [
-    CommonModule,
-    FormsModule,
-    OrdersListComponent,
-    OrderEmptyStateComponent,
-    OrderFilterDropdownComponent,
-    OrderStatsComponent,
-    InputsearchComponent,
-    ButtonComponent,
-    IconComponent,
-  ],
+  imports: [CommonModule, OrdersListComponent, OrderStatsComponent],
   templateUrl: './orders.component.html',
   styleUrls: ['./orders.component.css'],
 })
-export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
-  @ViewChild(OrdersListComponent) ordersList!: OrdersListComponent;
-
+export class OrdersComponent implements OnInit, OnDestroy {
   // Stats data
   orderStats: ExtendedOrderStats = {
     total_orders: 0,
@@ -64,28 +32,6 @@ export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
     revenueGrowthRate: 0,
   };
 
-  // Local state for filters
-  searchTerm = '';
-  selectedStatus = '';
-  selectedPaymentStatus = '';
-  selectedDateRange = '';
-  isLoading = true;
-
-  // Filters
-  filters: OrderQuery = {
-    search: '',
-    status: undefined,
-    payment_status: undefined,
-    date_range: undefined,
-    page: 1,
-    limit: 10,
-    sort_by: 'created_at',
-    sort_order: 'desc',
-  };
-
-  orders: Order[] = [];
-  totalItems = 0;
-
   private destroy$ = new Subject<void>();
 
   constructor(
@@ -95,13 +41,6 @@ export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnInit(): void {
     this.loadOrderStats();
-  }
-
-  ngAfterViewInit(): void {
-    // Cargar órdenes después de que la vista se haya inicializado
-    if (this.ordersList) {
-      this.ordersList.loadOrders();
-    }
   }
 
   ngOnDestroy(): void {
@@ -130,29 +69,6 @@ export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
       });
   }
 
-  get hasFilters(): boolean {
-    return !!(
-      this.searchTerm ||
-      this.selectedStatus ||
-      this.selectedPaymentStatus ||
-      this.selectedDateRange
-    );
-  }
-
-  getEmptyStateTitle(): string {
-    if (this.hasFilters) {
-      return 'No orders match your filters';
-    }
-    return 'No orders found';
-  }
-
-  getEmptyStateDescription(): string {
-    if (this.hasFilters) {
-      return 'Try adjusting your search terms or filters';
-    }
-    return 'Get started by creating your first order.';
-  }
-
   // Navigate to POS for new order
   createNewOrder(): void {
     this.router.navigate(['/admin/pos']);
@@ -163,76 +79,8 @@ export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
     this.router.navigate(['/admin/orders', orderId]);
   }
 
-  // Search functionality
-  onSearchChange(searchTerm: string): void {
-    this.searchTerm = searchTerm;
-    this.filters.search = searchTerm;
-    this.isLoading = true;
-    if (this.ordersList) {
-      this.ordersList.loadOrders();
-    }
-  }
-
-  // Filter dropdown change
-  onFilterDropdownChange(query: OrderQuery): void {
-    this.selectedStatus = query.status || '';
-    this.selectedPaymentStatus = query.payment_status || '';
-    this.selectedDateRange = query.date_range || '';
-
-    this.filters.status = query.status;
-    this.filters.payment_status = query.payment_status;
-    this.filters.date_range = query.date_range;
-    this.filters.page = 1;
-    this.isLoading = true;
-
-    if (this.ordersList) {
-      this.ordersList.loadOrders();
-    }
-  }
-
-  // Clear all filters
-  clearFilters(): void {
-    this.searchTerm = '';
-    this.selectedStatus = '';
-    this.selectedPaymentStatus = '';
-    this.selectedDateRange = '';
-
-    this.filters.search = '';
-    this.filters.status = undefined;
-    this.filters.payment_status = undefined;
-    this.filters.date_range = undefined;
-    this.filters.page = 1;
-    this.isLoading = true;
-
-    if (this.ordersList) {
-      this.ordersList.loadOrders();
-    }
-  }
-
-  // Refresh orders
+  // Refresh orders and stats
   refreshOrders(): void {
-    this.isLoading = true;
-    if (this.ordersList) {
-      this.ordersList.loadOrders();
-    }
     this.loadOrderStats();
-  }
-
-  // Export orders
-  exportOrders(): void {
-    this.ordersList.exportOrders();
-  }
-
-  // Handle orders loaded event
-  onOrdersLoaded(event: any): void {
-    this.orders = event.orders;
-    this.totalItems = event.totalItems;
-    this.isLoading = false;
-  }
-
-  // Format currency helper
-  formatCurrency(amount: number | string): string {
-    const numValue = typeof amount === 'string' ? parseFloat(amount) : amount;
-    return `$${numValue?.toFixed(2) || '0.00'}`;
   }
 }

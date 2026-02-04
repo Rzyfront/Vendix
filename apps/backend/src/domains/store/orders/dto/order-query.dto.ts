@@ -6,7 +6,7 @@ import {
   IsEnum,
   IsDateString,
 } from 'class-validator';
-import { order_state_enum, payments_state_enum } from '@prisma/client';
+import { order_state_enum, payments_state_enum, order_channel_enum } from '@prisma/client';
 import { Transform } from 'class-transformer';
 
 export class OrderQueryDto {
@@ -61,4 +61,8 @@ export class OrderQueryDto {
   @IsOptional()
   @IsDateString()
   date_to?: string;
+
+  @IsOptional()
+  @IsEnum(order_channel_enum)
+  channel?: order_channel_enum;
 }

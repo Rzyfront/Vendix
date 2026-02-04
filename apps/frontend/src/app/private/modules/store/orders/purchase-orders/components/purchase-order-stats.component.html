@@ -1,5 +1,5 @@
-<!-- Mobile: Horizontal scroll | Desktop: Grid -->
-<div class="stats-container">
+<!-- Stats are rendered inside parent's stats-container wrapper -->
+<ng-container>
   <app-stats
     title="Órdenes"
     [value]="formatNumber(stats.total)"
@@ -31,4 +31,4 @@
     iconBgColor="bg-purple-100"
     iconColor="text-purple-500"
   ></app-stats>
-</div>
+</ng-container>

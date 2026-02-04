@@ -522,6 +522,7 @@ export class PaymentsService {
           store_id: dto.store_id,
           order_number: orderNumber,
           state: 'created', // Orders start in 'created' state, flow service handles transitions
+          channel: 'pos', // POS orders are assigned 'pos' channel
           subtotal_amount: dto.subtotal,
           tax_amount: dto.tax_amount || 0,
           discount_amount: dto.discount_amount || 0,

@@ -1,3 +1,6 @@
+// Order channel types
+export type OrderChannel = 'pos' | 'ecommerce' | 'agent' | 'whatsapp' | 'marketplace';
+
 // Core entities - Aligned with backend models
 export interface Order {
   id: number;
@@ -5,6 +8,7 @@ export interface Order {
   store_id: number;
   order_number: string;
   state: OrderState;
+  channel?: OrderChannel;
   subtotal_amount: number;
   tax_amount: number;
   shipping_cost: number;
@@ -141,6 +145,7 @@ export interface OrderQuery {
 
   // Filtros principales
   status?: OrderState;
+  channel?: OrderChannel;
   customer_id?: number;
   store_id?: number;
   payment_status?: PaymentStatus;

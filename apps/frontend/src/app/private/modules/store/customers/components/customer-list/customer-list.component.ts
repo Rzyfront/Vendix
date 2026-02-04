@@ -4,11 +4,15 @@ import { FormsModule } from '@angular/forms';
 import {
   ResponsiveDataViewComponent,
   InputsearchComponent,
-  ButtonComponent,
   IconComponent,
+  ButtonComponent,
   TableColumn,
   TableAction,
   ItemListCardConfig,
+  OptionsDropdownComponent,
+  FilterConfig,
+  DropdownAction,
+  FilterValues,
 } from '../../../../../../shared/components';
 import { Customer } from '../../models/customer.model';
 
@@ -19,83 +23,56 @@ import { Customer } from '../../models/customer.model';
     CommonModule,
     ResponsiveDataViewComponent,
     InputsearchComponent,
-    ButtonComponent,
+    OptionsDropdownComponent,
     IconComponent,
+    ButtonComponent,
     FormsModule,
   ],
   template: `
-    <!-- Customer List Container matching Products style -->
-    <div
-      class="bg-surface rounded-card shadow-card border border-border min-h-[600px]"
-    >
-      <div class="px-6 py-4 border-b border-border">
-        <div
-          class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
-        >
-          <div class="flex-1 min-w-0">
-            <h2 class="text-lg font-semibold text-text-primary">
-              Todos los Clientes ({{ totalItems }})
-            </h2>
-          </div>
+    <!-- Customer List Container - Mobile First -->
+    <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border md:min-h-[600px] md:overflow-hidden">
 
-          <div
-            class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
-          >
-            <!-- Quick search input -->
+      <!-- Search Section: sticky below stats on mobile -->
+      <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
+        <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
+          <!-- Title -->
+          <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
+            Todos los Clientes ({{ totalItems }})
+          </h2>
+
+          <!-- Search + Options -->
+          <div class="flex items-center gap-2 w-full md:w-auto">
             <app-inputsearch
-              class="w-full sm:w-64 flex-shrink-0"
+              class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
               size="sm"
               placeholder="Buscar clientes..."
               (search)="onSearch($event)"
             ></app-inputsearch>
 
-            <!-- Action buttons -->
-            <div class="flex gap-2 items-center ml-auto">
-              <app-button
-                variant="outline"
-                size="sm"
-                (clicked)="refresh.emit()"
-                [disabled]="loading"
-                title="Actualizar"
-              >
-                <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
-              </app-button>
-
-              <app-button
-                variant="primary"
-                size="sm"
-                (clicked)="create.emit()"
-                title="Nuevo Cliente"
-              >
-                <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                <span class="hidden sm:inline">Nuevo Cliente</span>
-              </app-button>
-            </div>
+            <app-options-dropdown
+              class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+              [filters]="filterConfigs"
+              [filterValues]="filterValues"
+              [actions]="dropdownActions"
+              [isLoading]="loading"
+              (filterChange)="onFilterChange($event)"
+              (clearAllFilters)="onClearFilters()"
+              (actionClick)="onActionClick($event)"
+            ></app-options-dropdown>
           </div>
         </div>
       </div>
 
       <!-- Loading State -->
-      <div *ngIf="loading" class="p-8 text-center">
-        <div
-          class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-        ></div>
+      <div *ngIf="loading" class="p-4 md:p-6 text-center">
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
         <p class="mt-2 text-text-secondary">Cargando clientes...</p>
       </div>
 
       <!-- Empty State -->
-      <div
-        *ngIf="!loading && customers.length === 0"
-        class="p-12 text-center text-gray-500"
-      >
-        <app-icon
-          name="users"
-          [size]="48"
-          class="mx-auto mb-4 text-gray-300"
-        ></app-icon>
-        <h3 class="text-lg font-medium text-gray-900">
-          No se encontraron clientes
-        </h3>
+      <div *ngIf="!loading && customers.length === 0" class="p-12 text-center text-gray-500">
+        <app-icon name="users" [size]="48" class="mx-auto mb-4 text-gray-300"></app-icon>
+        <h3 class="text-lg font-medium text-gray-900">No se encontraron clientes</h3>
         <p class="mt-1">Comienza creando un nuevo cliente.</p>
         <div class="mt-6">
           <app-button variant="primary" (clicked)="create.emit()">
@@ -105,8 +82,8 @@ import { Customer } from '../../models/customer.model';
         </div>
       </div>
 
-      <!-- Responsive Data View (Table on desktop, Cards on mobile) -->
-      <div *ngIf="!loading && customers.length > 0" class="p-6">
+      <!-- Responsive Data View -->
+      <div *ngIf="!loading && customers.length > 0" class="px-2 pb-2 pt-1 md:p-4">
         <app-responsive-data-view
           [data]="customers"
           [columns]="columns"
@@ -129,10 +106,34 @@ export class CustomerListComponent {
   @Input() totalItems = 0;
 
   @Output() search = new EventEmitter<string>();
+  @Output() filter = new EventEmitter<FilterValues>();
   @Output() create = new EventEmitter<void>();
   @Output() edit = new EventEmitter<Customer>();
   @Output() delete = new EventEmitter<Customer>();
   @Output() refresh = new EventEmitter<void>();
+
+  // Filter configuration for the options dropdown
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'is_active',
+      label: 'Estado',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos' },
+        { value: 'true', label: 'Activos' },
+        { value: 'false', label: 'Inactivos' },
+      ],
+    },
+  ];
+
+  // Current filter values
+  filterValues: FilterValues = {};
+
+  // Dropdown actions
+  dropdownActions: DropdownAction[] = [
+    { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
+    { label: 'Nuevo Cliente', icon: 'plus', action: 'create', variant: 'primary' },
+  ];
 
   columns: TableColumn[] = [
     { key: 'first_name', label: 'Nombre', sortable: true, priority: 1 },
@@ -155,6 +156,7 @@ export class CustomerListComponent {
     titleTransform: (item) => `${item.first_name} ${item.last_name}`,
     subtitleKey: 'email',
     avatarFallbackIcon: 'user',
+    avatarShape: 'circle',
     badgeKey: 'state',
     badgeConfig: { type: 'status', size: 'sm' },
     badgeTransform: (v) => (v === 'active' ? 'Activo' : 'Inactivo'),
@@ -170,6 +172,7 @@ export class CustomerListComponent {
     ],
     footerKey: 'total_spend',
     footerLabel: 'Total Gastado',
+    footerStyle: 'prominent',
     footerTransform: (v) =>
       new Intl.NumberFormat('es-CO', {
         style: 'currency',
@@ -195,5 +198,26 @@ export class CustomerListComponent {
 
   onSearch(query: string) {
     this.search.emit(query);
+  }
+
+  onFilterChange(values: FilterValues): void {
+    this.filterValues = values;
+    this.filter.emit(values);
+  }
+
+  onClearFilters(): void {
+    this.filterValues = {};
+    this.filter.emit({});
+  }
+
+  onActionClick(action: string): void {
+    switch (action) {
+      case 'create':
+        this.create.emit();
+        break;
+      case 'refresh':
+        this.refresh.emit();
+        break;
+    }
   }
 }

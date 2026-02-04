@@ -2,11 +2,12 @@
 name: vendix-frontend-data-display
 description: >
   Responsive data display patterns using Table, ItemList, and ResponsiveDataView components.
+  Mobile-first card layouts with action button styling and prominent footer values.
   Trigger: When displaying lists of data, creating admin modules with tables, or implementing mobile-friendly data views.
 license: Apache-2.0
 metadata:
   author: gentleman-programming
-  version: "1.0"
+  version: "2.0"
   scope: [frontend]
   auto_invoke: "Displaying data lists, implementing responsive tables, creating mobile card views"
 ---
@@ -67,35 +68,84 @@ These are passed to BOTH components:
 
 ### 3. Card Structure
 
-**With Avatar (optional):**
+**With Avatar (Square - for products):**
 ```
 ┌─────────────────────────────────────┐
-│ [Avatar] Título        [Badge] [⋮] │
-│          Subtítulo                  │
+│ [■ Img] Título         [Badge] [⋮] │
+│         Subtítulo                   │
 ├─────────────────────────────────────┤
 │ LABEL 1        │ LABEL 2           │
 │ Valor 1        │ Valor 2           │
 ├─────────────────────────────────────┤
-│ FOOTER LABEL              [🖊][🗑] │
-│ $1,200.00                          │
+│ FOOTER LABEL         [Edit][Delete]│
+│ $1,200.00 (prominent)              │
 └─────────────────────────────────────┘
 ```
 
-**Without Avatar:**
+**With Avatar (Circle - for users/customers):**
 ```
 ┌─────────────────────────────────────┐
-│ Título                 [Badge] [⋮] │
-│ Subtítulo                           │
+│ [● Img] Título         [Badge] [⋮] │
+│         Subtítulo                   │
 ├─────────────────────────────────────┤
 │ LABEL 1        │ LABEL 2           │
 │ Valor 1        │ Valor 2           │
 ├─────────────────────────────────────┤
-│ FOOTER LABEL              [🖊][🗑] │
+│ FOOTER LABEL         [Edit][Delete]│
 │ $1,200.00                          │
 └─────────────────────────────────────┘
 ```
 
 **Avatar is OPTIONAL:** Only displayed when `avatarKey` or `avatarFallbackIcon` is configured.
+
+### 4. New Card Config Properties
+
+#### avatarShape - Avatar Form
+- `'circle'` (default): For users, customers, people
+- `'square'`: For products with images
+
+#### footerStyle - Footer Value Style
+- `'default'`: Normal value display
+- `'prominent'`: Large value (22px, extra-bold) for prices/totals
+
+```typescript
+cardConfig: ItemListCardConfig = {
+  titleKey: 'name',
+  subtitleKey: 'brand',
+  avatarKey: 'image_url',
+  avatarShape: 'square',        // Square for product images
+  badgeKey: 'state',
+  footerKey: 'base_price',
+  footerLabel: 'Precio',
+  footerStyle: 'prominent',     // Large price display
+  detailKeys: [
+    { key: 'sku', label: 'SKU' },
+    { key: 'stock', label: 'Stock' },
+  ],
+};
+```
+
+### 5. Action Button Styling
+
+Action buttons have colors based on their variant:
+
+| Variant | Color | Border | Hover BG |
+|---------|-------|--------|----------|
+| `default` | `#6B7280` (gray) | `#E5E7EB` | `#F9FAFB` |
+| `primary` | `#3B82F6` (blue) | `#BFDBFE` | `#EFF6FF` |
+| `danger` | `#EF4444` (red) | `#FECACA` | `#FEF2F2` |
+
+**Menu Dropdown Rule:**
+- ≤2 actions: Show buttons directly in footer, no menu
+- \>2 actions: First 2 in footer + menu (⋮) for rest
+
+```typescript
+actions: TableAction[] = [
+  { label: 'Editar', icon: 'edit', variant: 'primary', action: (item) => this.edit(item) },
+  { label: 'Eliminar', icon: 'trash-2', variant: 'danger', action: (item) => this.delete(item) },
+  // If 3+ actions, a menu button appears
+];
+```
 
 ---
 
@@ -133,11 +183,12 @@ export class MyListComponent {
     { key: 'status', label: 'Estado', badge: true, badgeConfig: { type: 'status' } },
   ];
 
-  // Card config (mobile)
+  // Card config (mobile) - with new properties
   cardConfig: ItemListCardConfig = {
     titleKey: 'name',
     subtitleKey: 'email',
     avatarFallbackIcon: 'user',
+    avatarShape: 'circle',                // Circle for users
     badgeKey: 'status',
     badgeConfig: { type: 'status', size: 'sm' },
     detailKeys: [
@@ -146,12 +197,13 @@ export class MyListComponent {
     ],
     footerKey: 'total',
     footerLabel: 'Total',
+    footerStyle: 'prominent',             // Large price display
     footerTransform: (v) => `$${v.toLocaleString()}`,
   };
 
-  // Shared actions
+  // Shared actions - with colored variants
   actions: TableAction[] = [
-    { label: 'Editar', icon: 'edit', variant: 'ghost', action: (item) => this.edit(item) },
+    { label: 'Editar', icon: 'edit', variant: 'primary', action: (item) => this.edit(item) },
     { label: 'Eliminar', icon: 'trash-2', variant: 'danger', action: (item) => this.delete(item) },
   ];
 }
@@ -170,6 +222,7 @@ interface ItemListCardConfig {
   // Avatar (OPTIONAL - only shown if either is set)
   avatarKey?: string;                         // Image URL field
   avatarFallbackIcon?: string;                // Icon when no image
+  avatarShape?: 'circle' | 'square';          // NEW: Shape (default: 'circle')
   // NOTE: If neither avatarKey nor avatarFallbackIcon is set, no avatar is displayed
 
   // Badge
@@ -183,6 +236,7 @@ interface ItemListCardConfig {
   // Footer
   footerKey?: string;                         // Highlighted value
   footerLabel?: string;                       // Label above value
+  footerStyle?: 'default' | 'prominent';      // NEW: Value style (default: 'default')
   footerTransform?: (value: any, item?: any) => string;
 }
 
@@ -316,6 +370,38 @@ Pre-defined status classes that work automatically:
   [tableSize]="'sm'"
 ></app-responsive-data-view>
 ```
+
+---
+
+## Mobile Card Styles (<768px)
+
+### Card Container
+- Border-radius: 16px
+- Shadow: `0 2px 8px rgba(0,0,0,0.07)`
+- Gap between cards: 8px
+- Background: White/Surface
+
+### Typography
+
+| Element | Size | Weight | Color |
+|---------|------|--------|-------|
+| Title | 15px | 700 | #1A1A1A |
+| Subtitle | 12px | 400 | #9CA3AF |
+| Detail Label | 10px | 700 | #6B7280 |
+| Detail Value | 14px | 700 | #1A1A1A |
+| Footer Label | 10px | 700 | #6B7280 |
+| Footer Value (default) | 14px | 700 | #1A1A1A |
+| Footer Value (prominent) | 22px | 800 | #1A1A1A |
+
+### Avatar Square Variant (for products)
+- Size: 56x56px
+- Border-radius: 12px
+- Background: #E5E7EB (when no image)
+
+### Footer Section
+- Background: Same as card (no separation line)
+- Border-top: none
+- Action buttons aligned to right with color variants
 
 ---
 

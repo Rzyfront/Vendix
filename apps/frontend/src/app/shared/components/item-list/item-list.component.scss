@@ -175,6 +175,23 @@
     color: var(--color-text-muted);
     background-color: var(--color-background);
   }
+
+  // Square variant (for products with images)
+  &.avatar-square {
+    width: 56px;
+    height: 56px;
+    border-radius: 12px;
+    background: #E5E7EB;
+
+    .avatar-image {
+      border-radius: 12px;
+    }
+
+    .avatar-placeholder {
+      border-radius: 12px;
+      background: #E5E7EB;
+    }
+  }
 }
 
 // Title Group
@@ -407,8 +424,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  background-color: var(--color-background);
-  border-top: var(--border-width) solid var(--color-border);
+  background-color: var(--color-surface);
+  border-top: none;
 }
 
 .footer-content {
@@ -437,37 +454,40 @@
 }
 
 .footer-action-btn {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: transparent;
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-secondary);
+  border: 1px solid #E5E7EB;
+  border-radius: 8px;
+  color: #6B7280;
   cursor: pointer;
-  transition: all var(--transition-fast) ease;
+  transition: all 0.15s ease;
 
   &:hover:not(:disabled) {
-    background-color: var(--color-muted);
-    color: var(--color-text-primary);
-    border-color: var(--color-text-muted);
+    background-color: #F9FAFB;
+    transform: scale(1.05);
   }
 
   &.action-danger {
+    color: #EF4444;
+    border-color: #FECACA;
+
     &:hover:not(:disabled) {
-      background-color: rgba(239, 68, 68, 0.1);
-      color: var(--color-destructive);
-      border-color: var(--color-destructive);
+      background-color: #FEF2F2;
+      border-color: #EF4444;
     }
   }
 
   &.action-primary {
+    color: #3B82F6;
+    border-color: #BFDBFE;
+
     &:hover:not(:disabled) {
-      background-color: rgba(var(--color-primary-rgb, 59, 130, 246), 0.1);
-      color: var(--color-primary);
-      border-color: var(--color-primary);
+      background-color: #EFF6FF;
+      border-color: #3B82F6;
     }
   }
 
@@ -565,6 +585,71 @@
   .footer-action-btn {
     width: 40px;
     height: 40px;
+  }
+}
+
+// ============================================
+// MOBILE-OPTIMIZED STYLES (Pencil Design)
+// Applies to any type of item (products, orders, customers, etc.)
+// ============================================
+
+
+// Mobile-specific improvements
+@media (max-width: 767px) {
+  // Compact gap between cards (8px as per Pencil)
+  .item-list-cards {
+    gap: 8px;
+  }
+
+  // Enhanced card container
+  .item-card {
+    border-radius: 16px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07);
+  }
+
+  // Enhanced typography
+  .card-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #1A1A1A;
+  }
+
+  .card-subtitle {
+    font-size: 12px;
+    color: #9CA3AF;
+  }
+
+  // Detail labels (SKU, Stock, Total, etc.)
+  .detail-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: #6B7280;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  // Detail values
+  .detail-value {
+    font-size: 14px;
+    font-weight: 700;
+    color: #1A1A1A;
+  }
+
+  // Prominent footer (for prices, totals, etc.)
+  .card-footer.footer-prominent {
+    .footer-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #6B7280;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .footer-value {
+      font-size: 22px;
+      font-weight: 800;
+      color: #1A1A1A;
+    }
   }
 }
 

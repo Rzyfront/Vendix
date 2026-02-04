@@ -25,16 +25,17 @@ export class LoginDto {
   password: string;
 
   @ApiPropertyOptional({
-    example: 'mi-super-organizacion',
+    example: 'mi-organizacion',
     description:
-      'Slug de la organización a la que se intenta acceder (opcional si se proporciona store_slug)',
+      'Identificador de la organización: puede ser el slug único o el nombre de la organización. ' +
+      'Si se proporciona un nombre y hay múltiples coincidencias, se intentará resolver por dominio del email.',
   })
   @IsString()
   @IsOptional()
   @ValidateIf((o) => !o.store_slug)
   @IsNotEmpty({
     message:
-      'El slug de la organización es requerido si no se proporciona store_slug',
+      'El identificador de la organización es requerido si no se proporciona store_slug',
   })
   organization_slug?: string;
 

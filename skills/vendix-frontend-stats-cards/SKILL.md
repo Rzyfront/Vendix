@@ -2,12 +2,13 @@
 name: vendix-frontend-stats-cards
 description: >
   Responsive stats cards pattern with horizontal scroll on mobile and grid on desktop.
+  Includes sticky positioning for mobile-first standard modules.
   Uses the shared StatsComponent for consistent styling across all admin modules.
   Trigger: When implementing stats cards, dashboard metrics, or KPI displays in admin modules.
 license: Apache-2.0
 metadata:
   author: gentleman-programming
-  version: "1.0"
+  version: "2.0"
   scope: [root, frontend]
   auto_invoke: "Implementing stats cards or dashboard metrics with mobile scroll"
 ---
@@ -24,8 +25,8 @@ metadata:
 ### 1. Stats Container Structure
 
 The container uses `stats-container` class which enables:
-- **Desktop (>=640px)**: CSS Grid with 4 columns
-- **Mobile (<640px)**: Flexbox with horizontal scroll
+- **Desktop (>=640px)**: CSS Grid with 4 columns, gap 16px (24px in lg)
+- **Mobile (<640px)**: Flexbox with horizontal scroll, fixed 160px cards, gap 12px
 
 ```html
 <!-- Parent component template -->
@@ -51,12 +52,64 @@ The container uses `stats-container` class which enables:
 
   // Desktop: Grid layout
   @media (min-width: 640px) {
-    @apply grid grid-cols-2 lg:grid-cols-4 gap-4 overflow-visible mx-0 px-0 pb-0;
+    @apply grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 overflow-visible mx-0 px-0 pb-0;
   }
 }
 ```
 
-### 2. StatsComponent Props
+### 2. Sticky Positioning (Mobile-First Modules)
+
+In standard admin modules, stats cards should be sticky on mobile:
+
+```html
+<!-- In parent component (e.g., products.component.html) -->
+<div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+  <app-stats ...></app-stats>
+  <app-stats ...></app-stats>
+  <app-stats ...></app-stats>
+  <app-stats ...></app-stats>
+</div>
+```
+
+**Sticky Properties Explained:**
+
+| Property | Purpose |
+|----------|---------|
+| `sticky top-0` | Sticks to viewport top on scroll |
+| `z-20` | Above search section (z-10) and content (z-0) |
+| `bg-background` | Solid background prevents transparency issues |
+| `!mb-0` | Override margin-bottom on mobile |
+| `md:static` | Normal flow on desktop |
+| `md:bg-transparent` | Transparent background on desktop |
+| `md:!mb-8` | Restore margin on desktop |
+
+### 3. Integration with Search Section
+
+**Stacking Order (Mobile):**
+
+```
+┌─────────────────────────────┐ ← Viewport top
+│  Stats (sticky top-0 z-20)  │
+├─────────────────────────────┤ ← ~99px from top
+│  Search (sticky top-[99px] z-10)
+├─────────────────────────────┤
+│                             │
+│  Items (scrollable content) │
+│                             │
+└─────────────────────────────┘
+```
+
+**Z-Index Convention:**
+
+| Layer | Element | Z-Index |
+|-------|---------|---------|
+| Top | Stats Container | 20 |
+| Middle | Search Section | 10 |
+| Bottom | Content/Items | 0 |
+
+**Important:** The `top-[99px]` value in the search section should approximately match the stats container height (~104px minus margin adjustments).
+
+### 4. StatsComponent Props
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
@@ -68,7 +121,7 @@ The container uses `stats-container` class which enables:
 | `iconColor` | `string` | `'text-primary'` | Tailwind text class |
 | `clickable` | `boolean` | `true` | Enable hover effects |
 
-### 3. Color Palette (Standard)
+### 5. Color Palette (Standard)
 
 Use these consistent color combinations:
 
@@ -81,7 +134,7 @@ Use these consistent color combinations:
 | Danger/Critical | `bg-red-100` | `text-red-500` | `x-circle`, `alert-triangle` |
 | Info/Secondary | `bg-gray-100` | `text-gray-500` | `info`, `help-circle` |
 
-### 4. Mobile Layout Details
+### 6. Mobile Layout Details
 
 Each `<app-stats>` card has these mobile styles (in `stats.component.scss`):
 
@@ -118,7 +171,7 @@ Each `<app-stats>` card has these mobile styles (in `stats.component.scss`):
 }
 ```
 
-### 5. Desktop Layout Details
+### 7. Desktop Layout Details
 
 ```scss
 .stat-card {
@@ -369,9 +422,17 @@ getGrowthText(rate?: number): string {
 - [ ] Format large numbers with K/M suffixes
 - [ ] Test horizontal scroll on mobile viewport
 - [ ] Verify cards are swipeable with snap behavior on mobile
+- [ ] Add sticky classes for mobile-first modules (see Section 2)
+- [ ] Verify z-index stacking with search section
 
 ## Resources
 
-- **Reference Implementation**: `apps/frontend/src/app/private/modules/store/orders/components/order-stats/`
+- **Reference Implementation (Mobile-First)**: `apps/frontend/src/app/private/modules/store/products/`
+- **Legacy Reference**: `apps/frontend/src/app/private/modules/store/orders/components/order-stats/`
 - **Shared Component**: `apps/frontend/src/app/shared/components/stats/`
 - **Global Styles**: `apps/frontend/src/styles.scss` (`.stats-container`)
+
+## Related Skills
+
+- `vendix-frontend-standard-module` - Complete module layout patterns
+- `vendix-frontend-data-display` - ResponsiveDataView integration

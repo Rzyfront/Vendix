@@ -1,27 +1,19 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 
 // Shared Components
 import {
-  ButtonComponent,
-  TableColumn,
-  TableAction,
-  InputsearchComponent,
   StatsComponent,
-  IconComponent,
-  SelectorComponent,
-  SelectorOption,
   ToastService,
-  ResponsiveDataViewComponent,
-  ItemListCardConfig,
+  FilterValues,
 } from '../../../../../shared/components/index';
 import { ConfirmationModalComponent } from '../../../../../shared/components/confirmation-modal/confirmation-modal.component';
 
 // Local Components
 import { AdjustmentDetailModalComponent } from './components/adjustment-detail-modal.component';
+import { AdjustmentListComponent } from './components/adjustment-list';
 
 // Services
 import { InventoryService } from '../services';
@@ -34,20 +26,15 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
   standalone: true,
   imports: [
     CommonModule,
-    FormsModule,
-    ButtonComponent,
-    ResponsiveDataViewComponent,
-    InputsearchComponent,
     StatsComponent,
-    IconComponent,
-    SelectorComponent,
     ConfirmationModalComponent,
     AdjustmentDetailModalComponent,
+    AdjustmentListComponent,
   ],
   template: `
     <div class="w-full">
-      <!-- Stats Grid -->
-      <div class="stats-container">
+      <!-- Stats Grid: sticky at top on mobile, static on desktop -->
+      <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Total Ajustes"
           [value]="stats.total"
@@ -81,120 +68,30 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
         ></app-stats>
       </div>
 
-      <!-- Adjustments List Container -->
-      <div
-        class="bg-surface rounded-card shadow-card border border-border min-h-[600px]"
-      >
-        <div class="px-6 py-4 border-b border-border">
-          <div
-            class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
-          >
-            <div class="flex-1 min-w-0">
-              <h2 class="text-lg font-semibold text-text-primary">
-                Ajustes de Inventario ({{ stats.total }})
-              </h2>
-            </div>
-
-            <div
-              class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
-            >
-              <app-inputsearch
-                class="w-full sm:w-48 flex-shrink-0"
-                size="sm"
-                placeholder="Buscar ajuste..."
-                (search)="onSearch($event)"
-              ></app-inputsearch>
-
-              <app-selector
-                class="w-full sm:w-40"
-                [options]="type_options"
-                [(ngModel)]="current_type"
-                placeholder="Tipo"
-                size="sm"
-                (valueChange)="filterByType($event)"
-              ></app-selector>
-
-              <div class="flex gap-2 items-center ml-auto">
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  (clicked)="loadAdjustments()"
-                  [disabled]="is_loading"
-                  title="Refrescar"
-                >
-                  <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
-                </app-button>
-
-                <app-button
-                  variant="primary"
-                  size="sm"
-                  (clicked)="openCreateModal()"
-                  title="Nuevo Ajuste"
-                >
-                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                  <span class="hidden sm:inline">Nuevo Ajuste</span>
-                </app-button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Loading State -->
-        <div *ngIf="is_loading" class="p-8 text-center">
-          <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-          ></div>
-          <p class="mt-2 text-text-secondary">Cargando ajustes...</p>
-        </div>
-
-        <!-- Empty State -->
-        <div
-          *ngIf="!is_loading && filtered_adjustments.length === 0"
-          class="p-12 text-center text-gray-500"
-        >
-          <app-icon
-            name="clipboard-list"
-            [size]="48"
-            class="mx-auto mb-4 text-gray-300"
-          ></app-icon>
-          <h3 class="text-lg font-medium text-gray-900">No hay ajustes</h3>
-          <p class="mt-1">
-            Registra ajustes de inventario cuando sea necesario.
-          </p>
-          <div class="mt-6">
-            <app-button variant="primary" (clicked)="openCreateModal()">
-              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-              Crear Ajuste
-            </app-button>
-          </div>
-        </div>
-
-        <!-- Table -->
-        <div *ngIf="!is_loading && filtered_adjustments.length > 0" class="p-6">
-          <app-responsive-data-view
-            [data]="filtered_adjustments"
-            [columns]="table_columns"
-            [cardConfig]="cardConfig"
-            [actions]="table_actions"
-            [loading]="is_loading"
-            emptyMessage="No hay ajustes de inventario"
-            emptyIcon="clipboard-list"
-          ></app-responsive-data-view>
-        </div>
-      </div>
+      <!-- Adjustments List -->
+      <app-adjustment-list
+        [adjustments]="filtered_adjustments"
+        [isLoading]="is_loading"
+        (search)="onSearch($event)"
+        (filterChange)="onFilterChange($event)"
+        (clearFilters)="onClearFilters()"
+        (actionClick)="onActionClick($event)"
+        (viewDetail)="viewDetail($event)"
+      ></app-adjustment-list>
 
       <!-- Instruction Modal -->
-      <app-confirmation-modal
-        *ngIf="is_info_modal_open"
-        title="Crear Nuevo Ajuste"
-        message="Para realizar un ajuste de inventario, por favor busca el producto en la lista de Productos y selecciona la opción 'Realizar Ajuste' en el detalle del producto."
-        confirmText="Ir a Productos"
-        cancelText="Entendido"
-        confirmVariant="primary"
-        [isOpen]="true"
-        (confirm)="navigateToProducts()"
-        (cancel)="closeInfoModal()"
-      ></app-confirmation-modal>
+      @if (is_info_modal_open) {
+        <app-confirmation-modal
+          title="Crear Nuevo Ajuste"
+          message="Para realizar un ajuste de inventario, por favor busca el producto en la lista de Productos y selecciona la opción 'Realizar Ajuste' en el detalle del producto."
+          confirmText="Ir a Productos"
+          cancelText="Entendido"
+          confirmVariant="primary"
+          [isOpen]="true"
+          (confirm)="navigateToProducts()"
+          (cancel)="closeInfoModal()"
+        ></app-confirmation-modal>
+      }
 
       <!-- Detail Modal -->
       <app-adjustment-detail-modal
@@ -222,107 +119,6 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
   // Filters
   current_type: AdjustmentType | 'all' = 'all';
   search_term = '';
-
-  type_options: SelectorOption[] = [
-    { value: 'all', label: 'Todos los tipos' },
-    { value: 'damage', label: 'Daño' },
-    { value: 'loss', label: 'Pérdida' },
-    { value: 'theft', label: 'Robo' },
-    { value: 'expiration', label: 'Vencido' },
-    { value: 'count_variance', label: 'Conteo' },
-    { value: 'manual_correction', label: 'Corrección' },
-  ];
-
-  // Table Configuration
-  table_columns: TableColumn[] = [
-    {
-      key: 'created_at',
-      label: 'Fecha',
-      sortable: true,
-      width: '120px',
-      priority: 3,
-      transform: (value: string) => new Date(value).toLocaleDateString('es-CO'),
-    },
-    {
-      key: 'products.name',
-      label: 'Producto',
-      sortable: true,
-      defaultValue: '-',
-      priority: 1,
-    },
-    {
-      key: 'inventory_locations.name',
-      label: 'Ubicacion',
-      defaultValue: '-',
-      priority: 2,
-    },
-    {
-      key: 'adjustment_type',
-      label: 'Tipo',
-      priority: 2,
-      transform: (value: AdjustmentType) => this.getTypeLabel(value),
-    },
-    {
-      key: 'quantity_change',
-      label: 'Cambio',
-      align: 'right',
-      priority: 1,
-      transform: (value: number) => (value > 0 ? `+${value}` : `${value}`),
-    },
-    {
-      key: 'quantity_before',
-      label: 'Antes',
-      align: 'right',
-      priority: 3,
-    },
-    {
-      key: 'quantity_after',
-      label: 'Despues',
-      align: 'right',
-      priority: 3,
-    },
-    {
-      key: 'created_by_user.user_name',
-      label: 'Creado por',
-      defaultValue: '-',
-      priority: 4,
-    },
-  ];
-
-  table_actions: TableAction[] = [
-    {
-      label: 'Ver Detalle',
-      icon: 'eye',
-      variant: 'ghost',
-      action: (item: InventoryAdjustment) => this.viewDetail(item),
-    },
-  ];
-
-  // Card Config for mobile
-  cardConfig: ItemListCardConfig = {
-    titleKey: 'products.name',
-    titleTransform: (val: any) => val || 'Sin producto',
-    subtitleKey: 'adjustment_type',
-    subtitleTransform: (val: AdjustmentType) => this.getTypeLabel(val),
-    detailKeys: [
-      {
-        key: 'quantity_change',
-        label: 'Cambio',
-        transform: (val: number) => (val > 0 ? `+${val}` : `${val}`),
-      },
-      {
-        key: 'created_at',
-        label: 'Fecha',
-        icon: 'calendar',
-        transform: (val: string) => new Date(val).toLocaleDateString('es-CO'),
-      },
-      {
-        key: 'inventory_locations.name',
-        label: 'Ubicación',
-        icon: 'map-pin',
-      },
-    ],
-  };
 
   // UI State
   is_loading = false;
@@ -416,9 +212,27 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
     this.applyFilters();
   }
 
-  filterByType(type: string | number | null): void {
-    this.current_type = (type as AdjustmentType | 'all') || 'all';
+  onFilterChange(values: FilterValues): void {
+    const typeValue = values['adjustment_type'] as string;
+    this.current_type = typeValue ? (typeValue as AdjustmentType) : 'all';
     this.applyFilters();
+  }
+
+  onClearFilters(): void {
+    this.current_type = 'all';
+    this.search_term = '';
+    this.applyFilters();
+  }
+
+  onActionClick(action: string): void {
+    switch (action) {
+      case 'create':
+        this.openCreateModal();
+        break;
+      case 'refresh':
+        this.loadAdjustments();
+        break;
+    }
   }
 
   openCreateModal(): void {
@@ -442,36 +256,5 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
   closeDetailModal(): void {
     this.is_detail_modal_open = false;
     this.selected_adjustment = null;
-  }
-
-  // ============================================================
-  // CRUD Operations
-  // ============================================================
-
-  // Methods removed as creation is now handled in Product Create Page
-
-  // ============================================================
-  // Helpers
-  // ============================================================
-
-  getTypeLabel(type: AdjustmentType): string {
-    const labels: Record<AdjustmentType, string> = {
-      damage: 'Daño',
-      loss: 'Pérdida',
-      theft: 'Robo',
-      expiration: 'Vencido',
-      count_variance: 'Conteo',
-      manual_correction: 'Corrección',
-    };
-    return labels[type] || type;
-  }
-
-  getFilterClasses(type: AdjustmentType | 'all'): string {
-    const base =
-      'flex items-center px-3 py-1.5 text-sm font-medium rounded-full transition-colors';
-    if (type === this.current_type) {
-      return `${base} bg-primary text-white`;
-    }
-    return `${base} bg-muted/20 text-text-secondary hover:bg-muted/40`;
   }
 }

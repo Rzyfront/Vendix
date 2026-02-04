@@ -527,6 +527,7 @@ model orders {
   shipping_cost                                   Decimal                  @default(0.00) @db.Decimal(12, 2)
   grand_total                                     Decimal                  @default(0.00) @db.Decimal(12, 2)
   state                                           order_state_enum         @default(created)
+  channel                                         order_channel_enum       @default(pos)
   delivery_type                                   order_delivery_type_enum @default(direct_delivery)
   shipping_method_id                              Int?
   internal_notes                                  String?
@@ -545,6 +546,7 @@ model orders {
 
   @@unique([store_id, order_number])
   @@index([store_id, order_number])
+  @@index([store_id, channel])
 }
 
 model system_payment_methods {
@@ -1472,6 +1474,14 @@ enum order_delivery_type_enum {
   home_delivery
   direct_delivery
   other
+}
+
+enum order_channel_enum {
+  pos
+  ecommerce
+  agent
+  whatsapp
+  marketplace
 }
 
 enum payment_method_state_enum {
