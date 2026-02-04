@@ -29,77 +29,82 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
       [title]="customer ? 'Editar cliente' : 'Nuevo cliente'"
       subtitle="Administra la información del cliente"
     >
-      <div class="p-6">
-        <form [formGroup]="form" class="space-y-4">
-          <!-- Email -->
+      <form [formGroup]="form" class="space-y-4">
+        <!-- Email -->
+        <app-input
+          formControlName="email"
+          label="Email"
+          placeholder="john.doe@example.com"
+          type="email"
+          [required]="true"
+          [error]="getFieldError('email')"
+          (blur)="onFieldBlur('email')"
+          customWrapperClass="mt-0"
+        ></app-input>
+
+        <!-- Names Row -->
+        <div class="grid grid-cols-2 gap-4">
           <app-input
-            formControlName="email"
-            label="Email *"
-            placeholder="john.doe@example.com"
-            type="email"
-            [error]="getFieldError('email')"
-            (blur)="onFieldBlur('email')"
+            formControlName="first_name"
+            label="Nombre"
+            placeholder="John"
+            [required]="true"
+            [error]="getFieldError('first_name')"
+            (blur)="onFieldBlur('first_name')"
+            customWrapperClass="mt-0"
           ></app-input>
 
-          <!-- Names Row -->
-          <div class="grid grid-cols-2 gap-4">
-            <app-input
-              formControlName="first_name"
-              label="Nombre *"
-              placeholder="John"
-              [error]="getFieldError('first_name')"
-              (blur)="onFieldBlur('first_name')"
-            ></app-input>
-
-            <app-input
-              formControlName="last_name"
-              label="Apellido*"
-              placeholder="Rodriguez"
-              [error]="getFieldError('last_name')"
-              (blur)="onFieldBlur('last_name')"
-            ></app-input>
-          </div>
-
-          <!-- Phone -->
           <app-input
-            formControlName="phone"
-            label="Telefono"
-            placeholder="+57 300 567 8900"
-            [error]="getFieldError('phone')"
-            (blur)="onFieldBlur('phone')"
+            formControlName="last_name"
+            label="Apellido"
+            placeholder="Rodriguez"
+            [required]="true"
+            [error]="getFieldError('last_name')"
+            (blur)="onFieldBlur('last_name')"
+            customWrapperClass="mt-0"
           ></app-input>
+        </div>
 
-          <!-- Document Row -->
-          <div class="grid grid-cols-2 gap-4">
-            <app-selector
-              formControlName="document_type"
-              label="Tipo de identificación"
-              placeholder="Seleccionar tipo"
-              [options]="documentTypes"
-            ></app-selector>
+        <!-- Phone -->
+        <app-input
+          formControlName="phone"
+          label="Teléfono"
+          placeholder="+57 300 567 8900"
+          [error]="getFieldError('phone')"
+          (blur)="onFieldBlur('phone')"
+          customWrapperClass="mt-0"
+        ></app-input>
 
-            <app-input
-              formControlName="document_number"
-              label="Número de identificación"
-              placeholder="12345678"
-              [error]="getFieldError('document_number')"
-              (blur)="onFieldBlur('document_number')"
-              customWrapperClass="mt-0"
-            ></app-input>
-          </div>
-        </form>
-      </div>
+        <!-- Document Row -->
+        <div class="grid grid-cols-2 gap-4">
+          <app-selector
+            formControlName="document_type"
+            label="Tipo documento"
+            placeholder="Seleccionar tipo"
+            [options]="documentTypes"
+          ></app-selector>
 
-      <!-- Footer -->
-      <div class="flex justify-end gap-3 p-6 border-t border-gray-100 bg-gray-50">
-        <app-button variant="ghost" (clicked)="onCancel()">Cancel</app-button>
+          <app-input
+            formControlName="document_number"
+            label="Nº documento"
+            placeholder="12345678"
+            [error]="getFieldError('document_number')"
+            (blur)="onFieldBlur('document_number')"
+            customWrapperClass="mt-0"
+          ></app-input>
+        </div>
+      </form>
+
+      <!-- Footer with slot -->
+      <div slot="footer" class="flex justify-end gap-3">
+        <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
         <app-button
           variant="primary"
           [disabled]="form.invalid || loading"
           [loading]="loading"
           (clicked)="onSubmit()"
         >
-          {{ customer ? 'Update' : 'Create' }}
+          {{ customer ? 'Actualizar' : 'Crear' }}
         </app-button>
       </div>
     </app-modal>

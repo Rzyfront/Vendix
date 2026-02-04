@@ -115,6 +115,7 @@ export class OrdersService {
       sort_order,
       date_from,
       date_to,
+      channel,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -127,6 +128,7 @@ export class OrdersService {
       }),
       ...(status && { state: status }),
       ...(customer_id && { customer_id }),
+      ...(channel && { channel }),
       ...(date_from &&
         date_to && {
           created_at: {

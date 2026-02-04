@@ -10,8 +10,9 @@ import { StatsComponent } from '../../../../../../shared/components/stats/stats.
   selector: 'vendix-expenses-stats',
   standalone: true,
   imports: [CommonModule, StatsComponent],
+  styleUrls: ['./expenses-stats.component.scss'],
   template: `
-    <div class="stats-container mb-8">
+    <ng-container>
       <app-stats
         title="Total Gastos"
         [value]="((totalAmount$ | async) | currency) || '$0.00'"
@@ -44,7 +45,7 @@ import { StatsComponent } from '../../../../../../shared/components/stats/stats.
         iconBgColor="bg-purple-100"
         iconColor="text-purple-600"
       ></app-stats>
-    </div>
+    </ng-container>
   `
 })
 export class ExpensesStatsComponent {

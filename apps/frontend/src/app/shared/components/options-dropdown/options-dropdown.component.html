@@ -1,6 +1,7 @@
 <div class="options-dropdown-container" #dropdownContainer>
   <!-- Trigger Button -->
   <button
+    #triggerButton
     type="button"
     class="options-dropdown-trigger"
     (click)="toggleDropdown()"
@@ -23,6 +24,7 @@
   <div
     *ngIf="isOpen"
     class="options-dropdown-content"
+    [style.--dropdown-top.px]="dropdownTop"
     (click)="$event.stopPropagation()"
   >
     <div class="dropdown-header">

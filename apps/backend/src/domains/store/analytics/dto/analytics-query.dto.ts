@@ -1,5 +1,6 @@
 import { IsOptional, IsString, IsNumber, IsEnum, IsDateString } from 'class-validator';
 import { Type } from 'class-transformer';
+import { order_channel_enum } from '@prisma/client';
 
 export enum DatePreset {
   TODAY = 'today',
@@ -70,6 +71,10 @@ export class SalesAnalyticsQueryDto extends AnalyticsQueryDto {
   @IsOptional()
   @IsString()
   payment_method?: string;
+
+  @IsOptional()
+  @IsEnum(order_channel_enum)
+  channel?: order_channel_enum;
 }
 
 export class InventoryAnalyticsQueryDto extends AnalyticsQueryDto {

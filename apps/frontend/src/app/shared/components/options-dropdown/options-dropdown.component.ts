@@ -10,6 +10,8 @@ import {
   ElementRef,
   ViewChild,
   SimpleChanges,
+  ChangeDetectorRef,
+  inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -72,9 +74,15 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
   @Output() clearAllFilters = new EventEmitter<void>();
 
   @ViewChild('dropdownContainer') dropdownContainer!: ElementRef<HTMLElement>;
+  @ViewChild('triggerButton') triggerButton!: ElementRef<HTMLButtonElement>;
+
+  private cdr = inject(ChangeDetectorRef);
 
   isOpen: boolean = false;
   activeFiltersCount: number = 0;
+
+  /** Position for mobile dropdown */
+  dropdownTop: number = 0;
 
   /** Local state for filter values */
   localFilterValues: FilterValues = {};
@@ -128,6 +136,19 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
 
   toggleDropdown(): void {
     this.isOpen = !this.isOpen;
+    if (this.isOpen) {
+      this.calculateDropdownPosition();
+    }
+  }
+
+  private calculateDropdownPosition(): void {
+    if (this.triggerButton?.nativeElement) {
+      const rect = this.triggerButton.nativeElement.getBoundingClientRect();
+      // Smaller gap on mobile (< 640px), normal gap on larger screens
+      const gap = window.innerWidth < 640 ? 3 : 8;
+      this.dropdownTop = rect.bottom + gap;
+      this.cdr.markForCheck();
+    }
   }
 
   closeDropdown(): void {
@@ -147,6 +168,13 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
   @HostListener('keydown.escape')
   onEscapeKey(): void {
     this.closeDropdown();
+  }
+
+  @HostListener('window:scroll')
+  onWindowScroll(): void {
+    if (this.isOpen) {
+      this.calculateDropdownPosition();
+    }
   }
 
   onFilterChange(key: string, value: string | number | null): void {

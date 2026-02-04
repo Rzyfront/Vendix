@@ -1,6 +1,5 @@
 import {
   Component,
-  Input,
   Output,
   EventEmitter,
   OnInit,
@@ -13,11 +12,15 @@ import { Subject, takeUntil } from 'rxjs';
 import {
   TableColumn,
   TableAction,
-  IconComponent,
   DialogService,
   ToastService,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  InputsearchComponent,
+  OptionsDropdownComponent,
+  FilterConfig,
+  FilterValues,
+  DropdownAction,
 } from '../../../../../../shared/components/index';
 
 import { PurchaseOrdersService } from '../../../inventory/services';
@@ -27,27 +30,28 @@ import {
   PurchaseOrderStatus,
 } from '../../../inventory/interfaces';
 
+import { PurchaseOrderEmptyStateComponent } from './purchase-order-empty-state';
+import { PurchaseOrderStats } from './purchase-order-stats.component';
+
 @Component({
   selector: 'app-purchase-order-list',
   standalone: true,
-  imports: [CommonModule, FormsModule, ResponsiveDataViewComponent, IconComponent],
+  imports: [
+    CommonModule,
+    FormsModule,
+    ResponsiveDataViewComponent,
+    InputsearchComponent,
+    OptionsDropdownComponent,
+    PurchaseOrderEmptyStateComponent,
+  ],
   templateUrl: './purchase-order-list.component.html',
   styleUrls: ['./purchase-order-list.component.scss'],
 })
 export class PurchaseOrderListComponent implements OnInit, OnDestroy {
-  @Input() filters: {
-    status: PurchaseOrderStatus | 'all';
-    search: string;
-  } = {
-      status: 'all',
-      search: '',
-    };
-
   @Output() viewOrder = new EventEmitter<PurchaseOrder>();
-  @Output() ordersLoaded = new EventEmitter<{
-    orders: PurchaseOrder[];
-    total: number;
-  }>();
+  @Output() create = new EventEmitter<void>();
+  @Output() refresh = new EventEmitter<void>();
+  @Output() statsUpdated = new EventEmitter<PurchaseOrderStats>();
 
   private destroy$ = new Subject<void>();
 
@@ -55,6 +59,36 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
   orders: PurchaseOrder[] = [];
   suppliers: any[] = [];
   loading = false;
+  totalItems = 0;
+
+  // Filter state
+  searchTerm = '';
+  selectedStatus = '';
+
+  // Filter configuration for the options dropdown
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'status',
+      label: 'Estado',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos los Estados' },
+        { value: 'draft', label: 'Borrador' },
+        { value: 'ordered', label: 'Ordenada' },
+        { value: 'partial', label: 'Parcial' },
+        { value: 'received', label: 'Recibida' },
+        { value: 'cancelled', label: 'Cancelada' },
+      ],
+    },
+  ];
+
+  // Current filter values
+  filterValues: FilterValues = {};
+
+  // Dropdown actions
+  dropdownActions: DropdownAction[] = [
+    { label: 'Nueva Orden', icon: 'plus', action: 'create', variant: 'primary' },
+  ];
 
   // Table configuration
   table_columns: TableColumn[] = [
@@ -133,11 +167,12 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
     },
   ];
 
-  // Card Config
+  // Card Config - mobile-first with prominent footer (no avatar needed for orders)
+  // Note: titleTransform receives the FULL item, not the titleKey value
   cardConfig: ItemListCardConfig = {
     titleKey: 'order_number',
-    titleTransform: (val: string) => `Orden #${val}`,
-    subtitleKey: 'supplierName',
+    titleTransform: (item: any) => `#${item.order_number}`,
+    subtitleTransform: (item: any) => item.supplierName || 'Sin proveedor',
     badgeKey: 'status',
     badgeConfig: {
       type: 'custom',
@@ -153,12 +188,11 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
       },
     },
     badgeTransform: (val: any) => this.getStatusLabel(val),
+    footerKey: 'total_amount',
+    footerLabel: 'Total',
+    footerStyle: 'prominent',
+    footerTransform: (val: any) => this.formatCurrency(val),
     detailKeys: [
-      {
-        key: 'total_amount',
-        label: 'Total',
-        transform: (val: any) => this.formatCurrency(val)
-      },
       {
         key: 'expected_date',
         label: 'Entrega',
@@ -167,22 +201,12 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
     ]
   };
 
-  // Status options for filter
-  status_options = [
-    { value: 'all', label: 'Todos los estados' },
-    { value: 'draft', label: 'Borrador' },
-    { value: 'ordered', label: 'Ordenada' },
-    { value: 'partial', label: 'Parcial' },
-    { value: 'received', label: 'Recibida' },
-    { value: 'cancelled', label: 'Cancelada' },
-  ];
-
   constructor(
     private purchaseOrdersService: PurchaseOrdersService,
     private suppliersService: SuppliersService,
     private dialogService: DialogService,
     private toastService: ToastService
-  ) { }
+  ) {}
 
   ngOnInit(): void {
     this.loadOrders();
@@ -199,11 +223,11 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
     this.loading = true;
 
     const query: any = {};
-    if (this.filters.status && this.filters.status !== 'all') {
-      query.status = this.filters.status;
+    if (this.selectedStatus) {
+      query.status = this.selectedStatus;
     }
-    if (this.filters.search) {
-      query.search = this.filters.search;
+    if (this.searchTerm) {
+      query.search = this.searchTerm;
     }
 
     this.purchaseOrdersService
@@ -213,26 +237,22 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
         next: (response: any) => {
           const orders = response.data || response;
           this.orders = Array.isArray(orders) ? orders : [];
+          this.totalItems = this.orders.length;
 
-          // Enrich orders with supplier names (backend includes suppliers data)
+          // Enrich orders with supplier names
           this.enrichOrdersWithSuppliers();
 
           this.loading = false;
-          this.ordersLoaded.emit({
-            orders: this.orders,
-            total: this.orders.length,
-          });
+
+          // Calculate and emit stats to parent
+          this.calculateAndEmitStats();
         },
         error: (error: any) => {
           console.error('Error loading purchase orders:', error);
           this.toastService.error(
-            'Failed to load purchase orders. Please try again.'
+            'Error al cargar las órdenes de compra. Por favor intenta nuevamente.'
           );
           this.loading = false;
-          this.ordersLoaded.emit({
-            orders: [],
-            total: 0,
-          });
         },
       });
   }
@@ -272,6 +292,75 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
         supplierName: supplier?.name || 'N/A',
       };
     }) as any;
+  }
+
+  // Calculate stats from orders and emit to parent
+  private calculateAndEmitStats(): void {
+    const stats: PurchaseOrderStats = {
+      total: this.orders.length,
+      pending: this.orders.filter(
+        (o) => ['draft', 'submitted', 'approved', 'ordered', 'partial'].includes(o.status)
+      ).length,
+      received: this.orders.filter((o) => o.status === 'received').length,
+      total_value: this.orders.reduce(
+        (sum, o) => {
+          const amount = typeof o.total_amount === 'string'
+            ? parseFloat(o.total_amount)
+            : (o.total_amount || 0);
+          return sum + amount;
+        },
+        0
+      ),
+    };
+    this.statsUpdated.emit(stats);
+  }
+
+  // Filter event handlers
+  onSearchChange(term: string): void {
+    this.searchTerm = term;
+    this.loadOrders();
+  }
+
+  onFilterChange(values: FilterValues): void {
+    this.filterValues = values;
+    this.selectedStatus = (values['status'] as string) || '';
+    this.loadOrders();
+  }
+
+  clearFilters(): void {
+    this.searchTerm = '';
+    this.selectedStatus = '';
+    this.filterValues = {};
+    this.loadOrders();
+  }
+
+  onActionClick(action: string): void {
+    switch (action) {
+      case 'create':
+        this.create.emit();
+        break;
+    }
+  }
+
+  // Check if there are active filters
+  get hasFilters(): boolean {
+    return !!(this.searchTerm || this.selectedStatus);
+  }
+
+  // Get empty state title based on filters
+  getEmptyStateTitle(): string {
+    if (this.hasFilters) {
+      return 'No se encontraron órdenes de compra';
+    }
+    return 'No hay órdenes de compra';
+  }
+
+  // Get empty state description based on filters
+  getEmptyStateDescription(): string {
+    if (this.hasFilters) {
+      return 'Intenta ajustar tus filtros para ver más resultados';
+    }
+    return 'Comienza creando tu primera orden de compra para reabastecer inventario.';
   }
 
   // Actions

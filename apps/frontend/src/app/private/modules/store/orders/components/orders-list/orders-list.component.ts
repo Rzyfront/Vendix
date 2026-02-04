@@ -2,49 +2,76 @@ import {
   Component,
   OnInit,
   OnDestroy,
-  Input,
   Output,
   EventEmitter,
-  OnChanges,
-  SimpleChanges,
 } from '@angular/core';
-import { Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil, forkJoin } from 'rxjs';
 
 import {
-  TableComponent,
   TableColumn,
   TableAction,
-  ButtonComponent,
-  IconComponent,
   DialogService,
   ToastService,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  InputsearchComponent,
+  OptionsDropdownComponent,
+  FilterConfig,
+  FilterValues,
+  DropdownAction,
 } from '../../../../../../shared/components/index';
 
+import { OrderEmptyStateComponent } from '../order-empty-state';
 import { StoreOrdersService } from '../../services/store-orders.service';
 import { CustomersService } from '../../../../store/customers/services/customers.service';
 import {
   Order,
   OrderQuery,
-  PaginatedOrdersResponse,
-  FilterOption,
+  OrderState,
+  OrderChannel,
+  PaymentStatus,
 } from '../../interfaces/order.interface';
 
 @Component({
   selector: 'app-orders-list',
   standalone: true,
-  imports: [CommonModule, FormsModule, ResponsiveDataViewComponent],
+  imports: [
+    CommonModule,
+    FormsModule,
+    ResponsiveDataViewComponent,
+    InputsearchComponent,
+    OptionsDropdownComponent,
+    OrderEmptyStateComponent,
+  ],
   templateUrl: './orders-list.component.html',
   styleUrls: ['./orders-list.component.css'],
 })
-export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
-  @Input() filters: OrderQuery = {
+export class OrdersListComponent implements OnInit, OnDestroy {
+  @Output() viewOrder = new EventEmitter<string>();
+  @Output() create = new EventEmitter<void>();
+  @Output() refresh = new EventEmitter<void>();
+
+  private destroy$ = new Subject<void>();
+
+  // Data
+  orders: Order[] = [];
+  totalItems = 0;
+  loading = false;
+
+  // Filter state
+  searchTerm = '';
+  selectedStatus = '';
+  selectedChannel = '';
+  selectedPaymentStatus = '';
+  selectedDateRange = '';
+
+  // Filters query
+  filters: OrderQuery = {
     search: '',
     status: undefined,
+    channel: undefined,
     payment_status: undefined,
     date_range: undefined,
     page: 1,
@@ -53,14 +80,73 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
     sort_order: 'desc',
   };
 
-  @Output() viewOrder = new EventEmitter<string>();
-  @Output() ordersLoaded = new EventEmitter<any>();
-  private destroy$ = new Subject<void>();
+  // Filter configuration for the options dropdown
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'status',
+      label: 'Estado',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos los Estados' },
+        { value: 'created', label: 'Creada' },
+        { value: 'pending_payment', label: 'Pago Pendiente' },
+        { value: 'processing', label: 'Procesando' },
+        { value: 'shipped', label: 'Enviada' },
+        { value: 'delivered', label: 'Entregada' },
+        { value: 'cancelled', label: 'Cancelada' },
+        { value: 'refunded', label: 'Reembolsada' },
+        { value: 'finished', label: 'Finalizada' },
+      ],
+    },
+    {
+      key: 'channel',
+      label: 'Canal',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos los Canales' },
+        { value: 'pos', label: 'Punto de Venta' },
+        { value: 'ecommerce', label: 'Tienda Online' },
+      ],
+    },
+    {
+      key: 'payment_status',
+      label: 'Estado de Pago',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos los Estados de Pago' },
+        { value: 'pending', label: 'Pendiente' },
+        { value: 'processing', label: 'Procesando' },
+        { value: 'completed', label: 'Completado' },
+        { value: 'failed', label: 'Fallido' },
+        { value: 'refunded', label: 'Reembolsado' },
+        { value: 'cancelled', label: 'Cancelado' },
+      ],
+    },
+    {
+      key: 'date_range',
+      label: 'Período',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todo el Período' },
+        { value: 'today', label: 'Hoy' },
+        { value: 'yesterday', label: 'Ayer' },
+        { value: 'thisWeek', label: 'Esta Semana' },
+        { value: 'lastWeek', label: 'Semana Pasada' },
+        { value: 'thisMonth', label: 'Este Mes' },
+        { value: 'lastMonth', label: 'Mes Pasado' },
+        { value: 'thisYear', label: 'Este Año' },
+        { value: 'lastYear', label: 'Año Pasado' },
+      ],
+    },
+  ];
 
-  // Data
-  orders: Order[] = [];
-  totalItems = 0;
-  loading = false;
+  // Current filter values
+  filterValues: FilterValues = {};
+
+  // Dropdown actions
+  dropdownActions: DropdownAction[] = [
+    { label: 'Nueva Orden', icon: 'plus', action: 'create', variant: 'primary' },
+  ];
 
   // Table configuration
   columns: TableColumn[] = [
@@ -70,6 +156,25 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
       label: 'Customer',
       sortable: true,
       priority: 2,
+    },
+    {
+      key: 'channel',
+      label: 'Canal',
+      sortable: true,
+      badge: true,
+      priority: 2,
+      badgeConfig: {
+        type: 'custom',
+        size: 'sm',
+        colorMap: {
+          pos: '#6366f1',
+          ecommerce: '#10b981',
+          agent: '#8b5cf6',
+          whatsapp: '#22c55e',
+          marketplace: '#f59e0b',
+        },
+      },
+      transform: (value: any) => this.formatChannel(value),
     },
     {
       key: 'state',
@@ -132,8 +237,10 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
   // Card configuration for mobile
   cardConfig: ItemListCardConfig = {
     titleKey: 'order_number',
-    titleTransform: (val: string) => `Order #${val}`,
+    titleTransform: (item) => `#${item.order_number}`,
     subtitleKey: 'customer_name',
+    avatarFallbackIcon: 'shopping-bag',
+    avatarShape: 'circle',
     badgeKey: 'state',
     badgeConfig: {
       type: 'custom',
@@ -150,11 +257,14 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
       },
     },
     badgeTransform: (value: any) => this.formatStatus(value),
+    footerKey: 'grand_total',
+    footerLabel: 'Total',
+    footerStyle: 'prominent',
+    footerTransform: (value: any) => `$${(value || 0).toFixed(2)}`,
     detailKeys: [
-      { key: 'grand_total', label: 'Total', transform: (value: any) => `$${(value || 0).toFixed(2)}` },
       {
         key: 'created_at',
-        label: 'Date',
+        label: 'Fecha',
         transform: (value: any) => {
           if (!value) return 'N/A';
           const date = new Date(value);
@@ -164,29 +274,96 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
     ],
   };
 
-  // Filter options (now handled by parent component)
-
   constructor(
     private ordersService: StoreOrdersService,
     private customersService: CustomersService,
     private dialogService: DialogService,
     private toastService: ToastService,
-    private router: Router
-  ) { }
+  ) {}
 
   ngOnInit(): void {
     this.loadOrders();
   }
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['filters'] && !changes['filters'].firstChange) {
-      this.loadOrders();
-    }
-  }
-
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
+  }
+
+  // Computed property for hasFilters
+  get hasFilters(): boolean {
+    return !!(
+      this.searchTerm ||
+      this.selectedStatus ||
+      this.selectedChannel ||
+      this.selectedPaymentStatus ||
+      this.selectedDateRange
+    );
+  }
+
+  getEmptyStateTitle(): string {
+    return this.hasFilters
+      ? 'Ninguna orden coincide con sus filtros'
+      : 'No se encontraron órdenes';
+  }
+
+  getEmptyStateDescription(): string {
+    return this.hasFilters
+      ? 'Intente ajustar sus términos de búsqueda o filtros'
+      : 'Comience creando su primera orden.';
+  }
+
+  // Event handlers
+  onSearchChange(term: string): void {
+    this.searchTerm = term;
+    this.filters.search = term;
+    this.filters.page = 1;
+    this.loadOrders();
+  }
+
+  onFilterChange(values: FilterValues): void {
+    this.filterValues = values;
+    this.selectedStatus = (values['status'] as string) || '';
+    this.selectedChannel = (values['channel'] as string) || '';
+    this.selectedPaymentStatus = (values['payment_status'] as string) || '';
+    this.selectedDateRange = (values['date_range'] as string) || '';
+
+    this.filters.status = this.selectedStatus ? (this.selectedStatus as OrderState) : undefined;
+    this.filters.channel = this.selectedChannel ? (this.selectedChannel as OrderChannel) : undefined;
+    this.filters.payment_status = this.selectedPaymentStatus ? (this.selectedPaymentStatus as PaymentStatus) : undefined;
+    this.filters.date_range = this.selectedDateRange || undefined;
+    this.filters.page = 1;
+
+    this.loadOrders();
+  }
+
+  clearFilters(): void {
+    this.searchTerm = '';
+    this.selectedStatus = '';
+    this.selectedChannel = '';
+    this.selectedPaymentStatus = '';
+    this.selectedDateRange = '';
+    this.filterValues = {};
+
+    this.filters.search = '';
+    this.filters.status = undefined;
+    this.filters.channel = undefined;
+    this.filters.payment_status = undefined;
+    this.filters.date_range = undefined;
+    this.filters.page = 1;
+
+    this.loadOrders();
+  }
+
+  onActionClick(action: string): void {
+    switch (action) {
+      case 'create':
+        this.create.emit();
+        break;
+      case 'export':
+        this.exportOrders();
+        break;
+    }
   }
 
   // Load orders with current filters
@@ -233,11 +410,6 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
                   }));
 
                   this.loading = false;
-                  this.ordersLoaded.emit({
-                    orders: this.orders,
-                    totalItems: this.totalItems,
-                    filters: this.filters,
-                  });
                 },
                 error: (error) => {
                   console.error('Error loading customers:', error);
@@ -246,11 +418,6 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
                     customer_name: order.customer_id ? 'N/A' : 'Consumidor Final'
                   }));
                   this.loading = false;
-                  this.ordersLoaded.emit({
-                    orders: this.orders,
-                    totalItems: this.totalItems,
-                    filters: this.filters,
-                  });
                 }
               });
           } else {
@@ -260,27 +427,17 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
               customer_name: order.customer_id ? 'N/A' : 'Consumidor Final'
             }));
             this.loading = false;
-            this.ordersLoaded.emit({
-              orders: this.orders,
-              totalItems: this.totalItems,
-              filters: this.filters,
-            });
           }
         },
         error: (error: any) => {
           console.error('Error loading orders:', error);
           this.toastService.error('Failed to load orders. Please try again.');
           this.loading = false;
-          this.ordersLoaded.emit({
-            orders: [],
-            totalItems: 0,
-            filters: this.filters,
-          });
         },
       });
   }
 
-  // Event handlers
+  // Pagination and sorting
   onPageChange(page: number): void {
     if (this.filters.page !== undefined) {
       this.filters.page = page;
@@ -318,6 +475,7 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
         next: () => {
           this.toastService.success('Orden cancelada exitosamente');
           this.loadOrders();
+          this.refresh.emit();
         },
         error: (error: any) => {
           console.error('Error cancelling order:', error);
@@ -352,12 +510,29 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
   // Helper methods for formatting
   formatStatus(status: string | undefined): string {
     if (!status) return 'Unknown';
-    return status.charAt(0).toUpperCase() + status.slice(1);
+    const statusMap: Record<string, string> = {
+      created: 'Creada',
+      pending_payment: 'Pago Pendiente',
+      processing: 'Procesando',
+      shipped: 'Enviada',
+      delivered: 'Entregada',
+      cancelled: 'Cancelada',
+      refunded: 'Reembolsada',
+      finished: 'Finalizada',
+    };
+    return statusMap[status] || status.charAt(0).toUpperCase() + status.slice(1);
   }
 
-  formatPaymentStatus(status: string | undefined): string {
-    if (!status) return 'Unknown';
-    return status.charAt(0).toUpperCase() + status.slice(1);
+  formatChannel(channel: string | undefined): string {
+    if (!channel) return 'N/A';
+    const channelMap: Record<string, string> = {
+      pos: 'POS',
+      ecommerce: 'Online',
+      agent: 'IA',
+      whatsapp: 'WhatsApp',
+      marketplace: 'Marketplace',
+    };
+    return channelMap[channel] || channel.charAt(0).toUpperCase() + channel.slice(1);
   }
 
   // Math utility for template

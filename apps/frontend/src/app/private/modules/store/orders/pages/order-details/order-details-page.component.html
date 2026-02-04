@@ -1,6 +1,6 @@
 <div class="min-h-screen" style="background-color: var(--color-background)">
   <!-- Loading State -->
-  <div *ngIf="isLoading" class="flex justify-center items-center h-64">
+  <div *ngIf="isLoading()" class="flex justify-center items-center h-64">
     <div
       class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"
     ></div>
@@ -34,69 +34,19 @@
   </div>
 
   <!-- Content when loaded -->
-  <ng-container *ngIf="order && !isLoading">
-    <!-- Header Sticky con Patrón Profesional -->
-    <div
-      class="sticky top-0 z-30 bg-white border-b border-gray-200 shadow-sm rounded-b-xl p-2 md:px-6 md:py-4"
-    >
-      <div
-        class="max-w-[1600px] mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 md:gap-4"
-      >
-        <!-- Left -->
-        <div class="flex items-center gap-2 md:gap-4">
-          <app-button
-            variant="ghost"
-            (clicked)="goBack()"
-            customClasses="!p-0 !w-10 !h-10 !rounded-xl border border-transparent hover:border-gray-200"
-          >
-            <app-icon
-              name="arrow-left"
-              size="20"
-              class="text-gray-500"
-            ></app-icon>
-          </app-button>
-          <div class="flex items-center gap-3">
-            <div
-              class="w-12 h-12 rounded-xl bg-[var(--color-surface)] flex items-center justify-center border border-border shadow-sm"
-            >
-              <app-icon
-                name="shopping-cart"
-                size="24"
-                class="text-primary-600"
-              ></app-icon>
-            </div>
-            <div class="flex flex-col">
-              <div class="flex items-center gap-2">
-                <h1 class="text-xl font-bold text-gray-900 leading-tight">
-                  Orden #{{ order.order_number }}
-                </h1>
-                <span
-                  class="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider"
-                  [class]="getStatusColor(order.state)"
-                >
-                  {{ formatStatus(order.state) }}
-                </span>
-              </div>
-              <p class="text-sm text-gray-500 font-medium">
-                {{ formatDate(order.created_at) }} • Tienda:
-                {{ order.stores?.name || order.store_id }}
-              </p>
-            </div>
-          </div>
-        </div>
-        <!-- Right -->
-        <div class="flex items-center gap-3 w-full sm:w-auto">
-          <app-button
-            variant="outline"
-            (clicked)="printOrder()"
-            customClasses="!rounded-xl flex-1 sm:flex-none font-medium"
-          >
-            <app-icon name="printer" size="16"></app-icon>
-            <span class="ml-2">Imprimir</span>
-          </app-button>
-        </div>
-      </div>
-    </div>
+  <ng-container *ngIf="order() as orderData">
+    <!-- Sticky Header Component -->
+    <app-sticky-header
+      [title]="headerTitle()"
+      [subtitle]="headerSubtitle()"
+      icon="shopping-cart"
+      [showBackButton]="true"
+      backRoute="/admin/orders"
+      [badgeText]="headerBadgeText()"
+      [badgeColor]="headerBadgeColor()"
+      [actions]="headerActions()"
+      (actionClicked)="onHeaderAction($event)"
+    ></app-sticky-header>
 
     <!-- Main Grid -->
     <div class="max-w-[1600px] mx-auto p-2 md:p-4">
@@ -117,11 +67,11 @@
                 <div
                   class="w-14 h-14 bg-primary/10 text-primary rounded-xl flex items-center justify-center text-xl font-bold border border-primary/5"
                 >
-                  {{ order.users?.first_name?.charAt(0) || "C" }}
+                  {{ orderData.users?.first_name?.charAt(0) || "C" }}
                 </div>
                 <div class="space-y-1">
                   <p class="text-lg font-bold text-gray-900">
-                    {{ order.users?.first_name }} {{ order.users?.last_name }}
+                    {{ orderData.users?.first_name }} {{ orderData.users?.last_name }}
                   </p>
                   <div class="flex items-center gap-2 text-sm text-gray-600">
                     <app-icon
@@ -129,10 +79,10 @@
                       size="16"
                       class="text-gray-400"
                     ></app-icon>
-                    {{ order.users?.email }}
+                    {{ orderData.users?.email }}
                   </div>
                   <div
-                    *ngIf="order.users?.phone"
+                    *ngIf="orderData.users?.phone"
                     class="flex items-center gap-2 text-sm text-gray-600"
                   >
                     <app-icon
@@ -140,7 +90,7 @@
                       size="16"
                       class="text-gray-400"
                     ></app-icon>
-                    {{ order.users?.phone }}
+                    {{ orderData.users?.phone }}
                   </div>
                 </div>
               </div>
@@ -161,7 +111,7 @@
                 </h3>
                 <div
                   *ngIf="
-                    order.addresses_orders_shipping_address_idToaddresses as addr
+                    orderData.addresses_orders_shipping_address_idToaddresses as addr
                   "
                   class="text-gray-700 space-y-1"
                 >
@@ -178,7 +128,7 @@
                   </p>
                 </div>
                 <p
-                  *ngIf="!order.addresses_orders_shipping_address_idToaddresses"
+                  *ngIf="!orderData.addresses_orders_shipping_address_idToaddresses"
                   class="text-sm text-gray-400 italic"
                 >
                   No especificada
@@ -201,7 +151,7 @@
                 </h3>
                 <div
                   *ngIf="
-                    order.addresses_orders_billing_address_idToaddresses as addr
+                    orderData.addresses_orders_billing_address_idToaddresses as addr
                   "
                   class="text-gray-700 space-y-1"
                 >
@@ -218,7 +168,7 @@
                   </p>
                 </div>
                 <p
-                  *ngIf="!order.addresses_orders_billing_address_idToaddresses"
+                  *ngIf="!orderData.addresses_orders_billing_address_idToaddresses"
                   class="text-sm text-gray-400 italic"
                 >
                   Igual a la dirección de envío
@@ -238,13 +188,13 @@
               <span
                 class="text-xs font-medium text-gray-500 bg-[var(--color-surface)] px-3 py-1 rounded-lg"
               >
-                {{ order.order_items?.length || 0 }} productos
+                {{ orderData.order_items?.length || 0 }} productos
               </span>
             </div>
 
             <div class="space-y-2">
               <div
-                *ngFor="let item of order.order_items"
+                *ngFor="let item of orderData.order_items"
                 class="p-4 bg-[var(--color-surface)] rounded-xl border border-border hover:border-gray-300 transition-colors"
               >
                 <div class="flex items-start gap-4">
@@ -352,7 +302,7 @@
                   <span
                     class="text-[10px] font-bold text-gray-400 uppercase tracking-tighter"
                   >
-                    {{ formatDate(order.created_at) }}
+                    {{ formatDate(orderData.created_at) }}
                   </span>
                 </div>
               </div>
@@ -376,20 +326,20 @@
               <button
                 *ngFor="let status of orderStatusOptions"
                 (clicked)="updateOrderStatus(status)"
-                [disabled]="order.state === status"
+                [disabled]="orderData.state === status"
                 class="px-3 py-2 text-xs font-bold rounded-lg border transition-all duration-200 flex items-center justify-center gap-2"
                 [ngClass]="{
                   'bg-primary-600 text-white border-primary-600 shadow-md shadow-primary-200':
-                    order.state === status,
+                    orderData.state === status,
                   'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-[var(--color-surface)]':
-                    order.state !== status,
-                  'opacity-50 cursor-not-allowed': order.state === status,
+                    orderData.state !== status,
+                  'opacity-50 cursor-not-allowed': orderData.state === status,
                 }"
               >
                 <span
                   class="w-1.5 h-1.5 rounded-full"
                   [ngClass]="
-                    order.state === status ? 'bg-white' : 'bg-gray-300'
+                    orderData.state === status ? 'bg-white' : 'bg-gray-300'
                   "
                 ></span>
                 {{ formatStatus(status) }}
@@ -411,25 +361,25 @@
               <div class="flex justify-between items-center text-sm">
                 <span class="text-text-secondary">Subtotal</span>
                 <span class="font-semibold text-gray-900"
-                  >${{ (order.subtotal_amount || 0).toFixed(2) }}</span
+                  >${{ (orderData.subtotal_amount || 0).toFixed(2) }}</span
                 >
               </div>
               <div class="flex justify-between items-center text-sm">
                 <span class="text-text-secondary">Descuento</span>
                 <span class="font-semibold text-green-600"
-                  >-${{ (order.discount_amount || 0).toFixed(2) }}</span
+                  >-${{ (orderData.discount_amount || 0).toFixed(2) }}</span
                 >
               </div>
               <div class="flex justify-between items-center text-sm">
                 <span class="text-text-secondary">Envío</span>
                 <span class="font-semibold text-gray-900"
-                  >${{ (order.shipping_cost || 0).toFixed(2) }}</span
+                  >${{ (orderData.shipping_cost || 0).toFixed(2) }}</span
                 >
               </div>
               <div class="flex justify-between items-center text-sm">
                 <span class="text-text-secondary">Impuestos</span>
                 <span class="font-semibold text-gray-900"
-                  >${{ (order.tax_amount || 0).toFixed(2) }}</span
+                  >${{ (orderData.tax_amount || 0).toFixed(2) }}</span
                 >
               </div>
               <div
@@ -439,7 +389,7 @@
                 <span
                   class="text-2xl font-black text-primary-600 font-mono tracking-tighter"
                 >
-                  ${{ (order.grand_total || 0).toFixed(2) }}
+                  ${{ (orderData.grand_total || 0).toFixed(2) }}
                 </span>
               </div>
             </div>
@@ -455,8 +405,8 @@
                 class="px-3 py-1 bg-green-500 text-white text-[10px] font-black uppercase rounded-lg tracking-wider"
               >
                 {{
-                  order.payments && order.payments.length > 0
-                    ? order.payments[0].state
+                  orderData.payments && orderData.payments.length > 0
+                    ? orderData.payments[0].state
                     : "Pendiente"
                 }}
               </span>
@@ -466,7 +416,7 @@
             <div class="pt-4">
               <button
                 *ngIf="
-                  order.state === 'finished' || order.state === 'delivered'
+                  orderData.state === 'finished' || orderData.state === 'delivered'
                 "
                 class="w-full bg-gray-900 text-white font-bold py-3 rounded-xl hover:bg-black transition-colors flex items-center justify-center gap-2 shadow-md"
               >
@@ -475,7 +425,7 @@
               </button>
               <div
                 *ngIf="
-                  !(order.state === 'finished' || order.state === 'delivered')
+                  !(orderData.state === 'finished' || orderData.state === 'delivered')
                 "
                 class="text-[10px] text-center text-text-secondary font-bold uppercase tracking-widest bg-[var(--color-surface)] py-3 rounded-xl border border-dashed border-border"
               >

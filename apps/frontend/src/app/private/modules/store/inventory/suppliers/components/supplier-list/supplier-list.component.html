@@ -1,12 +1,12 @@
 <div class="md:space-y-4">
-  <!-- Lista de Órdenes -->
+  <!-- Suppliers List Container -->
   <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border md:min-h-[600px] md:overflow-hidden">
     <!-- Search Section: sticky below stats on mobile, normal on desktop -->
     <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
       <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
         <!-- Title - smaller on mobile, larger on desktop -->
         <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
-          Órdenes ({{ totalItems }})
+          Proveedores ({{ suppliers.length }})
         </h2>
 
         <!-- Search row - horizontal on mobile -->
@@ -14,8 +14,8 @@
           <app-inputsearch
             class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
             size="sm"
-            placeholder="Buscar órdenes..."
-            [debounceTime]="1000"
+            placeholder="Buscar proveedor..."
+            [debounceTime]="300"
             [ngModel]="searchTerm"
             (ngModelChange)="onSearchChange($event)"
           ></app-inputsearch>
@@ -25,7 +25,7 @@
             [filters]="filterConfigs"
             [filterValues]="filterValues"
             [actions]="dropdownActions"
-            [isLoading]="loading"
+            [isLoading]="isLoading"
             (filterChange)="onFilterChange($event)"
             (clearAllFilters)="clearFilters()"
             (actionClick)="onActionClick($event)"
@@ -34,34 +34,44 @@
       </div>
     </div>
 
-    <!-- Estado de Carga -->
-    <div *ngIf="loading" class="p-4 md:p-6 text-center">
+    <!-- Loading State -->
+    <div *ngIf="isLoading" class="p-4 md:p-6 text-center">
       <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      <p class="mt-2 text-text-secondary">Cargando órdenes...</p>
+      <p class="mt-2 text-text-secondary">Cargando proveedores...</p>
     </div>
 
-    <!-- Estado Vacío -->
-    <app-order-empty-state
-      *ngIf="!loading && orders.length === 0"
-      [title]="getEmptyStateTitle()"
-      [description]="getEmptyStateDescription()"
-      [showAdditionalActions]="hasFilters"
-      (actionClick)="create.emit()"
-      (refreshClick)="refresh.emit()"
-      (clearFiltersClick)="clearFilters()"
-    ></app-order-empty-state>
+    <!-- Empty State -->
+    <div *ngIf="!isLoading && suppliers.length === 0" class="p-8 md:p-12 text-center text-gray-500">
+      <app-icon name="users" [size]="48" class="mx-auto mb-4 text-gray-300"></app-icon>
+      <h3 class="text-lg font-medium text-gray-900">{{ getEmptyStateTitle() }}</h3>
+      <p class="mt-1">{{ getEmptyStateDescription() }}</p>
+      <div class="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
+        <app-button variant="primary" (clicked)="create.emit()">
+          <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+          Agregar Proveedor
+        </app-button>
+        @if (hasFilters) {
+          <app-button variant="outline" (clicked)="clearFilters()">
+            <app-icon name="x" [size]="16" slot="icon"></app-icon>
+            Limpiar Filtros
+          </app-button>
+        }
+      </div>
+    </div>
 
-    <!-- Orders List -->
-    <div *ngIf="!loading && orders.length > 0" class="px-2 pb-2 pt-0 md:p-4">
+    <!-- Suppliers List -->
+    <div *ngIf="!isLoading && suppliers.length > 0" class="px-2 pb-2 pt-1 md:p-4">
       <app-responsive-data-view
-        [data]="orders"
-        [columns]="columns"
-        [actions]="actions"
+        [data]="suppliers"
+        [columns]="tableColumns"
         [cardConfig]="cardConfig"
-        [loading]="loading"
+        [actions]="tableActions"
+        [loading]="isLoading"
         [sortable]="true"
-        (sort)="onSort($event)"
-        (rowClick)="handleViewOrder($event.id)"
+        emptyMessage="No hay proveedores registrados"
+        emptyIcon="users"
+        (sort)="sort.emit($event)"
+        (rowClick)="edit.emit($event)"
       ></app-responsive-data-view>
     </div>
   </div>

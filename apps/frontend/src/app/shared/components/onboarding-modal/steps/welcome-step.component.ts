@@ -505,7 +505,6 @@ export class WelcomeStepComponent implements OnInit {
     type: 'STORE' | 'ORGANIZATION';
   }>();
   @Output() selectionChanged = new EventEmitter<'STORE' | 'ORGANIZATION' | null>();
-  @Output() skipSetup = new EventEmitter<void>();
   @Output() nextStep = new EventEmitter<void>();
 
   private destroy$ = new Subject<void>();
@@ -581,9 +580,5 @@ export class WelcomeStepComponent implements OnInit {
 
   onNextStep(): void {
     this.nextStep.emit();
-  }
-
-  onSkipSetup(): void {
-    this.skipSetup.emit();
   }
 }

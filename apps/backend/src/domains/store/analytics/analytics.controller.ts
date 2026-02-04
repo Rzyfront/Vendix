@@ -57,6 +57,12 @@ export class AnalyticsController {
     return this.response_service.success(result);
   }
 
+  @Get('sales/by-channel')
+  async getSalesByChannel(@Query() query: SalesAnalyticsQueryDto) {
+    const result = await this.sales_analytics_service.getSalesByChannel(query);
+    return this.response_service.success(result);
+  }
+
   @Get('sales/export')
   async exportSalesAnalytics(
     @Query() query: SalesAnalyticsQueryDto,

@@ -292,12 +292,18 @@
     width: calc(100vw - 2rem);
     max-width: none;
     position: fixed;
+    top: var(--dropdown-top, 150px);
     left: 1rem;
     right: 1rem;
+    bottom: auto;
+    max-height: calc(100vh - var(--dropdown-top, 150px) - 1rem);
+    border-radius: 0.75rem;
+    box-shadow: 0 4px 25px -5px rgba(0, 0, 0, 0.15),
+      0 10px 10px -5px rgba(0, 0, 0, 0.04);
   }
 
   .filters-body {
-    max-height: 50vh;
+    max-height: calc(100vh - var(--dropdown-top, 150px) - 8rem);
   }
 }
 
