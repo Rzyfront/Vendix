@@ -220,7 +220,6 @@ interface WizardStep {
             <app-icon name="arrow-left" size="14" slot="icon"></app-icon>
             <ng-container *ngIf="!isTermsStep">Anterior</ng-container>
           </app-button>
-
         </div>
 
         <!-- Right side: Next/Complete/Terms Actions -->
