@@ -4,6 +4,8 @@
 .options-dropdown-container {
   position: relative;
   display: inline-block;
+  // Ensure container creates its own stacking context above other elements
+  z-index: 100;
 }
 
 .options-dropdown-trigger {
@@ -286,24 +288,33 @@
   }
 }
 
-// Mobile optimizations
-@media (max-width: 640px) {
-  .options-dropdown-content {
-    width: calc(100vw - 2rem);
-    max-width: none;
-    position: fixed;
-    top: var(--dropdown-top, 150px);
-    left: 1rem;
-    right: 1rem;
-    bottom: auto;
-    max-height: calc(100vh - var(--dropdown-top, 150px) - 1rem);
-    border-radius: 0.75rem;
-    box-shadow: 0 4px 25px -5px rgba(0, 0, 0, 0.15),
-      0 10px 10px -5px rgba(0, 0, 0, 0.04);
-  }
+// Mobile and tablet optimizations - use fixed positioning to escape overflow:hidden containers
+.options-dropdown-content.mobile-fixed {
+  width: calc(100vw - 2rem);
+  max-width: 24rem;
+  position: fixed;
+  // top is set inline via [style.top.px]
+  left: auto;
+  right: 1rem;
+  bottom: auto;
+  margin-top: 0; // Reset margin since position is calculated
+  max-height: 60vh;
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 25px -5px rgba(0, 0, 0, 0.15),
+    0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
 
+@media (max-width: 1023px) {
   .filters-body {
-    max-height: calc(100vh - var(--dropdown-top, 150px) - 8rem);
+    max-height: 50vh;
+  }
+}
+
+// Small mobile - full width dropdown
+@media (max-width: 640px) {
+  .options-dropdown-content.mobile-fixed {
+    max-width: none;
+    left: 1rem;
   }
 }
 

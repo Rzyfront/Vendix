@@ -108,45 +108,39 @@ import { CartState, CartItem } from '../models/cart.model';
                   *ngIf="!item.product.image_url && !item.product.image"
                   class="image-placeholder"
                 >
-                  <app-icon name="image" [size]="20"></app-icon>
+                  <app-icon name="image" [size]="18"></app-icon>
                 </div>
               </div>
 
-              <!-- Item Details -->
-              <div class="item-details">
-                <div class="item-header">
-                  <h4 class="item-name">{{ item.product.name }}</h4>
-                  <button
-                    class="remove-btn"
-                    (click)="onRemoveItem(item.id)"
-                    title="Eliminar"
-                  >
-                    <app-icon name="x" [size]="16"></app-icon>
-                  </button>
-                </div>
-
+              <!-- Item Info -->
+              <div class="item-info">
+                <h4 class="item-name">{{ item.product.name }}</h4>
                 <div class="item-meta">
-                  <span *ngIf="item.product.sku" class="item-sku">{{
-                    item.product.sku
-                  }}</span>
-                  <span class="item-unit-price"
-                    >{{ formatCurrency(item.finalPrice) }} c/u</span
-                  >
+                  <span *ngIf="item.product.sku" class="item-sku">{{ item.product.sku }}</span>
+                  <span class="item-unit-price">{{ formatCurrency(item.finalPrice) }} c/u</span>
                 </div>
+              </div>
 
-                <div class="item-footer">
-                  <app-quantity-control
-                    [value]="item.quantity"
-                    [min]="1"
-                    [max]="item.product.stock"
-                    [editable]="true"
-                    [size]="'sm'"
-                    (valueChange)="onQuantityChange(item.id, $event)"
-                  ></app-quantity-control>
-                  <span class="item-total">{{
-                    formatCurrency(item.totalPrice)
-                  }}</span>
-                </div>
+              <!-- Remove Button -->
+              <button
+                class="remove-btn"
+                (click)="onRemoveItem(item.id)"
+                title="Eliminar"
+              >
+                <app-icon name="x" [size]="16"></app-icon>
+              </button>
+
+              <!-- Actions Row: Quantity + Total -->
+              <div class="item-actions">
+                <app-quantity-control
+                  [value]="item.quantity"
+                  [min]="1"
+                  [max]="item.product.stock"
+                  [editable]="true"
+                  [size]="'sm'"
+                  (valueChange)="onQuantityChange(item.id, $event)"
+                ></app-quantity-control>
+                <span class="item-total">{{ formatCurrency(item.totalPrice) }}</span>
               </div>
             </div>
           </div>
@@ -443,8 +437,10 @@ import { CartState, CartItem } from '../models/cart.model';
       }
 
       .cart-item {
-        display: flex;
-        gap: 12px;
+        display: grid;
+        grid-template-columns: 56px 1fr auto;
+        grid-template-rows: auto auto;
+        gap: 6px 10px;
         padding: 12px;
         background: var(--color-surface);
         border: 1px solid var(--color-border);
@@ -457,11 +453,12 @@ import { CartState, CartItem } from '../models/cart.model';
       }
 
       .item-image {
-        width: 70px;
-        height: 70px;
+        grid-row: 1;
+        grid-column: 1;
+        width: 56px;
+        height: 56px;
         border-radius: 10px;
         overflow: hidden;
-        flex-shrink: 0;
         background: var(--color-muted);
       }
 
@@ -480,18 +477,13 @@ import { CartState, CartItem } from '../models/cart.model';
         color: var(--color-text-muted);
       }
 
-      .item-details {
-        flex: 1;
+      .item-info {
+        grid-row: 1;
+        grid-column: 2;
         min-width: 0;
         display: flex;
         flex-direction: column;
-      }
-
-      .item-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: 8px;
+        justify-content: center;
       }
 
       .item-name {
@@ -506,31 +498,11 @@ import { CartState, CartItem } from '../models/cart.model';
         overflow: hidden;
       }
 
-      .remove-btn {
-        width: 28px;
-        height: 28px;
-        border: none;
-        background: transparent;
-        color: var(--color-text-muted);
-        cursor: pointer;
-        border-radius: 6px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-        transition: all 0.2s ease;
-      }
-
-      .remove-btn:hover {
-        background: rgba(239, 68, 68, 0.1);
-        color: var(--color-destructive);
-      }
-
       .item-meta {
         display: flex;
         align-items: center;
-        gap: 8px;
-        margin-top: 4px;
+        gap: 6px;
+        margin-top: 2px;
       }
 
       .item-sku {
@@ -544,16 +516,40 @@ import { CartState, CartItem } from '../models/cart.model';
         color: var(--color-text-secondary);
       }
 
-      .item-footer {
+      .remove-btn {
+        grid-row: 1;
+        grid-column: 3;
+        width: 28px;
+        height: 28px;
+        border: none;
+        background: transparent;
+        color: var(--color-text-muted);
+        cursor: pointer;
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s ease;
+      }
+
+      .remove-btn:hover {
+        background: rgba(239, 68, 68, 0.1);
+        color: var(--color-destructive);
+      }
+
+      .item-actions {
+        grid-row: 2;
+        grid-column: 1 / -1;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-top: auto;
         padding-top: 8px;
+        border-top: 1px solid var(--color-border);
+        margin-top: 4px;
       }
 
       .item-total {
-        font-size: 16px;
+        font-size: 15px;
         font-weight: 700;
         color: var(--color-primary);
       }

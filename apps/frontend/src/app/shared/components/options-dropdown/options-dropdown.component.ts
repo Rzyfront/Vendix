@@ -82,7 +82,12 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
   activeFiltersCount: number = 0;
 
   /** Position for mobile dropdown */
-  dropdownTop: number = 0;
+  dropdownTop: number | null = null;
+
+  /** Check if we're on mobile/tablet */
+  get isMobileOrTablet(): boolean {
+    return typeof window !== 'undefined' && window.innerWidth < 1024;
+  }
 
   /** Local state for filter values */
   localFilterValues: FilterValues = {};
@@ -142,12 +147,13 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
   }
 
   private calculateDropdownPosition(): void {
-    if (this.triggerButton?.nativeElement) {
+    // Only calculate position for mobile/tablet where we use position: fixed
+    if (this.isMobileOrTablet && this.triggerButton?.nativeElement) {
       const rect = this.triggerButton.nativeElement.getBoundingClientRect();
-      // Smaller gap on mobile (< 640px), normal gap on larger screens
-      const gap = window.innerWidth < 640 ? 3 : 8;
-      this.dropdownTop = rect.bottom + gap;
+      this.dropdownTop = rect.bottom;
       this.cdr.markForCheck();
+    } else {
+      this.dropdownTop = null; // Desktop uses CSS positioning
     }
   }
 

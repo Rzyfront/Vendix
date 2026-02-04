@@ -348,9 +348,10 @@ model stores {
   carts                 carts[]
   wishlists             wishlists[]
   main_store_users      users[]                 @relation("main_store")
-  shipping_zones        shipping_zones[]
-  shipping_methods      shipping_methods[]
-  expenses              expenses[]
+  shipping_zones         shipping_zones[]
+  shipping_methods       shipping_methods[]
+  store_shipping_methods store_shipping_methods[]
+  expenses               expenses[]
 
   @@unique([organization_id, slug])
   @@index([onboarding])
@@ -1298,9 +1299,10 @@ model shipping_methods {
   display_order  Int                       @default(0)
   created_at     DateTime?                 @default(now()) @db.Timestamp(6)
   updated_at     DateTime?                 @default(now()) @db.Timestamp(6)
-  store          stores?                   @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  shipping_rates shipping_rates[]
-  orders         orders[]
+  store                  stores?                  @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  shipping_rates         shipping_rates[]
+  orders                 orders[]
+  store_shipping_methods store_shipping_methods[]
 
   @@index([store_id])
   @@index([is_system])
@@ -1325,6 +1327,27 @@ model shipping_rates {
 
   @@index([shipping_zone_id])
   @@index([shipping_method_id])
+}
+
+// Store-specific shipping method configuration (links stores to system shipping methods)
+model store_shipping_methods {
+  id                        Int                        @id @default(autoincrement())
+  store_id                  Int
+  system_shipping_method_id Int
+  display_name              String?                    @db.VarChar(100)
+  custom_config             Json?
+  state                     shipping_method_state_enum @default(enabled)
+  display_order             Int                        @default(0)
+  min_order_amount          Decimal?                   @db.Decimal(12, 2)
+  max_order_amount          Decimal?                   @db.Decimal(12, 2)
+  created_at                DateTime                   @default(now()) @db.Timestamp(6)
+  updated_at                DateTime                   @updatedAt @db.Timestamp(6)
+
+  store                  stores           @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  system_shipping_method shipping_methods @relation(fields: [system_shipping_method_id], references: [id])
+
+  @@unique([store_id, system_shipping_method_id])
+  @@index([store_id, state])
 }
 
 // ===== ECOMMERCE MODELS =====
@@ -1772,6 +1795,12 @@ enum shipping_rate_type_enum {
   price_based
   carrier_calculated
   free
+}
+
+enum shipping_method_state_enum {
+  enabled
+  disabled
+  archived
 }
 
 // Payment processing mode - determines when/how payment is collected

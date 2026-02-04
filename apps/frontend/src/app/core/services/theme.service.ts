@@ -193,6 +193,12 @@ export class ThemeService {
         '--color-text-primary': brandingConfig.colors.text?.primary,
         '--color-text-secondary': brandingConfig.colors.text?.secondary,
         '--color-text-muted': brandingConfig.colors.text?.muted,
+        // RGB versions for gradient/rgba usage
+        '--color-primary-rgb': this.hexToRgbString(brandingConfig.colors.primary),
+        '--color-secondary-rgb': this.hexToRgbString(brandingConfig.colors.secondary),
+        '--color-accent-rgb': this.hexToRgbString(brandingConfig.colors.accent),
+        '--color-background-rgb': this.hexToRgbString(brandingConfig.colors.background),
+        '--color-surface-rgb': this.hexToRgbString(brandingConfig.colors.surface),
       };
       this.setCssVariables(colorStyles);
     }
@@ -223,6 +229,18 @@ export class ThemeService {
     // Esto es crucial para solucionar condiciones de carrera donde applyBranding sobreescribe 
     // las modificaciones de applyUserTheme (como transparency en Aura).
     await this.applyUserTheme(this.activeUserTheme);
+  }
+
+  /**
+   * Convierte un color HEX a string RGB para uso en CSS variables.
+   * @param hex Color en formato HEX (ej: #7ed7a5)
+   * @returns String RGB (ej: "126, 215, 165") o undefined si es inválido
+   */
+  private hexToRgbString(hex: string | undefined): string | undefined {
+    if (!hex) return undefined;
+    const rgb = ColorUtils.hexToRgb(hex);
+    if (!rgb) return undefined;
+    return `${rgb.r}, ${rgb.g}, ${rgb.b}`;
   }
 
   /**

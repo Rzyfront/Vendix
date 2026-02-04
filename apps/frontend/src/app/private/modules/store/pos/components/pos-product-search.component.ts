@@ -50,14 +50,6 @@ import {
               <i class="fas fa-times"></i>
             </button>
           </div>
-          <button
-            class="barcode-scan-btn"
-            (click)="toggleBarcodeScanner()"
-            type="button"
-            title="Escanear código de barras"
-          >
-            <i class="fas fa-barcode"></i>
-          </button>
         </div>
 
         <div class="search-actions">
@@ -211,36 +203,6 @@ import {
         </div>
       </div>
 
-      <div class="barcode-scanner" *ngIf="showBarcodeScanner">
-        <div class="scanner-content">
-          <h3>Escanear Código de Barras</h3>
-          <input
-            type="text"
-            class="barcode-input"
-            [(ngModel)]="barcodeInput"
-            (keyup.enter)="processBarcode()"
-            (keyup.escape)="toggleBarcodeScanner()"
-            placeholder="Ingrese o escanee código de barras"
-            autofocus
-          />
-          <div class="scanner-actions">
-            <button
-              class="btn btn-secondary"
-              (click)="toggleBarcodeScanner()"
-              type="button"
-            >
-              Cancelar
-            </button>
-            <button
-              class="btn btn-primary"
-              (click)="processBarcode()"
-              type="button"
-            >
-              Buscar
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
   `,
   styles: [
@@ -309,21 +271,6 @@ import {
 
       .clear-search-btn:hover {
         background-color: #f3f4f6;
-      }
-
-      .barcode-scan-btn {
-        padding: 12px 16px;
-        background-color: #f3f4f6;
-        border: 2px solid #e5e7eb;
-        border-radius: 8px;
-        color: #374151;
-        cursor: pointer;
-        transition: all 0.3s ease;
-      }
-
-      .barcode-scan-btn:hover {
-        background-color: #e5e7eb;
-        border-color: #d1d5db;
       }
 
       .search-actions {
@@ -489,55 +436,6 @@ import {
         font-size: 14px;
       }
 
-      .barcode-scanner {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background-color: rgba(0, 0, 0, 0.5);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 1000;
-      }
-
-      .scanner-content {
-        background: white;
-        border-radius: 12px;
-        padding: 32px;
-        max-width: 400px;
-        width: 90%;
-        text-align: center;
-      }
-
-      .scanner-content h3 {
-        margin-bottom: 20px;
-        color: #1f2937;
-      }
-
-      .barcode-input {
-        width: 100%;
-        padding: 16px;
-        border: 2px solid #e5e7eb;
-        border-radius: 8px;
-        font-size: 18px;
-        text-align: center;
-        margin-bottom: 20px;
-      }
-
-      .barcode-input:focus {
-        outline: none;
-        border-color: #3b82f6;
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-      }
-
-      .scanner-actions {
-        display: flex;
-        gap: 12px;
-        justify-content: center;
-      }
-
       @media (max-width: 768px) {
         .search-header {
           flex-direction: column;
@@ -554,13 +452,10 @@ import {
 export class PosProductSearchComponent implements OnInit, OnDestroy {
   @Output() search = new EventEmitter<SearchFilters>();
   @Output() productSelected = new EventEmitter<Product>();
-  @Output() barcodeScanned = new EventEmitter<string>();
 
   searchQuery: string = '';
   showFilters: boolean = false;
   showSuggestions: boolean = false;
-  showBarcodeScanner: boolean = false;
-  barcodeInput: string = '';
 
   filters: SearchFilters = {
     query: '',
@@ -649,20 +544,6 @@ export class PosProductSearchComponent implements OnInit, OnDestroy {
     this.filters.query = suggestion;
     this.showSuggestions = false;
     this.performSearch();
-  }
-
-  toggleBarcodeScanner(): void {
-    this.showBarcodeScanner = !this.showBarcodeScanner;
-    if (this.showBarcodeScanner) {
-      this.barcodeInput = '';
-    }
-  }
-
-  processBarcode(): void {
-    if (this.barcodeInput.trim()) {
-      this.barcodeScanned.emit(this.barcodeInput.trim());
-      this.toggleBarcodeScanner();
-    }
   }
 
   get activeFiltersCount(): number {

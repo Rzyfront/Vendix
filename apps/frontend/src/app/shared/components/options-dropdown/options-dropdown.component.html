@@ -24,7 +24,8 @@
   <div
     *ngIf="isOpen"
     class="options-dropdown-content"
-    [style.--dropdown-top.px]="dropdownTop"
+    [style.top.px]="dropdownTop"
+    [class.mobile-fixed]="isMobileOrTablet"
     (click)="$event.stopPropagation()"
   >
     <div class="dropdown-header">
