@@ -262,6 +262,13 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.PaymentsSettingsComponent),
           },
           {
+            path: 'shipping',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/settings/shipping/shipping-settings.component'
+              ).then((c) => c.ShippingSettingsComponent),
+          },
+          {
             path: 'appearance',
             loadComponent: () =>
               import(

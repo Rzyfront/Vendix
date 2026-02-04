@@ -177,6 +177,44 @@ import { EChartsOption } from 'echarts';
           </app-chart>
         </div>
 
+        <!-- Nightingale Rose Chart -->
+        <div
+          class="rounded-xl shadow-sm border border-border p-6"
+          style="background-color: var(--color-surface);"
+        >
+          <h3 class="text-xl font-semibold mb-4" style="color: var(--text);">
+            Nightingale Rose Chart
+          </h3>
+          <p class="text-sm mb-4" style="color: var(--muted-foreground);">
+            Category distribution with radial variation
+          </p>
+          <app-chart
+            [options]="nightingaleChartData"
+            [theme]="currentTheme"
+            size="medium"
+          >
+          </app-chart>
+        </div>
+
+        <!-- Gauge Chart -->
+        <div
+          class="rounded-xl shadow-sm border border-border p-6"
+          style="background-color: var(--color-surface);"
+        >
+          <h3 class="text-xl font-semibold mb-4" style="color: var(--text);">
+            Gauge Chart
+          </h3>
+          <p class="text-sm mb-4" style="color: var(--muted-foreground);">
+            Performance indicator
+          </p>
+          <app-chart
+            [options]="gaugeChartData"
+            [theme]="currentTheme"
+            size="medium"
+          >
+          </app-chart>
+        </div>
+
         <!-- Scatter Chart -->
         <div
           class="rounded-xl shadow-sm border border-border p-6"
@@ -436,6 +474,82 @@ export class ChartShowcaseComponent {
     ]
   };
 
+  // Nightingale Rose Chart Data
+  nightingaleChartData: EChartsOption = {
+    title: {
+      text: 'Nightingale Rose Diagram',
+      subtext: 'Sales by Category',
+      left: 'center'
+    },
+    legend: {
+      bottom: '5%',
+      left: 'center'
+    },
+    series: [{
+      type: 'pie',
+      radius: ['20%', '70%'],
+      center: ['50%', '50%'],
+      roseType: 'radius', // This makes it a Nightingale Rose!
+      itemStyle: {
+        borderRadius: 5
+      },
+      label: {
+        show: true
+      },
+      data: [
+        { value: 40, name: 'Electronics' },
+        { value: 33, name: 'Clothing' },
+        { value: 28, name: 'Food & Beverage' },
+        { value: 22, name: 'Home & Garden' },
+        { value: 20, name: 'Sports' },
+        { value: 15, name: 'Books' },
+        { value: 12, name: 'Toys' },
+        { value: 10, name: 'Other' }
+      ]
+    }]
+  };
+
+  // Gauge Chart Data
+  gaugeChartData: EChartsOption = {
+    series: [{
+      type: 'gauge',
+      startAngle: 180,
+      endAngle: 0,
+      min: 0,
+      max: 100,
+      splitNumber: 10,
+      itemStyle: {
+        color: '#3b82f6'
+      },
+      progress: {
+        show: true,
+        width: 18
+      },
+      pointer: {
+        show: true
+      },
+      axisLine: {
+        lineStyle: {
+          width: 18
+        }
+      },
+      axisTick: { show: false },
+      splitLine: { show: false },
+      axisLabel: { show: false },
+      title: {
+        offsetCenter: [0, '20%'],
+        fontSize: 16
+      },
+      detail: {
+        fontSize: 30,
+        offsetCenter: [0, '50%'],
+        valueAnimation: true,
+        formatter: '{value}%'
+      },
+      data: [{ value: 72, name: 'Performance' }]
+    }]
+  };
+
   changeTheme(themeName: string): void {
     this.selectedTheme = themeName;
     this.currentTheme = CHART_THEMES[themeName];
@@ -446,12 +560,10 @@ export class ChartShowcaseComponent {
   }
 
   onChartClick(event: any): void {
-    this.lastEvent = `Click: ${JSON.stringify(event.active?.[0]?.label || 'Unknown')}`;
+    this.lastEvent = `Click: ${event.name || event.seriesName || 'Unknown'} - Value: ${event.value ?? 'N/A'}`;
   }
 
   onChartHover(event: any): void {
-    if (event.active?.length > 0) {
-      this.lastEvent = `Hover: ${JSON.stringify(event.active[0]?.label || 'Unknown')}`;
-    }
+    this.lastEvent = `Hover: ${event.name || event.seriesName || 'Unknown'}`;
   }
 }

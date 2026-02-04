@@ -53,7 +53,9 @@ export type ExtendedChartType =
   | 'radar'
   | 'polarArea'
   | 'scatter'
-  | 'bubble';
+  | 'bubble'
+  | 'nightingale'
+  | 'gauge';
 
 // Chart themes
 export interface ChartTheme {

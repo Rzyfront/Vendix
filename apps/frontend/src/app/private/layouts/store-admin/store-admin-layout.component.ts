@@ -406,12 +406,12 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   }
 
   formatStoreType(type: string | null): string {
-    if (!type) return 'Not defined';
+    if (!type) return 'N/A';
 
     const typeMap: Record<string, string> = {
-      'physical': 'Physical Store',
-      'online': 'Online Store',
-      'hybrid': 'Hybrid Store',
+      'physical': 'Física',
+      'online': 'Online',
+      'hybrid': 'Híbrida',
     };
 
     return typeMap[type] || type;

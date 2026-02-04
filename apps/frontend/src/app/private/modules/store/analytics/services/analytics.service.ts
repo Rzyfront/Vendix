@@ -15,6 +15,7 @@ import {
   SalesByPaymentMethod,
   SalesTrend,
   SalesByCustomer,
+  SalesByChannel,
   SalesAnalyticsQueryDto,
 } from '../interfaces/sales-analytics.interface';
 import {
@@ -149,6 +150,15 @@ export class AnalyticsService {
   ): Observable<ApiResponse<SalesByCustomer[]>> {
     return this.http.get<ApiResponse<SalesByCustomer[]>>(
       this.getApiUrl('sales/by-customer'),
+      { params: this.buildParams(query) },
+    );
+  }
+
+  getSalesByChannel(
+    query: SalesAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<SalesByChannel[]>> {
+    return this.http.get<ApiResponse<SalesByChannel[]>>(
+      this.getApiUrl('sales/by-channel'),
       { params: this.buildParams(query) },
     );
   }

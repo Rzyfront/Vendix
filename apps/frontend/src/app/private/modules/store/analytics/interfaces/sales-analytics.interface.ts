@@ -61,6 +61,15 @@ export interface SalesByCustomer {
   last_order_date: string | null;
 }
 
+// Sales by Channel
+export interface SalesByChannel {
+  channel: string;
+  display_name: string;
+  order_count: number;
+  revenue: number;
+  percentage: number;
+}
+
 // Query DTO for Sales Analytics
 export interface SalesAnalyticsQueryDto {
   date_range?: DateRangeFilter;

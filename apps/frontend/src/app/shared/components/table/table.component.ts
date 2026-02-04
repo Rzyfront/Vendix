@@ -388,9 +388,12 @@ export class TableComponent implements AfterContentInit {
       // Map common status variations to standard CSS classes
       const statusMap: Record<string, string> = {
         active: 'active',
+        enabled: 'active',
         inactive: 'inactive',
+        disabled: 'inactive',
         pending_verification: 'pending',
         pending: 'pending',
+        requires_configuration: 'pending',
         suspended: 'suspended',
         archived: 'draft',
         draft: 'draft',

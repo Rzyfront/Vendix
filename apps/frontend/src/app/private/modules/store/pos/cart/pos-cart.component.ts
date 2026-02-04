@@ -156,80 +156,58 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
               let item of (cartState$ | async)?.items;
               trackBy: trackByItemId
             "
-            class="group flex flex-col gap-2 p-2.5 rounded-md border border-border bg-surface hover:bg-muted/30 hover:border-primary/30 transition-all duration-200"
+            class="group grid grid-cols-[40px_1fr_auto] gap-x-2.5 gap-y-1.5 p-2.5 rounded-md border border-border bg-surface hover:bg-muted/30 hover:border-primary/30 transition-all duration-200"
           >
-            <!-- Top Row: Info and Remove Button -->
-            <div class="flex items-start gap-3">
-              <!-- Product Image -->
+            <!-- Product Image -->
+            <div
+              class="row-span-1 w-10 h-10 shrink-0 bg-muted rounded-md overflow-hidden relative border border-border/50"
+            >
+              <img
+                *ngIf="item.product.image_url || item.product.image"
+                [src]="item.product.image_url || item.product.image"
+                [alt]="item.product.name"
+                class="absolute inset-0 w-full h-full object-cover"
+                (error)="handleImageError($event)"
+              />
               <div
-                class="w-10 h-10 shrink-0 bg-muted rounded-md overflow-hidden relative border border-border/50"
+                *ngIf="!item.product.image_url && !item.product.image"
+                class="absolute inset-0 flex items-center justify-center text-text-secondary"
               >
-                <!-- Product Image -->
-                <img
-                  *ngIf="item.product.image_url || item.product.image"
-                  [src]="item.product.image_url || item.product.image"
-                  [alt]="item.product.name"
-                  class="absolute inset-0 w-full h-full object-cover"
-                  (error)="handleImageError($event)"
-                />
-                
-                <!-- Fallback Icon -->
-                <div
-                  *ngIf="!item.product.image_url && !item.product.image"
-                  class="absolute inset-0 flex items-center justify-center text-text-secondary"
-                >
-                  <app-icon name="image" [size]="14"></app-icon>
-                </div>
-              </div>
-
-              <!-- Item Info -->
-              <div class="flex-1 min-w-0">
-                <div class="flex justify-between items-start gap-2 mb-1">
-                  <h4
-                    class="text-sm font-semibold text-text-primary truncate leading-tight"
-                  >
-                    {{ item.product.name }}
-                  </h4>
-                  <button
-                    (click)="removeFromCart(item.id)"
-                    class="p-1 rounded-sm text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
-                    title="Eliminar"
-                  >
-                    <app-icon name="trash-2" [size]="14"></app-icon>
-                  </button>
-                </div>
-
-                <div class="flex justify-between items-end mt-2">
-                  <div class="flex flex-col gap-0.5">
-                    <div
-                      *ngIf="getItemTaxAmount(item) > 0"
-                      class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-800 w-fit mb-1"
-                    >
-                      Imp {{ formatCurrency(getItemTaxAmount(item)) }}
-                    </div>
-                    <span class="text-[10px] text-text-muted leading-none">
-                      Base: {{ formatCurrency(item.unitPrice) }}
-                    </span>
-                    <span class="text-xs font-bold text-text-primary">
-                      Unit. Final: {{ formatCurrency(item.finalPrice) }}
-                    </span>
-                  </div>
-                  <span class="text-base font-extrabold text-primary">
-                    {{ formatCurrency(item.totalPrice) }}
-                  </span>
-                </div>
+                <app-icon name="image" [size]="14"></app-icon>
               </div>
             </div>
 
-            <!-- Bottom Row: Quantity Controls -->
-            <div
-              class="flex items-center justify-between pt-2 border-t border-border/50"
+            <!-- Item Info -->
+            <div class="min-w-0 flex flex-col justify-center">
+              <h4 class="text-sm font-semibold text-text-primary truncate leading-tight">
+                {{ item.product.name }}
+              </h4>
+              <div class="flex items-center gap-2 mt-0.5">
+                <span class="text-[10px] text-text-muted">
+                  Base: {{ formatCurrency(item.unitPrice) }}
+                </span>
+                <span
+                  *ngIf="getItemTaxAmount(item) > 0"
+                  class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-orange-100 text-orange-800"
+                >
+                  +{{ formatCurrency(getItemTaxAmount(item)) }}
+                </span>
+              </div>
+            </div>
+
+            <!-- Remove Button -->
+            <button
+              (click)="removeFromCart(item.id)"
+              class="p-1 rounded-sm text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors self-start"
+              title="Eliminar"
             >
-              <span
-                class="text-[10px] uppercase tracking-wider font-bold text-text-secondary/60"
-              >
-                Cantidad
-              </span>
+              <app-icon name="trash-2" [size]="14"></app-icon>
+            </button>
+
+            <!-- Actions Row: Quantity + Total -->
+            <div
+              class="col-span-3 flex items-center justify-between pt-2 mt-1 border-t border-border/50"
+            >
               <app-quantity-control
                 [value]="item.quantity"
                 [min]="1"
@@ -238,6 +216,9 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
                 [size]="'sm'"
                 (valueChange)="updateQuantity(item.id, $event)"
               ></app-quantity-control>
+              <span class="text-sm font-extrabold text-primary">
+                {{ formatCurrency(item.totalPrice) }}
+              </span>
             </div>
           </div>
         </div>

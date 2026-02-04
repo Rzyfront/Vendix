@@ -8,7 +8,7 @@ import {
   OnDestroy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ButtonComponent, IconComponent } from '../../index';
+import { IconComponent } from '../../index';
 import { OnboardingWizardService } from '../../../../core/services/onboarding-wizard.service';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { Subject, takeUntil, interval } from 'rxjs';
@@ -16,7 +16,7 @@ import { Subject, takeUntil, interval } from 'rxjs';
 @Component({
   selector: 'app-email-verification-step',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, IconComponent],
+  imports: [CommonModule, IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `

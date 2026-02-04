@@ -2,6 +2,14 @@
 module.exports = {
   content: ["./src/**/*.{html,ts}"],
   theme: {
+    screens: {
+      'xs': '375px',   // Extra small devices (iPhone SE, small Androids)
+      'sm': '640px',   // Small devices
+      'md': '768px',   // Medium devices (tablets)
+      'lg': '1024px',  // Large devices (desktops)
+      'xl': '1280px',  // Extra large devices
+      '2xl': '1536px', // 2X large devices
+    },
     extend: {
       fontFamily: {
         sans: ["Inter", "ui-sans-serif", "system-ui"],

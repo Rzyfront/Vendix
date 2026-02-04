@@ -88,23 +88,12 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
               (clearAllFilters)="onClearFilters()"
               class="shrink-0"
             ></app-options-dropdown>
-
-            <!-- Barcode scanner (desktop only) -->
-            <app-button
-              variant="outline"
-              size="sm"
-              (clicked)="onToggleScanMode()"
-              class="shrink-0 hidden lg:flex"
-              title="Escanear código de barras"
-            >
-              <app-icon name="barcode" [size]="16" slot="icon"></app-icon>
-            </app-button>
           </div>
         </div>
       </div>
 
       <!-- Products Content -->
-      <div class="flex-1 overflow-y-auto p-3 lg:p-6">
+      <div class="flex-1 overflow-y-auto p-3 lg:p-6 relative z-0">
         <!-- Loading State -->
         <div *ngIf="loading" class="p-8 text-center">
           <div
@@ -297,6 +286,8 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
         background: rgba(var(--color-surface-rgb, 255, 255, 255), 0.85);
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
+        position: relative;
+        z-index: 10;
       }
 
       /* Clamp utilities for text truncation */
@@ -703,10 +694,6 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
           this.toastService.error('Error al agregar producto al carrito');
         },
       });
-  }
-
-  onToggleScanMode(): void {
-    this.toastService.info('Modo escáner próximamente');
   }
 
   onImageError(event: any): void {
