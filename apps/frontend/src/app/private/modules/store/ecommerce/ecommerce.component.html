@@ -264,12 +264,7 @@
             </h2>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <app-selector label="Moneda" [formControl]="currencyControl" size="md" [options]="[
-              { value: 'COP', label: 'COP - Peso Colombiano' },
-              { value: 'USD', label: 'USD - Dólar Estadounidense' },
-              { value: 'EUR', label: 'EUR - Euro' },
-              { value: 'MXN', label: 'MXN - Peso Mexicano' },
-            ]"></app-selector>
+              <app-selector label="Moneda" [formControl]="currencyControl" size="md" [options]="currencies"></app-selector>
 
               <app-selector label="Idioma" [formControl]="localeControl" size="md" [options]="[
               { value: 'es-CO', label: 'Español (Colombia)' },

@@ -13,11 +13,12 @@ import { CountryService, Country, Department, City } from '../../../../../servic
 import { ProductCarouselComponent } from '../../components/product-carousel/product-carousel.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal/product-quick-view-modal.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
+import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-checkout',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, ReactiveFormsModule, ProductCarouselComponent, ProductQuickViewModalComponent, InputComponent],
+  imports: [CommonModule, RouterModule, FormsModule, ReactiveFormsModule, ProductCarouselComponent, ProductQuickViewModalComponent, InputComponent, CurrencyPipe],
   templateUrl: './checkout.component.html',
   styleUrls: ['./checkout.component.scss'],
 })
@@ -55,6 +56,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   private catalogService = inject(CatalogService);
   private countryService = inject(CountryService);
   private cdr = inject(ChangeDetectorRef);
+  private currencyService = inject(CurrencyFormatService);
 
   constructor(
     private cart_service: CartService,
@@ -67,6 +69,9 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    // Asegurar que la moneda esté cargada para mostrar precios correctamente
+    this.currencyService.loadCurrency();
+
     this.setupLocationData();
     this.loadData();
     this.loadRecommendations();

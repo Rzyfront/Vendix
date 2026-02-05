@@ -6,6 +6,7 @@ import { finalize } from 'rxjs/operators';
 import { WishlistService, Wishlist, WishlistItem } from '../../services/wishlist.service';
 import { CartService } from '../../services/cart.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-wishlist',

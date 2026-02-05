@@ -6,6 +6,7 @@ import {
   OnInit,
   OnDestroy,
   ChangeDetectorRef,
+  inject,
 } from '@angular/core';
 import {
   FormBuilder,
@@ -26,6 +27,7 @@ import {
   SelectorComponent,
 } from '../../../../../shared/components';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { CurrencyFormatService, CurrencyPipe } from '../../../../../shared/pipes/currency';
 import {
   PosPaymentService,
   PaymentMethod,
@@ -54,6 +56,7 @@ interface PaymentState {
     InputComponent,
     IconComponent,
     SelectorComponent,
+    CurrencyPipe,
   ],
   templateUrl: './pos-payment-interface.component.html',
   styles: [
@@ -914,6 +917,9 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
   anonymousSalesAsDefault = false;
   requireCashDrawerOpen = false;
 
+  // Currency symbol (computed signal from CurrencyFormatService)
+  currencySymbol: any;
+
   // Document type options for customer creation
   documentTypeOptions = [
     { value: 'dni', label: 'DNI' },
@@ -986,16 +992,21 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
     private toastService: ToastService,
     private router: Router,
     private store: Store,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
+    private currencyService: CurrencyFormatService
   ) {
     this.paymentForm = this.createPaymentForm();
     this.customerForm = this.createCustomerForm();
+    // Exponer el símbolo de moneda para usar en el template
+    this.currencySymbol = this.currencyService.currencySymbol;
   }
 
   ngOnInit(): void {
     this.loadPaymentMethods();
     this.setupFormListeners();
     this.loadStoreSettings();
+    // Asegurar que la moneda esté cargada para la interfaz de pago
+    this.currencyService.loadCurrency();
   }
 
   ngOnDestroy(): void {

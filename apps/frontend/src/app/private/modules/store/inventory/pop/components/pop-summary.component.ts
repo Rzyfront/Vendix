@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnInit } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
@@ -9,6 +9,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 
 import { PopCartService } from '../services/pop-cart.service';
 import type { PopCartSummary, PaymentTermPreset } from '../services/pop-cart.service';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
 // Local constants
 const PAYMENT_TERM_LABELS = {
@@ -173,6 +174,8 @@ const PAYMENT_TERM_LABELS = {
   styleUrls: ['./pop-summary.component.scss'],
 })
 export class PopSummaryComponent implements OnInit {
+  private currencyService = inject(CurrencyFormatService);
+
   @Input() summary!: PopCartSummary;
   @Output() saveAsDraft = new EventEmitter<void>();
   @Output() submitOrder = new EventEmitter<void>();
@@ -260,11 +263,6 @@ export class PopSummaryComponent implements OnInit {
   }
 
   public formatCurrency(value: number): string {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
+    return this.currencyService.format(value || 0);
   }
 }

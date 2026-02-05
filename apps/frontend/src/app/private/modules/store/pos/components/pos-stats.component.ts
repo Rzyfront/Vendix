@@ -1,10 +1,11 @@
-import { Component, Input } from '@angular/core';
+import { Component, Input, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 // Import shared components
 import { StatsComponent } from '../../../../../shared/components/index';
 
 import { CartState } from '../models/cart.model';
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-pos-stats',
@@ -47,6 +48,8 @@ import { CartState } from '../models/cart.model';
 export class PosStatsComponent {
   @Input() cartState: CartState | null = null;
 
+  private currencyService = inject(CurrencyFormatService);
+
   getTotalQuantity(): number {
     return (
       this.cartState?.items?.reduce(
@@ -61,9 +64,6 @@ export class PosStatsComponent {
   }
 
   formatCurrency(value: number): string {
-    return new Intl.NumberFormat('es-AR', {
-      style: 'currency',
-      currency: 'ARS',
-    }).format(value);
+    return this.currencyService.format(value);
   }
 }

@@ -17,11 +17,12 @@ import {
   ToastService,
 } from '../../../../../../shared/components';
 import { Order, OrderState } from '../../interfaces/order.interface';
+import { CurrencyPipe, CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-order-details',
   standalone: true,
-  imports: [CommonModule, ModalComponent],
+  imports: [CommonModule, ModalComponent, CurrencyPipe],
   templateUrl: './order-details.component.html',
   styleUrls: ['./order-details.component.css'],
 })
@@ -54,9 +55,13 @@ export class OrderDetailsComponent implements OnInit, OnDestroy, OnChanges {
     private ordersService: StoreOrdersService,
     private dialogService: DialogService,
     private toastService: ToastService,
+    private currencyService: CurrencyFormatService,
   ) {}
 
   ngOnInit(): void {
+    // Asegurar que la moneda esté cargada
+    this.currencyService.loadCurrency();
+
     if (this.orderId && this.isVisible) {
       this.loadOrderDetails();
     }

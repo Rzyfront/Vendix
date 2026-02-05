@@ -8,6 +8,7 @@ import {
   takeUntil,
   map,
   catchError,
+  tap,
 } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
 import { Store } from '@ngrx/store';
@@ -16,6 +17,7 @@ import {
   StoreSettings,
 } from '../../../../../../core/models/store-settings.interface';
 import * as AuthActions from '../../../../../../core/store/auth/auth.actions';
+import { CurrencyFormatService } from '../../../../../../shared/pipes';
 
 @Injectable({
   providedIn: 'root',
@@ -23,6 +25,7 @@ import * as AuthActions from '../../../../../../core/store/auth/auth.actions';
 export class StoreSettingsService {
   private http = inject(HttpClient);
   private store = inject(Store);
+  private currencyFormatService = inject(CurrencyFormatService);
   private readonly api_base_url = `${environment.apiUrl}/store`;
 
   private save_settings$$ = new Subject<Partial<StoreSettings>>();
@@ -57,12 +60,17 @@ export class StoreSettingsService {
         takeUntil(this.destroy$$),
       )
       .subscribe({
-        next: (response) => {
+        next: (response: ApiResponse<StoreSettings>) => {
           console.log('Settings saved successfully:', response);
           // Update local BehaviorSubject
           this.settings$$.next(response.data);
           // Dispatch success action directly to update NgRx store
           this.store.dispatch(AuthActions.updateStoreSettingsSuccess({ store_settings: response.data }));
+
+          // Refrescar moneda si cambió la configuración de moneda
+          if (response.data?.general?.currency) {
+            this.currencyFormatService.refresh();
+          }
         },
       });
   }

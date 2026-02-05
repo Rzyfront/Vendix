@@ -8,6 +8,9 @@ import {
 } from '@angular/forms';
 import { Subject, takeUntil, map, startWith } from 'rxjs';
 import { toSignal } from '@angular/core/rxjs-interop';
+import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
+import { environment } from '../../../../../environments/environment';
 import { EcommerceService } from './services/ecommerce.service';
 import {
   EcommerceSettings,
@@ -27,6 +30,9 @@ import {
   StickyHeaderComponent,
   StickyHeaderActionButton,
 } from '../../../../shared/components';
+import { SelectorOption } from '../../../../shared/components/selector/selector.component';
+import { CurrencyFormatService } from '../../../../shared/pipes/currency';
+import type { Currency } from '../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-ecommerce',
@@ -49,8 +55,13 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   private fb = inject(FormBuilder);
   private ecommerceService = inject(EcommerceService);
   private toastService = inject(ToastService);
+  private currencyService = inject(CurrencyFormatService);
+  private http = inject(HttpClient);
 
   private destroy$ = new Subject<void>();
+
+  // Currencies for selector
+  currencies: SelectorOption[] = [];
 
   // Mode detection
   isSetupMode = signal(false);
@@ -137,6 +148,10 @@ export class EcommerceComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.loadSettings();
+    // Asegurar que la moneda esté cargada
+    this.currencyService.loadCurrency();
+    // Cargar monedas activas para el selector
+    this.loadCurrencies();
   }
 
   ngOnDestroy(): void {
@@ -322,6 +337,41 @@ export class EcommerceComponent implements OnInit, OnDestroy {
           this.isLoading = false;
         },
       });
+  }
+
+  /**
+   * Load active currencies for the selector
+   */
+  private async loadCurrencies(): Promise<void> {
+    try {
+      const response = await firstValueFrom(
+        this.http.get<{ success: boolean; data: Currency[]; message?: string }>(
+          `${environment.apiUrl}/public/currencies/active`
+        )
+      );
+
+      if (response.success && response.data) {
+        this.currencies = response.data.map((c) => ({
+          value: c.code,
+          label: `${c.name} (${c.code})`,
+        }));
+      } else {
+        // Fallback to common currencies if service fails
+        this.currencies = [
+          { value: 'COP', label: 'Peso Colombiano (COP)' },
+          { value: 'USD', label: 'Dólar Americano (USD)' },
+          { value: 'EUR', label: 'Euro (EUR)' },
+        ];
+      }
+    } catch (error) {
+      console.error('Error loading currencies:', error);
+      // Fallback to common currencies
+      this.currencies = [
+        { value: 'COP', label: 'Peso Colombiano (COP)' },
+        { value: 'USD', label: 'Dólar Americano (USD)' },
+        { value: 'EUR', label: 'Euro (EUR)' },
+      ];
+    }
   }
 
   /**

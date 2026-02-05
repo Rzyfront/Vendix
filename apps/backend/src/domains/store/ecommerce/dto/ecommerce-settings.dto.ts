@@ -252,6 +252,14 @@ export class EcommerceCheckoutDto {
   @IsOptional()
   @IsBoolean()
   guest_newsletter_opt_in?: boolean;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Enable WhatsApp checkout',
+  })
+  @IsOptional()
+  @IsBoolean()
+  whatsapp_checkout?: boolean;
 }
 
 /**
@@ -529,6 +537,14 @@ export class EcommerceSettingsDto {
   @IsIn(['STORE_ECOMMERCE'])
   app?: string;
 
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Enable ecommerce module',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
   // Sección Inicio - Contiene colores (único source of truth para branding)
   @ApiPropertyOptional({
     description: 'Configuración de inicio (título, párrafo, logo, colores)',
@@ -605,6 +621,16 @@ export class EcommerceSettingsDto {
   @ValidateNested()
   @Type(() => FooterSettingsDto)
   footer?: FooterSettingsDto;
+
+  // Branding - Colores de marca para ecommerce (legacy, usar inicio.colores)
+  @ApiPropertyOptional({
+    description: 'Branding colors (deprecated, use inicio.colores instead)',
+    type: InicioColoresDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => InicioColoresDto)
+  branding?: InicioColoresDto;
 }
 
 export class UpdateEcommerceSettingsDto {

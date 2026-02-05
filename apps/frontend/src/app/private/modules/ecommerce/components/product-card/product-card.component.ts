@@ -1,13 +1,14 @@
-import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
+import { Component, Input, Output, EventEmitter, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { EcommerceProduct } from '../../services/catalog.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-product-card',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent],
+  imports: [CommonModule, RouterModule, IconComponent, CurrencyPipe],
   template: `
     <article class="product-card" (click)="onQuickView($event)">
       <div class="product-image">
@@ -233,7 +234,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
     }
   `],
 })
-export class ProductCardComponent {
+export class ProductCardComponent implements OnInit {
   @Input() product!: EcommerceProduct;
   @Input() in_wishlist = false;
   @Output() add_to_cart = new EventEmitter<EcommerceProduct>();
@@ -241,6 +242,12 @@ export class ProductCardComponent {
   @Output() quick_view = new EventEmitter<EcommerceProduct>();
 
   private router = inject(Router);
+  private currencyService = inject(CurrencyFormatService);
+
+  ngOnInit(): void {
+    // Asegurar que la moneda esté cargada para mostrar precios correctamente
+    this.currencyService.loadCurrency();
+  }
 
   onQuickView(event: Event): void {
     // Let clicks on buttons/links propagate normally to their handlers

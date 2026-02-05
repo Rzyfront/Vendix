@@ -19,6 +19,7 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-pos-cart',
@@ -248,6 +249,7 @@ export class PosCartComponent implements OnInit, OnDestroy {
     private cartService: PosCartService,
     private toastService: ToastService,
     private dialogService: DialogService,
+    private currencyService: CurrencyFormatService,
   ) {
     this.cartState$ = this.cartService.cartState;
     this.isEmpty$ = this.cartService.isEmpty;
@@ -342,10 +344,7 @@ export class PosCartComponent implements OnInit, OnDestroy {
   }
 
   formatCurrency(amount: number): string {
-    return new Intl.NumberFormat('es-AR', {
-      style: 'currency',
-      currency: 'ARS',
-    }).format(amount);
+    return this.currencyService.format(amount);
   }
 
   getItemTaxRate(item: CartItem): number {

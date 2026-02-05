@@ -9,6 +9,7 @@ import { ChartComponent } from '../../../../../shared/components/chart/chart.com
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { TableComponent, TableColumn, TableAction } from '../../../../../shared/components/table/table.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
 import { AnalyticsService } from '../../analytics/services/analytics.service';
 import { ExpensesService } from '../../expenses/services/expenses.service';
@@ -239,6 +240,7 @@ export class DashboardFinancialComponent implements OnInit, OnDestroy {
   private purchaseOrdersService = inject(PurchaseOrdersService);
   private toastService = inject(ToastService);
   private router = inject(Router);
+  private currencyService = inject(CurrencyFormatService);
   private destroy$ = new Subject<void>();
 
   // Inputs
@@ -332,6 +334,7 @@ export class DashboardFinancialComponent implements OnInit, OnDestroy {
   };
 
   ngOnInit(): void {
+    this.currencyService.loadCurrency();
     this.loadAllData();
   }
 
@@ -412,7 +415,8 @@ export class DashboardFinancialComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (response) => {
           this.purchaseOrders.set(response.data);
-          const total = response.data.reduce((sum, po) => sum + (po.total_amount || 0), 0);
+          // Ensure numeric values to avoid string concatenation
+          const total = response.data.reduce((sum, po) => sum + Number(po.total_amount || 0), 0);
           this.totalPurchaseOrdersCost.set(total);
           this.purchaseOrdersCount.set(response.data.length);
           this.loadingPurchaseOrders.set(false);
@@ -590,12 +594,7 @@ export class DashboardFinancialComponent implements OnInit, OnDestroy {
 
   // Utility methods
   formatCurrency(value: number): string {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
+    return this.currencyService.format(value || 0);
   }
 
   formatDate(date: Date | string): string {

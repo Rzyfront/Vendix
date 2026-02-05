@@ -4,6 +4,7 @@ import {
   EventEmitter,
   OnInit,
   OnDestroy,
+  inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -32,6 +33,7 @@ import {
 
 import { PurchaseOrderEmptyStateComponent } from './purchase-order-empty-state';
 import { PurchaseOrderStats } from './purchase-order-stats.component';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-purchase-order-list',
@@ -48,6 +50,8 @@ import { PurchaseOrderStats } from './purchase-order-stats.component';
   styleUrls: ['./purchase-order-list.component.scss'],
 })
 export class PurchaseOrderListComponent implements OnInit, OnDestroy {
+  private currencyService = inject(CurrencyFormatService);
+
   @Output() viewOrder = new EventEmitter<PurchaseOrder>();
   @Output() create = new EventEmitter<void>();
   @Output() refresh = new EventEmitter<void>();
@@ -398,7 +402,7 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
   // Helper methods
   formatCurrency(value: any): string {
     const numValue = typeof value === 'string' ? parseFloat(value) : (value || 0);
-    return `$${numValue.toFixed(2)}`;
+    return this.currencyService.format(numValue);
   }
 
   getStatusLabel(status: PurchaseOrderStatus): string {

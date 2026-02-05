@@ -452,11 +452,12 @@ model categories {
 }
 
 model currencies {
-  code           String              @id @db.VarChar(3)
-  name           String              @unique @db.VarChar(255)
-  symbol         String              @db.VarChar(10)
-  decimal_places Int                 @default(2) @db.SmallInt
-  state          currency_state_enum @default(active)
+  code           String                       @id @db.VarChar(3)
+  name           String                       @unique @db.VarChar(255)
+  symbol         String                       @db.VarChar(10)
+  decimal_places Int                          @default(2) @db.SmallInt
+  position       currency_position_enum       @default(after)
+  state          currency_state_enum          @default(active)
 }
 
 model inventory_transactions {
@@ -1471,6 +1472,11 @@ enum currency_state_enum {
   active
   inactive
   deprecated
+}
+
+enum currency_position_enum {
+  before  // Símbolo antes: $100
+  after   // Símbolo después: 100$
 }
 
 enum inventory_transaction_type_enum {

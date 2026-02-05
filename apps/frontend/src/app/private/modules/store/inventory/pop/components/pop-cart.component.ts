@@ -5,6 +5,7 @@ import {
   ChangeDetectionStrategy,
   Output,
   EventEmitter,
+  inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Observable, Subject } from 'rxjs';
@@ -23,6 +24,7 @@ import { FormsModule } from '@angular/forms';
 
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { QuantityControlComponent } from '../../../../../../shared/components/quantity-control/quantity-control.component';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-pop-cart',
@@ -262,6 +264,7 @@ import { QuantityControlComponent } from '../../../../../../shared/components/qu
   ],
 })
 export class PopCartComponent implements OnInit, OnDestroy {
+  private currencyService = inject(CurrencyFormatService);
   private destroy$ = new Subject<void>();
 
   cartState$: Observable<PopCartState>;
@@ -285,6 +288,8 @@ export class PopCartComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    // Asegurar que la moneda esté cargada
+    this.currencyService.loadCurrency();
   }
 
   ngOnDestroy(): void {
@@ -387,10 +392,6 @@ export class PopCartComponent implements OnInit, OnDestroy {
   }
 
   formatCurrency(amount: number): string {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      maximumFractionDigits: 0
-    }).format(amount);
+    return this.currencyService.format(amount || 0);
   }
 }
