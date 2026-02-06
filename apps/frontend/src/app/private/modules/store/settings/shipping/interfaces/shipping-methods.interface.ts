@@ -50,6 +50,11 @@ export interface ShippingMethodStats {
   enabled_methods: number;
   disabled_methods: number;
   orders_using_shipping: number;
+  // Extended stats from unified getStats()
+  total_zones?: number;
+  system_copy_zones?: number;
+  custom_zones?: number;
+  total_rates?: number;
 }
 
 export interface EnableShippingMethodDto {

@@ -955,3 +955,5 @@ export class BulkUploadTemplateDto {
   sample_data: any[];
   instructions: string;
 }
+
+export * from './bulk-image-upload.dto';

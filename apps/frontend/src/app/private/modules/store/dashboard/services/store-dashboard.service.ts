@@ -5,35 +5,11 @@ import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 
 export interface StoreDashboardStats {
-  totalProducts: number;
-  totalCustomers: number;
-  monthlyOrders: number;
-  monthlyRevenue: number;
-  productsGrowth: number;
-  customersGrowth: number;
-  ordersGrowth: number;
-  revenueGrowth: number;
-  salesData: SalesData[];
-  topProducts: TopProduct[];
   recentOrders: RecentOrder[];
-  customerActivity: CustomerActivity[];
-}
-
-export interface SalesData {
-  date: string;
-  orders: number;
-  revenue: number;
-  customers: number;
-}
-
-export interface TopProduct {
-  id: string;
-  name: string;
-  sku: string;
-  sales: number;
-  revenue: number;
-  stock: number;
-  status: 'active' | 'inactive' | 'out_of_stock';
+  dispatchPendingOrders: DispatchPendingOrder[];
+  dispatchPendingCount: number;
+  refundPendingOrders: RefundPendingOrder[];
+  refundPendingCount: number;
 }
 
 export interface RecentOrder {
@@ -41,16 +17,31 @@ export interface RecentOrder {
   customerName: string;
   customerEmail: string;
   amount: number;
-  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'finished';
   items: number;
   timestamp: Date;
+  hasShipping: boolean;
+  shippingMethodName: string | null;
+  isPaid: boolean;
+  deliveryType: 'pickup' | 'home_delivery' | 'direct_delivery';
 }
 
-export interface CustomerActivity {
-  date: string;
-  newCustomers: number;
-  returningCustomers: number;
-  totalOrders: number;
+export interface DispatchPendingOrder {
+  id: string;
+  customerName: string;
+  items: number;
+  amount: number;
+  createdAt: Date;
+}
+
+export interface RefundPendingOrder {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  customerName: string;
+  amount: number;
+  refundAmount: number;
+  state: string;
 }
 
 // Caché estático global (persiste entre instancias del servicio)

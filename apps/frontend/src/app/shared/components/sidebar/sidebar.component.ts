@@ -63,8 +63,15 @@ export interface MenuItem {
 
       <!-- Logo Section -->
       <div class="sidebar-header">
-        <div class="logo-container">
+        <div class="logo-container" [class.logo-placeholder]="!logoUrl">
+          <img
+            *ngIf="logoUrl"
+            [src]="logoUrl"
+            alt="Store logo"
+            class="w-full h-full object-contain"
+          />
           <app-icon
+            *ngIf="!logoUrl"
             name="store"
             [size]="20"
             class="text-primary-foreground"
@@ -173,6 +180,7 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
   @Input() title: string = 'Vendix Corp';
   @Input() vlink: string = 'vlink-slug';
   @Input() domainHostname: string | null = null; // Nuevo input para el hostname del dominio
+  @Input() logoUrl: string | null = null; // Logo URL for store branding
   @Input() collapsed: boolean = false;
   @Input() isOpen: boolean = false;
   @Input() showFooter: boolean = false;

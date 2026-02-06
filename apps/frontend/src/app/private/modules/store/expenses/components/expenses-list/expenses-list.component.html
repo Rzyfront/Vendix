@@ -53,20 +53,17 @@
       </div>
       <h3 class="text-lg font-medium text-text-primary mb-2">{{ getEmptyStateTitle() }}</h3>
       <p class="text-text-secondary mb-4">{{ getEmptyStateDescription() }}</p>
-      <div class="flex flex-col sm:flex-row gap-2 justify-center">
-        <button
+      <div class="flex flex-col items-center sm:flex-row gap-2 justify-center">
+        <app-button variant="primary" (clicked)="create.emit()">
+          Crear nuevo gasto
+        </app-button>
+        <app-button
           *ngIf="hasFilters"
-          (click)="onClearFilters()"
-          class="px-4 py-2.5 text-sm font-medium text-text-secondary hover:text-text-primary border border-border rounded-lg hover:bg-gray-50 transition-colors"
+          variant="ghost"
+          (clicked)="onClearFilters()"
         >
           Limpiar filtros
-        </button>
-        <button
-          (click)="create.emit()"
-          class="btn btn-primary"
-        >
-          Crear nuevo gasto
-        </button>
+        </app-button>
       </div>
     </div>
 

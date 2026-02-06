@@ -1546,8 +1546,12 @@ export class AuthService {
       id: number;
       name: string;
       slug: string;
+      logo_url: string | null;
+      store_type: string;
+      onboarding: boolean;
       organizations: any;
       store_settings?: any;
+      domain_settings?: any;
     } | null = null;
     let active_store_settings: any = null;
 
@@ -1747,9 +1751,26 @@ export class AuthService {
 
     // Remover password del response
     // Nota: domain_settings ya viene incluido en la relación de store.organizations
+    // Limpiar store para evitar duplicación de store_settings (ya se envía a nivel raíz)
+    const storeToUse = active_store || user.main_store;
+    const signedLogoUrl = await this.s3Service.signUrl(storeToUse?.logo_url);
+    const cleanStore = storeToUse
+      ? {
+          id: storeToUse.id,
+          name: storeToUse.name,
+          slug: storeToUse.slug,
+          logo_url: signedLogoUrl,
+          store_type: storeToUse.store_type,
+          onboarding: storeToUse.onboarding,
+          organizations: storeToUse.organizations,
+          domain_settings: storeToUse.domain_settings,
+          // store_settings OMITIDO - ya se envía a nivel raíz como store_settings
+        }
+      : null;
+
     const { password: _, ...userWithRolesAndPassword } = {
       ...userWithRolesArray,
-      store: active_store || user.main_store,
+      store: cleanStore,
     };
 
     if (!userSettings) {

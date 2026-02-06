@@ -103,7 +103,7 @@ export function passwordStrengthValidator(
             (ngSubmit)="onSubmit()"
             class="space-y-8"
           >
-            <div>
+            <div class="space-y-4">
               <!-- Error message display -->
               <div
                 *ngIf="error"
@@ -157,7 +157,7 @@ export function passwordStrengthValidator(
                   resetPasswordForm.hasError('passwordsMismatch') &&
                   resetPasswordForm.get('confirmPassword')?.touched
                 "
-                class="mt-2 text-sm text-[var(--color-destructive)]"
+                class="text-sm text-[var(--color-destructive)]"
               >
                 Las contraseñas no coinciden.
               </div>

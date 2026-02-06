@@ -20,6 +20,7 @@ import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { finalize, take } from 'rxjs';
 import { ButtonComponent } from '../button/button.component';
 import { InputComponent } from '../input/input.component';
+import { SelectorComponent, SelectorOption } from '../selector/selector.component';
 import { ToastService } from '../toast/toast.service';
 import {
   CountryService,
@@ -38,6 +39,7 @@ import { environment } from '../../../../environments/environment';
     ModalComponent,
     ButtonComponent,
     InputComponent,
+    SelectorComponent,
   ],
   template: `
     <app-modal
@@ -409,32 +411,20 @@ import { environment } from '../../../../environments/environment';
                 [error]="getError('phone')"
               ></app-input>
 
-              <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1"
-                  >Tipo de Documento</label
-                >
-                <select class="modal-input" formControlName="document_type">
-                  <option value="">Selecciona tipo de documento</option>
-                  <option
-                    *ngFor="let type of documentTypes"
-                    [value]="type.value"
-                  >
-                    {{ type.label }}
-                  </option>
-                </select>
-              </div>
+              <app-selector
+                [label]="'Tipo de Documento'"
+                formControlName="document_type"
+                [styleVariant]="'modern'"
+                [placeholder]="'Selecciona tipo de documento'"
+                [options]="documentTypeOptions"
+              ></app-selector>
 
-              <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1"
-                  >Número de Documento</label
-                >
-                <input
-                  class="modal-input"
-                  type="text"
-                  formControlName="document_number"
-                  placeholder="12345678"
-                />
-              </div>
+              <app-input
+                [label]="'Número de Documento'"
+                formControlName="document_number"
+                [styleVariant]="'modern'"
+                [placeholder]="'12345678'"
+              ></app-input>
             </div>
           </div>
 
@@ -459,106 +449,45 @@ import { environment } from '../../../../environments/environment';
 
               <!-- País -->
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-1"
-                    >País</label
-                  >
-                  <select class="modal-input" formControlName="country_code">
-                    <option value="">Selecciona un país</option>
-                    <option
-                      *ngFor="let country of countries"
-                      [value]="country.code"
-                    >
-                      {{ country.name }}
-                    </option>
-                  </select>
-                  <div
-                    class="text-red-500 text-sm mt-1"
-                    *ngIf="
-                      profileForm.get('address')?.get('country_code')
-                        ?.touched &&
-                      profileForm.get('address')?.get('country_code')?.errors?.[
-                        'required'
-                      ]
-                    "
-                  >
-                    Este campo es requerido
-                  </div>
-                </div>
+                <app-selector
+                  [label]="'País'"
+                  formControlName="country_code"
+                  [styleVariant]="'modern'"
+                  [placeholder]="'Selecciona un país'"
+                  [options]="countryOptions"
+                  [errorText]="getAddressError('country_code')"
+                ></app-selector>
 
                 <!-- Departamento/Estado -->
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-1"
-                    >Departamento</label
-                  >
-                  <select class="modal-input" formControlName="state_province">
-                    <option value="">Selecciona un departamento</option>
-                    <option *ngFor="let dep of departments" [value]="dep.id">
-                      {{ dep.name }}
-                    </option>
-                  </select>
-                  <div
-                    class="text-red-500 text-sm mt-1"
-                    *ngIf="
-                      profileForm.get('address')?.get('state_province')
-                        ?.touched &&
-                      profileForm.get('address')?.get('state_province')
-                        ?.errors?.['required']
-                    "
-                  >
-                    Este campo es requerido
-                  </div>
-                </div>
+                <app-selector
+                  [label]="'Departamento'"
+                  formControlName="state_province"
+                  [styleVariant]="'modern'"
+                  [placeholder]="'Selecciona un departamento'"
+                  [options]="departmentOptions"
+                  [errorText]="getAddressError('state_province')"
+                ></app-selector>
               </div>
 
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <!-- Ciudad -->
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-1"
-                    >Ciudad</label
-                  >
-                  <select class="modal-input" formControlName="city">
-                    <option value="">Selecciona una ciudad</option>
-                    <option *ngFor="let city of cities" [value]="city.id">
-                      {{ city.name }}
-                    </option>
-                  </select>
-                  <div
-                    class="text-red-500 text-sm mt-1"
-                    *ngIf="
-                      profileForm.get('address')?.get('city')?.touched &&
-                      profileForm.get('address')?.get('city')?.errors?.[
-                        'required'
-                      ]
-                    "
-                  >
-                    Este campo es requerido
-                  </div>
-                </div>
+                <app-selector
+                  [label]="'Ciudad'"
+                  formControlName="city"
+                  [styleVariant]="'modern'"
+                  [placeholder]="'Selecciona una ciudad'"
+                  [options]="cityOptions"
+                  [errorText]="getAddressError('city')"
+                ></app-selector>
 
                 <!-- Código Postal -->
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-1"
-                    >Código Postal</label
-                  >
-                  <input
-                    type="text"
-                    class="modal-input"
-                    formControlName="postal_code"
-                    placeholder="00000"
-                  />
-                  <div
-                    class="text-red-500 text-sm mt-1"
-                    *ngIf="
-                      profileForm.get('address')?.get('postal_code')?.touched &&
-                      profileForm.get('address')?.get('postal_code')?.errors?.[
-                        'required'
-                      ]
-                    "
-                  >
-                    Este campo es requerido
-                  </div>
-                </div>
+                <app-input
+                  [label]="'Código Postal'"
+                  formControlName="postal_code"
+                  [styleVariant]="'modern'"
+                  [placeholder]="'00000'"
+                  [error]="getAddressError('postal_code')"
+                ></app-input>
               </div>
             </div>
           </div>
@@ -592,41 +521,7 @@ import { environment } from '../../../../environments/environment';
       </div>
     </app-modal>
   `,
-  styles: [
-    `
-      .modal-input {
-        display: block;
-        width: 100%;
-        padding: 0.5rem 1rem;
-        border: 2px solid #e5e7eb;
-        border-radius: 0.5rem;
-        font-size: 0.875rem;
-        transition: all 0.2s ease;
-        background: white;
-        box-sizing: border-box;
-        line-height: 1.5;
-        appearance: none;
-        -webkit-appearance: none;
-        -moz-appearance: none;
-      }
-
-      .modal-input:focus {
-        outline: none;
-        border-color: var(--color-text-primary);
-        box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.1);
-      }
-
-      .modal-input:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-        background-color: #f9fafb;
-      }
-
-      .modal-input::placeholder {
-        color: #9ca3af;
-      }
-    `,
-  ],
+  styles: [],
 })
 export class ProfileModalComponent implements OnInit {
   @Input() isOpen = false;
@@ -1117,6 +1012,22 @@ export class ProfileModalComponent implements OnInit {
       console.error('Error loading cities', error);
       this.cities = [];
     }
+  }
+
+  get documentTypeOptions(): SelectorOption[] {
+    return this.documentTypes.map(t => ({ value: t.value, label: t.label }));
+  }
+
+  get countryOptions(): SelectorOption[] {
+    return this.countries.map(c => ({ value: c.code, label: c.name }));
+  }
+
+  get departmentOptions(): SelectorOption[] {
+    return this.departments.map(d => ({ value: d.id, label: d.name }));
+  }
+
+  get cityOptions(): SelectorOption[] {
+    return this.cities.map(c => ({ value: c.id, label: c.name }));
   }
 
   passwordMatchValidator(g: FormGroup) {

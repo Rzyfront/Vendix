@@ -24,6 +24,7 @@ import { TenantFacade } from '../../../../../core/store';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { LegalService, PendingDocument } from '../../../../../public/ecommerce/services/legal.service';
 import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/components/legal-preview-modal/legal-preview-modal.component';
@@ -107,25 +108,31 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
 
         <!-- Error Message -->
         @if (errorMessage) {
-          <div
-            class="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm"
-          >
-            {{ errorMessage }}
+          <div class="p-4 rounded-lg bg-red-50 border border-red-200" role="alert">
+            <div class="flex items-start gap-3">
+              <app-icon name="alert-circle" [size]="20" class="text-red-500 mt-0.5 flex-shrink-0"></app-icon>
+              <div class="flex-1">
+                <p class="text-sm font-medium text-red-800">{{ errorTitle }}</p>
+                <p class="text-sm text-red-700 mt-1">{{ errorMessage }}</p>
+              </div>
+            </div>
           </div>
         }
 
-        <form [formGroup]="authForm" (ngSubmit)="onSubmit()" class="space-y-4">
+        <form id="authForm" [formGroup]="authForm" (ngSubmit)="onSubmit()" class="space-y-4">
           @if (!isLogin) {
             <div class="grid grid-cols-2 gap-4">
               <app-input
                 label="Nombre"
                 placeholder="Ej. Juan"
                 formControlName="first_name"
+                [control]="firstNameControl"
               ></app-input>
               <app-input
                 label="Apellido"
                 placeholder="Ej. Perez"
                 formControlName="last_name"
+                [control]="lastNameControl"
               ></app-input>
             </div>
           }
@@ -135,6 +142,7 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
             type="email"
             placeholder="tu@email.com"
             formControlName="email"
+            [control]="emailControl"
           ></app-input>
 
           <app-input
@@ -142,11 +150,21 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
             type="password"
             placeholder="********"
             formControlName="password"
+            [control]="passwordControl"
           ></app-input>
-          @if (!isLogin && authForm.get('password')?.touched) {
-            <p class="text-[10px] text-[var(--color-text-secondary)] mt-1">
-              Mínimo 8 caracteres y al menos un carácter especial (ej. @, #, !).
-            </p>
+
+          <!-- Password requirements (always visible in register mode) -->
+          @if (!isLogin) {
+            <div class="flex items-start gap-2 p-3 rounded-lg bg-blue-50 border border-blue-100">
+              <app-icon name="info" [size]="16" class="text-blue-500 mt-0.5 flex-shrink-0"></app-icon>
+              <div class="text-xs text-blue-700">
+                <p class="font-medium">Requisitos de contraseña:</p>
+                <ul class="mt-1 space-y-0.5">
+                  <li [class.text-green-600]="hasMinLength">{{ hasMinLength ? '✓' : '○' }} Mínimo 8 caracteres</li>
+                  <li [class.text-green-600]="hasSpecialChar">{{ hasSpecialChar ? '✓' : '○' }} Al menos un carácter especial</li>
+                </ul>
+              </div>
+            </div>
           }
 
           <!-- Documentos Legales -->
@@ -155,9 +173,9 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
               <p class="text-xs font-medium text-[var(--color-text-primary)]">Documentos Legales</p>
               @for (doc of pendingDocuments; track doc.document_id) {
                 <div class="flex items-start gap-2">
-                  <input 
-                    type="checkbox" 
-                    [id]="'doc-' + doc.document_id" 
+                  <input
+                    type="checkbox"
+                    [id]="'doc-' + doc.document_id"
                     [checked]="acceptedDocuments[doc.document_id]"
                     (change)="toggleDoc(doc.document_id)"
                     class="mt-1 h-3.5 w-3.5 rounded border-gray-300 text-[var(--color-primary)] focus:ring-[var(--color-primary)]"
@@ -169,18 +187,20 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
               }
             </div>
           }
-
-          <div class="pt-4">
-            <app-button
-              type="submit"
-              [variant]="'primary'"
-              [fullWidth]="true"
-              [loading]="(loading$ | async) || false"
-            >
-              {{ isLogin ? 'Entrar' : 'Registrarme' }}
-            </app-button>
-          </div>
         </form>
+      </div>
+
+      <!-- Footer with Submit Button -->
+      <div slot="footer" class="w-full">
+        <app-button
+          type="submit"
+          form="authForm"
+          [variant]="'primary'"
+          [fullWidth]="true"
+          [loading]="(loading$ | async) || false"
+        >
+          {{ isLogin ? 'Iniciar sesión' : 'Crear cuenta' }}
+        </app-button>
       </div>
     </app-modal>
 
@@ -202,6 +222,7 @@ export class AuthModalComponent implements OnChanges {
 
   isLogin = true;
   errorMessage: string | null = null;
+  errorTitle = 'Error de autenticación';
 
   // Legal Documents state
   pendingDocuments: PendingDocument[] = [];
@@ -215,6 +236,7 @@ export class AuthModalComponent implements OnChanges {
   private legalService = inject(LegalService);
   private destroyRef = inject(DestroyRef);
   private cdr = inject(ChangeDetectorRef);
+  private toast = inject(ToastService);
 
   loading$ = this.authFacade.loading$;
   authForm: FormGroup;
@@ -252,10 +274,106 @@ export class AuthModalComponent implements OnChanges {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((error) => {
         if (error && this.isOpen) {
-          this.errorMessage =
+          const rawMessage =
             typeof error === 'string' ? error : extractApiErrorMessage(error);
+          const { title, message } = this.mapErrorToUserFriendly(rawMessage);
+          this.errorTitle = title;
+          this.errorMessage = message;
+          this.toast.error(message, title, 4000);
         }
       });
+
+    // Clear error when user starts typing
+    this.authForm.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (this.errorMessage) {
+          this.errorMessage = null;
+        }
+      });
+  }
+
+  // Typed getters for form controls
+  get emailControl() {
+    return this.authForm.get('email')!;
+  }
+  get passwordControl() {
+    return this.authForm.get('password')!;
+  }
+  get firstNameControl() {
+    return this.authForm.get('first_name')!;
+  }
+  get lastNameControl() {
+    return this.authForm.get('last_name')!;
+  }
+
+  // Password validation getters
+  get hasMinLength(): boolean {
+    return (this.authForm.get('password')?.value || '').length >= 8;
+  }
+  get hasSpecialChar(): boolean {
+    return /[^A-Za-z0-9]/.test(this.authForm.get('password')?.value || '');
+  }
+
+  /**
+   * Maps backend error messages to user-friendly messages
+   */
+  private mapErrorToUserFriendly(error: string): { title: string; message: string } {
+    const errorLower = error.toLowerCase();
+
+    // Invalid credentials
+    if (errorLower.includes('credenciales') || errorLower.includes('invalid') || errorLower.includes('incorrect')) {
+      return {
+        title: 'Credenciales incorrectas',
+        message: 'El correo o la contraseña no coinciden. Verifica tus datos e intenta de nuevo.',
+      };
+    }
+
+    // User not found
+    if (errorLower.includes('no encontrado') || errorLower.includes('not found') || errorLower.includes('no existe')) {
+      return {
+        title: 'Usuario no encontrado',
+        message: 'No existe una cuenta con este correo electrónico.',
+      };
+    }
+
+    // Email already exists
+    if (errorLower.includes('ya existe') || errorLower.includes('duplicate') || errorLower.includes('already exists')) {
+      return {
+        title: 'Correo ya registrado',
+        message: 'Ya existe una cuenta con este correo. Intenta iniciar sesión.',
+      };
+    }
+
+    // Account locked
+    if (errorLower.includes('bloqueado') || errorLower.includes('locked') || errorLower.includes('suspended')) {
+      return {
+        title: 'Cuenta bloqueada',
+        message: 'Tu cuenta ha sido bloqueada temporalmente. Contacta al soporte si necesitas ayuda.',
+      };
+    }
+
+    // Rate limit
+    if (errorLower.includes('too many') || errorLower.includes('rate limit') || errorLower.includes('demasiados')) {
+      return {
+        title: 'Demasiados intentos',
+        message: 'Has realizado demasiados intentos. Espera unos minutos antes de intentar de nuevo.',
+      };
+    }
+
+    // Network errors
+    if (errorLower.includes('network') || errorLower.includes('timeout') || errorLower.includes('conexión')) {
+      return {
+        title: 'Error de conexión',
+        message: 'No se pudo conectar al servidor. Verifica tu conexión a internet.',
+      };
+    }
+
+    // Default
+    return {
+      title: 'Error de autenticación',
+      message: error,
+    };
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -399,6 +517,7 @@ export class AuthModalComponent implements OnChanges {
   onSubmit(): void {
     if (this.authForm.invalid) {
       this.authForm.markAllAsTouched();
+      this.toast.warning('Completa todos los campos requeridos', 'Formulario incompleto');
       return;
     }
 

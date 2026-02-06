@@ -7,7 +7,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
-import { IconComponent } from '../../index';
+import { IconComponent, InputComponent, TextareaComponent } from '../../index';
 
 @Component({
   selector: 'app-organization-setup-step',
@@ -17,6 +17,8 @@ import { IconComponent } from '../../index';
     FormsModule,
     ReactiveFormsModule,
     IconComponent,
+    InputComponent,
+    TextareaComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
@@ -443,55 +445,44 @@ import { IconComponent } from '../../index';
 
             <div class="form-grid">
               <div class="form-field">
-                <label class="field-label">
-                  Nombre de la empresa
-                  <span class="field-required">*</span>
-                </label>
-                <input
-                  type="text"
-                  class="field-input"
+                <app-input
+                  label="Nombre de la empresa"
+                  styleVariant="modern"
                   formControlName="name"
                   placeholder="Mi Empresa S.A. de C.V."
-                />
+                  [required]="true"
+                ></app-input>
               </div>
 
               <div class="form-field">
-                <label class="field-label">
-                  Email de contacto
-                  <span class="field-required">*</span>
-                </label>
-                <input
+                <app-input
+                  label="Email de contacto"
                   type="email"
-                  class="field-input"
+                  styleVariant="modern"
                   formControlName="email"
                   placeholder="contacto@miempresa.com"
-                />
+                  [required]="true"
+                ></app-input>
               </div>
 
               <div class="form-field">
-                <label class="field-label">
-                  Teléfono
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <input
+                <app-input
+                  label="Teléfono (opcional)"
                   type="tel"
-                  class="field-input"
+                  styleVariant="modern"
                   formControlName="phone"
                   placeholder="+57 123 456 7890"
-                />
+                ></app-input>
               </div>
 
               <div class="form-field">
-                <label class="field-label">
-                  Sitio web
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <input
+                <app-input
+                  label="Sitio web (opcional)"
                   type="url"
-                  class="field-input"
+                  styleVariant="modern"
                   formControlName="website"
                   placeholder="https://miempresa.com"
-                />
+                ></app-input>
               </div>
             </div>
           </div>
@@ -511,29 +502,21 @@ import { IconComponent } from '../../index';
 
             <div class="form-grid">
               <div class="form-field">
-                <label class="field-label">
-                  Razón social
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <input
-                  type="text"
-                  class="field-input"
+                <app-input
+                  label="Razón social (opcional)"
+                  styleVariant="modern"
                   formControlName="legal_name"
                   placeholder="Nombre legal de la empresa"
-                />
+                ></app-input>
               </div>
 
               <div class="form-field">
-                <label class="field-label">
-                  RFC o Tax ID
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <input
-                  type="text"
-                  class="field-input"
+                <app-input
+                  label="RFC o Tax ID (opcional)"
+                  styleVariant="modern"
                   formControlName="tax_id"
                   placeholder="RFC000000000"
-                />
+                ></app-input>
               </div>
             </div>
           </div>
@@ -552,22 +535,14 @@ import { IconComponent } from '../../index';
             </div>
 
             <div class="form-field">
-              <label class="field-label">
-                ¿Qué hace tu empresa?
-                <span class="field-optional">(opcional)</span>
-              </label>
-              <textarea
-                class="field-textarea"
+              <app-textarea
+                label="¿Qué hace tu empresa? (opcional)"
+                styleVariant="modern"
                 formControlName="description"
                 placeholder="Describe brevemente qué hace tu empresa, tus productos o servicios..."
-                rows="3"
-              ></textarea>
-              <div class="field-hint">
-                <app-icon name="info" size="12" class="hint-icon"></app-icon>
-                <span class="hint-text">
-                  Esto nos ayudará a personalizar mejor tu experiencia
-                </span>
-              </div>
+                [rows]="3"
+                helperText="Esto nos ayudará a personalizar mejor tu experiencia"
+              ></app-textarea>
             </div>
           </div>
         </form>

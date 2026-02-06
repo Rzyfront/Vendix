@@ -1,16 +1,18 @@
 <div class="inventory-settings-form">
   <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-    <div class="space-y-4">
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Control de Stock</h4>
-      <app-input [formControl]="lowStockThresholdControl" type="number" label="Umbral de Stock Bajo" placeholder="10"
-        min="0" (inputChange)="onFieldChange()"></app-input>
+    <div>
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Control de Stock</h4>
+      <div class="space-y-4">
+        <app-input [formControl]="lowStockThresholdControl" type="number" label="Umbral de Stock Bajo" placeholder="10"
+          min="0" size="sm" (inputChange)="onFieldChange()"></app-input>
+      </div>
     </div>
-
-    <div class="space-y-4">
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Comportamiento</h4>
-      <app-selector [formControl]="outOfStockActionControl" label="Acción sin stock" [options]="outOfStockActions"
-        (valueChange)="onFieldChange()" size="sm"></app-selector>
+    <div>
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Comportamiento</h4>
+      <div class="space-y-4">
+        <app-selector [formControl]="outOfStockActionControl" label="Acción sin stock" [options]="outOfStockActions"
+          (valueChange)="onFieldChange()" size="sm"></app-selector>
+      </div>
     </div>
   </div>
-
 </div>

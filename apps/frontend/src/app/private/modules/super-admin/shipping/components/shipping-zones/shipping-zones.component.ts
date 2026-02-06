@@ -2,7 +2,7 @@ import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { ShippingService } from '../../services/shipping.service';
-import { ShippingZone, ShippingZoneStats, ShippingMethod } from '../../interfaces/shipping.interface';
+import { ShippingZone, ShippingMethod } from '../../interfaces/shipping.interface';
 import { ShippingZoneModalComponent } from '../shipping-zone-modal/shipping-zone-modal.component';
 import { ShippingRatesComponent } from '../shipping-rates/shipping-rates.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -14,43 +14,6 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
   imports: [CommonModule, IconComponent, ButtonComponent, ShippingZoneModalComponent, ShippingRatesComponent],
   template: `
     <div class="space-y-6">
-      <!-- Stats Cards -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div class="bg-white rounded-xl p-6 border border-[var(--color-border)] shadow-sm">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-[var(--color-text-secondary)] mb-1">Total de Zonas</p>
-              <p class="text-3xl font-bold text-[var(--color-text-primary)]">{{ stats?.total_zones || 0 }}</p>
-            </div>
-            <div class="w-12 h-12 bg-indigo-50 rounded-lg flex items-center justify-center">
-              <app-icon name="map-pin" size="24" class="text-indigo-600"></app-icon>
-            </div>
-          </div>
-        </div>
-        <div class="bg-white rounded-xl p-6 border border-[var(--color-border)] shadow-sm">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-[var(--color-text-secondary)] mb-1">Activas</p>
-              <p class="text-3xl font-bold text-green-600">{{ stats?.active_zones || 0 }}</p>
-            </div>
-            <div class="w-12 h-12 bg-green-50 rounded-lg flex items-center justify-center">
-              <app-icon name="check-circle" size="24" class="text-green-600"></app-icon>
-            </div>
-          </div>
-        </div>
-        <div class="bg-white rounded-xl p-6 border border-[var(--color-border)] shadow-sm">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-[var(--color-text-secondary)] mb-1">Inactivas</p>
-              <p class="text-3xl font-bold text-gray-600">{{ stats?.inactive_zones || 0 }}</p>
-            </div>
-            <div class="w-12 h-12 bg-gray-50 rounded-lg flex items-center justify-center">
-              <app-icon name="x-circle" size="24" class="text-gray-600"></app-icon>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- Zones Grid -->
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -158,7 +121,6 @@ export class ShippingZonesComponent implements OnInit {
   private shippingService = inject(ShippingService);
 
   zones: ShippingZone[] = [];
-  stats?: ShippingZoneStats;
   methods: ShippingMethod[] = [];
   showModal = false;
   showRatesModal = false;
@@ -169,14 +131,11 @@ export class ShippingZonesComponent implements OnInit {
   }
 
   loadData() {
-    this.shippingService.getZones().subscribe(data => {
+    this.shippingService.getZones().subscribe((data) => {
       this.zones = data;
     });
-    this.shippingService.getZoneStats().subscribe(data => {
-      this.stats = data;
-    });
     // Load methods for rates modal
-    this.shippingService.getMethods().subscribe(data => {
+    this.shippingService.getMethods().subscribe((data) => {
       this.methods = data;
     });
   }

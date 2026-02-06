@@ -192,31 +192,7 @@ export class EcommerceService {
       },
     });
 
-    // 6. Sync store name and organization name if titulo changed
-    if (mergedEcommerce.inicio?.titulo) {
-      try {
-        const store = await this.prisma.stores.findUnique({
-          where: { id: store_id },
-          select: { organization_id: true },
-        });
-
-        await this.prisma.stores.update({
-          where: { id: store_id },
-          data: { name: mergedEcommerce.inicio.titulo },
-        });
-
-        if (store?.organization_id) {
-          await this.prisma.organizations.update({
-            where: { id: store.organization_id },
-            data: { name: mergedEcommerce.inicio.titulo },
-          });
-        }
-      } catch (error) {
-        this.logger.warn(`Failed to sync name from ecommerce: ${error.message}`);
-      }
-    }
-
-    // 7. Ensure ecommerce domain exists (for hostname only, no config duplication)
+    // 6. Ensure ecommerce domain exists (for hostname only, no config duplication)
     let domain = await this.prisma.domain_settings.findFirst({
       where: { store_id, domain_type: 'ecommerce' },
     });
@@ -231,7 +207,7 @@ export class EcommerceService {
       });
     }
 
-    // 8. Generate favicon if logo changed
+    // 7. Generate favicon if logo changed
     if (logoChanged && mergedEcommerce.inicio?.logo_url) {
       this.generateFaviconForEcommerce(mergedEcommerce.inicio.logo_url).catch((error) =>
         this.logger.warn(`Favicon generation failed: ${error.message}`),

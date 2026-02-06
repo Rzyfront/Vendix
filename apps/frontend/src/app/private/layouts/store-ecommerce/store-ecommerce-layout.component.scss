@@ -29,6 +29,28 @@
     gap: 1.5rem;
   }
 
+  // Mobile Logo - only visible on mobile
+  .mobile-logo {
+    display: none;
+    flex-shrink: 0;
+
+    .mobile-logo-img {
+      height: 32px;
+      width: auto;
+    }
+
+    .mobile-logo-fallback {
+      width: 32px;
+      height: 32px;
+      border-radius: var(--radius-sm);
+      background-color: var(--color-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+    }
+  }
+
   .header-left {
     display: flex;
     align-items: center;
@@ -42,7 +64,7 @@
     flex-shrink: 0;
 
     .logo-img {
-      height: 32px; // Slightly larger for better visibility
+      height: 38px; // 20% larger for better visibility
       width: auto;
     }
 
@@ -75,6 +97,7 @@
     display: flex;
     align-items: center;
     gap: 0.25rem; // Tightened
+    flex-shrink: 0; // Never shrink - keep menu button visible
 
     .desktop-actions {
       display: flex;
@@ -111,6 +134,89 @@
 
   .cart-container {
     position: relative;
+  }
+
+  .wishlist-container {
+    position: relative;
+  }
+
+  .wishlist-btn {
+    position: relative;
+
+    .wishlist-badge {
+      position: absolute;
+      top: -2px;
+      right: -2px;
+      background: var(--color-error);
+      color: white;
+      font-size: 0.6rem;
+      font-weight: 800;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      border-radius: 99px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid var(--color-surface);
+    }
+
+    // Red heart when wishlist has items
+    &.has-items {
+      color: var(--color-error);
+
+      &:hover {
+        color: var(--color-error);
+      }
+    }
+
+    &.shake-animation {
+      animation: shake 0.5s cubic-bezier(.36, .07, .19, .97) both;
+      color: var(--color-error);
+    }
+  }
+
+  .wishlist-tooltip {
+    position: absolute;
+    top: calc(100% + 1rem);
+    right: -10px;
+    z-index: 110;
+    animation: fadeIn 0.3s ease;
+
+    .tooltip-arrow {
+      position: absolute;
+      top: -6px;
+      right: 20px;
+      width: 12px;
+      height: 12px;
+      background: var(--color-surface);
+      transform: rotate(45deg);
+      border-top: 1px solid var(--color-border);
+      border-left: 1px solid var(--color-border);
+      z-index: 2;
+    }
+
+    .tooltip-content {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      white-space: nowrap;
+
+      span {
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--color-text-primary);
+      }
+
+      app-icon {
+        color: var(--color-error);
+      }
+    }
   }
 
   .cart-btn {
@@ -374,16 +480,8 @@
           }
 
           .remove-btn {
-            border: none;
-            background: transparent;
-            color: var(--color-text-muted);
-            cursor: pointer;
-            padding: 4px;
-            border-radius: 4px;
-            transition: all 0.2s;
-
             &:hover {
-              background: #fee2e2;
+              background: #fee2e2 !important;
               color: #dc2626;
             }
           }
@@ -422,40 +520,8 @@
 
       .cart-actions {
         display: grid;
-        grid-template-columns: 1fr 2fr;
+        grid-template-columns: auto 1fr;
         gap: 0.75rem;
-
-        button {
-          padding: 0.75rem;
-          border-radius: 8px;
-          border: none;
-          font-size: 0.875rem;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-
-        .btn-clear {
-          background: transparent;
-          border: 1px solid var(--color-border);
-          color: var(--color-text-secondary);
-
-          &:hover {
-            background: #fee2e2;
-            border-color: #fee2e2;
-            color: #dc2626;
-          }
-        }
-
-        .btn-checkout {
-          background: var(--color-primary);
-          color: white;
-
-          &:hover {
-            opacity: 0.9;
-            transform: translateY(-1px);
-          }
-        }
       }
     }
   }
@@ -764,7 +830,7 @@
   a {
     font-size: 0.9375rem;
     padding: 0.625rem 0.75rem;
-    border-radius: 8px;
+    border-radius: 0.75rem; /* 12px - consistent with system */
     color: var(--color-text-secondary);
     text-decoration: none;
     display: flex;
@@ -783,6 +849,30 @@
 
       &:hover {
         background: #fee2e2;
+      }
+    }
+
+    &.wishlist-mobile-link {
+      .mobile-badge {
+        margin-left: auto;
+        background: var(--color-error);
+        color: white;
+        font-size: 0.65rem;
+        font-weight: 700;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        border-radius: 99px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      // Red heart icon when wishlist has items
+      &.has-items {
+        app-icon {
+          color: var(--color-error);
+        }
       }
     }
   }
@@ -896,10 +986,14 @@
 // Responsive
 @media (max-width: 1024px) {
   .ecommerce-header {
+    // Show mobile logo
+    .mobile-logo {
+      display: flex;
+    }
+
+    // Hide desktop logo container
     .header-left {
-      // Allow header left to shrink
-      flex-shrink: 1;
-      min-width: 0;
+      display: none;
     }
 
     // Hide desktop specific actions
@@ -910,17 +1004,10 @@
 
     // Ensure search is visible but flexible
     .header-search {
-      display: block; // Changed from none to block
+      display: block;
       flex: 1;
-      margin: 0 1rem; // Add spacing
-      min-width: 0; // Allow shrinking
-    }
-
-    // Adjust logo for mobile to save space
-    .logo {
-      .logo-text {
-        display: none; // Hide text on mobile to save space for search
-      }
+      margin: 0 0.75rem;
+      min-width: 0; // Allow search to shrink
     }
 
     .mobile-menu-btn {
@@ -938,12 +1025,23 @@
 
 @media (max-width: 640px) {
   .ecommerce-header {
-    padding: 0 0.5rem; // Reduced padding as requested (was 1rem)
-    height: 56px; // Slightly smaller height
+    padding: 0 0.5rem;
+    height: 56px;
 
     .header-container {
-      gap: 0.5rem; // Reduce gap between items
+      gap: 0.5rem;
       padding: 0;
+    }
+
+    .mobile-logo {
+      .mobile-logo-img {
+        height: 28px; // Smaller on small mobile
+      }
+
+      .mobile-logo-fallback {
+        width: 28px;
+        height: 28px;
+      }
     }
 
     .header-search {

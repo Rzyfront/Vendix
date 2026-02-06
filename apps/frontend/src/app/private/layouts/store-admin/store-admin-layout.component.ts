@@ -12,7 +12,7 @@ import { OnboardingWizardService } from '../../../core/services/onboarding-wizar
 import { OnboardingModalComponent } from '../../../shared/components/onboarding-modal';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
 import { Observable, Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+import { takeUntil, map } from 'rxjs/operators';
 
 @Component({
   selector: 'app-store-admin-layout',
@@ -32,6 +32,7 @@ import { takeUntil } from 'rxjs/operators';
         #sidebarRef
         [menuItems]="filteredMenuItems"
         [title]="(storeName$ | async) || 'Cargando...'"
+        [logoUrl]="storeLogo$ | async"
         subtitle="Administrador de Tienda"
         [vlink]="(organizationSlug$ | async) || 'slug'"
         [domainHostname]="storeDomainHostname"
@@ -117,6 +118,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   storeDomainHostname$: Observable<string | null>;
   storeDomainHostname: string | null = null;
   storeType$: Observable<string | null>;
+  storeLogo$: Observable<string | null>;
 
   // Onboarding
   showOnboardingModal = false; // Will be set in ngOnInit based on actual status
@@ -322,6 +324,9 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
     this.storeDomainHostname$ = this.authFacade.userDomainHostname$;
     this.storeType$ = this.authFacade.userStoreType$;
+    this.storeLogo$ = this.authFacade.userStore$.pipe(
+      map(store => store?.logo_url || null)
+    );
   }
 
   ngOnInit(): void {

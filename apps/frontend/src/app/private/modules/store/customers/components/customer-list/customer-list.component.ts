@@ -75,9 +75,9 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
         <app-icon name="users" [size]="48" class="mx-auto mb-4 text-gray-300"></app-icon>
         <h3 class="text-lg font-medium text-gray-900">No se encontraron clientes</h3>
         <p class="mt-1">Comienza creando un nuevo cliente.</p>
-        <div class="mt-6">
+        <div class="mt-6 flex justify-center">
           <app-button variant="primary" (clicked)="create.emit()">
-            <app-icon name="plus" [size]="16" class="mr-2"></app-icon>
+            <app-icon slot="icon" name="plus" [size]="16"></app-icon>
             Agregar Cliente
           </app-button>
         </div>
@@ -118,7 +118,7 @@ export class CustomerListComponent implements OnInit {
   @Output() create = new EventEmitter<void>();
   @Output() edit = new EventEmitter<Customer>();
   @Output() delete = new EventEmitter<Customer>();
-  @Output() refresh = new EventEmitter<void>();
+  @Output() bulkUpload = new EventEmitter<void>();
 
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
@@ -139,7 +139,7 @@ export class CustomerListComponent implements OnInit {
 
   // Dropdown actions
   dropdownActions: DropdownAction[] = [
-    { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
+    { label: 'Carga Masiva', icon: 'upload', action: 'bulk-upload' },
     { label: 'Nuevo Cliente', icon: 'plus', action: 'create', variant: 'primary' },
   ];
 
@@ -218,8 +218,8 @@ export class CustomerListComponent implements OnInit {
       case 'create':
         this.create.emit();
         break;
-      case 'refresh':
-        this.refresh.emit();
+      case 'bulk-upload':
+        this.bulkUpload.emit();
         break;
     }
   }

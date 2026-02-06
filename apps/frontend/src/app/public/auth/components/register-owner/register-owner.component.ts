@@ -75,7 +75,7 @@ interface RegistrationError {
 
         <!-- Registration Form -->
         <app-card class="!mt-6 sm:!mt-8" [animateOnLoad]="true" shadow="lg" [responsivePadding]="true">
-          <form [formGroup]="registerForm" (ngSubmit)="onSubmit()" class="space-y-1">
+          <form [formGroup]="registerForm" (ngSubmit)="onSubmit()" class="space-y-4">
             <!-- Información de la organización -->
             <app-input
               label="Nombre de la organización"
@@ -86,7 +86,7 @@ interface RegistrationError {
             ></app-input>
 
             <!-- Información personal -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 sm:gap-x-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <app-input
                 label="Nombre"
                 formControlName="first_name"
@@ -104,7 +104,7 @@ interface RegistrationError {
               ></app-input>
             </div>
 
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 sm:gap-x-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <app-input
                 label="Email"
                 formControlName="email"

@@ -1,12 +1,9 @@
 <div class="app-settings-form">
   <div class="space-y-6">
-    <!-- Color Scheme Section - Full Width Horizontal -->
-    <div class="space-y-4">
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
-        Esquema de Colores
-      </h4>
-
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+    <!-- Color Scheme Section -->
+    <div>
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Esquema de Colores</h4>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <!-- Primary Color -->
         <div class="p-3 bg-gray-50 border border-gray-100 rounded-xl hover:bg-gray-100/50 transition-all">
           <label class="block text-[10px] font-bold text-gray-500 uppercase mb-2">Primario</label>
@@ -19,7 +16,6 @@
               placeholder="#000000" />
           </div>
         </div>
-
         <!-- Secondary Color -->
         <div class="p-3 bg-gray-50 border border-gray-100 rounded-xl hover:bg-gray-100/50 transition-all">
           <label class="block text-[10px] font-bold text-gray-500 uppercase mb-2">Secundario</label>
@@ -32,7 +28,6 @@
               placeholder="#000000" />
           </div>
         </div>
-
         <!-- Accent Color -->
         <div class="p-3 bg-gray-50 border border-gray-100 rounded-xl hover:bg-gray-100/50 transition-all">
           <label class="block text-[10px] font-bold text-gray-500 uppercase mb-2">Acento</label>
@@ -48,36 +43,32 @@
       </div>
     </div>
 
-    <!-- Brand Assets Section - 50/50 Horizontal Layout -->
-    <div class="space-y-4">
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Recursos de Marca</h4>
-
+    <!-- Brand Assets Section -->
+    <div>
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Recursos de Marca</h4>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <!-- Logo URL -->
-        <div class="flex items-center gap-4 p-3 bg-gray-50 border border-gray-100 rounded-2xl">
-          <div
-            class="w-16 h-16 rounded-xl bg-white border border-gray-200 p-2 flex items-center justify-center overflow-hidden shrink-0">
+        <div class="flex items-center gap-4 p-3 bg-gray-50 border border-gray-100 rounded-xl">
+          <div class="w-12 h-12 rounded-lg bg-white border border-gray-200 p-1.5 flex items-center justify-center overflow-hidden shrink-0">
             <img *ngIf="logoUrlControl.value" [src]="logoUrlControl.value" alt="Logo"
               class="max-w-full max-h-full object-contain">
-            <app-icon *ngIf="!logoUrlControl.value" name="image" size="24" class="text-gray-300"></app-icon>
+            <app-icon *ngIf="!logoUrlControl.value" name="image" size="20" class="text-gray-300"></app-icon>
           </div>
-          <div class="flex-1">
+          <div class="flex-1 min-w-0">
             <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">URL del Logo</label>
             <input type="text" [formControl]="logoUrlControl" (input)="onFieldChange()"
               class="w-full bg-transparent border-0 p-0 text-xs text-blue-600 truncate focus:ring-0"
               placeholder="https://...">
           </div>
         </div>
-
         <!-- Favicon URL -->
-        <div class="flex items-center gap-4 p-3 bg-gray-50 border border-gray-100 rounded-2xl">
-          <div
-            class="w-16 h-16 rounded-xl bg-white border border-gray-200 p-2 flex items-center justify-center overflow-hidden shrink-0">
+        <div class="flex items-center gap-4 p-3 bg-gray-50 border border-gray-100 rounded-xl">
+          <div class="w-12 h-12 rounded-lg bg-white border border-gray-200 p-1.5 flex items-center justify-center overflow-hidden shrink-0">
             <img *ngIf="faviconUrlControl.value" [src]="faviconUrlControl.value" alt="Favicon"
               class="max-w-full max-h-full object-contain">
-            <app-icon *ngIf="!faviconUrlControl.value" name="feather" size="24" class="text-gray-300"></app-icon>
+            <app-icon *ngIf="!faviconUrlControl.value" name="feather" size="20" class="text-gray-300"></app-icon>
           </div>
-          <div class="flex-1">
+          <div class="flex-1 min-w-0">
             <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">URL del Favicon</label>
             <input type="text" [formControl]="faviconUrlControl" (input)="onFieldChange()"
               class="w-full bg-transparent border-0 p-0 text-xs text-blue-600 truncate focus:ring-0"
@@ -86,6 +77,5 @@
         </div>
       </div>
     </div>
-
   </div>
 </div>

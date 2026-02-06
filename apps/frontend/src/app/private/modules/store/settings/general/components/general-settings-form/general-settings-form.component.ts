@@ -6,13 +6,20 @@ import {
   OnInit,
   OnChanges,
   inject,
+  OnDestroy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
+import { Subject } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
 import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 import { CurrencyService, Currency } from '../../../../../../../services/currency.service';
+import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
+import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
+import { StoreSettingsService } from '../../services/store-settings.service';
+import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 
 export interface GeneralSettings {
   // Campos de store_settings (existentes)
@@ -30,15 +37,24 @@ export interface GeneralSettings {
 @Component({
   selector: 'app-general-settings-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, InputComponent, SelectorComponent],
+  imports: [CommonModule, ReactiveFormsModule, InputComponent, SelectorComponent, IconComponent, ButtonComponent],
   templateUrl: './general-settings-form.component.html',
   styleUrls: ['./general-settings-form.component.scss'],
 })
-export class GeneralSettingsForm implements OnInit, OnChanges {
+export class GeneralSettingsForm implements OnInit, OnChanges, OnDestroy {
   @Input() settings!: GeneralSettings;
   @Output() settingsChange = new EventEmitter<GeneralSettings>();
 
   private currencyService = inject(CurrencyService);
+  isUploadingLogo = false;
+  logoPreview: string | null = null;
+  private logoInputRef: HTMLInputElement | null = null;
+  private destroy$ = new Subject<void>();
+
+  constructor(
+    private storeSettingsService: StoreSettingsService,
+    private toastService: ToastService
+  ) { }
 
   form: FormGroup = new FormGroup({
     // Campos de stores
@@ -152,6 +168,8 @@ export class GeneralSettingsForm implements OnInit, OnChanges {
   patchForm() {
     if (this.settings) {
       this.form.patchValue(this.settings);
+      // Initialize preview from settings (already signed from backend)
+      this.logoPreview = this.settings.logo_url || null;
     }
   }
 
@@ -159,5 +177,65 @@ export class GeneralSettingsForm implements OnInit, OnChanges {
     if (this.form.valid) {
       this.settingsChange.emit(this.form.value);
     }
+  }
+
+  triggerLogoInput(): void {
+    if (this.isUploadingLogo) return;
+
+    if (!this.logoInputRef) {
+      this.logoInputRef = document.createElement('input');
+      this.logoInputRef.type = 'file';
+      this.logoInputRef.accept = 'image/*';
+      this.logoInputRef.addEventListener('change', (e) => this.onLogoUpload(e));
+    }
+    this.logoInputRef.click();
+  }
+
+  onLogoUpload(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const files = input.files;
+    if (!files || files.length === 0) return;
+
+    const file = files[0];
+
+    if (!file.type.startsWith('image/')) {
+      this.toastService.warning('Solo se permiten archivos de imagen');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      this.toastService.warning('El logo excede el tamaño máximo de 2MB');
+      return;
+    }
+
+    this.isUploadingLogo = true;
+
+    this.storeSettingsService.uploadStoreLogo(file)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (result) => {
+          this.logoPreview = result.url;
+          this.logoUrlControl.setValue(result.key);
+          this.onFieldChange();
+          this.isUploadingLogo = false;
+          this.toastService.success('Logo subido exitosamente');
+        },
+        error: () => {
+          this.isUploadingLogo = false;
+          this.toastService.error('Error al subir el logo');
+        },
+      });
+
+    input.value = '';
+  }
+
+  removeLogo(): void {
+    this.logoPreview = null;
+    this.logoUrlControl.setValue(null);
+    this.onFieldChange();
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 }

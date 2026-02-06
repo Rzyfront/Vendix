@@ -14,11 +14,15 @@ import { ProductCarouselComponent } from '../../components/product-carousel/prod
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal/product-quick-view-modal.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
+import { ButtonComponent } from '../../../../../shared/components/button/button.component';
+import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { SelectorComponent, SelectorOption } from '../../../../../shared/components/selector/selector.component';
+import { ToastService } from '../../../../../shared/components/toast/toast.service';
 
 @Component({
   selector: 'app-checkout',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, ReactiveFormsModule, ProductCarouselComponent, ProductQuickViewModalComponent, InputComponent, CurrencyPipe],
+  imports: [CommonModule, RouterModule, FormsModule, ReactiveFormsModule, ProductCarouselComponent, ProductQuickViewModalComponent, InputComponent, CurrencyPipe, ButtonComponent, IconComponent, SelectorComponent],
   templateUrl: './checkout.component.html',
   styleUrls: ['./checkout.component.scss'],
 })
@@ -30,6 +34,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   selected_payment_method_id: number | null = null;
   selected_address_id: number | null = null;
   use_new_address = false;
+  save_new_address = true; // Default to save the new address
 
   address_form!: FormGroup;
   notes = '';
@@ -57,6 +62,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   private countryService = inject(CountryService);
   private cdr = inject(ChangeDetectorRef);
   private currencyService = inject(CurrencyFormatService);
+  private toast = inject(ToastService);
 
   constructor(
     private cart_service: CartService,
@@ -336,6 +342,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     if (this.step === 1) {
       if (this.use_new_address && !this.address_form.valid) {
         this.error_message = 'Por favor completa la dirección de envío';
+        this.address_form.markAllAsTouched();
         return;
       }
       if (!this.use_new_address && !this.selected_address_id) {
@@ -343,9 +350,17 @@ export class CheckoutComponent implements OnInit, OnDestroy {
         return;
       }
 
-      // Load shipping before moving? Or move to step 2 (Payment/Shipping)
-      // If we move to step 2, we load shipping there.
+      // If using new address and save_new_address is checked, save it first
+      if (this.use_new_address && this.save_new_address) {
+        this.saveNewAddressAndContinue();
+        return;
+      }
+
+      // Load shipping before moving
       this.loadShippingOptions();
+      this.error_message = '';
+      this.step++;
+      return;
     }
 
     if (this.step === 2 && !this.selected_payment_method_id) {
@@ -361,6 +376,76 @@ export class CheckoutComponent implements OnInit, OnDestroy {
 
     this.error_message = '';
     this.step++;
+  }
+
+  /**
+   * Saves the new address to the customer's account, then continues to the next step
+   */
+  private saveNewAddressAndContinue(): void {
+    this.is_loading = true;
+
+    // Prepare address payload with converted names
+    const addressPayload = this.prepareAddressPayload();
+
+    this.account_service.createAddress(addressPayload).subscribe({
+      next: (response) => {
+        if (response.success) {
+          // Add the new address to the list and select it
+          this.addresses.push(response.data);
+          this.selected_address_id = response.data.id;
+          this.use_new_address = false;
+          this.toast.success('Dirección guardada correctamente', 'Dirección guardada');
+        }
+        // Continue with shipping options
+        this.loadShippingOptions();
+        this.error_message = '';
+        this.step++;
+        this.is_loading = false;
+        this.cdr.markForCheck();
+      },
+      error: (err) => {
+        this.is_loading = false;
+        // Still continue even if save fails, but notify user
+        this.toast.warning('La dirección no pudo guardarse, pero puedes continuar con tu compra', 'Aviso');
+        this.loadShippingOptions();
+        this.error_message = '';
+        this.step++;
+        this.cdr.markForCheck();
+      },
+    });
+  }
+
+  /**
+   * Prepares the address payload with converted department/city names for Colombia
+   */
+  private prepareAddressPayload(): any {
+    let addressValue = { ...this.address_form.value };
+
+    // For Colombia, convert department and city IDs to names
+    if (addressValue.country_code === 'CO') {
+      if (addressValue.state_province) {
+        const depId = Number(addressValue.state_province);
+        const department = this.departments.find(d => d.id === depId);
+        if (department) {
+          addressValue.state_province = department.name;
+        }
+      }
+
+      if (addressValue.city) {
+        const cityId = Number(addressValue.city);
+        const city = this.cities.find(c => c.id === cityId);
+        if (city) {
+          addressValue.city = city.name;
+        }
+      }
+    }
+
+    // Add required fields for the API
+    return {
+      ...addressValue,
+      type: 'shipping',
+      is_primary: this.addresses.length === 0, // Make it primary if it's the first address
+    };
   }
 
   prevStep(): void {
@@ -462,6 +547,19 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     const cityId = Number(this.address_form.get('city')?.value);
     const city = this.cities.find(c => c.id === cityId);
     return city?.name || this.address_form.get('city')?.value || '';
+  }
+
+  // Transform location data to SelectorOption format
+  get countryOptions(): SelectorOption[] {
+    return this.countries.map(c => ({ value: c.code, label: c.name }));
+  }
+
+  get departmentOptions(): SelectorOption[] {
+    return this.departments.map(d => ({ value: d.id, label: d.name }));
+  }
+
+  get cityOptions(): SelectorOption[] {
+    return this.cities.map(c => ({ value: c.id, label: c.name }));
   }
 
   // Helper method for field validation errors

@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { BehaviorSubject, Observable } from 'rxjs';
+import { BehaviorSubject, Observable, Subject } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { environment } from '../../../../../environments/environment';
@@ -42,6 +42,12 @@ export class WishlistService {
 
     private wishlist_subject = new BehaviorSubject<Wishlist | null>(null);
     wishlist$ = this.wishlist_subject.asObservable();
+
+    // Event subjects for UI feedback (animations, toasts, etc.)
+    private item_added_subject = new Subject<void>();
+    private item_removed_subject = new Subject<void>();
+    itemAdded$ = this.item_added_subject.asObservable();
+    itemRemoved$ = this.item_removed_subject.asObservable();
 
     constructor(
         private http: HttpClient,
@@ -102,6 +108,8 @@ export class WishlistService {
                     if (response.success) {
                         // Reemplazar con datos reales del backend
                         this.wishlist_subject.next(response.data);
+                        // Emit event for UI feedback
+                        this.item_added_subject.next();
                     }
                 }),
             );
@@ -112,6 +120,8 @@ export class WishlistService {
             tap((response: any) => {
                 if (response.success) {
                     this.wishlist_subject.next(response.data);
+                    // Emit event for UI feedback
+                    this.item_removed_subject.next();
                 }
             }),
         );

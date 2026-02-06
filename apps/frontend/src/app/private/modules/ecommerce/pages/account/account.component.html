@@ -16,10 +16,10 @@
                 <p class="header-email">{{ profile?.email }}</p>
             </div>
         </div>
-        <button class="logout-btn" (click)="logout()">
-            <app-icon name="log-out" [size]="18"></app-icon>
+        <app-button variant="outline-danger" (clicked)="logout()">
+            <app-icon slot="icon" name="log-out" [size]="18"></app-icon>
             Cerrar sesión
-        </button>
+        </app-button>
     </div>
 
     <!-- Navigation Tabs -->
@@ -65,70 +65,40 @@
                     <form [formGroup]="profile_form" (ngSubmit)="saveProfile()">
                         <div class="form-row">
                             <div class="form-group">
-                                <label>Nombre</label>
-                                <input type="text" formControlName="first_name" placeholder="Tu nombre" />
+                                <app-input label="Nombre" formControlName="first_name" placeholder="Tu nombre" [control]="profile_form.get('first_name')"></app-input>
                             </div>
                             <div class="form-group">
-                                <label>Apellido</label>
-                                <input type="text" formControlName="last_name" placeholder="Tu apellido" />
+                                <app-input label="Apellido" formControlName="last_name" placeholder="Tu apellido" [control]="profile_form.get('last_name')"></app-input>
                             </div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label>Teléfono</label>
-                                <input
-                                    type="tel"
-                                    inputmode="numeric"
-                                    formControlName="phone"
-                                    placeholder="Solo números"
-                                    (input)="onNumericInput($event, 'phone')"
-                                    [class.error]="profile_form.get('phone')?.touched && profile_form.get('phone')?.invalid"
-                                />
-                                @if (profile_form.get('phone')?.touched && profile_form.get('phone')?.hasError('pattern')) {
-                                <span class="error-text">Solo se permiten números</span>
-                                }
+                                <app-input label="Teléfono" type="tel" formControlName="phone" placeholder="Solo números" [control]="profile_form.get('phone')"></app-input>
                             </div>
                             <div class="form-group">
-                                <label>Email</label>
-                                <input type="email" [value]="profile?.email" disabled />
+                                <app-input label="Email" type="email" [value]="profile?.email || ''" [disabled]="true"></app-input>
                             </div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label>Tipo de Documento</label>
-                                <select formControlName="document_type">
-                                    <option value="">Seleccionar</option>
-                                    <option value="CC">Cédula de Ciudadanía</option>
-                                    <option value="CE">Cédula de Extranjería</option>
-                                    <option value="NIT">NIT</option>
-                                    <option value="passport">Pasaporte</option>
-                                </select>
+                                <app-selector
+                                    label="Tipo de Documento"
+                                    formControlName="document_type"
+                                    placeholder="Seleccionar"
+                                    [options]="document_type_options">
+                                </app-selector>
                             </div>
                             <div class="form-group">
-                                <label>Número de Documento</label>
-                                <input
-                                    type="text"
-                                    inputmode="numeric"
-                                    formControlName="document_number"
-                                    placeholder="Solo números"
-                                    (input)="onNumericInput($event, 'document_number')"
-                                    [class.error]="profile_form.get('document_number')?.touched && profile_form.get('document_number')?.invalid"
-                                />
-                                @if (profile_form.get('document_number')?.touched && profile_form.get('document_number')?.hasError('pattern')) {
-                                <span class="error-text">Solo se permiten números</span>
-                                }
+                                <app-input label="Número de Documento" formControlName="document_number" placeholder="Solo números" [control]="profile_form.get('document_number')"></app-input>
                             </div>
                         </div>
                         <div class="form-actions">
-                            <button type="submit" class="save-btn" [disabled]="is_saving || !profile_form.valid">
-                                @if (is_saving) {
-                                    <span class="btn-spinner"></span>
-                                    Guardando...
-                                } @else {
-                                    <app-icon name="save" [size]="18"></app-icon>
-                                    Guardar cambios
+                            <app-button type="submit" variant="primary" [loading]="is_saving" [disabled]="is_saving || !profile_form.valid">
+                                @if (!is_saving) {
+                                    <app-icon slot="icon" name="save" [size]="18"></app-icon>
                                 }
-                            </button>
+                                {{ is_saving ? 'Guardando...' : 'Guardar cambios' }}
+                            </app-button>
                         </div>
                     </form>
                 </section>
@@ -141,39 +111,31 @@
                     @if (!show_password_form) {
                         <div class="security-actions">
                             <p class="security-hint">Cambiar tu contraseña regularmente ayuda a proteger tu cuenta.</p>
-                            <button class="secondary-btn" (click)="show_password_form = true">
-                                <app-icon name="key" [size]="18"></app-icon>
+                            <app-button variant="outline" (clicked)="show_password_form = true">
+                                <app-icon slot="icon" name="key" [size]="18"></app-icon>
                                 Cambiar contraseña
-                            </button>
+                            </app-button>
                         </div>
                     } @else {
                         <form [formGroup]="password_form" (ngSubmit)="changePassword()">
                             <div class="form-group">
-                                <label>Contraseña actual</label>
-                                <input type="password" formControlName="current_password" placeholder="Contraseña actual" />
+                                <app-input label="Contraseña actual" type="password" formControlName="current_password" placeholder="Contraseña actual" [control]="password_form.get('current_password')"></app-input>
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label>Nueva contraseña</label>
-                                    <input type="password" formControlName="new_password" placeholder="Nueva contraseña" />
+                                    <app-input label="Nueva contraseña" type="password" formControlName="new_password" placeholder="Nueva contraseña" [control]="password_form.get('new_password')"></app-input>
                                 </div>
                                 <div class="form-group">
-                                    <label>Confirmar contraseña</label>
-                                    <input type="password" formControlName="confirm_password" placeholder="Confirmar" />
+                                    <app-input label="Confirmar contraseña" type="password" formControlName="confirm_password" placeholder="Confirmar" [control]="password_form.get('confirm_password')"></app-input>
                                 </div>
                             </div>
                             <div class="form-actions">
-                                <button type="button" class="cancel-btn" (click)="show_password_form = false; password_form.reset()">
+                                <app-button type="button" variant="ghost" (clicked)="show_password_form = false; password_form.reset()">
                                     Cancelar
-                                </button>
-                                <button type="submit" class="save-btn" [disabled]="is_changing_password || !password_form.valid">
-                                    @if (is_changing_password) {
-                                        <span class="btn-spinner"></span>
-                                        Cambiando...
-                                    } @else {
-                                        Cambiar contraseña
-                                    }
-                                </button>
+                                </app-button>
+                                <app-button type="submit" variant="primary" [loading]="is_changing_password" [disabled]="is_changing_password || !password_form.valid">
+                                    {{ is_changing_password ? 'Cambiando...' : 'Cambiar contraseña' }}
+                                </app-button>
                             </div>
                         </form>
                     }
@@ -185,18 +147,18 @@
                 <section class="account-section addresses-section">
                     <div class="section-header">
                         <h2>Mis Direcciones</h2>
-                        <button class="icon-btn" (click)="openAddressModal('create')" title="Agregar dirección">
+                        <app-button variant="ghost" size="sm" (clicked)="openAddressModal('create')" title="Agregar dirección">
                             <app-icon name="plus" [size]="18"></app-icon>
-                        </button>
+                        </app-button>
                     </div>
 
                     @if (!profile || !profile.addresses || profile.addresses.length === 0) {
                         <div class="empty-state">
                             <app-icon name="map-pin" [size]="32"></app-icon>
                             <p>No tienes direcciones guardadas</p>
-                            <button class="secondary-btn" (click)="openAddressModal('create')">
+                            <app-button variant="outline" (clicked)="openAddressModal('create')">
                                 Agregar dirección
-                            </button>
+                            </app-button>
                         </div>
                     } @else {
                         <div class="address-list">
@@ -240,16 +202,16 @@
                                     </div>
                                     <div class="address-actions">
                                         @if (!addr.is_primary) {
-                                            <button class="icon-btn" (click)="setAddressPrimary(addr.id)" title="Establecer como principal">
+                                            <app-button variant="ghost" size="sm" (clicked)="setAddressPrimary(addr.id)" title="Establecer como principal">
                                                 <app-icon name="star" [size]="18"></app-icon>
-                                            </button>
+                                            </app-button>
                                         }
-                                        <button class="icon-btn" (click)="openAddressModal('edit', addr)" title="Editar">
+                                        <app-button variant="ghost" size="sm" (clicked)="openAddressModal('edit', addr)" title="Editar">
                                             <app-icon name="edit" [size]="16"></app-icon>
-                                        </button>
-                                        <button class="icon-btn icon-btn-danger" (click)="deleteAddress(addr.id)" title="Eliminar">
+                                        </app-button>
+                                        <app-button variant="outline-danger" size="sm" (clicked)="deleteAddress(addr.id)" title="Eliminar">
                                             <app-icon name="trash" [size]="16"></app-icon>
-                                        </button>
+                                        </app-button>
                                     </div>
                                 </div>
                             }
@@ -260,13 +222,11 @@
         </div>
     }
 
-    <!-- Address Modal (Dynamic Component) -->
-    @if (show_address_modal) {
-        <app-address-modal
-            [mode]="address_modal_mode"
-            [address]="editing_address"
-            [onClose]="closeAddressModal"
-            [onSave]="onAddressSaved"
-        />
-    }
+    <!-- Address Modal -->
+    <app-address-modal
+        [(isOpen)]="show_address_modal"
+        [mode]="address_modal_mode"
+        [address]="editing_address"
+        (saved)="onAddressSaved($event)"
+    />
 </div>

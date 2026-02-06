@@ -1,16 +1,19 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { purchase_order_status_enum } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
-import { BadRequestException } from '@nestjs/common';
 import { toTitleCase } from '@common/utils/format.util';
+import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 
 @Injectable()
 export class PurchaseOrdersService {
-  constructor(private prisma: StorePrismaService) { }
+  constructor(
+    private prisma: StorePrismaService,
+    private stockLevelManager: StockLevelManager,
+  ) {}
 
   async create(createPurchaseOrderDto: CreatePurchaseOrderDto) {
     return this.prisma.$transaction(async (tx) => {
@@ -509,35 +512,25 @@ export class PurchaseOrdersService {
         throw new Error('Purchase order not found');
       }
 
-      // Create inventory movements for received items
+      // Create inventory movements and update stock for received items
       for (const item of items) {
         const orderItem = purchaseOrder.purchase_order_items.find(i => i.id === item.id);
         const productId = orderItem?.product_id;
         const productVariantId = orderItem?.product_variant_id;
 
         if (productId && item.quantity_received > 0) {
-          await tx.inventory_movements.create({
-            data: {
-              organization_id: purchaseOrder.organization_id,
+          // Update stock levels using StockLevelManager (handles sync + movement + transaction)
+          await this.stockLevelManager.updateStock(
+            {
               product_id: productId,
-              product_variant_id: productVariantId || null,
-              to_location_id: purchaseOrder.location_id,
-              quantity: item.quantity_received,
+              variant_id: productVariantId || undefined,
+              location_id: purchaseOrder.location_id!,
+              quantity_change: item.quantity_received,
               movement_type: 'stock_in',
-              source_order_type: 'purchase',
-              source_order_id: id,
               reason: 'Purchase order receipt',
-              created_at: new Date(),
+              create_movement: true,
             },
-          });
-
-          // Update stock levels
-          await this.updateStockLevel(
             tx,
-            productId,
-            purchaseOrder.location_id!,
-            item.quantity_received,
-            productVariantId || undefined,
           );
         }
       }
@@ -577,49 +570,5 @@ export class PurchaseOrdersService {
     return this.prisma.purchase_orders.delete({
       where: { id },
     });
-  }
-
-  private async updateStockLevel(
-    tx: any,
-    productId: number,
-    locationId: number,
-    quantityChange: number,
-    productVariantId?: number,
-  ) {
-    // Use findFirst instead of findUnique to avoid composite key null issues
-    const existingStock = await tx.stock_levels.findFirst({
-      where: {
-        product_id: productId,
-        product_variant_id: productVariantId || null,
-        location_id: locationId,
-      },
-    });
-
-    if (existingStock) {
-      const newQuantityOnHand = existingStock.quantity_on_hand + quantityChange;
-      const newQuantityAvailable =
-        existingStock.quantity_available + quantityChange;
-
-      return tx.stock_levels.update({
-        where: { id: existingStock.id },
-        data: {
-          quantity_on_hand: Math.max(0, newQuantityOnHand),
-          quantity_available: Math.max(0, newQuantityAvailable),
-          updated_at: new Date(),
-        },
-      });
-    } else {
-      return tx.stock_levels.create({
-        data: {
-          product_id: productId,
-          product_variant_id: productVariantId || null,
-          location_id: locationId,
-          quantity_on_hand: Math.max(0, quantityChange),
-          quantity_reserved: 0,
-          quantity_available: Math.max(0, quantityChange),
-          updated_at: new Date(), // Fixed field name to updated_at
-        },
-      });
-    }
   }
 }

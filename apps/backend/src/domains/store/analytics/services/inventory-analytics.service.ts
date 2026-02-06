@@ -8,10 +8,14 @@ export class InventoryAnalyticsService {
 
   async getInventorySummary(query: InventoryAnalyticsQueryDto) {
     // Get all products with stock info (store scoping is automatic)
+    // Include products where track_inventory is true OR null (null = trackable by default)
     const products = await this.prisma.products.findMany({
       where: {
         state: 'active',
-        track_inventory: true,
+        OR: [
+          { track_inventory: true },
+          { track_inventory: null },
+        ],
       },
       select: {
         id: true,
@@ -56,10 +60,14 @@ export class InventoryAnalyticsService {
   }
 
   async getStockLevels(query: InventoryAnalyticsQueryDto) {
+    // Include products where track_inventory is true OR null (null = trackable by default)
     const products = await this.prisma.products.findMany({
       where: {
         state: 'active',
-        track_inventory: true,
+        OR: [
+          { track_inventory: true },
+          { track_inventory: null },
+        ],
         ...(query.category_id && {
           product_categories: {
             some: {
@@ -126,10 +134,18 @@ export class InventoryAnalyticsService {
   }
 
   async getLowStockAlerts(query: InventoryAnalyticsQueryDto) {
+    // Include products where track_inventory is true OR null (null = trackable by default)
     const products = await this.prisma.products.findMany({
       where: {
         state: 'active',
-        track_inventory: true,
+        AND: [
+          {
+            OR: [
+              { track_inventory: true },
+              { track_inventory: null },
+            ],
+          },
+        ],
         OR: [
           { stock_quantity: 0 },
           {

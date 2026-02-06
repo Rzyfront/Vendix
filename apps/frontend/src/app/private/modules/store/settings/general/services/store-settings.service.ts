@@ -136,6 +136,19 @@ export class StoreSettingsService {
       );
   }
 
+  uploadStoreLogo(file: File): Observable<{ key: string; url: string; thumbKey?: string; thumbUrl?: string }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('entityType', 'store_logos');
+
+    return this.http
+      .post<any>(`${environment.apiUrl}/upload`, formData)
+      .pipe(
+        map((response) => response.data ?? response),
+        catchError(this.handleError)
+      );
+  }
+
   private update_settings_api(
     settings: Partial<StoreSettings>,
   ): Observable<ApiResponse<StoreSettings>> {

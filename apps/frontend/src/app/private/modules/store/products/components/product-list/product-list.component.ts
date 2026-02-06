@@ -59,6 +59,7 @@ export class ProductListComponent implements OnChanges {
   @Output() edit = new EventEmitter<Product>();
   @Output() delete = new EventEmitter<Product>();
   @Output() bulkUpload = new EventEmitter<void>();
+  @Output() bulkImageUpload = new EventEmitter<void>();
   @Output() sort = new EventEmitter<{
     column: string;
     direction: 'asc' | 'desc' | null;
@@ -105,6 +106,7 @@ export class ProductListComponent implements OnChanges {
   dropdownActions: DropdownAction[] = [
     { label: 'Nuevo Producto', icon: 'plus', action: 'create', variant: 'primary' },
     { label: 'Carga Masiva', icon: 'upload-cloud', action: 'bulk-upload' },
+    { label: 'Carga de Imágenes', icon: 'image', action: 'bulk-image-upload' },
   ];
 
   // Table configuration
@@ -308,6 +310,9 @@ export class ProductListComponent implements OnChanges {
         break;
       case 'bulk-upload':
         this.bulkUpload.emit();
+        break;
+      case 'bulk-image-upload':
+        this.bulkImageUpload.emit();
         break;
     }
   }

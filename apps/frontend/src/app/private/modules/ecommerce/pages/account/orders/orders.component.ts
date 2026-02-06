@@ -2,11 +2,13 @@ import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { AccountService, Order } from '../../../services/account.service';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 
 @Component({
   selector: 'app-orders',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [CommonModule, RouterModule, IconComponent, ButtonComponent],
   templateUrl: './orders.component.html',
   styleUrls: ['./orders.component.scss'],
 })

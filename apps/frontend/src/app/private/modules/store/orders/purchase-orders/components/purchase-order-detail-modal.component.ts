@@ -106,35 +106,38 @@ import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '.
       </div>
 
       <!-- Footer Actions -->
-      <div slot="footer" class="flex justify-between gap-3 w-full">
+      <div slot="footer" class="flex justify-between gap-2 w-full">
         <div>
           <app-button
             *ngIf="canCancel"
             variant="danger"
+            size="xsm"
             (clicked)="onCancelOrder()"
           >
-            <app-icon name="x-circle" [size]="16" class="mr-2"></app-icon>
+            <app-icon name="x-circle" [size]="14" class="mr-1.5"></app-icon>
             Cancelar Orden
           </app-button>
         </div>
-        <div class="flex gap-3">
-          <app-button variant="secondary" (clicked)="onClose()">
+        <div class="flex gap-2">
+          <app-button variant="secondary" size="xsm" (clicked)="onClose()">
             Cerrar
           </app-button>
           <app-button
             *ngIf="canEdit"
             variant="outline"
+            size="xsm"
             (clicked)="onEditOrder()"
           >
-            <app-icon name="edit" [size]="16" class="mr-2"></app-icon>
+            <app-icon name="edit" [size]="14" class="mr-1.5"></app-icon>
             Editar Orden
           </app-button>
           <app-button
             *ngIf="canReceive"
             variant="primary"
+            size="xsm"
             (clicked)="startReceiving()"
           >
-            <app-icon name="package" [size]="16" class="mr-2"></app-icon>
+            <app-icon name="package" [size]="14" class="mr-1.5"></app-icon>
             Recibir Todo
           </app-button>
         </div>

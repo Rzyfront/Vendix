@@ -6,11 +6,13 @@ import {
   Validators,
   ReactiveFormsModule,
 } from '@angular/forms';
-import { Subject, takeUntil, map, startWith } from 'rxjs';
+import { Subject, takeUntil, map, startWith, take } from 'rxjs';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../../environments/environment';
+import { Store } from '@ngrx/store';
+import { selectStoreSettings } from '../../../../core/store/auth/auth.selectors';
 import { EcommerceService } from './services/ecommerce.service';
 import {
   EcommerceSettings,
@@ -57,6 +59,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   private toastService = inject(ToastService);
   private currencyService = inject(CurrencyFormatService);
   private http = inject(HttpClient);
+  private store = inject(Store);
 
   private destroy$ = new Subject<void>();
 
@@ -731,59 +734,28 @@ export class EcommerceComponent implements OnInit, OnDestroy {
     }
   }
   /**
-   * Sincronizar colores desde el tema actual
+   * Sincronizar colores desde el branding de la tienda (source of truth)
    */
-  syncColorsFromTheme(): void {
-    const root = document.documentElement;
-    const computedStyle = getComputedStyle(root);
+  syncColorsFromBranding(): void {
+    this.store.select(selectStoreSettings).pipe(take(1)).subscribe((storeSettings: any) => {
+      const branding = storeSettings?.branding;
 
-    const primaryColor = this.rgbToHex(
-      computedStyle.getPropertyValue('--color-primary').trim(),
-    );
-    const secondaryColor = this.rgbToHex(
-      computedStyle.getPropertyValue('--color-secondary').trim(),
-    );
-    const accentColor = this.rgbToHex(
-      computedStyle.getPropertyValue('--color-accent').trim(),
-    );
+      if (!branding) {
+        this.toastService.warning('No se encontró configuración de branding');
+        return;
+      }
 
-    const coloresGroup = this.settingsForm.get('inicio.colores') as FormGroup;
-    if (coloresGroup) {
-      coloresGroup.patchValue({
-        primary_color: primaryColor,
-        secondary_color: secondaryColor,
-        accent_color: accentColor,
-      });
-      this.settingsForm.markAsDirty();
-      this.toastService.success(
-        'Colores sincronizados con la aplicación actual',
-      );
-    }
-  }
-
-  /**
-   * Convert RGB/RGBA to Hex
-   */
-  private rgbToHex(rgb: string): string {
-    // Si ya es hex, retornar
-    if (rgb.startsWith('#')) return rgb;
-
-    // Extraer números
-    const match = rgb.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*[\d.]+)?\)$/);
-    if (!match) return rgb;
-
-    const r = parseInt(match[1]);
-    const g = parseInt(match[2]);
-    const b = parseInt(match[3]);
-
-    return (
-      '#' +
-      [r, g, b]
-        .map((x) => {
-          const hex = x.toString(16);
-          return hex.length === 1 ? '0' + hex : hex;
-        })
-        .join('')
-    ).toUpperCase();
+      const coloresGroup = this.settingsForm.get('inicio.colores') as FormGroup;
+      if (coloresGroup) {
+        coloresGroup.patchValue({
+          primary_color: branding.primary_color || '#3B82F6',
+          secondary_color: branding.secondary_color || '#10B981',
+          accent_color: branding.accent_color || '#F59E0B',
+        });
+        this.settingsForm.markAsDirty();
+        this.formUpdateTrigger.update(v => v + 1);
+        this.toastService.success('Colores sincronizados desde el branding de la tienda');
+      }
+    });
   }
 }

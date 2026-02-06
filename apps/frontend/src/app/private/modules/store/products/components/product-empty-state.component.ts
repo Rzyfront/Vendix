@@ -38,7 +38,7 @@ import { ButtonComponent } from '../../../../../shared/components';
       </p>
 
       <!-- Actions -->
-      <div class="flex flex-col sm:flex-row gap-3 justify-center">
+      <div class="flex flex-col items-center sm:flex-row gap-3 justify-center">
         <app-button variant="primary" (clicked)="actionClick.emit()">
           Crear Primer Producto
         </app-button>

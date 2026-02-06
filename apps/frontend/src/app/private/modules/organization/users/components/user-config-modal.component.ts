@@ -18,6 +18,8 @@ import {
 import {
   ButtonComponent,
   ModalComponent,
+  InputComponent,
+  TextareaComponent,
 } from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
 import { User } from '../interfaces/user.interface';
@@ -27,7 +29,7 @@ import { Subject, takeUntil } from 'rxjs';
 @Component({
   selector: 'app-user-config-modal',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, ButtonComponent, ModalComponent],
+  imports: [CommonModule, ReactiveFormsModule, ButtonComponent, ModalComponent, InputComponent, TextareaComponent],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -122,13 +124,12 @@ import { Subject, takeUntil } from 'rxjs';
                   servicio de roles. Por ahora, puedes ingresar IDs de roles
                   manualmente (separados por coma).
                 </p>
-                <label class="block text-sm font-medium mt-2">Role IDs</label>
-                <input
-                  type="text"
+                <app-input
+                  styleVariant="modern"
                   formControlName="rolesInput"
+                  [label]="'Role IDs'"
                   placeholder="Ej: 1, 2, 3"
-                  class="w-full mt-1 px-3 py-2 border rounded text-sm"
-                />
+                ></app-input>
               </div>
             </div>
           </div>
@@ -140,28 +141,26 @@ import { Subject, takeUntil } from 'rxjs';
                 La selección de tiendas se conectará con el servicio de tiendas.
                 Por ahora, ingresa IDs de tiendas manualmente.
               </p>
-              <label class="block text-sm font-medium mt-2">Store IDs</label>
-              <input
-                type="text"
+              <app-input
+                styleVariant="modern"
                 formControlName="storesInput"
+                [label]="'Store IDs'"
                 placeholder="Ej: 10, 20"
-                class="w-full mt-1 px-3 py-2 border rounded text-sm"
-              />
+              ></app-input>
             </div>
           </div>
 
           <!-- Panel UI Tab -->
           <div *ngSwitchCase="'panel_ui'" class="space-y-4">
             <div class="space-y-2">
-              <label class="block text-sm font-medium"
-                >Configuración JSON</label
-              >
-              <textarea
+              <app-textarea
+                styleVariant="modern"
                 formControlName="panelUiInput"
-                rows="10"
-                class="w-full px-3 py-2 font-mono text-sm border rounded bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200"
+                [label]="'Configuración JSON'"
+                [rows]="10"
                 placeholder='{"dashboard": true, "settings": false}'
-              ></textarea>
+                customClass="font-mono"
+              ></app-textarea>
               <p *ngIf="jsonError" class="text-xs text-red-500">
                 {{ jsonError }}
               </p>

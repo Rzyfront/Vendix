@@ -1,7 +1,7 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Subject, takeUntil, finalize } from 'rxjs';
-import { CustomerListComponent, CustomerModalComponent } from './components';
+import { CustomerListComponent, CustomerModalComponent, CustomerBulkUploadModalComponent } from './components';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { CustomersService } from './services/customers.service';
 import {
@@ -22,6 +22,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
     StatsComponent,
     CustomerListComponent,
     CustomerModalComponent,
+    CustomerBulkUploadModalComponent,
   ],
   template: `
     <div class="w-full">
@@ -73,7 +74,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
         (create)="openCreateModal()"
         (edit)="openEditModal($event)"
         (delete)="onDelete($event)"
-        (refresh)="loadCustomers()"
+        (bulkUpload)="openBulkUploadModal()"
       ></app-customer-list>
 
       <!-- Modal -->
@@ -84,6 +85,13 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
         (closed)="closeModal()"
         (save)="onSave($event)"
       ></app-customer-modal>
+
+      <!-- Bulk Upload Modal -->
+      <app-customer-bulk-upload-modal
+        [isOpen]="isBulkUploadModalOpen"
+        (isOpenChange)="isBulkUploadModalOpen = $event"
+        (uploadComplete)="onBulkUploadComplete()"
+      ></app-customer-bulk-upload-modal>
     </div>
   `,
 })
@@ -106,6 +114,9 @@ export class CustomersComponent implements OnInit, OnDestroy {
   // Modal
   isModalOpen = false;
   selectedCustomer: Customer | null = null;
+
+  // Bulk Upload Modal
+  isBulkUploadModalOpen = false;
 
   private destroy$ = new Subject<void>();
 
@@ -259,5 +270,14 @@ export class CustomersComponent implements OnInit, OnDestroy {
             });
         }
       });
+  }
+
+  openBulkUploadModal() {
+    this.isBulkUploadModalOpen = true;
+  }
+
+  onBulkUploadComplete() {
+    this.loadCustomers();
+    this.loadStats();
   }
 }

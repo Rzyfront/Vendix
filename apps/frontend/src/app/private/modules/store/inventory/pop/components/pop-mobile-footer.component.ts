@@ -48,7 +48,7 @@ import { PopCartSummary } from '../services/pop-cart.service';
           (click)="saveDraft.emit()"
           [disabled]="itemCount === 0"
         >
-          <app-icon name="save" [size]="18"></app-icon>
+          <app-icon name="save" [size]="14"></app-icon>
           <span>Borrador</span>
         </button>
         <button
@@ -56,8 +56,16 @@ import { PopCartSummary } from '../services/pop-cart.service';
           (click)="createOrder.emit()"
           [disabled]="itemCount === 0"
         >
-          <app-icon name="file-text" [size]="18"></app-icon>
-          <span>Crear Orden</span>
+          <app-icon name="file-plus" [size]="14"></app-icon>
+          <span>Crear</span>
+        </button>
+        <button
+          class="action-btn receive-btn"
+          (click)="createAndReceive.emit()"
+          [disabled]="itemCount === 0"
+        >
+          <app-icon name="package-check" [size]="14"></app-icon>
+          <span>C+R</span>
         </button>
       </div>
     </div>
@@ -191,7 +199,7 @@ import { PopCartSummary } from '../services/pop-cart.service';
       /* Row 2: Actions */
       .actions-row {
         display: flex;
-        gap: 10px;
+        gap: 6px;
       }
 
       .action-btn {
@@ -199,14 +207,15 @@ import { PopCartSummary } from '../services/pop-cart.service';
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 8px;
-        height: 44px;
+        gap: 4px;
+        height: 36px;
         border: none;
-        border-radius: 12px;
-        font-size: 14px;
+        border-radius: 8px;
+        font-size: 12px;
         font-weight: 600;
         cursor: pointer;
         transition: all 0.2s ease;
+        white-space: nowrap;
       }
 
       .action-btn:active:not(:disabled) {
@@ -232,10 +241,18 @@ import { PopCartSummary } from '../services/pop-cart.service';
       .create-btn {
         background: var(--color-primary);
         color: white;
-        flex: 1.5;
       }
 
       .create-btn:hover:not(:disabled) {
+        filter: brightness(1.1);
+      }
+
+      .receive-btn {
+        background: var(--color-success, #22c55e);
+        color: white;
+      }
+
+      .receive-btn:hover:not(:disabled) {
         filter: brightness(1.1);
       }
 
@@ -279,6 +296,7 @@ export class PopMobileFooterComponent {
   @Output() viewOrder = new EventEmitter<void>();
   @Output() saveDraft = new EventEmitter<void>();
   @Output() createOrder = new EventEmitter<void>();
+  @Output() createAndReceive = new EventEmitter<void>();
 
   formatCurrency(amount: number): string {
     return new Intl.NumberFormat('es-CO', {

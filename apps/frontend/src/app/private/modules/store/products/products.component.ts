@@ -28,6 +28,7 @@ import {
 import { ProductListComponent } from './components/product-list/product-list.component';
 import { ProductCreateModalComponent } from './components/product-create-modal.component';
 import { BulkUploadModalComponent } from './components/bulk-upload-modal/bulk-upload-modal.component';
+import { BulkImageUploadModalComponent } from './components/bulk-image-upload-modal/bulk-image-upload-modal.component';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 
 @Component({
@@ -38,6 +39,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
     ProductListComponent,
     ProductCreateModalComponent,
     BulkUploadModalComponent,
+    BulkImageUploadModalComponent,
     StatsComponent,
   ],
   providers: [ProductsService],
@@ -95,6 +97,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         (edit)="navigateToEditPage($event)"
         (delete)="deleteProduct($event)"
         (bulkUpload)="openBulkUploadModal()"
+        (bulkImageUpload)="openBulkImageUploadModal()"
       ></app-product-list>
 
       <!-- Modals -->
@@ -110,6 +113,11 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         [(isOpen)]="isBulkUploadModalOpen"
         (uploadComplete)="onBulkUploadComplete()"
       ></app-bulk-upload-modal>
+
+      <app-bulk-image-upload-modal
+        [(isOpen)]="isBulkImageUploadModalOpen"
+        (uploadComplete)="onBulkImageUploadComplete()"
+      ></app-bulk-image-upload-modal>
     </div>
   `,
 })
@@ -142,6 +150,7 @@ export class ProductsComponent implements OnInit, OnDestroy {
   // Modal State
   isCreateModalOpen = false;
   isBulkUploadModalOpen = false;
+  isBulkImageUploadModalOpen = false;
   isCreatingProduct = false;
 
   private subscriptions: Subscription[] = [];
@@ -311,6 +320,16 @@ export class ProductsComponent implements OnInit, OnDestroy {
     this.loadProducts();
     this.loadStats();
     this.toastService.success('Carga masiva completada');
+  }
+
+  // Bulk Image Upload
+  openBulkImageUploadModal(): void {
+    this.isBulkImageUploadModalOpen = true;
+  }
+
+  onBulkImageUploadComplete(): void {
+    this.isBulkImageUploadModalOpen = false;
+    this.loadProducts();
   }
   // Helpers
   getGrowthPercentage(val: number): string {

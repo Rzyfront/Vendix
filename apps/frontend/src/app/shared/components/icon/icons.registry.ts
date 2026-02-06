@@ -102,6 +102,7 @@ import {
   UploadCloud,
   LucideIconData,
   Heart,
+  Share2,
   ExternalLink,
   Layers,
   ShieldOff,
@@ -130,6 +131,12 @@ import {
   // Inventory adjustment icons:
   XCircle,
   Edit3,
+  // Social media icons
+  Facebook,
+  Instagram,
+  // POP icons
+  PackageCheck,
+  FilePlus,
 } from 'lucide-angular';
 
 /**
@@ -276,6 +283,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'upload-cloud': UploadCloud,
   copy: Copy,
   heart: Heart,
+  share: Share2,
   'trending-down': TrendingDown,
   layers: Layers,
   'shield-off': ShieldOff,
@@ -306,6 +314,14 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   // Inventory adjustment icons
   'x-circle': XCircle,
   'edit-3': Edit3,
+
+  // Social media icons
+  facebook: Facebook,
+  instagram: Instagram,
+
+  // POP icons
+  'package-check': PackageCheck,
+  'file-plus': FilePlus,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

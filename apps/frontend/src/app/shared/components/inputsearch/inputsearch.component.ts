@@ -14,6 +14,7 @@ import {
   ReactiveFormsModule,
 } from '@angular/forms';
 import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
+import { FormStyleVariant } from '../../types/form.types';
 
 export type InputSearchSize = 'sm' | 'md' | 'lg';
 
@@ -113,6 +114,7 @@ export class InputsearchComponent
   @Input() required = false;
   @Input() showClear = true;
   @Input() size: InputSearchSize = 'md';
+  @Input() styleVariant: FormStyleVariant = 'modern';
   @Input() debounceTime = 300; // 300 ms por defecto
   @Input() helpText = '';
   @Input() errorMessage = '';
@@ -214,11 +216,17 @@ export class InputsearchComponent
   get containerClasses(): string {
     const baseClasses = ['inputsearch-container'];
 
-    const sizeClasses = {
-      sm: ['inputsearch-container-sm'],
-      md: ['inputsearch-container-md'],
-      lg: ['inputsearch-container-lg'],
-    };
+    const variantClasses = this.styleVariant === 'modern'
+      ? ['inputsearch-modern']
+      : [];
+
+    const sizeClasses = this.styleVariant === 'classic'
+      ? {
+          sm: ['inputsearch-container-sm'],
+          md: ['inputsearch-container-md'],
+          lg: ['inputsearch-container-lg'],
+        }[this.size]
+      : [];
 
     const stateClasses = [
       this.disabled ? 'inputsearch-disabled' : '',
@@ -228,7 +236,8 @@ export class InputsearchComponent
 
     const classes = [
       ...baseClasses,
-      ...sizeClasses[this.size],
+      ...variantClasses,
+      ...sizeClasses,
       ...stateClasses,
     ];
 
@@ -242,11 +251,17 @@ export class InputsearchComponent
   get wrapperClasses(): string {
     const baseClasses = ['inputsearch-wrapper'];
 
-    const sizeClasses = {
-      sm: ['inputsearch-wrapper-sm'],
-      md: ['inputsearch-wrapper-md'],
-      lg: ['inputsearch-wrapper-lg'],
-    };
+    const variantClasses = this.styleVariant === 'modern'
+      ? ['inputsearch-wrapper-modern']
+      : [];
+
+    const sizeClasses = this.styleVariant === 'classic'
+      ? {
+          sm: ['inputsearch-wrapper-sm'],
+          md: ['inputsearch-wrapper-md'],
+          lg: ['inputsearch-wrapper-lg'],
+        }[this.size]
+      : [];
 
     const stateClasses = [
       this.disabled ? 'inputsearch-wrapper-disabled' : '',
@@ -254,19 +269,23 @@ export class InputsearchComponent
       this.isFocused ? 'inputsearch-wrapper-focused' : '',
     ].filter(Boolean);
 
-    return [...baseClasses, ...sizeClasses[this.size], ...stateClasses].join(
-      ' ',
-    );
+    return [...baseClasses, ...variantClasses, ...sizeClasses, ...stateClasses].join(' ');
   }
 
   get inputClasses(): string {
     const baseClasses = ['inputsearch-input'];
 
-    const sizeClasses = {
-      sm: ['inputsearch-input-sm'],
-      md: ['inputsearch-input-md'],
-      lg: ['inputsearch-input-lg'],
-    };
+    const variantClasses = this.styleVariant === 'modern'
+      ? ['inputsearch-input-modern']
+      : [];
+
+    const sizeClasses = this.styleVariant === 'classic'
+      ? {
+          sm: ['inputsearch-input-sm'],
+          md: ['inputsearch-input-md'],
+          lg: ['inputsearch-input-lg'],
+        }[this.size]
+      : [];
 
     const stateClasses = [
       this.disabled ? 'inputsearch-input-disabled' : '',
@@ -274,35 +293,43 @@ export class InputsearchComponent
       this.isFocused ? 'inputsearch-input-focused' : '',
     ].filter(Boolean);
 
-    return [...baseClasses, ...sizeClasses[this.size], ...stateClasses].join(
-      ' ',
-    );
+    return [...baseClasses, ...variantClasses, ...sizeClasses, ...stateClasses].join(' ');
   }
 
   get iconClasses(): string {
     const baseClasses = ['inputsearch-icon'];
 
-    const sizeClasses = {
-      sm: ['inputsearch-icon-sm'],
-      md: ['inputsearch-icon-md'],
-      lg: ['inputsearch-icon-lg'],
-    };
+    const variantClasses = this.styleVariant === 'modern'
+      ? ['inputsearch-icon-modern']
+      : [];
 
-    return [...baseClasses, ...sizeClasses[this.size]].join(' ');
+    const sizeClasses = this.styleVariant === 'classic'
+      ? {
+          sm: ['inputsearch-icon-sm'],
+          md: ['inputsearch-icon-md'],
+          lg: ['inputsearch-icon-lg'],
+        }[this.size]
+      : [];
+
+    return [...baseClasses, ...variantClasses, ...sizeClasses].join(' ');
   }
 
   get clearButtonClasses(): string {
     const baseClasses = ['inputsearch-clear'];
 
-    const sizeClasses = {
-      sm: ['inputsearch-clear-sm'],
-      md: ['inputsearch-clear-md'],
-      lg: ['inputsearch-clear-lg'],
-    };
+    const variantClasses = this.styleVariant === 'modern'
+      ? ['inputsearch-clear-modern']
+      : [];
 
-    const classes = [...baseClasses, ...sizeClasses[this.size]];
+    const sizeClasses = this.styleVariant === 'classic'
+      ? {
+          sm: ['inputsearch-clear-sm'],
+          md: ['inputsearch-clear-md'],
+          lg: ['inputsearch-clear-lg'],
+        }[this.size]
+      : [];
 
-    return classes.join(' ');
+    return [...baseClasses, ...variantClasses, ...sizeClasses].join(' ');
   }
 
   get helpClasses(): string {

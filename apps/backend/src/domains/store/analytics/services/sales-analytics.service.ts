@@ -6,6 +6,9 @@ import { SalesAnalyticsQueryDto, DatePreset, Granularity } from '../dto/analytic
 export class SalesAnalyticsService {
   constructor(private readonly prisma: StorePrismaService) {}
 
+  // States that count as completed sales
+  private readonly COMPLETED_STATES = ['delivered', 'finished'];
+
   async getSalesSummary(query: SalesAnalyticsQueryDto) {
     const { startDate, endDate } = this.parseDateRange(query);
     const { previousStartDate, previousEndDate } = this.getPreviousPeriod(startDate, endDate);
@@ -13,7 +16,7 @@ export class SalesAnalyticsService {
     // Current period metrics (store scoping is automatic)
     const currentPeriod = await this.prisma.orders.aggregate({
       where: {
-        state: 'finished',
+        state: { in: this.COMPLETED_STATES },
         ...(query.channel && { channel: query.channel }),
         created_at: {
           gte: startDate,
@@ -31,7 +34,7 @@ export class SalesAnalyticsService {
     // Previous period for comparison
     const previousPeriod = await this.prisma.orders.aggregate({
       where: {
-        state: 'finished',
+        state: { in: this.COMPLETED_STATES },
         ...(query.channel && { channel: query.channel }),
         created_at: {
           gte: previousStartDate,
@@ -50,7 +53,7 @@ export class SalesAnalyticsService {
     const unitsSold = await this.prisma.order_items.aggregate({
       where: {
         orders: {
-          state: 'finished',
+          state: { in: this.COMPLETED_STATES },
           ...(query.channel && { channel: query.channel }),
           created_at: {
             gte: startDate,
@@ -67,7 +70,7 @@ export class SalesAnalyticsService {
     const customers = await this.prisma.orders.groupBy({
       by: ['customer_id'],
       where: {
-        state: 'finished',
+        state: { in: this.COMPLETED_STATES },
         ...(query.channel && { channel: query.channel }),
         created_at: {
           gte: startDate,
@@ -109,7 +112,7 @@ export class SalesAnalyticsService {
       by: ['product_id'],
       where: {
         orders: {
-          state: 'finished',
+          state: { in: this.COMPLETED_STATES },
           ...(query.channel && { channel: query.channel }),
           created_at: {
             gte: startDate,
@@ -188,7 +191,7 @@ export class SalesAnalyticsService {
     const sales = await this.prisma.order_items.findMany({
       where: {
         orders: {
-          state: 'finished',
+          state: { in: this.COMPLETED_STATES },
           created_at: {
             gte: startDate,
             lte: endDate,
@@ -254,7 +257,7 @@ export class SalesAnalyticsService {
     const payments = await this.prisma.payments.findMany({
       where: {
         orders: {
-          state: 'finished',
+          state: { in: this.COMPLETED_STATES },
           created_at: {
             gte: startDate,
             lte: endDate,
@@ -305,7 +308,7 @@ export class SalesAnalyticsService {
 
     const orders = await this.prisma.orders.findMany({
       where: {
-        state: 'finished',
+        state: { in: this.COMPLETED_STATES },
         ...(query.channel && { channel: query.channel }),
         created_at: {
           gte: startDate,
@@ -351,7 +354,7 @@ export class SalesAnalyticsService {
     const results = await this.prisma.orders.groupBy({
       by: ['customer_id'],
       where: {
-        state: 'finished',
+        state: { in: this.COMPLETED_STATES },
         customer_id: {
           not: null,
         },
@@ -387,6 +390,8 @@ export class SalesAnalyticsService {
       select: {
         id: true,
         username: true,
+        first_name: true,
+        last_name: true,
         email: true,
       },
     });
@@ -398,9 +403,14 @@ export class SalesAnalyticsService {
       const totalSpent = Number(r._sum.grand_total || 0);
       const totalOrders = r._count.id || 0;
 
+      // Build customer display name: prefer "First Last", fallback to username, then default
+      const customerName = customer
+        ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || customer.username || 'Cliente'
+        : 'Cliente';
+
       return {
         customer_id: r.customer_id,
-        customer_name: customer?.username || 'Cliente',
+        customer_name: customerName,
         email: customer?.email || '',
         total_orders: totalOrders,
         total_spent: totalSpent,
@@ -416,7 +426,7 @@ export class SalesAnalyticsService {
     const results = await this.prisma.orders.groupBy({
       by: ['channel'],
       where: {
-        state: 'finished',
+        state: { in: this.COMPLETED_STATES },
         created_at: {
           gte: startDate,
           lte: endDate,
@@ -443,7 +453,7 @@ export class SalesAnalyticsService {
     return results
       .map((r) => ({
         channel: r.channel,
-        channel_name: labels[r.channel] || r.channel,
+        display_name: labels[r.channel] || r.channel,
         order_count: r._count.id,
         revenue: Number(r._sum.grand_total || 0),
         percentage: total > 0 ? (Number(r._sum.grand_total || 0) / total) * 100 : 0,

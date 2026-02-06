@@ -10,8 +10,9 @@ import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
 import { CommonModule } from '@angular/common';
 
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
+import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import { DropdownAction } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 import { PopCartService } from '../services/pop-cart.service';
@@ -21,14 +22,12 @@ import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
 @Component({
   selector: 'app-pop-product-selection',
   standalone: true,
-  imports: [CommonModule, IconComponent, InputsearchComponent, ButtonComponent, PopBulkDataModalComponent],
+  imports: [CommonModule, IconComponent, InputsearchComponent, OptionsDropdownComponent, PopBulkDataModalComponent],
   schemas: [NO_ERRORS_SCHEMA],
   template: `
-    <div
-      class="h-full flex flex-col bg-surface rounded-card shadow-card border border-border overflow-hidden"
-    >
-      <!-- Products Header -->
-      <div class="products-header px-4 lg:px-6 py-3 lg:py-4 border-b border-border">
+    <div class="h-full flex flex-col bg-surface rounded-card shadow-card border border-border">
+      <!-- Products Header - Outside overflow container -->
+      <div class="products-header flex-none px-4 lg:px-6 py-3 lg:py-4 border-b border-border bg-surface rounded-t-card">
         <!-- Desktop Header -->
         <div class="hidden lg:flex justify-between items-center gap-4">
           <div class="flex-1 min-w-0">
@@ -46,25 +45,12 @@ import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
               (searchChange)="onSearch($event)"
             />
 
-            <app-button
-              variant="outline"
-              size="sm"
-              (clicked)="bulkModalOpen = true"
-              title="Importar Masivo (CSV/Excel)"
-            >
-              <app-icon name="upload-cloud" [size]="18" slot="icon"></app-icon>
-              Bulk
-            </app-button>
-
-            <app-button
-              variant="outline"
-              size="sm"
-              (clicked)="requestManualAdd.emit()"
-              title="Nuevo Producto (Manual)"
-            >
-              <app-icon name="plus" [size]="18" slot="icon"></app-icon>
-              Nuevo
-            </app-button>
+            <app-options-dropdown
+              [actions]="dropdownActions"
+              triggerLabel="Opciones"
+              title="Opciones"
+              (actionClick)="onDropdownAction($event)"
+            ></app-options-dropdown>
           </div>
         </div>
 
@@ -78,27 +64,12 @@ import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
             (searchChange)="onSearch($event)"
           />
 
-          <!-- Bulk Import - Icon only on mobile -->
-          <app-button
-            variant="outline"
-            size="sm"
-            (clicked)="bulkModalOpen = true"
-            customClasses="!px-2"
-            title="Importar Masivo"
-          >
-            <app-icon name="upload-cloud" [size]="18" slot="icon"></app-icon>
-          </app-button>
-
-          <!-- Manual Add - Icon only on mobile -->
-          <app-button
-            variant="outline"
-            size="sm"
-            (clicked)="requestManualAdd.emit()"
-            customClasses="!px-2"
-            title="Nuevo Producto"
-          >
-            <app-icon name="plus" [size]="18" slot="icon"></app-icon>
-          </app-button>
+          <app-options-dropdown
+            [actions]="dropdownActions"
+            triggerLabel="Opciones"
+            title="Opciones"
+            (actionClick)="onDropdownAction($event)"
+          ></app-options-dropdown>
         </div>
       </div>
 
@@ -236,6 +207,7 @@ import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
         background: rgba(var(--color-surface-rgb, 255, 255, 255), 0.85);
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
+        overflow: visible; /* Allow dropdown to overflow */
       }
 
       /* Touch feedback for mobile */
@@ -260,6 +232,22 @@ export class PopProductSelectionComponent implements OnInit, OnDestroy {
   addingToCart = new Set<string>();
 
   bulkModalOpen = false;
+
+  // Dropdown actions configuration
+  dropdownActions: DropdownAction[] = [
+    {
+      label: 'Nuevo producto',
+      icon: 'plus',
+      action: 'new-product',
+      variant: 'primary',
+    },
+    {
+      label: 'Carga masiva',
+      icon: 'upload-cloud',
+      action: 'bulk-import',
+      variant: 'outline',
+    },
+  ];
 
   @Output() productSelected = new EventEmitter<any>();
   @Output() requestManualAdd = new EventEmitter<void>();
@@ -363,5 +351,16 @@ export class PopProductSelectionComponent implements OnInit, OnDestroy {
 
   onBulkDataLoaded(data: any[]): void {
     this.bulkDataLoaded.emit(data);
+  }
+
+  onDropdownAction(action: string): void {
+    switch (action) {
+      case 'new-product':
+        this.requestManualAdd.emit();
+        break;
+      case 'bulk-import':
+        this.bulkModalOpen = true;
+        break;
+    }
   }
 }

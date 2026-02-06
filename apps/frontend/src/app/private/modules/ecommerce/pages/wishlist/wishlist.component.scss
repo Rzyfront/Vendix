@@ -40,15 +40,19 @@
 
 // Empty wishlist
 .empty-wishlist {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
   padding: 4rem 2rem;
   background: var(--color-surface);
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-border);
 
-  .text-muted {
-    color: var(--color-text-muted);
+  app-icon {
+    display: block;
     margin-bottom: 1.5rem;
+    color: var(--color-text-muted);
   }
 
   h2 {
@@ -60,22 +64,6 @@
   p {
     color: var(--color-text-secondary);
     margin-bottom: 2rem;
-  }
-
-  .primary-btn {
-    padding: 0.875rem 2rem;
-    background: var(--color-primary);
-    color: var(--color-text-on-primary);
-    border: none;
-    border-radius: var(--radius-md);
-    font-weight: var(--fw-medium);
-    font-size: var(--fs-base);
-    cursor: pointer;
-    transition: background var(--transition-fast);
-
-    &:hover {
-      background: var(--color-secondary);
-    }
   }
 }
 

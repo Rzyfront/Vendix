@@ -4,10 +4,14 @@ import { CreateReturnOrderDto } from './dto/create-return-order.dto';
 import { UpdateReturnOrderDto } from './dto/update-return-order.dto';
 import { ReturnOrderQueryDto } from './dto/return-order-query.dto';
 import { return_order_status_enum } from '@prisma/client';
+import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 
 @Injectable()
 export class ReturnOrdersService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    private stockLevelManager: StockLevelManager,
+  ) {}
 
   async create(createReturnOrderDto: CreateReturnOrderDto) {
     return this.prisma.$transaction(async (tx) => {
@@ -276,56 +280,36 @@ export class ReturnOrdersService {
   ) {
     const target_location_id = locationId || returnOrder.location_id;
 
-    // Create inventory movement for restocking
-    await tx.inventory_movements.create({
-      data: {
-        organization_id: returnOrder.organization_id,
+    // Update stock levels using StockLevelManager (handles sync + movement + transaction)
+    await this.stockLevelManager.updateStock(
+      {
         product_id: returnItem.product_id,
-        product_variant_id: returnItem.product_variant_id,
-        to_location_id: target_location_id,
-        quantity: returnItem.quantity,
+        variant_id: returnItem.product_variant_id || undefined,
+        location_id: target_location_id,
+        quantity_change: returnItem.quantity,
         movement_type: 'return',
-        source_order_type: 'return_order',
-        source_order_id: returnOrder.id,
         reason: `Return restock: ${returnItem.reason}`,
-        created_at: new Date(),
+        create_movement: true,
       },
-    });
-
-    // Update stock levels
-    await this.updateStockLevel(
       tx,
-      returnItem.product_id,
-      target_location_id,
-      returnItem.quantity,
-      returnItem.product_variant_id,
     );
   }
 
   private async writeOffItem(tx: any, returnOrder: any, returnItem: any) {
-    // Create inventory movement for write-off
-    await tx.inventory_movements.create({
-      data: {
-        organization_id: returnOrder.organization_id,
+    // Update stock levels using StockLevelManager (handles sync + movement + transaction)
+    // Note: write-off is damage, so quantity_change is negative
+    await this.stockLevelManager.updateStock(
+      {
         product_id: returnItem.product_id,
-        product_variant_id: returnItem.product_variant_id,
-        from_location_id: returnOrder.location_id,
-        quantity: returnItem.quantity,
+        variant_id: returnItem.product_variant_id || undefined,
+        location_id: returnOrder.location_id,
+        quantity_change: -returnItem.quantity,
         movement_type: 'damage',
-        source_order_type: 'return_order',
-        source_order_id: returnOrder.id,
         reason: `Return write-off: ${returnItem.reason}`,
-        created_at: new Date(),
+        create_movement: true,
+        from_location_id: returnOrder.location_id,
       },
-    });
-
-    // Update stock levels (decrease)
-    await this.updateStockLevel(
       tx,
-      returnItem.product_id,
-      returnOrder.location_id,
-      returnItem.quantity,
-      returnItem.product_variant_id,
     );
   }
 
@@ -337,29 +321,18 @@ export class ReturnOrdersService {
   ) {
     const target_location_id = locationId || returnOrder.location_id;
 
-    // Create inventory movement for repair
-    await tx.inventory_movements.create({
-      data: {
-        organization_id: returnOrder.organization_id,
+    // Update stock levels using StockLevelManager (handles sync + movement + transaction)
+    await this.stockLevelManager.updateStock(
+      {
         product_id: returnItem.product_id,
-        product_variant_id: returnItem.product_variant_id,
-        to_location_id: target_location_id,
-        quantity: returnItem.quantity,
+        variant_id: returnItem.product_variant_id || undefined,
+        location_id: target_location_id,
+        quantity_change: returnItem.quantity,
         movement_type: 'adjustment',
-        source_order_type: 'return_order',
-        source_order_id: returnOrder.id,
         reason: `Return repair: ${returnItem.reason}`,
-        created_at: new Date(),
+        create_movement: true,
       },
-    });
-
-    // Update stock levels
-    await this.updateStockLevel(
       tx,
-      returnItem.product_id,
-      target_location_id,
-      returnItem.quantity,
-      returnItem.product_variant_id,
     );
   }
 
@@ -395,54 +368,4 @@ export class ReturnOrdersService {
     return `${prefix}-${String(sequence).padStart(4, '0')}`;
   }
 
-  private async updateStockLevel(
-    tx: any,
-    productId: number,
-    locationId: number,
-    quantityChange: number,
-    productVariantId?: number,
-  ) {
-    const existingStock = await tx.stock_levels.findUnique({
-      where: {
-        product_id_product_variant_id_location_id: {
-          product_id: productId,
-          product_variant_id: productVariantId || null,
-          location_id: locationId,
-        },
-      },
-    });
-
-    if (existingStock) {
-      const newQuantityOnHand = existingStock.quantity_on_hand + quantityChange;
-      const newQuantityAvailable =
-        existingStock.quantity_available + quantityChange;
-
-      return tx.stock_levels.update({
-        where: {
-          product_id_product_variant_id_location_id: {
-            product_id: productId,
-            product_variant_id: productVariantId || null,
-            location_id: locationId,
-          },
-        },
-        data: {
-          quantity_on_hand: Math.max(0, newQuantityOnHand),
-          quantity_available: Math.max(0, newQuantityAvailable),
-          last_updated: new Date(),
-        },
-      });
-    } else {
-      return tx.stock_levels.create({
-        data: {
-          product_id: productId,
-          product_variant_id: productVariantId,
-          location_id: locationId,
-          quantity_on_hand: Math.max(0, quantityChange),
-          quantity_reserved: 0,
-          quantity_available: Math.max(0, quantityChange),
-          last_updated: new Date(),
-        },
-      });
-    }
-  }
 }

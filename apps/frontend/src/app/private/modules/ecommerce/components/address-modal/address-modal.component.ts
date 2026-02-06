@@ -1,10 +1,16 @@
-import { Component, OnInit, inject, DestroyRef, Input, ChangeDetectorRef } from '@angular/core';
+import { Component, OnInit, inject, DestroyRef, Input, Output, EventEmitter, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Observable } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { AccountService, Address } from '../../services/account.service';
 import { CountryService, Country, Department, City } from '../../../../../services/country.service';
+import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
+import { ButtonComponent } from '../../../../../shared/components/button/button.component';
+import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { InputComponent } from '../../../../../shared/components/input/input.component';
+import { SelectorComponent, SelectorOption } from '../../../../../shared/components/selector/selector.component';
+import { ToggleComponent } from '../../../../../shared/components/toggle/toggle.component';
 
 export interface AddressModalData {
     mode: 'create' | 'edit';
@@ -14,7 +20,7 @@ export interface AddressModalData {
 @Component({
     selector: 'app-address-modal',
     standalone: true,
-    imports: [CommonModule, ReactiveFormsModule],
+    imports: [CommonModule, ReactiveFormsModule, ModalComponent, ButtonComponent, IconComponent, InputComponent, SelectorComponent, ToggleComponent],
     templateUrl: './address-modal.component.html',
     styleUrls: ['./address-modal.component.scss'],
 })
@@ -25,19 +31,19 @@ export class AddressModalComponent implements OnInit {
     private country_service = inject(CountryService);
     private cdr = inject(ChangeDetectorRef);
 
+    // Modal state (two-way binding)
+    @Input() isOpen = false;
+    @Output() isOpenChange = new EventEmitter<boolean>();
+
     // Inputs
     @Input() mode: 'create' | 'edit' = 'create';
     @Input() address?: Address;
-    @Input() onClose = () => {};
-    @Input() onSave = (address: Address) => {};
+    @Output() saved = new EventEmitter<Address>();
 
     // Form
     address_form!: FormGroup;
     is_saving = false;
     error_message = '';
-
-    // UI state
-    is_open = false;
 
     // Location data
     countries: Country[] = [];
@@ -46,13 +52,26 @@ export class AddressModalComponent implements OnInit {
     loading_departments = false;
     loading_cities = false;
 
-    // Address type options
-    address_types = [
+    // Address type options for selector
+    address_type_options: SelectorOption[] = [
         { value: 'shipping', label: 'Envío' },
         { value: 'billing', label: 'Facturación' },
         { value: 'home', label: 'Casa' },
         { value: 'work', label: 'Trabajo' },
     ];
+
+    // Computed options for selectors
+    get country_options(): SelectorOption[] {
+        return this.countries.map(c => ({ value: c.code, label: c.name }));
+    }
+
+    get department_options(): SelectorOption[] {
+        return this.departments.map(d => ({ value: d.id, label: d.name }));
+    }
+
+    get city_options(): SelectorOption[] {
+        return this.cities.map(c => ({ value: c.id, label: c.name }));
+    }
 
     ngOnInit(): void {
         // Load static countries
@@ -64,10 +83,6 @@ export class AddressModalComponent implements OnInit {
         if (this.mode === 'edit' && this.address) {
             this.patchForm(this.address);
         }
-        // Small delay for animation
-        setTimeout(() => {
-            this.is_open = true;
-        }, 10);
     }
 
     private initForm(): void {
@@ -224,7 +239,7 @@ export class AddressModalComponent implements OnInit {
         operation.pipe(takeUntilDestroyed(this.destroy_ref)).subscribe({
             next: (response) => {
                 if (response.success) {
-                    this.onSave(response.data);
+                    this.saved.emit(response.data);
                     this.close();
                 }
                 this.is_saving = false;
@@ -237,14 +252,7 @@ export class AddressModalComponent implements OnInit {
     }
 
     close(): void {
-        this.is_open = false;
-        setTimeout(() => {
-            this.onClose();
-        }, 300); // Wait for animation
-    }
-
-    cancel(): void {
-        this.close();
+        this.isOpenChange.emit(false);
     }
 
     private clearErrors(): void {

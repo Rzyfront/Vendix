@@ -287,53 +287,34 @@
     <form [formGroup]="updateForm" class="space-y-2 md:space-y-4">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4">
         <div>
-          <label class="block text-sm font-medium text-text-primary mb-1"
-            >Estado del pedido</label
-          >
-          <select
+          <app-selector
+            label="Estado del pedido"
             formControlName="status"
-            class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
-          >
-            <option value="">Seleccionar estado</option>
-            <option value="pending">Pendiente</option>
-            <option value="confirmed">Confirmado</option>
-            <option value="processing">Procesando</option>
-            <option value="shipped">Enviado</option>
-            <option value="delivered">Entregado</option>
-            <option value="cancelled">Cancelada</option>
-            <option value="refunded">Reintegrada</option>
-          </select>
+            [options]="orderStatusOptions"
+            placeholder="Seleccionar estado"
+            styleVariant="modern"
+          ></app-selector>
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-text-primary mb-1"
-            >Estado del pago</label
-          >
-          <select
+          <app-selector
+            label="Estado del pago"
             formControlName="payment_status"
-            class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
-          >
-            <option value="">Seleccionar estado de pago</option>
-            <option value="pending">Pendiente</option>
-            <option value="paid">Pagado</option>
-            <option value="failed">Fallido</option>
-            <option value="refunded">Reintegrado</option>
-            <option value="partially_refunded">Parcialmente Reintegrado</option>
-          </select>
+            [options]="paymentStatusOptions"
+            placeholder="Seleccionar estado de pago"
+            styleVariant="modern"
+          ></app-selector>
         </div>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4">
         <div>
-          <label class="block text-sm font-medium text-text-primary mb-1"
-            >El número de rastreo</label
-          >
-          <input
-            type="text"
+          <app-input
+            label="El número de rastreo"
             formControlName="tracking_number"
             placeholder="Enter tracking number"
-            class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
-          />
+            styleVariant="modern"
+          ></app-input>
         </div>
 
         <div>
@@ -349,15 +330,13 @@
       </div>
 
       <div>
-        <label class="block text-sm font-medium text-text-primary mb-1"
-          >Notas</label
-        >
-        <textarea
+        <app-textarea
+          label="Notas"
           formControlName="notes"
-          rows="3"
+          [rows]="3"
           placeholder="Enter order notes"
-          class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
-        ></textarea>
+          styleVariant="modern"
+        ></app-textarea>
       </div>
     </form>
   </div>
@@ -417,6 +396,17 @@
       </app-button>
 
       <app-button
+        *ngIf="canDispatchOrder()"
+        variant="primary"
+        size="sm"
+        (clicked)="openDispatchModal()"
+        [disabled]="isLoading"
+      >
+        <app-icon name="truck" [size]="16" slot="icon"></app-icon>
+        Despachar Orden
+      </app-button>
+
+      <app-button
         variant="primary"
         size="sm"
         (clicked)="onUpdateOrder()"
@@ -426,5 +416,69 @@
         {{ isUpdating ? "Updating..." : "Update Order" }}
       </app-button>
     </div>
+  </div>
+</app-modal>
+
+<!-- Dispatch Modal -->
+<app-modal
+  [(isOpen)]="showDispatchModal"
+  title="Despachar Orden"
+  size="sm"
+>
+  <div class="space-y-4">
+    <p class="text-sm text-text-secondary">
+      Confirma el despacho de la orden <strong>{{ orderDetails?.order_number }}</strong>.
+      Puedes agregar información de seguimiento opcional.
+    </p>
+
+    <form [formGroup]="dispatchForm" class="space-y-4">
+      <div>
+        <app-input
+          label="Número de Tracking (opcional)"
+          formControlName="tracking_number"
+          placeholder="Ej: 1Z999AA10123456784"
+          styleVariant="modern"
+        ></app-input>
+      </div>
+
+      <div>
+        <app-input
+          label="Transportadora (opcional)"
+          formControlName="carrier"
+          placeholder="Ej: FedEx, DHL, Servientrega"
+          styleVariant="modern"
+        ></app-input>
+      </div>
+
+      <div>
+        <app-textarea
+          label="Notas de despacho (opcional)"
+          formControlName="notes"
+          [rows]="2"
+          placeholder="Notas adicionales sobre el envío"
+          styleVariant="modern"
+        ></app-textarea>
+      </div>
+    </form>
+  </div>
+
+  <div class="flex justify-end gap-2 pt-4 border-t border-border">
+    <app-button
+      variant="outline"
+      size="sm"
+      (clicked)="closeDispatchModal()"
+      [disabled]="isDispatching"
+    >
+      Cancelar
+    </app-button>
+    <app-button
+      variant="primary"
+      size="sm"
+      (clicked)="onDispatchOrder()"
+      [disabled]="isDispatching"
+    >
+      <app-icon name="truck" [size]="16" slot="icon"></app-icon>
+      {{ isDispatching ? 'Despachando...' : 'Confirmar Despacho' }}
+    </app-button>
   </div>
 </app-modal>

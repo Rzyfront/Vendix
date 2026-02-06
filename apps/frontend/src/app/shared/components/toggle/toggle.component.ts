@@ -7,6 +7,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
+import { FormStyleVariant } from '../../types/form.types';
 
 @Component({
   selector: 'app-toggle',
@@ -26,7 +27,7 @@ import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
       [attr.aria-label]="ariaLabel || label || 'Toggle'"
       [disabled]="disabled"
       (click)="onToggle()"
-      class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] focus:ring-offset-2"
+      [class]="buttonClasses"
       [class.bg-[var(--color-primary)]]="checked"
       [class.bg-[var(--color-muted)]]="!checked"
     >
@@ -38,7 +39,7 @@ import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
     </button>
     <span
       *ngIf="label"
-      class="ml-2 align-middle text-sm text-[var(--color-text-primary)]"
+      [class]="labelClasses"
       >{{ label }}</span
     >
   `,
@@ -48,6 +49,7 @@ export class ToggleComponent implements ControlValueAccessor {
   @Input() disabled = false;
   @Input() label?: string;
   @Input() ariaLabel?: string;
+  @Input() styleVariant: FormStyleVariant = 'modern';
 
   @Output() toggled = new EventEmitter<boolean>();
   @Output() changed = new EventEmitter<boolean>();
@@ -78,5 +80,59 @@ export class ToggleComponent implements ControlValueAccessor {
     this.toggled.emit(this.checked);
     this.changed.emit(this.checked);
     this.onTouched();
+  }
+
+  get buttonClasses(): string {
+    const baseClasses = [
+      'relative',
+      'inline-flex',
+      'h-6',
+      'w-11',
+      'shrink-0',
+      'cursor-pointer',
+      'rounded-full',
+      'border-2',
+      'border-transparent',
+      'transition-colors',
+      'duration-200',
+      'ease-in-out',
+      'focus:outline-none',
+    ];
+
+    if (this.styleVariant === 'modern') {
+      // Modern: shadow-based focus
+      return [
+        ...baseClasses,
+        'focus:shadow-[0_0_0_3px_var(--color-ring)]',
+      ].join(' ');
+    }
+
+    // Classic: ring with offset
+    return [
+      ...baseClasses,
+      'focus:ring-2',
+      'focus:ring-[var(--color-ring)]',
+      'focus:ring-offset-2',
+    ].join(' ');
+  }
+
+  get labelClasses(): string {
+    const baseClasses = ['ml-2', 'align-middle'];
+
+    if (this.styleVariant === 'modern') {
+      return [
+        ...baseClasses,
+        'text-[11px]',
+        'uppercase',
+        'tracking-[0.05em]',
+        'text-[var(--color-text-muted)]',
+      ].join(' ');
+    }
+
+    return [
+      ...baseClasses,
+      'text-sm',
+      'text-[var(--color-text-primary)]',
+    ].join(' ');
   }
 }

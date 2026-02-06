@@ -12,6 +12,8 @@ import {
   AbstractControl,
 } from '@angular/forms';
 
+import { FormStyleVariant } from '../../types/form.types';
+
 export type InputType =
   | 'text'
   | 'email'
@@ -35,15 +37,12 @@ export type InputSize = 'sm' | 'md' | 'lg';
     },
   ],
   template: `
-    <div [class]="'w-full mt-3 sm:mt-4 ' + customWrapperClass">
+    <div [class]="'w-full ' + customWrapperClass">
       <!-- Label -->
       <label
         *ngIf="label"
         [for]="inputId"
-        [class]="
-          'block text-sm font-medium text-[var(--color-text-primary)] mb-2 ' +
-          customLabelClass
-        "
+        [class]="labelClasses"
         class="label-with-tooltip"
       >
         <span>{{ label }}</span>
@@ -177,6 +176,10 @@ export type InputSize = 'sm' | 'md' | 'lg';
   `,
   styles: [
     `
+      :host {
+        display: block;
+      }
+
       /* Hide number input spinners */
       input[type='number']::-webkit-outer-spin-button,
       input[type='number']::-webkit-inner-spin-button {
@@ -249,6 +252,7 @@ export class InputComponent implements ControlValueAccessor {
   @Input() placeholder = '';
   @Input() type: InputType = 'text';
   @Input() size: InputSize = 'md';
+  @Input() styleVariant: FormStyleVariant = 'modern';
   @Input() disabled = false;
   @Input() readonly = false;
   @Input() required = false;
@@ -299,35 +303,53 @@ export class InputComponent implements ControlValueAccessor {
     this.disabled = isDisabled;
   }
 
+  get labelClasses(): string {
+    const baseClasses = ['block', 'font-medium', 'mb-2'];
+
+    if (this.styleVariant === 'modern') {
+      // Modern: iOS-inspired uppercase labels
+      return [
+        ...baseClasses,
+        'text-[11px]',
+        'uppercase',
+        'tracking-[0.05em]',
+        'text-[var(--color-text-muted)]',
+        this.customLabelClass,
+      ]
+        .filter(Boolean)
+        .join(' ');
+    }
+
+    // Classic: standard labels
+    return [
+      ...baseClasses,
+      'text-sm',
+      'text-[var(--color-text-primary)]',
+      this.customLabelClass,
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }
+
   get inputClasses(): string {
-    // Clases base
+    // Clases base comunes
     const baseClasses = [
       'block',
       'w-full',
       'border',
-      'rounded-sm',
       'transition-colors',
       'duration-200',
       'focus:outline-none',
-      'focus:ring-2',
       'placeholder:text-text-muted',
     ];
 
-    // Clases por tamaño (mobile-first: touch targets ≥ 44px en móvil)
-    const sizeClasses = {
-      sm: ['px-3', 'py-2.5', 'text-sm', 'min-h-[40px]'], // 40px - Compacto pero touch-friendly
-      md: ['px-3', 'py-3', 'text-base', 'min-h-[44px]', 'sm:px-4'], // 44px ✓ Touch target estándar
-      lg: ['px-4', 'py-3.5', 'text-lg', 'min-h-[48px]'], // 48px - Extra grande para formularios destacados
-    };
-
-    // Clases por estado (validación)
+    // Clases de validación por estado
     let stateClasses: string[];
     if (this.control?.invalid && this.control?.touched) {
       stateClasses = [
         'border-[var(--color-destructive)]',
         'focus:border-[var(--color-destructive)]',
-        'focus:ring-[var(--color-destructive)]/30',
-        'bg-[rgba(239, 68, 68, 0.1)]',
+        'bg-[rgba(239,68,68,0.1)]',
       ];
     } else if (
       this.control?.valid &&
@@ -337,14 +359,12 @@ export class InputComponent implements ControlValueAccessor {
       stateClasses = [
         'border-[var(--color-primary)]',
         'focus:border-[var(--color-primary)]',
-        'focus:ring-[var(--color-primary)]/30',
-        'bg-[rgba(126, 215, 165, 0.1)]',
+        'bg-[rgba(126,215,165,0.1)]',
       ];
     } else {
       stateClasses = [
         'border-border',
         'hover:border-border',
-        'focus:ring-secondary/40',
         'focus:border-primary',
       ];
     }
@@ -358,15 +378,55 @@ export class InputComponent implements ControlValueAccessor {
       iconPadding.push('pr-10');
     }
 
+    let variantClasses: string[];
+
+    // Unified height system (matches ButtonComponent)
+    // sm: 32px mobile → 36px desktop
+    // md: 40px mobile → 44px desktop
+    // lg: 48px mobile → 52px desktop
+    const sizeClasses = {
+      sm: ['h-8', 'sm:h-9', 'px-3', 'text-sm'],
+      md: ['h-10', 'sm:h-11', 'px-3', 'sm:px-4', 'text-sm', 'sm:text-base'],
+      lg: ['h-12', 'sm:h-[52px]', 'px-4', 'text-base', 'sm:text-lg'],
+    };
+
+    if (this.styleVariant === 'modern') {
+      // Modern: iOS-inspired with shadow focus
+      variantClasses = [
+        ...sizeClasses[this.size],
+        'rounded-xl',
+        'bg-[var(--color-background)]',
+        'focus:bg-[var(--color-surface)]',
+        'focus:shadow-[0_0_0_3px_var(--color-ring)]',
+        this.control?.invalid && this.control?.touched
+          ? 'focus:shadow-[0_0_0_3px_rgba(239,68,68,0.3)]'
+          : this.control?.valid && this.control?.touched && this.control?.value
+            ? 'focus:shadow-[0_0_0_3px_rgba(126,215,165,0.3)]'
+            : '',
+      ];
+    } else {
+      // Classic: with ring focus
+      variantClasses = [
+        ...sizeClasses[this.size],
+        'rounded-xl',
+        'focus:ring-2',
+        this.control?.invalid && this.control?.touched
+          ? 'focus:ring-[var(--color-destructive)]/30'
+          : this.control?.valid && this.control?.touched && this.control?.value
+            ? 'focus:ring-[var(--color-primary)]/30'
+            : 'focus:ring-secondary/40',
+      ];
+    }
+
     // Combinar todas las clases
     const classes = [
       ...baseClasses,
-      ...sizeClasses[this.size],
+      ...variantClasses,
       ...stateClasses,
       ...iconPadding,
     ];
 
-    // ✅ Agregar clases personalizadas (soporta customInputClass y customClasses)
+    // Agregar clases personalizadas
     if (this.customInputClass) {
       classes.push(this.customInputClass);
     }
@@ -374,7 +434,7 @@ export class InputComponent implements ControlValueAccessor {
       classes.push(this.customClasses);
     }
 
-    return classes.join(' ');
+    return classes.filter(Boolean).join(' ');
   }
 
   getValidationError(): string | null {

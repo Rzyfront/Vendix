@@ -6,6 +6,7 @@ import { Expense } from '../../interfaces/expense.interface';
 
 import {
   InputsearchComponent,
+  ButtonComponent,
   TableColumn,
   TableAction,
   ResponsiveDataViewComponent,
@@ -25,6 +26,7 @@ import {
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
+    ButtonComponent,
   ],
   templateUrl: './expenses-list.component.html',
 })

@@ -11,9 +11,9 @@
         <app-icon name="shopping-cart" [size]="64" class="text-muted"></app-icon>
         <h2>Tu carrito está vacío</h2>
         <p>Agrega productos para comenzar tu compra</p>
-        <button class="primary-btn" (click)="continueShopping()">
+        <app-button variant="primary" (clicked)="continueShopping()">
             Ver productos
-        </button>
+        </app-button>
     </div>
     } @else {
     <div class="cart-content">
@@ -53,9 +53,9 @@
                     {{ item.total_price | currency }}
                 </div>
 
-                <button class="remove-btn" (click)="removeItem(item)" title="Eliminar">
+                <app-button variant="ghost" size="sm" (clicked)="removeItem(item)" title="Eliminar">
                     <app-icon name="trash-2" [size]="18"></app-icon>
-                </button>
+                </app-button>
             </div>
             }
         </div>
@@ -81,17 +81,17 @@
                     <span>{{ cart.subtotal | currency }}</span>
                 </div>
 
-                <button class="checkout-btn" (click)="proceedToCheckout()">
+                <app-button variant="primary" [fullWidth]="true" (clicked)="proceedToCheckout()">
                     @if (!is_authenticated) {
                     Iniciar sesión para comprar
                     } @else {
                     Finalizar compra
                     }
-                </button>
+                </app-button>
 
-                <button class="continue-btn" (click)="continueShopping()">
+                <app-button variant="outline" [fullWidth]="true" (clicked)="continueShopping()">
                     Seguir comprando
-                </button>
+                </app-button>
             </div>
         </div>
     </div>

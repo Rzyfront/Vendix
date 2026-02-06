@@ -1,7 +1,7 @@
 <div class="orders-page">
     <div class="page-header">
         <a routerLink="/account" class="back-link">
-            <i class="pi pi-arrow-left"></i>
+            <app-icon name="arrow-left" [size]="16"></app-icon>
             Mi cuenta
         </a>
         <h1>Mis Pedidos</h1>
@@ -13,10 +13,12 @@
     </div>
     } @else if (orders.length === 0) {
     <div class="empty-state">
-        <i class="pi pi-shopping-bag"></i>
+        <app-icon name="shopping-bag" [size]="64"></app-icon>
         <h2>No tienes pedidos</h2>
         <p>Cuando realices una compra, tus pedidos aparecerán aquí</p>
-        <a routerLink="/catalog" class="shop-btn">Ver productos</a>
+        <app-button variant="primary" routerLink="/catalog">
+            Ver productos
+        </app-button>
     </div>
     } @else {
     <div class="orders-list">
@@ -30,18 +32,18 @@
             </div>
             <div class="order-info">
                 <div class="order-date">
-                    <i class="pi pi-calendar"></i>
+                    <app-icon name="calendar" [size]="14"></app-icon>
                     {{ order.created_at | date:'dd MMM yyyy' }}
                 </div>
                 <div class="order-items">
-                    <i class="pi pi-box"></i>
+                    <app-icon name="package" [size]="14"></app-icon>
                     {{ order.item_count }} producto(s)
                 </div>
             </div>
             <div class="order-total">
                 {{ order.grand_total | currency }}
             </div>
-            <i class="pi pi-chevron-right order-arrow"></i>
+            <app-icon name="chevron-right" [size]="20" class="order-arrow"></app-icon>
         </a>
         }
     </div>
@@ -49,11 +51,11 @@
     @if (total_pages > 1) {
     <div class="pagination">
         <button [disabled]="current_page === 1" (click)="goToPage(current_page - 1)">
-            <i class="pi pi-chevron-left"></i>
+            <app-icon name="chevron-left" [size]="16"></app-icon>
         </button>
         <span>Página {{ current_page }} de {{ total_pages }}</span>
         <button [disabled]="current_page === total_pages" (click)="goToPage(current_page + 1)">
-            <i class="pi pi-chevron-right"></i>
+            <app-icon name="chevron-right" [size]="16"></app-icon>
         </button>
     </div>
     }

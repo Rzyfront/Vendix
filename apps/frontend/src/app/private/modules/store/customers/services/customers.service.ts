@@ -118,4 +118,20 @@ export class CustomersService {
             storeCustomersStatsCache.clear();
         }
     }
+
+    /**
+     * Descarga la plantilla de carga masiva de clientes
+     */
+    getBulkUploadTemplate(): Observable<Blob> {
+        return this.http.get(`${this.apiUrl}/bulk/template/download`, {
+            responseType: 'blob',
+        });
+    }
+
+    /**
+     * Sube clientes en formato JSON para carga masiva
+     */
+    uploadBulkCustomersJson(customers: any[]): Observable<any> {
+        return this.http.post(`${this.apiUrl}/bulk/upload`, { customers });
+    }
 }
