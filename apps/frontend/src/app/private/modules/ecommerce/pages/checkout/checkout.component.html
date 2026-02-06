@@ -67,73 +67,57 @@
                 @if (use_new_address) {
                 <form [formGroup]="address_form" class="address-form">
                     <app-input label="Dirección" formControlName="address_line1" placeholder="Calle y número"
-                        [error]="getFieldError('address_line1')" [required]="true"></app-input>
+                        [control]="address_form.get('address_line1')" [required]="true"></app-input>
 
                     <app-input label="Apartamento, oficina, etc. (opcional)" formControlName="address_line2"
                         placeholder="Apto, piso, oficina"></app-input>
 
                     <div class="form-row">
-                        <div class="form-group">
-                            <label>País</label>
-                            <select formControlName="country_code" class="checkout-select">
-                                <option value="">Selecciona un país</option>
-                                @for (country of countries; track country.code) {
-                                <option [value]="country.code">{{ country.name }}</option>
-                                }
-                            </select>
-                            @if (getFieldError('country_code')) {
-                            <p class="error-text">{{ getFieldError('country_code') }}</p>
-                            }
-                        </div>
-                        <div class="form-group">
-                            <label>Departamento/Estado</label>
-                            @if (loading_departments) {
-                            <select class="checkout-select" disabled>
-                                <option>Cargando...</option>
-                            </select>
-                            } @else {
-                            <select formControlName="state_province" class="checkout-select"
-                                [disabled]="departments.length === 0">
-                                <option value="">Selecciona un departamento</option>
-                                @for (dep of departments; track dep.id) {
-                                <option [value]="dep.id">{{ dep.name }}</option>
-                                }
-                            </select>
-                            }
-                            @if (getFieldError('state_province')) {
-                            <p class="error-text">{{ getFieldError('state_province') }}</p>
-                            }
-                        </div>
+                        <app-selector
+                            label="País"
+                            formControlName="country_code"
+                            [options]="countryOptions"
+                            placeholder="Selecciona un país"
+                            [errorText]="getFieldError('country_code')"
+                            [required]="true"
+                        ></app-selector>
+
+                        <app-selector
+                            label="Departamento/Estado"
+                            formControlName="state_province"
+                            [options]="departmentOptions"
+                            [placeholder]="loading_departments ? 'Cargando...' : 'Selecciona un departamento'"
+                            [disabled]="loading_departments || departmentOptions.length === 0"
+                            [errorText]="getFieldError('state_province')"
+                        ></app-selector>
                     </div>
 
                     <div class="form-row">
-                        <div class="form-group">
-                            <label>Ciudad</label>
-                            @if (loading_cities) {
-                            <select class="checkout-select" disabled>
-                                <option>Cargando...</option>
-                            </select>
-                            } @else {
-                            <select formControlName="city" class="checkout-select" [disabled]="cities.length === 0">
-                                <option value="">Selecciona una ciudad</option>
-                                @for (city of cities; track city.id) {
-                                <option [value]="city.id">{{ city.name }}</option>
-                                }
-                            </select>
-                            }
-                            @if (getFieldError('city')) {
-                            <p class="error-text">{{ getFieldError('city') }}</p>
-                            }
-                        </div>
-                        <div class="form-group">
-                            <app-input label="Código Postal" formControlName="postal_code"
-                                placeholder="Código postal"></app-input>
-                        </div>
+                        <app-selector
+                            label="Ciudad"
+                            formControlName="city"
+                            [options]="cityOptions"
+                            [placeholder]="loading_cities ? 'Cargando...' : 'Selecciona una ciudad'"
+                            [disabled]="loading_cities || cityOptions.length === 0"
+                            [errorText]="getFieldError('city')"
+                            [required]="true"
+                        ></app-selector>
+
+                        <app-input label="Código Postal" formControlName="postal_code"
+                            placeholder="Código postal"></app-input>
                     </div>
 
                     <app-input label="Teléfono" formControlName="phone_number" type="tel"
-                        placeholder="Teléfono de contacto" [error]="getFieldError('phone_number')"
+                        placeholder="Teléfono de contacto" [control]="address_form.get('phone_number')"
                         [required]="true"></app-input>
+
+                    <!-- Save address checkbox -->
+                    <div class="save-address-option">
+                        <label class="checkbox-label">
+                            <input type="checkbox" [(ngModel)]="save_new_address" [ngModelOptions]="{standalone: true}">
+                            <span class="checkbox-text">Guardar esta dirección para futuras compras</span>
+                        </label>
+                    </div>
                 </form>
                 }
             </div>
@@ -250,32 +234,30 @@
 
             <div class="checkout-actions">
                 @if (step > 1) {
-                <button class="back-btn" (click)="prevStep()">
-                    <i class="pi pi-arrow-left"></i>
+                <app-button variant="outline" (clicked)="prevStep()">
+                    <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
                     Anterior
-                </button>
+                </app-button>
                 } @else {
-                <button class="back-btn" (click)="goToCart()">
-                    <i class="pi pi-arrow-left"></i>
+                <app-button variant="outline" (clicked)="goToCart()">
+                    <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
                     Volver al carrito
-                </button>
+                </app-button>
                 }
 
-                @if (step < 3) { <button class="next-btn" (click)="nextStep()">
+                @if (step < 3) {
+                <app-button variant="primary" (clicked)="nextStep()">
                     Continuar
-                    <i class="pi pi-arrow-right"></i>
-                    </button>
-                    } @else {
-                    <button class="place-order-btn" (click)="placeOrder()" [disabled]="is_submitting">
-                        @if (is_submitting) {
-                        <span class="spinner-small"></span>
-                        Procesando...
-                        } @else {
-                        <i class="pi pi-check"></i>
-                        Confirmar Pedido
-                        }
-                    </button>
+                    <app-icon slot="icon" name="arrow-right" [size]="16"></app-icon>
+                </app-button>
+                } @else {
+                <app-button variant="primary" (clicked)="placeOrder()" [loading]="is_submitting" [disabled]="is_submitting">
+                    @if (!is_submitting) {
+                    <app-icon slot="icon" name="check" [size]="16"></app-icon>
                     }
+                    {{ is_submitting ? 'Procesando...' : 'Confirmar Pedido' }}
+                </app-button>
+                }
             </div>
         </div>
 

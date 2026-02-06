@@ -58,6 +58,8 @@ export interface OrderStore {
   slug: string;
 }
 
+export type DeliveryType = 'pickup' | 'home_delivery' | 'direct_delivery';
+
 export interface OrderListItem {
   id: string;
   order_number: string;
@@ -79,6 +81,9 @@ export interface OrderListItem {
   notes?: string;
   created_at: string;
   updated_at: string;
+  delivery_type?: DeliveryType;
+  shipping_method_id?: number;
+  shipping_method_name?: string;
 }
 
 export interface OrderDetails extends OrderListItem {

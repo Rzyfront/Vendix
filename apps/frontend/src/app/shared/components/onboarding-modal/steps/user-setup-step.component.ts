@@ -9,7 +9,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
-import { IconComponent } from '../../index';
+import { IconComponent, InputComponent, SelectorComponent } from '../../index';
 import {
   CountryService,
   Country,
@@ -25,6 +25,8 @@ import {
     FormsModule,
     ReactiveFormsModule,
     IconComponent,
+    InputComponent,
+    SelectorComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
@@ -443,42 +445,34 @@ import {
 
             <div class="form-grid">
               <div class="form-field">
-                <label class="field-label">
-                  Nombre
-                  <app-icon name="help-circle" size="12" class="help-icon" data-tooltip="Tu primer nombre"></app-icon>
-                </label>
-                <input
-                  type="text"
-                  class="field-input"
+                <app-input
+                  label="Nombre"
+                  styleVariant="modern"
                   formControlName="first_name"
                   placeholder="Tu nombre"
-                />
+                  tooltipText="Tu primer nombre"
+                ></app-input>
               </div>
 
               <div class="form-field">
-                <label class="field-label">
-                  Apellido
-                  <app-icon name="help-circle" size="12" class="help-icon" data-tooltip="Tu apellido principal"></app-icon>
-                </label>
-                <input
-                  type="text"
-                  class="field-input"
+                <app-input
+                  label="Apellido"
+                  styleVariant="modern"
                   formControlName="last_name"
                   placeholder="Tu apellido"
-                />
+                  tooltipText="Tu apellido principal"
+                ></app-input>
               </div>
 
               <div class="form-field">
-                <label class="field-label">
-                  Teléfono
-                  <app-icon name="help-circle" size="12" class="help-icon" data-tooltip="Solo para notificaciones importantes"></app-icon>
-                </label>
-                <input
+                <app-input
+                  label="Teléfono"
                   type="tel"
-                  class="field-input"
+                  styleVariant="modern"
                   formControlName="phone"
                   placeholder="+57 300 123 4567"
-                />
+                  tooltipText="Solo para notificaciones importantes"
+                ></app-input>
               </div>
             </div>
           </div>
@@ -498,84 +492,66 @@ import {
 
             <div class="form-grid">
               <div class="form-field half-width">
-                <label class="field-label">
-                  Calle y número
-                  <app-icon name="help-circle" size="12" class="help-icon" data-tooltip="Dirección de tu domicilio"></app-icon>
-                </label>
-                <input
-                  type="text"
-                  class="field-input"
+                <app-input
+                  label="Calle y número"
+                  styleVariant="modern"
                   formControlName="address_line1"
                   placeholder="Calle Principal 123"
-                />
+                  tooltipText="Dirección de tu domicilio"
+                ></app-input>
               </div>
 
               <div class="form-field half-width">
-                <label class="field-label">
-                  Apto, edificio, etc.
-                  <app-icon name="help-circle" size="12" class="help-icon" data-tooltip="Información adicional de dirección"></app-icon>
-                </label>
-                <input
-                  type="text"
-                  class="field-input"
+                <app-input
+                  label="Apto, edificio, etc."
+                  styleVariant="modern"
                   formControlName="address_line2"
                   placeholder="Apt 101, Torre A"
-                />
+                  tooltipText="Información adicional de dirección"
+                ></app-input>
               </div>
 
               <div class="form-field">
-                <label class="field-label">
-                  País
-                  <app-icon name="help-circle" size="12" class="help-icon" data-tooltip="País de residencia"></app-icon>
-                </label>
-                <select class="field-input" formControlName="country_code">
-                  <option value="">Selecciona país</option>
-                  <option
-                    *ngFor="let country of countries"
-                    [value]="country.code"
-                  >
-                    {{ country.name }}
-                  </option>
-                </select>
+                <app-selector
+                  label="País"
+                  styleVariant="modern"
+                  formControlName="country_code"
+                  placeholder="Selecciona país"
+                  [options]="countryOptions"
+                  tooltipText="País de residencia"
+                ></app-selector>
               </div>
 
               <div class="form-field">
-                <label class="field-label">
-                  Departamento
-                  <app-icon name="help-circle" size="12" class="help-icon" data-tooltip="Estado o departamento"></app-icon>
-                </label>
-                <select class="field-input" formControlName="state_province">
-                  <option value="">Selecciona</option>
-                  <option *ngFor="let dep of departments" [value]="dep.id">
-                    {{ dep.name }}
-                  </option>
-                </select>
+                <app-selector
+                  label="Departamento"
+                  styleVariant="modern"
+                  formControlName="state_province"
+                  placeholder="Selecciona"
+                  [options]="departmentOptions"
+                  tooltipText="Estado o departamento"
+                ></app-selector>
               </div>
 
               <div class="form-field">
-                <label class="field-label">
-                  Ciudad
-                  <app-icon name="help-circle" size="12" class="help-icon" data-tooltip="Ciudad de residencia"></app-icon>
-                </label>
-                <select class="field-input" formControlName="city">
-                  <option value="">Selecciona</option>
-                  <option *ngFor="let city of cities" [value]="city.id">
-                    {{ city.name }}
-                  </option>
-                </select>
+                <app-selector
+                  label="Ciudad"
+                  styleVariant="modern"
+                  formControlName="city"
+                  placeholder="Selecciona"
+                  [options]="cityOptions"
+                  tooltipText="Ciudad de residencia"
+                ></app-selector>
               </div>
 
               <div class="form-field">
-                <label class="field-label">
-                  Código postal
-                  <app-icon name="help-circle" size="12" class="help-icon" data-tooltip="Código postal de tu ubicación"></app-icon>
-                </label>
-                <input
-                  type="text"
-                  class="field-input"
+                <app-input
+                  label="Código postal"
+                  styleVariant="modern"
                   formControlName="postal_code"
                   placeholder="110111"
-                />
+                  tooltipText="Código postal de tu ubicación"
+                ></app-input>
               </div>
             </div>
           </div>
@@ -650,5 +626,17 @@ export class UserSetupStepComponent implements OnInit {
   async loadCities(departmentId: number): Promise<void> {
     this.cities = await this.countryService.getCitiesByDepartment(departmentId);
     this.cdr.markForCheck();
+  }
+
+  get countryOptions() {
+    return this.countries.map(c => ({ value: c.code, label: c.name }));
+  }
+
+  get departmentOptions() {
+    return this.departments.map(d => ({ value: d.id, label: d.name }));
+  }
+
+  get cityOptions() {
+    return this.cities.map(c => ({ value: c.id, label: c.name }));
   }
 }

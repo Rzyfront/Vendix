@@ -1,7 +1,8 @@
-import { Component, Input } from '@angular/core';
+import { Component, Input, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ProductStats } from '../../interfaces/product.interface';
 import { StatsComponent } from '../../../../../../shared/components/index';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-product-stats',
@@ -10,7 +11,14 @@ import { StatsComponent } from '../../../../../../shared/components/index';
   templateUrl: './product-stats.component.html',
   styleUrls: ['./product-stats.component.scss'],
 })
-export class ProductStatsComponent {
+export class ProductStatsComponent implements OnInit {
+  private currencyService = inject(CurrencyFormatService);
+
+  ngOnInit(): void {
+    // Asegurar que la moneda esté cargada
+    this.currencyService.loadCurrency();
+  }
+
   @Input() stats: ProductStats | null = null;
 
   // Formatear número para visualización
@@ -25,10 +33,7 @@ export class ProductStatsComponent {
 
   // Formatear moneda
   formatCurrency(amount: number): string {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-    }).format(amount);
+    return this.currencyService.format(amount);
   }
 
   // Calcular porcentaje de crecimiento

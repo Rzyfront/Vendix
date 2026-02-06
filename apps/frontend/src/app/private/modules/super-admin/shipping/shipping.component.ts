@@ -1,65 +1,97 @@
-import { Component } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ShippingMethodsComponent } from './components/shipping-methods/shipping-methods.component';
 import { ShippingZonesComponent } from './components/shipping-zones/shipping-zones.component';
-import { IconComponent } from '../../../../../app/shared/components/icon/icon.component';
+import { StatsComponent } from '../../../../shared/components/stats/stats.component';
+import { DashboardTabsComponent, DashboardTab } from '../../store/dashboard/components/dashboard-tabs.component';
+import { ShippingService } from './services/shipping.service';
+import { ShippingMethodStats, ShippingZoneStats } from './interfaces/shipping.interface';
 
 @Component({
   selector: 'app-superadmin-shipping-layout',
   standalone: true,
-  imports: [CommonModule, ShippingMethodsComponent, ShippingZonesComponent, IconComponent],
+  imports: [
+    CommonModule,
+    ShippingMethodsComponent,
+    ShippingZonesComponent,
+    StatsComponent,
+    DashboardTabsComponent,
+  ],
   template: `
-    <div class="min-h-screen bg-[var(--color-background)]">
-      <!-- Sticky Header: Stuck to top and rounded only at bottom -->
-      <div class="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-[var(--color-border)] p-4 md:px-6 md:py-4 shadow-sm mb-6 rounded-b-xl">
-        <div class="max-w-[1600px] mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div class="flex items-center gap-4">
-            <div class="w-12 h-12 rounded-xl bg-[var(--color-primary)]/10 flex items-center justify-center border border-[var(--color-primary)]/20">
-              <app-icon name="truck" size="24" class="text-[var(--color-primary)]"></app-icon>
-            </div>
-            <div>
-              <h1 class="text-xl font-bold text-[var(--color-text-primary)]">Configuración de Envíos del Sistema</h1>
-              <p class="text-sm text-[var(--color-text-secondary)]">Gestiona los métodos de envío disponibles para todas las tiendas.</p>
-            </div>
-          </div>
-        </div>
+    <div class="space-y-4 p-4 md:p-6">
+      <!-- Stats consolidadas usando stats-container -->
+      <div class="stats-container">
+        <app-stats
+          title="Métodos Totales"
+          [value]="methodStats()?.total_methods || 0"
+          iconName="truck"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+        />
+        <app-stats
+          title="Métodos Activos"
+          [value]="methodStats()?.active_methods || 0"
+          iconName="check-circle"
+          iconBgColor="bg-green-100"
+          iconColor="text-green-600"
+        />
+        <app-stats
+          title="Zonas Totales"
+          [value]="zoneStats()?.total_zones || 0"
+          iconName="map-pin"
+          iconBgColor="bg-indigo-100"
+          iconColor="text-indigo-600"
+        />
+        <app-stats
+          title="Zonas Activas"
+          [value]="zoneStats()?.active_zones || 0"
+          iconName="globe"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-600"
+        />
       </div>
 
-      <div class="max-w-[1600px] mx-auto px-4 md:px-6 pb-12">
-        <!-- Tabs -->
-        <div class="flex items-center gap-2 bg-white/50 p-1 rounded-xl border border-[var(--color-border)] w-fit mb-8 backdrop-blur-sm">
-          <button
-             (click)="activeTab = 'methods'"
-             [class.bg-white]="activeTab === 'methods'"
-             [class.shadow-sm]="activeTab === 'methods'"
-             [class.text-[var(--color-primary)]]="activeTab === 'methods'"
-             class="px-6 py-2 rounded-lg font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-all">
-             Métodos de Envío
-          </button>
-          <button
-             (click)="activeTab = 'zones'"
-             [class.bg-white]="activeTab === 'zones'"
-             [class.shadow-sm]="activeTab === 'zones'"
-             [class.text-[var(--color-primary)]]="activeTab === 'zones'"
-             class="px-6 py-2 rounded-lg font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-all">
-             Zonas y Tarifas
-          </button>
-        </div>
+      <!-- Tabs debajo de stats (patrón dashboard) -->
+      <app-dashboard-tabs
+        [tabs]="tabs"
+        [activeTab]="activeTab()"
+        (tabChange)="setActiveTab($event)"
+      />
 
-        <!-- Content -->
-        <div class="tab-content transition-all duration-300">
-           <ng-container *ngIf="activeTab === 'methods'">
-              <app-superadmin-shipping-methods></app-superadmin-shipping-methods>
-           </ng-container>
-
-           <ng-container *ngIf="activeTab === 'zones'">
-              <app-superadmin-shipping-zones></app-superadmin-shipping-zones>
-           </ng-container>
-        </div>
-      </div>
+      <!-- Contenido según tab activo -->
+      @switch (activeTab()) {
+        @case ('methods') {
+          <app-superadmin-shipping-methods />
+        }
+        @case ('zones') {
+          <app-superadmin-shipping-zones />
+        }
+      }
     </div>
-  `
+  `,
 })
-export class ShippingLayoutComponent {
-  activeTab: 'methods' | 'zones' = 'methods';
+export class ShippingLayoutComponent implements OnInit {
+  private shippingService = inject(ShippingService);
+
+  activeTab = signal<'methods' | 'zones'>('methods');
+  methodStats = signal<ShippingMethodStats | null>(null);
+  zoneStats = signal<ShippingZoneStats | null>(null);
+
+  tabs: DashboardTab[] = [
+    { id: 'methods', label: 'Métodos de Envío', shortLabel: 'Métodos', icon: 'truck' },
+    { id: 'zones', label: 'Zonas y Tarifas', shortLabel: 'Zonas', icon: 'map-pin' },
+  ];
+
+  ngOnInit(): void {
+    this.loadStats();
+  }
+
+  loadStats(): void {
+    this.shippingService.getMethodStats().subscribe((stats) => this.methodStats.set(stats));
+    this.shippingService.getZoneStats().subscribe((stats) => this.zoneStats.set(stats));
+  }
+
+  setActiveTab(tab: string): void {
+    this.activeTab.set(tab as 'methods' | 'zones');
+  }
 }

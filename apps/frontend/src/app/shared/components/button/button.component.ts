@@ -18,15 +18,16 @@ export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
   template: `
     <button
       [type]="type"
+      [attr.form]="form"
       [disabled]="disabled || loading"
       [class]="buttonClasses"
       (click)="handleClick($event)"
     >
-      <div class="flex items-center justify-center gap-1.5">
+      <div class="btn-content">
         <!-- Loading spinner -->
         <svg
           *ngIf="loading"
-          class="animate-spin h-4 w-4"
+          class="animate-spin h-4 w-4 flex-shrink-0"
           fill="none"
           viewBox="0 0 24 24"
         >
@@ -43,14 +44,51 @@ export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
             fill="currentColor"
             d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
           ></path>
-        </svg><ng-content select="[slot=icon]"></ng-content><ng-container *ngIf="!loading || showTextWhileLoading"><ng-content></ng-content></ng-container>
+        </svg>
+        <span class="btn-icon flex-shrink-0"><ng-content select="[slot=icon]"></ng-content></span>
+        <span *ngIf="!loading || showTextWhileLoading" class="btn-text"><ng-content></ng-content></span>
       </div>
     </button>
   `,
   styles: [
     `
       :host {
-        display: inline-block;
+        display: inline-flex;
+        min-width: 0; /* Permite que el host se achique */
+        max-width: 100%;
+      }
+
+      /* Contenido del botón - adaptativo */
+      .btn-content {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.375rem;
+        min-width: 0; /* Permite que el contenido se achique */
+        max-width: 100%;
+        overflow: hidden;
+      }
+
+      /* Texto del botón - truncable */
+      .btn-text {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
+
+      /* Icono del botón - no se achica */
+      .btn-icon {
+        display: inline-flex;
+        flex-shrink: 0;
+      }
+
+      .btn-icon:empty {
+        display: none;
+      }
+
+      .btn-text:empty {
+        display: none;
       }
 
       /* Asegurar alturas exactas para consistencia (mobile-first) */
@@ -88,6 +126,7 @@ export class ButtonComponent {
   @Input() variant: ButtonVariant = 'primary';
   @Input() size: ButtonSize = 'md';
   @Input() type: 'button' | 'submit' | 'reset' = 'button';
+  @Input() form?: string; // Associates button with a form by id (for buttons outside the form)
   @Input() disabled = false;
   @Input() loading = false;
   @Input() showTextWhileLoading = false;
@@ -104,7 +143,7 @@ export class ButtonComponent {
   get buttonClasses(): string {
     const baseClasses = [
       'font-medium',
-      'rounded-sm',
+      'rounded-xl',
       'transition-all',
       'duration-200',
       'focus:outline-none',
@@ -116,6 +155,10 @@ export class ButtonComponent {
       'inline-flex',
       'items-center',
       'justify-center',
+      // Clases para adaptabilidad - permite que el botón se achique
+      'min-w-0',
+      'max-w-full',
+      'overflow-hidden',
     ];
 
     // Size classes - mobile-first con alturas consistentes con inputs y selectors
@@ -141,7 +184,7 @@ export class ButtonComponent {
         'focus:ring-[var(--color-secondary)]/50',
       ],
       outline: [
-        'border-2',
+        'border',
         'border-[var(--color-primary)]',
         'text-[var(--color-primary)]',
         'hover:bg-[var(--color-primary)]',
@@ -149,7 +192,7 @@ export class ButtonComponent {
         'focus:ring-[var(--color-primary)]/50',
       ],
       'outline-danger': [
-        'border-2',
+        'border',
         'border-[var(--color-destructive)]',
         'text-[var(--color-destructive)]',
         'hover:bg-[var(--color-destructive)]',

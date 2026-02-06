@@ -16,8 +16,10 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { SpinnerComponent } from '../../../../../shared/components/spinner/spinner.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { CatalogService, ProductDetail, EcommerceProduct } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
+import { ShareModalComponent } from '../share-modal/share-modal.component';
 
 @Component({
   selector: 'app-product-quick-view-modal',
@@ -29,7 +31,9 @@ import { CartService } from '../../services/cart.service';
     ModalComponent,
     SpinnerComponent,
     IconComponent,
+    ButtonComponent,
     QuantityControlComponent,
+    ShareModalComponent,
   ],
   template: `
     <app-modal
@@ -144,17 +148,24 @@ import { CartService } from '../../services/cart.service';
 
             <!-- Actions -->
             <div class="quick-view-actions">
-              <button
-                class="btn-add-cart"
-                (click)="onAddToCart()"
+              <app-button
+                variant="primary"
+                size="md"
+                [fullWidth]="true"
                 [disabled]="product.stock_quantity === 0"
+                (clicked)="onAddToCart()"
               >
-                <app-icon name="shopping-cart" [size]="18" />
-                Agregar
-              </button>
-              <button class="btn-share" (click)="onShare()">
-                <app-icon name="link-2" [size]="18" />
-              </button>
+                <app-icon slot="icon" name="shopping-cart" [size]="18" />
+                Agregar al carrito
+              </app-button>
+              <app-button
+                variant="outline"
+                size="md"
+                customClasses="share-btn"
+                (clicked)="onShareClick()"
+              >
+                <app-icon slot="icon" name="share" [size]="18" />
+              </app-button>
             </div>
 
             <!-- View Full Details Link -->
@@ -171,10 +182,19 @@ import { CartService } from '../../services/cart.service';
         <div class="quick-view-error">
           <app-icon name="alert-circle" [size]="48" class="text-error" />
           <p>No se pudo cargar el producto</p>
-          <button (click)="loadProduct()">Reintentar</button>
+          <app-button variant="primary" size="sm" (clicked)="loadProduct()">
+            Reintentar
+          </app-button>
         </div>
       }
     </app-modal>
+
+    <!-- Share Modal -->
+    <app-share-modal
+      [isOpen]="shareModalOpen"
+      [product]="productForShare"
+      (closed)="onShareModalClosed()"
+    />
   `,
   styles: [`
     .quick-view-loading {
@@ -347,50 +367,16 @@ import { CartService } from '../../services/cart.service';
       gap: 0.75rem;
       margin-top: 0.5rem;
 
-      .btn-add-cart {
+      /* Botón principal ocupa el espacio */
+      app-button:first-child {
         flex: 1;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.5rem;
-        padding: 0.875rem 1.5rem;
-        background: var(--color-primary);
-        color: var(--color-text-on-primary);
-        border: none;
-        border-radius: var(--radius-md);
-        font-size: var(--fs-base);
-        font-weight: var(--fw-semibold);
-        cursor: pointer;
-        transition: all var(--transition-fast);
-
-        &:hover:not(:disabled) {
-          background: var(--color-secondary);
-          transform: translateY(-1px);
-        }
-
-        &:disabled {
-          background: var(--color-text-muted);
-          cursor: not-allowed;
-        }
       }
 
-      .btn-share {
-        width: 48px;
-        height: 48px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: var(--color-background);
-        color: var(--color-text-primary);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        cursor: pointer;
-        transition: all var(--transition-fast);
-
-        &:hover {
-          background: var(--color-border);
-          color: var(--color-primary);
-        }
+      /* Botón de compartir cuadrado */
+      :host ::ng-deep .share-btn {
+        width: 44px !important;
+        min-width: 44px !important;
+        padding: 0 !important;
       }
     }
 
@@ -426,28 +412,14 @@ import { CartService } from '../../services/cart.service';
       gap: 1rem;
       text-align: center;
 
-      i {
-        font-size: 3rem;
-        color: var(--color-error);
-      }
-
       p {
         color: var(--color-text-secondary);
         margin: 0;
       }
+    }
 
-      button {
-        padding: 0.5rem 1rem;
-        background: var(--color-primary);
-        color: var(--color-text-on-primary);
-        border: none;
-        border-radius: var(--radius-md);
-        cursor: pointer;
-
-        &:hover {
-          background: var(--color-secondary);
-        }
-      }
+    .text-error {
+      color: var(--color-error);
     }
   `],
 })
@@ -461,6 +433,7 @@ export class ProductQuickViewModalComponent implements OnChanges {
   isLoading = false;
   hasError = false;
   quantity = 1;
+  shareModalOpen = false;
 
   private destroyRef = inject(DestroyRef);
   private catalogService = inject(CatalogService);
@@ -490,6 +463,24 @@ export class ProductQuickViewModalComponent implements OnChanges {
       return this.product.description;
     }
     return this.product.description.substring(0, maxLength) + '...';
+  }
+
+  // Convert ProductDetail to EcommerceProduct for ShareModal
+  get productForShare(): EcommerceProduct | null {
+    if (!this.product) return null;
+    return {
+      id: this.product.id,
+      name: this.product.name,
+      slug: this.product.slug,
+      description: this.product.description,
+      base_price: this.product.base_price,
+      final_price: this.product.final_price,
+      is_on_sale: this.product.is_on_sale,
+      image_url: this.mainImageUrl,
+      stock_quantity: this.product.stock_quantity,
+      brand: this.product.brand,
+      categories: this.product.categories,
+    } as EcommerceProduct;
   }
 
   loadProduct(): void {
@@ -530,28 +521,13 @@ export class ProductQuickViewModalComponent implements OnChanges {
     // this.onClose();
   }
 
-  onShare(): void {
+  onShareClick(): void {
     if (!this.product) return;
-    const url = `${window.location.origin}/catalog/${this.product.slug}`;
-
-    if (navigator.share) {
-      navigator.share({
-        title: this.product.name,
-        text: this.product.description || `Mira este producto: ${this.product.name}`,
-        url: url,
-      }).catch(() => {
-        // Fallback to clipboard
-        this.copyToClipboard(url);
-      });
-    } else {
-      this.copyToClipboard(url);
-    }
+    this.shareModalOpen = true;
   }
 
-  private copyToClipboard(text: string): void {
-    navigator.clipboard.writeText(text).then(() => {
-      // TODO: Show toast notification "URL copiada"
-    });
+  onShareModalClosed(): void {
+    this.shareModalOpen = false;
   }
 
   onClose(): void {

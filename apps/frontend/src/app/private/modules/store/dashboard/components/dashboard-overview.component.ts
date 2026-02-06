@@ -8,10 +8,16 @@ import { StatsComponent } from '../../../../../shared/components/stats/stats.com
 import { ChartComponent } from '../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { DashboardTabsComponent, DashboardTab } from './dashboard-tabs.component';
 
 import { AnalyticsService } from '../../analytics/services/analytics.service';
-import { StoreDashboardService, RecentOrder } from '../services/store-dashboard.service';
+import {
+  StoreDashboardService,
+  RecentOrder,
+  DispatchPendingOrder,
+  RefundPendingOrder,
+} from '../services/store-dashboard.service';
 import {
   SalesSummary,
   SalesTrend,
@@ -165,18 +171,25 @@ const CHANNEL_CONFIG: Record<string, { color: string }> = {
             <div class="divide-y divide-gray-100">
               @for (order of recentOrders().slice(0, 5); track order.id) {
                 <div
-                  class="p-3 hover:bg-gray-50 transition-colors cursor-pointer flex items-center gap-3"
+                  class="p-3 hover:bg-gray-50 transition-colors cursor-pointer flex items-center gap-3 relative"
+                  [class.ring-2]="isReadyToDispatch(order)"
+                  [class.ring-blue-400]="isReadyToDispatch(order)"
+                  [class.bg-blue-50/50]="isReadyToDispatch(order)"
                   (click)="viewOrder(order.id)"
                 >
+                  <!-- Badge de despacho urgente -->
+                  @if (isReadyToDispatch(order)) {
+                    <div class="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
+                  }
                   <div class="flex-shrink-0">
                     <div
                       class="w-8 h-8 rounded-full flex items-center justify-center"
-                      [ngClass]="getStatusIconBg(order.status)"
+                      [ngClass]="isReadyToDispatch(order) ? 'bg-blue-100' : getStatusIconBg(order.status)"
                     >
                       <app-icon
-                        [name]="getStatusIcon(order.status)"
+                        [name]="isReadyToDispatch(order) ? 'truck' : getStatusIcon(order.status)"
                         [size]="14"
-                        [ngClass]="getStatusIconColor(order.status)"
+                        [ngClass]="isReadyToDispatch(order) ? 'text-blue-600' : getStatusIconColor(order.status)"
                       ></app-icon>
                     </div>
                   </div>
@@ -187,9 +200,9 @@ const CHANNEL_CONFIG: Record<string, { color: string }> = {
                       </h4>
                       <span
                         class="text-[10px] font-medium px-2 py-0.5 rounded-full ml-2"
-                        [ngClass]="getStatusBadgeClass(order.status)"
+                        [ngClass]="isReadyToDispatch(order) ? 'bg-blue-100 text-blue-800' : getStatusBadgeClass(order.status)"
                       >
-                        {{ getStatusLabel(order.status) }}
+                        {{ isReadyToDispatch(order) ? 'Listo para despachar' : getStatusLabel(order.status) }}
                       </span>
                     </div>
                     <div class="flex items-center gap-2 text-xs text-gray-500">
@@ -251,7 +264,39 @@ const CHANNEL_CONFIG: Record<string, { color: string }> = {
                 </div>
               }
 
-              @if (lowStockCount() === 0 && outOfStockCount() === 0) {
+              <!-- Alerta de Despacho -->
+              @if (dispatchPendingCount() > 0) {
+                <div
+                  class="flex items-center gap-3 p-3 bg-blue-50 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors"
+                  (click)="navigateTo('/admin/orders/sales?status=processing&delivery=home_delivery')"
+                >
+                  <div class="flex-shrink-0 w-7 h-7 bg-blue-100 rounded-full flex items-center justify-center">
+                    <app-icon name="truck" [size]="14" class="text-blue-600"></app-icon>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-blue-800">{{ dispatchPendingCount() }} listas para despachar</p>
+                  </div>
+                  <app-icon name="chevron-right" [size]="14" class="text-blue-400"></app-icon>
+                </div>
+              }
+
+              <!-- Alerta de Refund -->
+              @if (refundPendingCount() > 0) {
+                <div
+                  class="flex items-center gap-3 p-3 bg-purple-50 rounded-lg cursor-pointer hover:bg-purple-100 transition-colors"
+                  (click)="navigateTo('/admin/orders/sales?status=refunded')"
+                >
+                  <div class="flex-shrink-0 w-7 h-7 bg-purple-100 rounded-full flex items-center justify-center">
+                    <app-icon name="rotate-ccw" [size]="14" class="text-purple-600"></app-icon>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-purple-800">{{ refundPendingCount() }} reembolsos pendientes</p>
+                  </div>
+                  <app-icon name="chevron-right" [size]="14" class="text-purple-400"></app-icon>
+                </div>
+              }
+
+              @if (lowStockCount() === 0 && outOfStockCount() === 0 && dispatchPendingCount() === 0 && refundPendingCount() === 0) {
                 <div class="py-4 text-center">
                   <div class="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-2">
                     <app-icon name="check-circle" [size]="20" class="text-emerald-600"></app-icon>
@@ -292,6 +337,7 @@ export class DashboardOverviewComponent implements OnInit, OnDestroy {
   private dashboardService = inject(StoreDashboardService);
   private toastService = inject(ToastService);
   private router = inject(Router);
+  private currencyService = inject(CurrencyFormatService);
   private destroy$ = new Subject<void>();
 
   storeId = input.required<string>();
@@ -312,6 +358,12 @@ export class DashboardOverviewComponent implements OnInit, OnDestroy {
   lowStockCount = signal(0);
   outOfStockCount = signal(0);
 
+  // Alertas de despacho y refund
+  dispatchPendingOrders = signal<DispatchPendingOrder[]>([]);
+  dispatchPendingCount = signal(0);
+  refundPendingOrders = signal<RefundPendingOrder[]>([]);
+  refundPendingCount = signal(0);
+
   trendChartOptions = signal<EChartsOption>({});
   channelChartOptions = signal<EChartsOption>({});
 
@@ -322,6 +374,7 @@ export class DashboardOverviewComponent implements OnInit, OnDestroy {
   };
 
   ngOnInit(): void {
+    this.currencyService.loadCurrency();
     this.loadAllData();
   }
 
@@ -377,6 +430,10 @@ export class DashboardOverviewComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (stats) => {
           this.recentOrders.set(stats.recentOrders || []);
+          this.dispatchPendingOrders.set(stats.dispatchPendingOrders || []);
+          this.dispatchPendingCount.set(stats.dispatchPendingCount || 0);
+          this.refundPendingOrders.set(stats.refundPendingOrders || []);
+          this.refundPendingCount.set(stats.refundPendingCount || 0);
           this.loadingOrders.set(false);
         },
         error: () => this.loadingOrders.set(false),
@@ -488,7 +545,8 @@ export class DashboardOverviewComponent implements OnInit, OnDestroy {
     this.channelChartOptions.set({
       tooltip: {
         trigger: 'item',
-        formatter: (params: any) => `<strong>${params.name}</strong><br/>$${params.value.toLocaleString()}<br/>${params.percent.toFixed(1)}%`,
+        formatter: (params: any) =>
+          `<strong>${params.name}</strong><br/>$${params.value.toLocaleString()}<br/>${params.percent.toFixed(1)}%`,
       },
       legend: {
         orient: 'vertical',
@@ -500,10 +558,11 @@ export class DashboardOverviewComponent implements OnInit, OnDestroy {
         {
           name: 'Ventas por Canal',
           type: 'pie',
-          radius: ['40%', '65%'],
+          radius: ['0%', '65%'],
           center: ['35%', '50%'],
+          roseType: 'radius', // Pie irregular (nightingale chart)
           avoidLabelOverlap: true,
-          itemStyle: { borderRadius: 4, borderColor: '#fff', borderWidth: 2 },
+          itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
           label: { show: false },
           emphasis: { label: { show: true, fontSize: 12, fontWeight: 'bold' } },
           labelLine: { show: false },
@@ -522,9 +581,37 @@ export class DashboardOverviewComponent implements OnInit, OnDestroy {
   }
 
   formatCurrency(value: number): string {
-    if (value >= 1000000) return '$' + (value / 1000000).toFixed(1) + 'M';
-    if (value >= 1000) return '$' + (value / 1000).toFixed(1) + 'K';
-    return '$' + value.toFixed(0);
+    const currency = this.currencyService.currentCurrency();
+
+    // Fallback if currency is not loaded yet
+    if (!currency) {
+      return this.currencyService.format(value);
+    }
+
+    // Apply K/M suffixes for large numbers while preserving currency symbol
+    if (value >= 1000000) {
+      const numValue = (value / 1000000).toFixed(1);
+      if (currency.position === 'before') {
+        return `${currency.symbol}${numValue}M`;
+      } else {
+        return `${numValue}M${currency.symbol}`;
+      }
+    }
+    if (value >= 1000) {
+      const numValue = (value / 1000).toFixed(1);
+      if (currency.position === 'before') {
+        return `${currency.symbol}${numValue}K`;
+      } else {
+        return `${numValue}K${currency.symbol}`;
+      }
+    }
+
+    // For smaller values, use the standard format but remove decimals for cleaner display
+    if (currency.position === 'before') {
+      return `${currency.symbol}${Math.round(value).toLocaleString()}`;
+    } else {
+      return `${Math.round(value).toLocaleString()}${currency.symbol}`;
+    }
   }
 
   getGrowthText(growth?: number): string {
@@ -587,6 +674,15 @@ export class DashboardOverviewComponent implements OnInit, OnDestroy {
       delivered: 'Entregado', finished: 'Completado', cancelled: 'Cancelado',
     };
     return labelMap[status] || status;
+  }
+
+  isReadyToDispatch(order: RecentOrder): boolean {
+    return (
+      order.status === 'processing' &&
+      order.isPaid &&
+      order.hasShipping &&
+      order.deliveryType === 'home_delivery'
+    );
   }
 
   viewOrder(orderId: string): void {

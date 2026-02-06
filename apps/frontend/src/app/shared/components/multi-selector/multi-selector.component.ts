@@ -20,6 +20,7 @@ import {
 } from '@angular/forms';
 import { Subject } from 'rxjs';
 import { IconComponent } from '../icon/icon.component';
+import { FormStyleVariant } from '../../types/form.types';
 
 export interface MultiSelectorOption {
   value: string | number;
@@ -46,7 +47,7 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
     <div class="w-full">
       <label
         *ngIf="label"
-        class="block text-sm font-medium text-[var(--color-text-primary)] mb-2"
+        [class]="labelClasses"
         [class.opacity-50]="disabled"
       >
         {{ label }}
@@ -59,10 +60,7 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
           type="button"
           [disabled]="disabled"
           (click)="toggleDropdown()"
-          class="w-full min-h-[42px] px-3 py-2 text-left border bg-[var(--color-surface)] transition-colors
-                 focus:outline-none focus:ring-2 focus:ring-secondary/40 focus:border-primary
-                 disabled:opacity-50 disabled:cursor-not-allowed"
-          style="border-radius: var(--radius-sm);"
+          [class]="triggerClasses"
           [class.border-border]="!errorText"
           [class.border-destructive]="errorText"
         >
@@ -191,6 +189,7 @@ export class MultiSelectorComponent implements ControlValueAccessor, OnInit, OnD
   @Input() required = false;
   @Input() disabled = false;
   @Input() size: MultiSelectorSize = 'md';
+  @Input() styleVariant: FormStyleVariant = 'modern';
   @Input() options: MultiSelectorOption[] = [];
 
   @Output() valueChange = new EventEmitter<(string | number)[]>();
@@ -295,5 +294,72 @@ export class MultiSelectorComponent implements ControlValueAccessor, OnInit, OnD
     this.onChange(this.selectedValues);
     this.onTouched();
     this.valueChange.emit(this.selectedValues);
+  }
+
+  // CSS class getters
+  get labelClasses(): string {
+    const baseClasses = ['block', 'font-medium', 'mb-2'];
+
+    if (this.styleVariant === 'modern') {
+      return [
+        ...baseClasses,
+        'text-[11px]',
+        'uppercase',
+        'tracking-[0.05em]',
+        'text-[var(--color-text-muted)]',
+      ].join(' ');
+    }
+
+    return [
+      ...baseClasses,
+      'text-sm',
+      'text-[var(--color-text-primary)]',
+    ].join(' ');
+  }
+
+  get triggerClasses(): string {
+    const baseClasses = [
+      'w-full',
+      'px-3',
+      'py-2',
+      'text-left',
+      'border',
+      'bg-[var(--color-surface)]',
+      'transition-colors',
+      'focus:outline-none',
+      'disabled:opacity-50',
+      'disabled:cursor-not-allowed',
+    ];
+
+    // Unified height system (matches Button, Input, Selector)
+    // sm: 32px mobile → 36px desktop
+    // md: 40px mobile → 44px desktop
+    // lg: 48px mobile → 52px desktop
+    const sizeClasses = {
+      sm: ['min-h-8', 'sm:min-h-9'],
+      md: ['min-h-10', 'sm:min-h-11'],
+      lg: ['min-h-12', 'sm:min-h-[52px]'],
+    };
+
+    if (this.styleVariant === 'modern') {
+      return [
+        ...baseClasses,
+        ...sizeClasses[this.size],
+        'rounded-xl',
+        '!bg-[var(--color-background)]',
+        'focus:!bg-[var(--color-surface)]',
+        'focus:shadow-[0_0_0_3px_var(--color-ring)]',
+      ].join(' ');
+    }
+
+    // Classic: with ring focus
+    return [
+      ...baseClasses,
+      ...sizeClasses[this.size],
+      'rounded-xl',
+      'focus:ring-2',
+      'focus:ring-secondary/40',
+      'focus:border-primary',
+    ].join(' ');
   }
 }

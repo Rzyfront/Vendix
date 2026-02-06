@@ -17,6 +17,7 @@ import {
   OrderStatus,
   PaymentStatus,
   UpdateOrderDto,
+  DeliveryType,
 } from '../interfaces/order.interface';
 
 // Import shared components
@@ -25,6 +26,9 @@ import {
   IconComponent,
   ButtonComponent,
   ToastService,
+  InputComponent,
+  SelectorComponent,
+  TextareaComponent,
 } from '../../../../../shared/components/index';
 
 @Component({
@@ -37,6 +41,9 @@ import {
     ModalComponent,
     IconComponent,
     ButtonComponent,
+    InputComponent,
+    SelectorComponent,
+    TextareaComponent,
   ],
   templateUrl: './order-details.component.html',
 })
@@ -48,14 +55,39 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
   orderDetails?: OrderDetails;
   isLoading = false;
   isUpdating = false;
+  isDispatching = false;
+  showDispatchModal = false;
+
+  // Dispatch form
+  dispatchForm!: FormGroup;
 
   // Update form
   updateForm!: FormGroup;
+
+  // Options arrays for selectors
+  orderStatusOptions = [
+    { value: 'pending', label: 'Pendiente' },
+    { value: 'confirmed', label: 'Confirmado' },
+    { value: 'processing', label: 'Procesando' },
+    { value: 'shipped', label: 'Enviado' },
+    { value: 'delivered', label: 'Entregado' },
+    { value: 'cancelled', label: 'Cancelado' },
+    { value: 'refunded', label: 'Reembolsado' }
+  ];
+
+  paymentStatusOptions = [
+    { value: 'pending', label: 'Pendiente' },
+    { value: 'paid', label: 'Pagado' },
+    { value: 'failed', label: 'Fallido' },
+    { value: 'refunded', label: 'Reembolsado' },
+    { value: 'partially_refunded', label: 'Reembolso parcial' }
+  ];
 
   private subscriptions: Subscription[] = [];
 
   constructor(private fb: FormBuilder) {
     this.initializeUpdateForm();
+    this.initializeDispatchForm();
   }
 
   ngOnInit(): void {
@@ -74,6 +106,14 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
       payment_status: [''],
       tracking_number: [''],
       estimated_delivery: [''],
+      notes: [''],
+    });
+  }
+
+  private initializeDispatchForm(): void {
+    this.dispatchForm = this.fb.group({
+      tracking_number: [''],
+      carrier: [''],
       notes: [''],
     });
   }
@@ -281,5 +321,44 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
       OrderStatus.PROCESSING,
       OrderStatus.SHIPPED,
     ].includes(this.orderDetails.status);
+  }
+
+  canDispatchOrder(): boolean {
+    if (!this.orderDetails) return false;
+    return (
+      this.orderDetails.status === OrderStatus.PROCESSING &&
+      this.orderDetails.payment_status === PaymentStatus.PAID &&
+      this.orderDetails.delivery_type === 'home_delivery' &&
+      !!this.orderDetails.shipping_method_id
+    );
+  }
+
+  openDispatchModal(): void {
+    this.dispatchForm.reset();
+    this.showDispatchModal = true;
+  }
+
+  closeDispatchModal(): void {
+    this.showDispatchModal = false;
+  }
+
+  onDispatchOrder(): void {
+    if (!this.orderDetails) return;
+
+    this.isDispatching = true;
+
+    const dispatchData = {
+      tracking_number: this.dispatchForm.get('tracking_number')?.value || undefined,
+      carrier: this.dispatchForm.get('carrier')?.value || undefined,
+      notes: this.dispatchForm.get('notes')?.value || undefined,
+    };
+
+    // TODO: Replace with actual API call to POST /store/orders/:id/flow/ship
+    setTimeout(() => {
+      console.log('Order dispatched successfully', dispatchData);
+      this.closeDispatchModal();
+      this.loadOrderDetails();
+      this.isDispatching = false;
+    }, 1000);
   }
 }

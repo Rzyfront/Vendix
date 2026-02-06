@@ -57,14 +57,29 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
         </div>
 
         <!-- Context Info (Supplier + Location) -->
-        <div class="context-section" *ngIf="supplierName || locationName">
-          <div class="context-item" *ngIf="supplierName">
-            <app-icon name="truck" [size]="16"></app-icon>
-            <span>{{ supplierName }}</span>
+        <div class="context-section" [class.context-warning]="!supplierName || !locationName">
+          <!-- Missing Config Alert -->
+          <div *ngIf="!supplierName || !locationName" class="config-alert">
+            <div class="alert-content">
+              <app-icon name="alert-circle" [size]="18"></app-icon>
+              <span>Configura proveedor y bodega para continuar</span>
+            </div>
+            <button class="config-btn" (click)="onConfigureClick()">
+              <app-icon name="settings" [size]="14"></app-icon>
+              Configurar
+            </button>
           </div>
-          <div class="context-item" *ngIf="locationName">
-            <app-icon name="warehouse" [size]="16"></app-icon>
-            <span>{{ locationName }}</span>
+
+          <!-- Normal context display -->
+          <div *ngIf="supplierName && locationName" class="context-items">
+            <div class="context-item">
+              <app-icon name="truck" [size]="16"></app-icon>
+              <span>{{ supplierName }}</span>
+            </div>
+            <div class="context-item">
+              <app-icon name="warehouse" [size]="16"></app-icon>
+              <span>{{ locationName }}</span>
+            </div>
           </div>
         </div>
 
@@ -97,28 +112,16 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
                   *ngIf="!item.product.image_url"
                   class="image-placeholder"
                 >
-                  <app-icon name="image" [size]="20"></app-icon>
+                  <app-icon name="image" [size]="18"></app-icon>
                 </div>
               </div>
 
-              <!-- Item Details -->
-              <div class="item-details">
-                <div class="item-header">
-                  <h4 class="item-name">{{ item.product.name }}</h4>
-                  <button
-                    class="remove-btn"
-                    (click)="onRemoveItem(item.id)"
-                    title="Eliminar"
-                  >
-                    <app-icon name="x" [size]="16"></app-icon>
-                  </button>
-                </div>
-
+              <!-- Item Info -->
+              <div class="item-info">
+                <h4 class="item-name">{{ item.product.name }}</h4>
                 <div class="item-meta">
-                  <span *ngIf="item.product.code" class="item-sku">{{
-                    item.product.code
-                  }}</span>
-                  <!-- Editable Unit Cost (key difference from POS) -->
+                  <span *ngIf="item.product.code" class="item-sku">{{ item.product.code }}</span>
+                  <!-- Editable Unit Cost -->
                   <div class="cost-input">
                     <span class="currency">$</span>
                     <input
@@ -127,36 +130,43 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
                       (change)="onCostChange(item.id, $event)"
                       min="0"
                       step="1"
+                      placeholder="Costo"
                     />
                   </div>
                 </div>
+              </div>
 
-                <div class="item-footer">
-                  <app-quantity-control
-                    [value]="item.quantity"
-                    [min]="1"
-                    [editable]="true"
-                    [size]="'sm'"
-                    (valueChange)="onQuantityChange(item.id, $event)"
-                  ></app-quantity-control>
-                  <span class="item-total">{{
-                    formatCurrency(item.total)
-                  }}</span>
-                </div>
+              <!-- Remove Button -->
+              <button
+                class="remove-btn"
+                (click)="onRemoveItem(item.id)"
+                title="Eliminar"
+              >
+                <app-icon name="x" [size]="16"></app-icon>
+              </button>
 
-                <!-- Lot Config (POP-specific) -->
-                <button
-                  *ngIf="!item.lot_info"
-                  class="lot-btn"
-                  (click)="configureLot.emit(item)"
-                >
-                  <app-icon name="tag" [size]="14"></app-icon>
+              <!-- Actions Row: Quantity + Total -->
+              <div class="item-actions">
+                <app-quantity-control
+                  [value]="item.quantity"
+                  [min]="1"
+                  [editable]="true"
+                  [size]="'sm'"
+                  (valueChange)="onQuantityChange(item.id, $event)"
+                ></app-quantity-control>
+                <span class="item-total">{{ formatCurrency(item.total) }}</span>
+              </div>
+
+              <!-- Lot Config Row (POP-specific) -->
+              <div class="item-lot" *ngIf="!item.lot_info">
+                <button class="lot-btn" (click)="configureLot.emit(item)">
+                  <app-icon name="tag" [size]="12"></app-icon>
                   Configurar lote
                 </button>
-                <div *ngIf="item.lot_info" class="lot-info">
-                  <app-icon name="tag" [size]="14"></app-icon>
-                  Lote: {{ item.lot_info.batch_number || 'Configurado' }}
-                </div>
+              </div>
+              <div class="item-lot lot-configured" *ngIf="item.lot_info">
+                <app-icon name="check-circle" [size]="12"></app-icon>
+                <span>Lote: {{ item.lot_info.batch_number || 'Configurado' }}</span>
               </div>
             </div>
           </div>
@@ -184,31 +194,33 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
         <div class="modal-actions">
           <app-button
             variant="outline"
-            size="md"
+            size="sm"
             (clicked)="saveDraft.emit()"
             [disabled]="!cartState?.items?.length"
             class="action-btn"
           >
-            <app-icon name="save" [size]="18" slot="icon"></app-icon>
+            <app-icon name="save" [size]="16" slot="icon"></app-icon>
             Borrador
           </app-button>
           <app-button
             variant="primary"
-            size="md"
+            size="sm"
             (clicked)="createOrder.emit()"
             [disabled]="!cartState?.items?.length"
-            class="action-btn create"
+            class="action-btn"
           >
             Crear
           </app-button>
           <app-button
             variant="success"
-            size="md"
+            size="sm"
             (clicked)="createAndReceive.emit()"
-            [disabled]="!cartState?.items?.length"
-            class="action-btn receive"
+            [disabled]="!cartState?.items?.length || isProcessing"
+            [loading]="isProcessing"
+            class="action-btn checkout"
           >
-            C+R
+            <app-icon *ngIf="!isProcessing" name="package-check" [size]="16" slot="icon"></app-icon>
+            Crear y Recibir
           </app-button>
         </div>
       </div>
@@ -324,12 +336,64 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
         flex-shrink: 0;
       }
 
+      .context-section.context-warning {
+        background: rgba(245, 158, 11, 0.1);
+        border-bottom-color: rgba(245, 158, 11, 0.3);
+      }
+
+      .context-items {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+
       .context-item {
         display: flex;
         align-items: center;
         gap: 6px;
         font-size: 13px;
         color: var(--color-text-secondary);
+      }
+
+      .config-alert {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        width: 100%;
+      }
+
+      .alert-content {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--color-warning, #f59e0b);
+        font-size: 13px;
+        font-weight: 500;
+      }
+
+      .config-btn {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 6px 12px;
+        background: var(--color-warning, #f59e0b);
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        white-space: nowrap;
+      }
+
+      .config-btn:hover {
+        filter: brightness(1.1);
+      }
+
+      .config-btn:active {
+        transform: scale(0.97);
       }
 
       /* Items Container */
@@ -382,9 +446,12 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
         gap: 12px;
       }
 
+      /* Cart Item - Grid Layout like POS */
       .cart-item {
-        display: flex;
-        gap: 12px;
+        display: grid;
+        grid-template-columns: 56px 1fr auto;
+        grid-template-rows: auto auto auto;
+        gap: 6px 10px;
         padding: 12px;
         background: var(--color-surface);
         border: 1px solid var(--color-border);
@@ -397,11 +464,12 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
       }
 
       .item-image {
-        width: 70px;
-        height: 70px;
+        grid-row: 1;
+        grid-column: 1;
+        width: 56px;
+        height: 56px;
         border-radius: 10px;
         overflow: hidden;
-        flex-shrink: 0;
         background: var(--color-muted);
       }
 
@@ -420,18 +488,13 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
         color: var(--color-text-muted);
       }
 
-      .item-details {
-        flex: 1;
+      .item-info {
+        grid-row: 1;
+        grid-column: 2;
         min-width: 0;
         display: flex;
         flex-direction: column;
-      }
-
-      .item-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: 8px;
+        justify-content: center;
       }
 
       .item-name {
@@ -446,31 +509,12 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
         overflow: hidden;
       }
 
-      .remove-btn {
-        width: 28px;
-        height: 28px;
-        border: none;
-        background: transparent;
-        color: var(--color-text-muted);
-        cursor: pointer;
-        border-radius: 6px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-        transition: all 0.2s ease;
-      }
-
-      .remove-btn:hover {
-        background: rgba(239, 68, 68, 0.1);
-        color: var(--color-destructive);
-      }
-
       .item-meta {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         margin-top: 4px;
+        flex-wrap: wrap;
       }
 
       .item-sku {
@@ -486,20 +530,20 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
         background: var(--color-background);
         border: 1px solid var(--color-border);
         border-radius: 6px;
-        padding: 4px 8px;
+        padding: 3px 6px;
       }
 
       .cost-input .currency {
-        font-size: 12px;
+        font-size: 11px;
         color: var(--color-text-secondary);
         margin-right: 2px;
       }
 
       .cost-input input {
-        width: 70px;
+        width: 60px;
         border: none;
         background: transparent;
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 600;
         color: var(--color-text-primary);
         outline: none;
@@ -512,33 +556,62 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
         margin: 0;
       }
 
-      .item-footer {
+      .remove-btn {
+        grid-row: 1;
+        grid-column: 3;
+        width: 28px;
+        height: 28px;
+        border: none;
+        background: transparent;
+        color: var(--color-text-muted);
+        cursor: pointer;
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s ease;
+      }
+
+      .remove-btn:hover {
+        background: rgba(239, 68, 68, 0.1);
+        color: var(--color-destructive);
+      }
+
+      .item-actions {
+        grid-row: 2;
+        grid-column: 1 / -1;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-top: auto;
         padding-top: 8px;
+        border-top: 1px solid var(--color-border);
+        margin-top: 4px;
       }
 
       .item-total {
-        font-size: 16px;
+        font-size: 15px;
         font-weight: 700;
         color: var(--color-primary);
       }
 
-      /* Lot config (POP-specific) */
+      /* Lot config row (POP-specific) */
+      .item-lot {
+        grid-row: 3;
+        grid-column: 1 / -1;
+        padding-top: 6px;
+      }
+
       .lot-btn {
-        display: flex;
+        display: inline-flex;
         align-items: center;
         gap: 4px;
-        padding: 6px 10px;
+        padding: 4px 8px;
         background: transparent;
         border: 1px dashed var(--color-border);
-        border-radius: 6px;
+        border-radius: 4px;
         color: var(--color-text-muted);
-        font-size: 12px;
+        font-size: 11px;
         cursor: pointer;
-        margin-top: 8px;
         transition: all 0.2s ease;
       }
 
@@ -547,13 +620,12 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
         color: var(--color-primary);
       }
 
-      .lot-info {
+      .item-lot.lot-configured {
         display: flex;
         align-items: center;
         gap: 4px;
-        font-size: 12px;
+        font-size: 11px;
         color: var(--color-success);
-        margin-top: 8px;
       }
 
       /* Summary Section */
@@ -600,18 +672,14 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
 
       .action-btn {
         flex: 1;
-        height: 48px;
-        border-radius: 12px;
+        height: 44px;
+        border-radius: 10px;
         font-weight: 600;
         font-size: 14px;
       }
 
-      .action-btn.create {
-        flex: 1.2;
-      }
-
-      .action-btn.receive {
-        flex: 1;
+      .action-btn.checkout {
+        flex: 1.5;
       }
 
       /* Hide on desktop */
@@ -628,6 +696,7 @@ export class PopCartModalComponent implements OnChanges {
   @Input() cartState: PopCartState | null = null;
   @Input() supplierName: string = '';
   @Input() locationName: string = '';
+  @Input() isProcessing: boolean = false;
 
   @Output() closed = new EventEmitter<void>();
   @Output() itemQuantityChanged = new EventEmitter<{
@@ -644,6 +713,12 @@ export class PopCartModalComponent implements OnChanges {
   @Output() saveDraft = new EventEmitter<void>();
   @Output() createOrder = new EventEmitter<void>();
   @Output() createAndReceive = new EventEmitter<void>();
+  @Output() configure = new EventEmitter<void>();
+
+  onConfigureClick(): void {
+    this.configure.emit();
+    this.closed.emit();
+  }
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['isOpen']) {

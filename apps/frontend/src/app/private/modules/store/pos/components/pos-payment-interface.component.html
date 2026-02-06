@@ -37,22 +37,22 @@
         </div>
         <div class="summary-row">
           <span>Subtotal</span>
-          <span class="summary-value">${{ cartState?.summary?.subtotal || 0 | number: "1.2-2" }}</span>
+          <span class="summary-value">{{ cartState?.summary?.subtotal || 0 | currency }}</span>
         </div>
         <div class="summary-row">
           <span>Impuestos</span>
-          <span class="summary-value">${{ cartState?.summary?.taxAmount || 0 | number: "1.2-2" }}</span>
+          <span class="summary-value">{{ cartState?.summary?.taxAmount || 0 | currency }}</span>
         </div>
         <div *ngIf="(cartState?.summary?.discountAmount ?? 0) > 0" class="summary-row">
           <span>Descuento</span>
-          <span class="summary-value discount">-${{ cartState?.summary?.discountAmount | number: "1.2-2" }}</span>
+          <span class="summary-value discount">-{{ cartState?.summary?.discountAmount | currency }}</span>
         </div>
       </div>
 
       <!-- Total -->
       <div class="total-section">
         <p class="total-label">Total a Pagar</p>
-        <p class="total-amount">${{ cartState?.summary?.total || 0 | number: "1.2-2" }}</p>
+        <p class="total-amount">{{ cartState?.summary?.total || 0 | currency }}</p>
       </div>
     </section>
 
@@ -90,7 +90,7 @@
           <div class="cash-input-group">
             <label>Monto Recibido</label>
             <div class="cash-input" [class.error]="isCashAmountInsufficient">
-              <span class="currency">$</span>
+              <span class="currency">{{ currencySymbol() }}</span>
               <input
                 type="number"
                 [formControl]="cashReceivedControl"
@@ -100,13 +100,13 @@
               />
             </div>
             <span *ngIf="isCashAmountInsufficient" class="error-text">
-              Faltan: ${{ missingAmount | number: "1.2-2" }}
+              Faltan: {{ missingAmount | currency }}
             </span>
           </div>
           <div class="cash-input-group">
             <label>Cambio</label>
             <div class="change-display">
-              <span>${{ paymentState.change | number: "1.2-2" }}</span>
+              <span>{{ paymentState.change | currency }}</span>
               <app-icon name="coins" [size]="18"></app-icon>
             </div>
           </div>
@@ -116,7 +116,7 @@
         <div class="quick-amounts">
           <button type="button" (click)="setHalfAmount()" class="quick-btn">
             <span>1/2 Pago</span>
-            <span class="quick-value">${{ (cartState?.summary?.total || 0) / 2 | number: "1.0-0" }}</span>
+            <span class="quick-value">{{ (cartState?.summary?.total || 0) / 2 | currency }}</span>
           </button>
           <button type="button" (click)="setFullAmount()" class="quick-btn primary">
             <span>Total</span>

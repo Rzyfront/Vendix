@@ -14,12 +14,16 @@ import {
 import {
   ButtonComponent,
   ModalComponent,
+  InputComponent,
+  SelectorComponent,
+  TextareaComponent,
+  SelectorOption,
 } from '../../../../../../shared/components/index';
 
 @Component({
   selector: 'app-store-edit-modal',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, ButtonComponent, ModalComponent],
+  imports: [CommonModule, ReactiveFormsModule, ButtonComponent, ModalComponent, InputComponent, SelectorComponent, TextareaComponent],
   styles: [
     `
       :host {
@@ -46,112 +50,62 @@ import {
           </h3>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <!-- Store Name -->
-            <div>
-              <label class="block text-sm font-medium text-text-primary mb-2"
-                >Nombre de la Tienda *</label
-              >
-              <input
-                type="text"
-                formControlName="name"
-                [class]="
-                  isFieldInvalid('name') ? 'border-red-500' : 'border-border'
-                "
-                class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
-                placeholder="Ingresa el nombre de la tienda"
-              />
-              <div
-                *ngIf="isFieldInvalid('name')"
-                class="mt-1 text-sm text-destructive"
-              >
-                {{ getErrorMessage("name") }}
-              </div>
-            </div>
+            <app-input
+              [label]="'Nombre de la Tienda'"
+              formControlName="name"
+              styleVariant="modern"
+              placeholder="Ingresa el nombre de la tienda"
+              [required]="true"
+              [control]="editForm.get('name')"
+            ></app-input>
 
             <!-- Domain -->
-            <div>
-              <label class="block text-sm font-medium text-text-primary mb-2"
-                >Dominio *</label
-              >
-              <input
-                type="text"
-                formControlName="domain"
-                [class]="
-                  isFieldInvalid('domain')
-                    ? 'border-red-500'
-                    : 'border-border'
-                "
-                class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
-                placeholder="dominio-tienda"
-              />
-              <div
-                *ngIf="isFieldInvalid('domain')"
-                class="mt-1 text-sm text-destructive"
-              >
-                {{ getErrorMessage("domain") }}
-              </div>
-            </div>
+            <app-input
+              [label]="'Dominio'"
+              formControlName="domain"
+              styleVariant="modern"
+              placeholder="dominio-tienda"
+              [required]="true"
+              [control]="editForm.get('domain')"
+            ></app-input>
 
             <!-- Email -->
-            <div>
-              <label class="block text-sm font-medium text-text-primary mb-2"
-                >Correo Electrónico *</label
-              >
-              <input
-                type="email"
-                formControlName="email"
-                [class]="
-                  isFieldInvalid('email') ? 'border-red-500' : 'border-border'
-                "
-                class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
-                placeholder="contacto@tienda.com"
-              />
-              <div
-                *ngIf="isFieldInvalid('email')"
-                class="mt-1 text-sm text-destructive"
-              >
-                {{ getErrorMessage("email") }}
-              </div>
-            </div>
+            <app-input
+              [label]="'Correo Electrónico'"
+              type="email"
+              formControlName="email"
+              styleVariant="modern"
+              placeholder="contacto@tienda.com"
+              [required]="true"
+              [control]="editForm.get('email')"
+            ></app-input>
 
             <!-- Phone -->
-            <div>
-              <label class="block text-sm font-medium text-text-primary mb-2"
-                >Teléfono</label
-              >
-              <input
-                type="tel"
-                formControlName="phone"
-                class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
-                placeholder="+57 (1) 000-0000"
-              />
-            </div>
+            <app-input
+              [label]="'Teléfono'"
+              type="tel"
+              formControlName="phone"
+              styleVariant="modern"
+              placeholder="+57 (1) 000-0000"
+            ></app-input>
 
             <!-- Status -->
-            <div>
-              <label class="block text-sm font-medium text-text-primary mb-2"
-                >Estado</label
-              >
-              <select
-                formControlName="status"
-                class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
-              >
-                <option value="active">Activa</option>
-                <option value="inactive">Inactiva</option>
-                <option value="maintenance">En Mantenimiento</option>
-              </select>
-            </div>
+            <app-selector
+              [label]="'Estado'"
+              formControlName="status"
+              styleVariant="modern"
+              [options]="statusOptions"
+            ></app-selector>
 
             <!-- Description -->
             <div class="md:col-span-2">
-              <label class="block text-sm font-medium text-text-primary mb-2"
-                >Descripción</label
-              >
-              <textarea
+              <app-textarea
+                [label]="'Descripción'"
                 formControlName="description"
-                rows="3"
-                class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
+                styleVariant="modern"
                 placeholder="Breve descripción de tu tienda"
-              ></textarea>
+                [rows]="3"
+              ></app-textarea>
             </div>
           </div>
         </div>
@@ -161,71 +115,48 @@ import {
           <h3 class="text-lg font-medium text-text-primary mb-4">
             Información de Dirección
           </h3>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4" formGroupName="address">
             <!-- Street -->
             <div class="md:col-span-2">
-              <label class="block text-sm font-medium text-text-primary mb-2"
-                >Dirección</label
-              >
-              <input
-                type="text"
-                formControlName="address.street"
-                class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
+              <app-input
+                [label]="'Dirección'"
+                formControlName="street"
+                styleVariant="modern"
                 placeholder="Calle 123 #45-67"
-              />
+              ></app-input>
             </div>
 
             <!-- City -->
-            <div>
-              <label class="block text-sm font-medium text-text-primary mb-2"
-                >Ciudad</label
-              >
-              <input
-                type="text"
-                formControlName="address.city"
-                class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
-                placeholder="Bogotá"
-              />
-            </div>
+            <app-input
+              [label]="'Ciudad'"
+              formControlName="city"
+              styleVariant="modern"
+              placeholder="Bogotá"
+            ></app-input>
 
             <!-- State -->
-            <div>
-              <label class="block text-sm font-medium text-text-primary mb-2"
-                >Departamento</label
-              >
-              <input
-                type="text"
-                formControlName="address.state"
-                class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
-                placeholder="Cundinamarca"
-              />
-            </div>
+            <app-input
+              [label]="'Departamento'"
+              formControlName="state"
+              styleVariant="modern"
+              placeholder="Cundinamarca"
+            ></app-input>
 
             <!-- ZIP Code -->
-            <div>
-              <label class="block text-sm font-medium text-text-primary mb-2"
-                >Código Postal</label
-              >
-              <input
-                type="text"
-                formControlName="address.zipCode"
-                class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
-                placeholder="110111"
-              />
-            </div>
+            <app-input
+              [label]="'Código Postal'"
+              formControlName="zipCode"
+              styleVariant="modern"
+              placeholder="110111"
+            ></app-input>
 
             <!-- Country -->
-            <div>
-              <label class="block text-sm font-medium text-text-primary mb-2"
-                >País</label
-              >
-              <input
-                type="text"
-                formControlName="address.country"
-                class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
-                placeholder="Colombia"
-              />
-            </div>
+            <app-input
+              [label]="'País'"
+              formControlName="country"
+              styleVariant="modern"
+              placeholder="Colombia"
+            ></app-input>
           </div>
         </div>
       </form>
@@ -259,6 +190,12 @@ export class StoreEditModalComponent {
 
   editForm: FormGroup;
   settingsForm: FormGroup;
+
+  statusOptions: SelectorOption[] = [
+    { value: 'active', label: 'Activo' },
+    { value: 'inactive', label: 'Inactivo' },
+    { value: 'maintenance', label: 'Mantenimiento' }
+  ];
 
   constructor(private fb: FormBuilder) {
     this.editForm = this.fb.group({

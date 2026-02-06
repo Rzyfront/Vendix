@@ -16,13 +16,15 @@
     @if (expandedSections.store_info) {
     <div class="p-4 space-y-4 animate-in fade-in slide-in-from-top-2 duration-200" formGroupName="store_info">
       <!-- Sobre Nosotros -->
-      <div class="space-y-1.5">
-        <label class="block text-sm font-medium text-gray-700">Sobre Nosotros</label>
-        <textarea formControlName="about_us" rows="4"
-          placeholder="Escribe un relato sobre tu tienda. Este texto se mostrará cuando los clientes hagan clic en 'Sobre Nosotros' en el footer..."
-          class="w-full px-3 py-2 rounded-lg bg-white border border-gray-300 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none resize-none"></textarea>
-        <small class="text-xs text-gray-500">Se mostrará en un modal al hacer clic en "Sobre Nosotros"</small>
-      </div>
+      <app-textarea
+        label="Sobre Nosotros"
+        styleVariant="modern"
+        formControlName="about_us"
+        [rows]="4"
+        placeholder="Escribe un relato sobre tu tienda. Este texto se mostrará cuando los clientes hagan clic en 'Sobre Nosotros' en el footer..."
+        helperText="Se mostrará en un modal al hacer clic en 'Sobre Nosotros'"
+        customWrapperClass="!mt-0"
+      ></app-textarea>
 
       <!-- Email de Soporte -->
       <app-input label="Correo de Soporte" type="email" formControlName="support_email"
@@ -162,22 +164,26 @@
       </div>
 
       <!-- Información de Envíos -->
-      <div class="space-y-1.5">
-        <label class="block text-sm font-medium text-gray-700">Información de Envíos</label>
-        <textarea formControlName="shipping_info" rows="4"
-          placeholder="Realizamos envíos a todo el país. El tiempo de entrega varía según tu ubicación..."
-          class="w-full px-3 py-2 rounded-lg bg-white border border-gray-300 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none resize-none"></textarea>
-        <small class="text-xs text-gray-500">Se mostrará al hacer clic en "Envíos" en el footer</small>
-      </div>
+      <app-textarea
+        label="Información de Envíos"
+        styleVariant="modern"
+        formControlName="shipping_info"
+        [rows]="4"
+        placeholder="Realizamos envíos a todo el país. El tiempo de entrega varía según tu ubicación..."
+        helperText="Se mostrará al hacer clic en 'Envíos' en el footer"
+        customWrapperClass="!mt-0"
+      ></app-textarea>
 
       <!-- Política de Devoluciones -->
-      <div class="space-y-1.5">
-        <label class="block text-sm font-medium text-gray-700">Política de Devoluciones</label>
-        <textarea formControlName="returns_info" rows="4"
-          placeholder="Si no estás satisfecho con tu compra, puedes solicitar una devolución dentro de los 30 días..."
-          class="w-full px-3 py-2 rounded-lg bg-white border border-gray-300 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none resize-none"></textarea>
-        <small class="text-xs text-gray-500">Se mostrará al hacer clic en "Devoluciones" en el footer</small>
-      </div>
+      <app-textarea
+        label="Política de Devoluciones"
+        styleVariant="modern"
+        formControlName="returns_info"
+        [rows]="4"
+        placeholder="Si no estás satisfecho con tu compra, puedes solicitar una devolución dentro de los 30 días..."
+        helperText="Se mostrará al hacer clic en 'Devoluciones' en el footer"
+        customWrapperClass="!mt-0"
+      ></app-textarea>
     </div>
     }
   </div>

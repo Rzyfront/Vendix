@@ -29,9 +29,13 @@ export interface City {
 })
 export class CountryService {
   private countries: Country[] = [
+    { code: 'DO', name: 'República Dominicana' },
     { code: 'CO', name: 'Colombia' },
     { code: 'MX', name: 'México' },
     { code: 'US', name: 'Estados Unidos' },
+    { code: 'PR', name: 'Puerto Rico' },
+    { code: 'PA', name: 'Panamá' },
+    { code: 'VE', name: 'Venezuela' },
     { code: 'AR', name: 'Argentina' },
     { code: 'CL', name: 'Chile' },
     { code: 'PE', name: 'Perú' },

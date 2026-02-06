@@ -25,6 +25,7 @@ import {
   SelectorOption,
   DialogService,
 } from '../../../../../shared/components';
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { Product, ProductState, ProductCategory, Brand } from '../interfaces';
 import { ProductsService } from '../services/products.service';
@@ -79,6 +80,7 @@ export class ProductCreateModalComponent implements OnChanges {
     private toastService: ToastService,
     private router: Router,
     private dialogService: DialogService,
+    private currencyService: CurrencyFormatService,
   ) {
     this.productForm = this.createForm();
     this.loadCategoriesAndBrands();
@@ -94,6 +96,8 @@ export class ProductCreateModalComponent implements OnChanges {
     }
 
     if (changes['isOpen'] && this.isOpen) {
+      // Asegurar que la moneda esté cargada cuando el modal se abre
+      this.currencyService.loadCurrency();
       if (!this.product) {
         this.resetForm();
       }

@@ -171,8 +171,8 @@ export class StockLevelManager {
       });
     }
 
-    // 7. Sincronizar con products.stock_quantity
-    await this.syncProductStock(prisma, params.product_id);
+    // 7. Sincronizar con products.stock_quantity y product_variants.stock_quantity
+    await this.syncProductStock(prisma, params.product_id, params.variant_id);
 
     // 8. Emitir evento
     this.eventEmitter.emit('stock.updated', {
@@ -259,7 +259,10 @@ export class StockLevelManager {
         },
       });
 
-      // 5. La reserva misma sirve como registro de auditoría
+      // 5. Sincronizar con products.stock_quantity y product_variants.stock_quantity
+      await this.syncProductStock(prisma, product_id, variant_id);
+
+      // 6. La reserva misma sirve como registro de auditoría
       // No se crea transacción con quantity_change: 0 para evitar contaminar el historial
       // El registro en stock_reservations es suficiente para trazabilidad
     });
@@ -338,6 +341,9 @@ export class StockLevelManager {
             updated_at: new Date(),
           },
         });
+
+        // 4. Sincronizar con products.stock_quantity y product_variants.stock_quantity
+        await this.syncProductStock(prisma, product_id, variant_id);
       }
     });
   }
@@ -459,14 +465,37 @@ export class StockLevelManager {
   }
 
   /**
-   * Sincroniza el stock agregado con products.stock_quantity
-   * Incluye tanto el stock base del producto como el de todas sus variantes
+   * Sincroniza el stock agregado con products.stock_quantity y product_variants.stock_quantity
+   * - Si variant_id está presente, sincroniza esa variante específica
+   * - Siempre sincroniza el producto padre con el total de todo su stock (base + variantes)
    */
   private async syncProductStock(
     prisma: any,
     product_id: number,
+    variant_id?: number,
   ): Promise<void> {
-    // Sumar TODO el stock disponible del producto (base + variantes) across all locations
+    // 1. Si hay variant_id, sincronizar esa variante específica
+    if (variant_id) {
+      const variant_stock = await prisma.stock_levels.aggregate({
+        where: {
+          product_id: product_id,
+          product_variant_id: variant_id,
+        },
+        _sum: {
+          quantity_available: true,
+        },
+      });
+
+      await prisma.product_variants.update({
+        where: { id: variant_id },
+        data: {
+          stock_quantity: variant_stock._sum.quantity_available || 0,
+          updated_at: new Date(),
+        },
+      });
+    }
+
+    // 2. Siempre sincronizar el producto padre (suma de TODO el stock: base + variantes)
     const total_stock = await prisma.stock_levels.aggregate({
       where: {
         product_id: product_id,

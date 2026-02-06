@@ -43,6 +43,12 @@ export class SearchAutocompleteComponent implements OnDestroy {
       .subscribe((query) => {
         if (query.trim().length >= 2) {
           this.onSubmit();
+        } else if (query.trim().length === 0) {
+          // Navegar sin el parámetro search para limpiar resultados
+          this.router.navigate(['/productos'], {
+            queryParams: { search: null },
+            queryParamsHandling: 'merge',
+          });
         }
       });
   }

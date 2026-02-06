@@ -111,6 +111,7 @@ import { PopCartModalComponent } from './components/pop-cart-modal.component';
       (viewOrder)="onOpenCartModal()"
       (saveDraft)="onSaveAsDraft()"
       (createOrder)="onSubmitOrder()"
+      (createAndReceive)="onCreateAndReceive()"
     ></app-pop-mobile-footer>
 
     <!-- Mobile Cart Modal -->
@@ -119,6 +120,7 @@ import { PopCartModalComponent } from './components/pop-cart-modal.component';
       [cartState]="cartState"
       [supplierName]="selectedSupplierName"
       [locationName]="selectedLocationName"
+      [isProcessing]="isProcessingOrder"
       (closed)="onCloseCartModal()"
       (itemQuantityChanged)="onItemQuantityChanged($event)"
       (itemCostChanged)="onItemCostChanged($event)"
@@ -128,6 +130,7 @@ import { PopCartModalComponent } from './components/pop-cart-modal.component';
       (saveDraft)="onSaveDraftFromModal()"
       (createOrder)="onCreateOrderFromModal()"
       (createAndReceive)="onCreateAndReceiveFromModal()"
+      (configure)="onConfigureFromModal()"
     ></app-pop-cart-modal>
 
     <!-- Modals -->
@@ -179,6 +182,7 @@ export class PopComponent implements OnInit, OnDestroy {
   // Mobile responsive
   isMobile = signal(false);
   showCartModal = false;
+  isProcessingOrder = false;
 
   // Cart state for mobile components
   cartState: PopCartState | null = null;
@@ -479,6 +483,14 @@ export class PopComponent implements OnInit, OnDestroy {
     this.showCartModal = false;
   }
 
+  onConfigureFromModal(): void {
+    // Close modal and expand header settings
+    this.showCartModal = false;
+    if (this.header) {
+      this.header.showMobileSettings = true;
+    }
+  }
+
   onItemQuantityChanged(event: { itemId: string; quantity: number }): void {
     this.popCartService.updateCartItem({
       itemId: event.itemId,
@@ -530,8 +542,71 @@ export class PopComponent implements OnInit, OnDestroy {
   }
 
   onCreateAndReceiveFromModal(): void {
-    this.showCartModal = false;
-    this.onCreateAndReceive();
+    // Don't close modal - let onCreateAndReceive handle it after success
+    this.onCreateAndReceiveWithModal();
+  }
+
+  /**
+   * Create and receive order from modal - keeps modal open until success
+   */
+  private onCreateAndReceiveWithModal(): void {
+    const state = this.popCartService.currentState;
+
+    if (!state.supplierId || !state.locationId || state.items.length === 0) {
+      this.toastService.warning(
+        'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',
+      );
+      return;
+    }
+
+    this.isProcessingOrder = true;
+    const userId = 0;
+    const request = cartToPurchaseOrderRequest(state, userId, undefined);
+    request.status = 'approved';
+
+    this.toastService.info('Creando orden e ingresando inventario...');
+
+    this.purchaseOrdersService.createPurchaseOrder(request).subscribe({
+      next: (response) => {
+        if (response.success && response.data) {
+          const orderId = response.data.id;
+          const orderItems = response.data.purchase_order_items || [];
+
+          const receiveItems = orderItems.map((item: any) => ({
+            id: item.id,
+            quantity_received: item.quantity_ordered,
+          }));
+
+          this.purchaseOrdersService
+            .receivePurchaseOrder(orderId, receiveItems)
+            .subscribe({
+              next: () => {
+                this.isProcessingOrder = false;
+                this.showCartModal = false;
+                this.toastService.success('Stock ingresado correctamente');
+                this.popCartService.clearCart().subscribe();
+                this.router.navigate(['/admin/products']);
+              },
+              error: (err: any) => {
+                this.isProcessingOrder = false;
+                console.error('Error receiving order:', err);
+                this.toastService.error(
+                  'Orden creada pero hubo error al recibir stock',
+                );
+                this.showCartModal = false;
+                this.popCartService.clearCart().subscribe();
+                this.router.navigate(['/admin/products']);
+              },
+            });
+        }
+      },
+      error: (error) => {
+        this.isProcessingOrder = false;
+        console.error('Error creating order:', error);
+        const errorMsg = error.error?.message || error.message || 'Error al crear la orden';
+        this.toastService.error(errorMsg);
+      },
+    });
   }
 
   // ============================================================
@@ -568,6 +643,10 @@ export class PopComponent implements OnInit, OnDestroy {
     const state = this.popCartService.currentState;
 
     if (!state.supplierId || !state.locationId || state.items.length === 0) {
+      // On mobile, open the cart modal to show the config alert
+      if (this.isMobile()) {
+        this.showCartModal = true;
+      }
       this.toastService.warning(
         'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',
       );
@@ -599,6 +678,10 @@ export class PopComponent implements OnInit, OnDestroy {
     const state = this.popCartService.currentState;
 
     if (!state.supplierId || !state.locationId || state.items.length === 0) {
+      // On mobile, open the cart modal to show the config alert
+      if (this.isMobile()) {
+        this.showCartModal = true;
+      }
       this.toastService.warning(
         'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',
       );

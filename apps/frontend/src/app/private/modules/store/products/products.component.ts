@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Subscription } from 'rxjs';
 import { Router } from '@angular/router';
@@ -11,6 +11,7 @@ import { ToastService } from '../../../../shared/components/toast/toast.service'
 import { DialogService } from '../../../../shared/components/dialog/dialog.service';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
+import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 
 // Models
 import {
@@ -27,6 +28,7 @@ import {
 import { ProductListComponent } from './components/product-list/product-list.component';
 import { ProductCreateModalComponent } from './components/product-create-modal.component';
 import { BulkUploadModalComponent } from './components/bulk-upload-modal/bulk-upload-modal.component';
+import { BulkImageUploadModalComponent } from './components/bulk-image-upload-modal/bulk-image-upload-modal.component';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 
 @Component({
@@ -37,6 +39,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
     ProductListComponent,
     ProductCreateModalComponent,
     BulkUploadModalComponent,
+    BulkImageUploadModalComponent,
     StatsComponent,
   ],
   providers: [ProductsService],
@@ -73,7 +76,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
 
         <app-stats
           title="Valor Total"
-          [value]="(stats.total_value || 0 | currency) || '$0.00'"
+          [value]="formatCurrencyValue(stats.total_value)"
           [smallText]="'+12% vs last month'"
           iconName="dollar-sign"
           iconBgColor="bg-purple-100"
@@ -94,6 +97,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         (edit)="navigateToEditPage($event)"
         (delete)="deleteProduct($event)"
         (bulkUpload)="openBulkUploadModal()"
+        (bulkImageUpload)="openBulkImageUploadModal()"
       ></app-product-list>
 
       <!-- Modals -->
@@ -109,10 +113,17 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         [(isOpen)]="isBulkUploadModalOpen"
         (uploadComplete)="onBulkUploadComplete()"
       ></app-bulk-upload-modal>
+
+      <app-bulk-image-upload-modal
+        [(isOpen)]="isBulkImageUploadModalOpen"
+        (uploadComplete)="onBulkImageUploadComplete()"
+      ></app-bulk-image-upload-modal>
     </div>
   `,
 })
 export class ProductsComponent implements OnInit, OnDestroy {
+  private currencyService = inject(CurrencyFormatService);
+
   products: Product[] = [];
   categories: ProductCategory[] = [];
   brands: Brand[] = [];
@@ -139,6 +150,7 @@ export class ProductsComponent implements OnInit, OnDestroy {
   // Modal State
   isCreateModalOpen = false;
   isBulkUploadModalOpen = false;
+  isBulkImageUploadModalOpen = false;
   isCreatingProduct = false;
 
   private subscriptions: Subscription[] = [];
@@ -154,6 +166,9 @@ export class ProductsComponent implements OnInit, OnDestroy {
   ) { }
 
   ngOnInit(): void {
+    // Asegurar que la moneda esté cargada
+    this.currencyService.loadCurrency();
+
     // Subscribe to userStore$ observable to get the store ID
     const storeSub = this.authFacade.userStore$.subscribe((store: any) => {
       const storeId = store?.id;
@@ -306,8 +321,22 @@ export class ProductsComponent implements OnInit, OnDestroy {
     this.loadStats();
     this.toastService.success('Carga masiva completada');
   }
+
+  // Bulk Image Upload
+  openBulkImageUploadModal(): void {
+    this.isBulkImageUploadModalOpen = true;
+  }
+
+  onBulkImageUploadComplete(): void {
+    this.isBulkImageUploadModalOpen = false;
+    this.loadProducts();
+  }
   // Helpers
   getGrowthPercentage(val: number): string {
     return val > 0 ? `+${val}%` : `${val}%`;
+  }
+
+  formatCurrencyValue(value: number): string {
+    return this.currencyService.format(value || 0);
   }
 }

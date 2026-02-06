@@ -1,9 +1,20 @@
 // Constantes de diseño para consistencia entre componentes
+// Unified height system (matches Button, Input, Selector)
 
-// Alturas estándar para todos los componentes interactivos
-$height-sm: 2.25rem; // 36px
-$height-md: 2.75rem; // 44px
-$height-lg: 3.25rem; // 52px
+// Alturas MOBILE (base)
+$height-sm-mobile: 2rem;      // 32px
+$height-md-mobile: 2.5rem;    // 40px
+$height-lg-mobile: 3rem;      // 48px
+
+// Alturas DESKTOP (sm: 640px+)
+$height-sm-desktop: 2.25rem;  // 36px
+$height-md-desktop: 2.75rem;  // 44px
+$height-lg-desktop: 3.25rem;  // 52px
+
+// Legacy aliases (desktop values for backward compatibility)
+$height-sm: $height-sm-desktop;
+$height-md: $height-md-desktop;
+$height-lg: $height-lg-desktop;
 
 // Paddings verticales consistentes
 $padding-y-sm: 0.5rem;
@@ -28,3 +39,23 @@ $border-radius: var(--radius-md);
 $icon-spacing-sm: 0.5rem;
 $icon-spacing-md: 0.75rem;
 $icon-spacing-lg: 1rem;
+
+// ============================================
+// Modern variant (iOS-inspired)
+// ============================================
+$modern-height: 40px;
+$modern-border-radius: 0.75rem;        // 12px
+$modern-padding-x: 0.75rem;            // 12px
+$modern-padding-y: 0.625rem;           // 10px
+$modern-font-size: var(--fs-sm);
+$modern-focus-ring: 0 0 0 3px var(--color-ring);
+
+// Modern background colors (subtle background, lighter on focus)
+$modern-bg: var(--color-background);
+$modern-bg-focus: var(--color-surface);
+
+// Modern label styles
+$modern-label-size: 11px;
+$modern-label-spacing: 0.05em;
+$modern-label-transform: uppercase;
+$modern-label-color: var(--color-text-muted);

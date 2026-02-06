@@ -20,6 +20,7 @@ import {
 import { PosPaymentService } from '../services/pos-payment.service';
 import { PosTicketService } from '../services/pos-ticket.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-pos-order-confirmation',
@@ -269,10 +270,14 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
   private authFacade = inject(AuthFacade);
   private toastService = inject(ToastService);
   private ticketService = inject(PosTicketService);
+  private currencyService = inject(CurrencyFormatService);
 
   ngOnInit(): void {
     const user = this.authFacade.getCurrentUser();
     this.cashierName = user ? `${user.first_name} ${user.last_name}` : 'Cajero';
+
+    // Asegurar que la moneda esté cargada para el modal
+    this.currencyService.loadCurrency();
   }
 
   ngOnChanges(): void {
@@ -421,10 +426,7 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
     return this.orderDiscount > 0;
   }
 
-  formatCurrency(amount: any): string {
-    return new Intl.NumberFormat('es-AR', {
-      style: 'currency',
-      currency: 'ARS',
-    }).format(Number(amount));
+  formatCurrency(amount: number): string {
+    return this.currencyService.format(amount);
   }
 }

@@ -14,6 +14,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { AuthFacade } from '../../../core/store';
 import { TenantFacade } from '../../../core/store';
 import { CartService } from '../../modules/ecommerce/services/cart.service';
+import { WishlistService } from '../../modules/ecommerce/services/wishlist.service';
 import { StoreUiService } from '../../modules/ecommerce/services/store-ui.service';
 import { SearchAutocompleteComponent } from '../../modules/ecommerce/components/search-autocomplete';
 import { IconComponent } from '../../../shared/components/icon/icon.component';
@@ -21,6 +22,7 @@ import { AuthModalComponent } from './components/auth-modal/auth-modal.component
 import { QuantityControlComponent } from '../../../shared/components/quantity-control/quantity-control.component';
 import { InfoModalComponent } from './components/info-modal';
 import { FaqModalComponent } from './components/faq-modal';
+import { ButtonComponent } from '../../../shared/components/button/button.component';
 
 // Footer types (matching backend interfaces)
 interface FooterStoreInfo {
@@ -76,6 +78,7 @@ interface FooterSettings {
     QuantityControlComponent,
     InfoModalComponent,
     FaqModalComponent,
+    ButtonComponent,
   ],
   templateUrl: './store-ecommerce-layout.component.html',
   styleUrls: ['./store-ecommerce-layout.component.scss'],
@@ -109,6 +112,7 @@ export class StoreEcommerceLayoutComponent implements OnInit {
   private auth_facade = inject(AuthFacade);
   private domain_service = inject(TenantFacade);
   private cart_service = inject(CartService);
+  private wishlist_service = inject(WishlistService);
   private store_ui_service = inject(StoreUiService);
   private router = inject(Router);
   private cdr = inject(ChangeDetectorRef);
@@ -129,12 +133,26 @@ export class StoreEcommerceLayoutComponent implements OnInit {
   cart$ = this.cart_service.cart$;
   show_cart_dropdown = false;
 
-  // Animation and tooltip state
+  // Wishlist badge observable
+  wishlist_badge$ = this.wishlist_service.wishlist$.pipe(
+    map((wishlist) => ({
+      show: (wishlist?.item_count || 0) > 0,
+      count: wishlist?.item_count || 0,
+    })),
+  );
+
+  // Cart animation and tooltip state
   is_animating = false;
   show_added_tooltip = false;
   private animation_timeout: any;
   private tooltip_timeout: any;
   private close_timer: any;
+
+  // Wishlist animation and tooltip state
+  is_wishlist_animating = false;
+  show_wishlist_added_tooltip = false;
+  private wishlist_animation_timeout: any;
+  private wishlist_tooltip_timeout: any;
 
   ngOnInit(): void {
     // Get store info from domain resolution reactively
@@ -143,8 +161,9 @@ export class StoreEcommerceLayoutComponent implements OnInit {
       .subscribe((domainConfig: any) => {
         if (!domainConfig) return;
 
-        // Intentar obtener configuración desde customConfig (prioridad) o config
-        const config = domainConfig.customConfig || domainConfig.config || {};
+        // La configuración está estructurada en customConfig.ecommerce y customConfig.branding
+        const customConfig = domainConfig.customConfig || {};
+        const ecommerceConfig = customConfig.ecommerce || {};
         const tenantConfig =
           this.domain_service.getCurrentTenantConfig() || ({} as any);
 
@@ -160,33 +179,35 @@ export class StoreEcommerceLayoutComponent implements OnInit {
         }
 
         // Resolver Logo con prioridad:
-        // 1. customConfig.inicio.logo_url (configuración específica del layout e-commerce)
-        // 2. customConfig.branding.logo_url (configuración de branding)
-        // 3. tenantConfig.branding.logo_url (standardizer backend)
-        // 4. legacy branding
-        const inicioLogo = config.inicio?.logo_url;
+        // 1. store_logo_url (logo de la tienda, firmado desde el backend)
+        // 2. customConfig.ecommerce.inicio.logo_url (configuración específica del ecommerce)
+        // 3. customConfig.branding.logo_url (configuración de branding)
+        // 4. tenantConfig.branding.logo_url (standardizer backend)
+        const storeLogo = domainConfig.store_logo_url;
+        const inicioLogo = ecommerceConfig.inicio?.logo_url;
         const brandingLogo =
-          config.branding?.logo_url || config.branding?.logo?.url;
+          customConfig.branding?.logo_url || customConfig.branding?.logo?.url;
         const tenantLogo =
           tenantConfig.branding?.logo_url || tenantConfig.branding?.logo?.url;
 
-        this.store_logo = inicioLogo || brandingLogo || tenantLogo || null;
+        this.store_logo = storeLogo || inicioLogo || brandingLogo || tenantLogo || null;
 
-        // Load footer settings
-        const ecommerceSettings = domainConfig.ecommerce || config;
-        if (ecommerceSettings?.footer) {
-          this.footer_settings = ecommerceSettings.footer;
+        // Load footer settings from ecommerce config
+        if (ecommerceConfig.footer) {
+          this.footer_settings = ecommerceConfig.footer;
         }
 
         console.log('Layout Resolved Config:', {
           storeName: this.store_name,
           storeLogo: this.store_logo,
           footerSettings: this.footer_settings ? 'loaded' : 'not configured',
-          source: inicioLogo
-            ? 'inicio.logo_url'
-            : brandingLogo
-              ? 'branding.logo_url'
-              : 'legacy',
+          source: storeLogo
+            ? 'store_logo_url'
+            : inicioLogo
+              ? 'ecommerce.inicio.logo_url'
+              : brandingLogo
+                ? 'branding.logo_url'
+                : 'tenantConfig',
         });
       });
 
@@ -204,6 +225,13 @@ export class StoreEcommerceLayoutComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroy_ref))
       .subscribe(() => {
         this.triggerCartAnimation();
+      });
+
+    // Subscribe to wishlist item added events
+    this.wishlist_service.itemAdded$
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe(() => {
+        this.triggerWishlistAnimation();
       });
   }
 
@@ -230,6 +258,34 @@ export class StoreEcommerceLayoutComponent implements OnInit {
       // Hide tooltip after 3000ms
       this.tooltip_timeout = setTimeout(() => {
         this.show_added_tooltip = false;
+        this.cdr.detectChanges();
+      }, 3000);
+    });
+  }
+
+  private triggerWishlistAnimation(): void {
+    // Reset if already playing
+    this.is_wishlist_animating = false;
+    this.show_wishlist_added_tooltip = false;
+    clearTimeout(this.wishlist_animation_timeout);
+    clearTimeout(this.wishlist_tooltip_timeout);
+    this.cdr.detectChanges();
+
+    // Trigger animation
+    requestAnimationFrame(() => {
+      this.is_wishlist_animating = true;
+      this.show_wishlist_added_tooltip = true;
+      this.cdr.detectChanges();
+
+      // Stop shaking after 500ms
+      this.wishlist_animation_timeout = setTimeout(() => {
+        this.is_wishlist_animating = false;
+        this.cdr.detectChanges();
+      }, 500);
+
+      // Hide tooltip after 3000ms
+      this.wishlist_tooltip_timeout = setTimeout(() => {
+        this.show_wishlist_added_tooltip = false;
         this.cdr.detectChanges();
       }, 3000);
     });

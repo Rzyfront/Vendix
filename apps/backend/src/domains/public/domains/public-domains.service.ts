@@ -50,6 +50,7 @@ export class PublicDomainsService {
             id: true,
             name: true,
             slug: true,
+            logo_url: true,
           },
         },
       },
@@ -169,6 +170,11 @@ export class PublicDomainsService {
       await this.signEcommerceImages(config);
     }
 
+    // Firmar logo de la tienda
+    const signedStoreLogo = domain.store?.logo_url
+      ? await this.s3Service.signUrl(domain.store.logo_url)
+      : null;
+
     return {
       id: domain.id,
       hostname: domain.hostname,
@@ -195,6 +201,7 @@ export class PublicDomainsService {
       updated_at: domain.updated_at?.toISOString() || new Date().toISOString(),
       store_name: domain.store?.name,
       store_slug: domain.store?.slug,
+      store_logo_url: signedStoreLogo,
       organization_name: domain.organization?.name,
       organization_slug: domain.organization?.slug,
       domain_type: domain.domain_type, // Legacy: mantener para compatibilidad

@@ -226,10 +226,10 @@
 
               <div class="text-right flex-shrink-0">
                 <p class="text-base font-bold text-gray-900">
-                  ${{ (item.total_price || 0).toFixed(2) }}
+                  {{ item.total_price | currency }}
                 </p>
                 <p class="text-xs text-gray-500">
-                  {{ item.quantity }} × ${{ (item.unit_price || 0).toFixed(2) }}
+                  {{ item.quantity }} × {{ item.unit_price | currency }}
                 </p>
               </div>
             </div>
@@ -393,7 +393,7 @@
             <div class="flex justify-between items-center text-sm">
               <span class="text-gray-500">Subtotal</span>
               <span class="font-semibold text-gray-900"
-                >${{ (order.subtotal_amount || 0).toFixed(2) }}</span
+                >{{ order.subtotal_amount | currency }}</span
               >
             </div>
             <div
@@ -402,19 +402,19 @@
             >
               <span class="text-gray-500">Descuento</span>
               <span class="font-semibold text-green-600"
-                >-${{ order.discount_amount.toFixed(2) }}</span
+                >-{{ order.discount_amount | currency }}</span
               >
             </div>
             <div class="flex justify-between items-center text-sm">
               <span class="text-gray-500">Envío</span>
               <span class="font-semibold text-gray-900"
-                >${{ (order.shipping_cost || 0).toFixed(2) }}</span
+                >{{ order.shipping_cost | currency }}</span
               >
             </div>
             <div class="flex justify-between items-center text-sm">
               <span class="text-gray-500">Impuestos</span>
               <span class="font-semibold text-gray-900"
-                >${{ (order.tax_amount || 0).toFixed(2) }}</span
+                >{{ order.tax_amount | currency }}</span
               >
             </div>
 
@@ -424,7 +424,7 @@
               <span class="text-base font-bold text-gray-900">Total</span>
               <span
                 class="text-xl font-black text-primary font-mono tracking-tight"
-                >${{ (order.grand_total || 0).toFixed(2) }}</span
+                >{{ order.grand_total | currency }}</span
               >
             </div>
           </div>

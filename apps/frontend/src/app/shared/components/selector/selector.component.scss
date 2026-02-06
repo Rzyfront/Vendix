@@ -1,6 +1,28 @@
 // Componente Selector usando tokens CSS de la aplicación - Estilo similar a InputSearch
 @use "../_constants.scss" as constants;
 
+// ============================================
+// Modern variant (iOS-inspired) - applied via Tailwind classes in component
+// These SCSS classes are for additional customization if needed
+// ============================================
+.selector-modern {
+  height: constants.$modern-height;
+  border-radius: constants.$modern-border-radius;
+  padding: constants.$modern-padding-y constants.$modern-padding-x;
+  font-size: constants.$modern-font-size;
+
+  &:focus {
+    box-shadow: constants.$modern-focus-ring;
+  }
+}
+
+.selector-label-modern {
+  font-size: constants.$modern-label-size;
+  text-transform: constants.$modern-label-transform;
+  letter-spacing: constants.$modern-label-spacing;
+  color: constants.$modern-label-color;
+}
+
 // Contenedor principal - siempre ocupa todo el ancho disponible
 .selector-container {
   width: 100%;

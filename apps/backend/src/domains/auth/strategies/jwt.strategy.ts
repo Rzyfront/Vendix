@@ -51,6 +51,27 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         );
       }
 
+      // Buscar store si hay store_id en el token
+      let stores: {
+        id: number;
+        name: string;
+        slug: string;
+        logo_url: string | null;
+        store_type: string;
+      } | null = null;
+      if (payload.store_id) {
+        stores = await this.prismaService.stores.findUnique({
+          where: { id: payload.store_id },
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            logo_url: true,
+            store_type: true,
+          },
+        });
+      }
+
       // if (!user.email_verified) {
       //   throw new UnauthorizedException('Email no verificado');
       // }
@@ -77,6 +98,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         fullName: `${user.first_name} ${user.last_name}`,
         organization_id: payload.organization_id, // ✅ Del TOKEN - Corregido
         store_id: payload.store_id || null, // ✅ Del TOKEN - Corregido
+        stores, // ✅ Objeto store con logo_url para el sidebar
         user_roles: user.user_roles, // ✅ Mantener para el middleware
         roles: user.user_roles.map((ur) => ur.roles?.name || ''),
         permissions: user.user_roles.flatMap(

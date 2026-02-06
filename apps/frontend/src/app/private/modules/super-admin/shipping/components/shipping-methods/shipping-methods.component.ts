@@ -1,7 +1,7 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ShippingService } from '../../services/shipping.service';
-import { ShippingMethod, ShippingMethodStats } from '../../interfaces/shipping.interface';
+import { ShippingMethod } from '../../interfaces/shipping.interface';
 import { ShippingMethodModalComponent } from '../shipping-method-modal/shipping-method-modal.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -15,43 +15,6 @@ import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../../
   imports: [CommonModule, ShippingMethodModalComponent, IconComponent, ButtonComponent, ResponsiveDataViewComponent],
   template: `
     <div class="space-y-6">
-      <!-- Stats Cards -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div class="bg-white rounded-xl p-6 border border-[var(--color-border)] shadow-sm">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-[var(--color-text-secondary)] mb-1">Total de Métodos</p>
-              <p class="text-3xl font-bold text-[var(--color-text-primary)]">{{ stats?.total_methods || 0 }}</p>
-            </div>
-            <div class="w-12 h-12 bg-blue-50 rounded-lg flex items-center justify-center">
-              <app-icon name="truck" size="24" class="text-blue-600"></app-icon>
-            </div>
-          </div>
-        </div>
-        <div class="bg-white rounded-xl p-6 border border-[var(--color-border)] shadow-sm">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-[var(--color-text-secondary)] mb-1">Activos</p>
-              <p class="text-3xl font-bold text-green-600">{{ stats?.active_methods || 0 }}</p>
-            </div>
-            <div class="w-12 h-12 bg-green-50 rounded-lg flex items-center justify-center">
-              <app-icon name="check-circle" size="24" class="text-green-600"></app-icon>
-            </div>
-          </div>
-        </div>
-        <div class="bg-white rounded-xl p-6 border border-[var(--color-border)] shadow-sm">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-[var(--color-text-secondary)] mb-1">Inactivos</p>
-              <p class="text-3xl font-bold text-gray-600">{{ stats?.inactive_methods || 0 }}</p>
-            </div>
-            <div class="w-12 h-12 bg-gray-50 rounded-lg flex items-center justify-center">
-              <app-icon name="x-circle" size="24" class="text-gray-600"></app-icon>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- Methods Table -->
       <div class="bg-white rounded-2xl shadow-sm border border-[var(--color-border)] overflow-hidden">
         <div class="p-6 border-b border-[var(--color-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-50/50">
@@ -108,7 +71,6 @@ export class ShippingMethodsComponent implements OnInit {
   private dialogService = inject(DialogService);
 
   methods: ShippingMethod[] = [];
-  stats?: ShippingMethodStats;
   showModal = false;
   selectedMethod?: ShippingMethod;
 
@@ -143,11 +105,8 @@ export class ShippingMethodsComponent implements OnInit {
   }
 
   loadData() {
-    this.shippingService.getMethods().subscribe(data => {
+    this.shippingService.getMethods().subscribe((data) => {
       this.methods = data;
-    });
-    this.shippingService.getMethodStats().subscribe(data => {
-      this.stats = data;
     });
   }
 

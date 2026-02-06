@@ -2,6 +2,7 @@ import { Component, Input, Output, EventEmitter, OnChanges } from '@angular/core
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { IconComponent } from '../icon/icon.component';
+import { FormStyleVariant } from '../../types/form.types';
 
 export type QuantityControlSize = 'sm' | 'md' | 'lg';
 
@@ -15,10 +16,7 @@ export type QuantityControlSize = 'sm' | 'md' | 'lg';
   imports: [CommonModule, IconComponent, FormsModule],
   template: `
     <div
-      class="flex items-center bg-muted/50 border border-border/50 rounded-md overflow-hidden"
-      [class.h-7]="size === 'sm'"
-      [class.h-9]="size === 'md'"
-      [class.h-11]="size === 'lg'"
+      [class]="containerClasses"
     >
       <button
         [class.px-2.5]="size === 'sm'"
@@ -103,6 +101,7 @@ export class QuantityControlComponent implements OnChanges {
   @Input() disabled = false;
   @Input() loading = false;
   @Input() size: QuantityControlSize = 'sm';
+  @Input() styleVariant: FormStyleVariant = 'modern';
 
   @Output() valueChange = new EventEmitter<number>();
 
@@ -129,6 +128,40 @@ export class QuantityControlComponent implements OnChanges {
   get iconSize(): number {
     const sizeMap: Record<QuantityControlSize, number> = { sm: 12, md: 14, lg: 16 };
     return sizeMap[this.size];
+  }
+
+  get containerClasses(): string {
+    const baseClasses = [
+      'flex',
+      'items-center',
+      'bg-muted/50',
+      'border',
+      'border-border/50',
+      'overflow-hidden',
+    ];
+
+    // Height based on size
+    const heightClasses = {
+      sm: 'h-7',
+      md: 'h-9',
+      lg: 'h-11',
+    };
+
+    if (this.styleVariant === 'modern') {
+      // Modern: larger border-radius (12px)
+      return [
+        ...baseClasses,
+        heightClasses[this.size],
+        'rounded-xl',
+      ].join(' ');
+    }
+
+    // Classic: same border-radius as modern (0.75rem / 12px)
+    return [
+      ...baseClasses,
+      heightClasses[this.size],
+      'rounded-xl',
+    ].join(' ');
   }
 
   decrease(): void {

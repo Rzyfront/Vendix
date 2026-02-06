@@ -1,29 +1,25 @@
 <div class="pos-settings-form">
-  <div class="space-y-8">
+  <div class="space-y-6">
     <!-- Sales & Configuration -->
-    <div class="space-y-4">
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Ventas y Operación</h4>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+    <div>
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Ventas y Operación</h4>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <app-setting-toggle [formControl]="allowAnonymousSalesControl" label="Ventas Anónimas"
           description="Sin registro de cliente" (changed)="onFieldChange()"></app-setting-toggle>
-
         <app-setting-toggle [formControl]="anonymousSalesAsDefaultControl" label="Anónimas por Defecto"
           description="Tipo de venta predeterminado" [disabled]="!allowAnonymousSalesControl.value"
           (changed)="onFieldChange()"></app-setting-toggle>
-
         <app-setting-toggle [formControl]="offlineModeEnabledControl" label="Modo Offline"
           description="Operar sin internet" (changed)="onFieldChange()"></app-setting-toggle>
-
         <app-setting-toggle [formControl]="requireCashDrawerOpenControl" label="Apertura de Caja"
           description="Monto inicial requerido" (changed)="onFieldChange()"></app-setting-toggle>
       </div>
     </div>
 
-    <!-- Business Hours - Editable -->
-    <div class="space-y-4">
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Horarios de Atención</h4>
-      <div class="grid grid-cols-1 gap-3">
+    <!-- Business Hours -->
+    <div>
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Horarios de Atención</h4>
+      <div class="grid grid-cols-1 gap-2">
         @for (day of daysOfWeek; track day.key) {
         <div class="flex items-center gap-4 p-3 bg-white border border-gray-100 rounded-xl shadow-sm">
           <div class="w-24">

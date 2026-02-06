@@ -15,7 +15,7 @@
         (actionClicked)="onHeaderAction($event)">
       </app-sticky-header>
 
-      <div class="p-2 md:p-4 grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
+      <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
         <!-- Columna Izquierda -->
         <div class="space-y-6">
           <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
@@ -103,10 +103,10 @@
                         experiencia única a tus clientes. Puedes optar por un diseño que se diferencie de tu panel
                         administrativo o mantener la coherencia visual.
                       </p>
-                      <button type="button" (click)="syncColorsFromTheme()"
+                      <button type="button" (click)="syncColorsFromBranding()"
                         class="text-sm font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1.5 transition-colors">
                         <app-icon name="refresh-cw" size="14"></app-icon>
-                        Usar colores de la aplicación actual
+                        Sincronizar con branding de la tienda
                       </button>
                     </div>
                   </div>
@@ -264,12 +264,7 @@
             </h2>
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <app-selector label="Moneda" [formControl]="currencyControl" size="md" [options]="[
-              { value: 'COP', label: 'COP - Peso Colombiano' },
-              { value: 'USD', label: 'USD - Dólar Estadounidense' },
-              { value: 'EUR', label: 'EUR - Euro' },
-              { value: 'MXN', label: 'MXN - Peso Mexicano' },
-            ]"></app-selector>
+              <app-selector label="Moneda" [formControl]="currencyControl" size="md" [options]="currencies"></app-selector>
 
               <app-selector label="Idioma" [formControl]="localeControl" size="md" [options]="[
               { value: 'es-CO', label: 'Español (Colombia)' },

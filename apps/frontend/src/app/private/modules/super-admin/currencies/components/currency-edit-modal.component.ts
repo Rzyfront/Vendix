@@ -3,7 +3,6 @@ import {
   input,
   output,
   OnChanges,
-  SimpleChanges,
   inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -13,7 +12,7 @@ import {
   FormGroup,
   Validators,
 } from '@angular/forms';
-import { Currency, UpdateCurrencyDto } from '../interfaces';
+import { Currency, UpdateCurrencyDto, CurrencyPosition } from '../interfaces';
 import {
   ModalComponent,
   InputComponent,
@@ -44,33 +43,47 @@ import {
     >
       <form [formGroup]="currencyForm" (ngSubmit)="onSubmit()">
         <div class="space-y-4">
-          <!-- Currency Code (Read-only) -->
+          <!-- Campos readonly desde la API -->
           <app-input
             label="Código de Moneda"
             [value]="currency()?.code || ''"
             [disabled]="true"
-            helpText="El código de moneda no puede modificarse (identificador ISO 4217)"
+            helpText="Código ISO 4217 (no editable)"
           ></app-input>
 
           <app-input
-            formControlName="name"
             label="Nombre de Moneda"
-            placeholder="ej. Dólar Americano"
-            [required]="true"
-            [control]="currencyForm.get('name')"
-            [disabled]="isSubmitting()"
+            [value]="currency()?.name || ''"
+            [disabled]="true"
+            helpText="Nombre completo (no editable)"
           ></app-input>
 
           <app-input
-            formControlName="symbol"
             label="Símbolo"
-            placeholder="ej. $"
-            [required]="true"
-            [control]="currencyForm.get('symbol')"
-            [disabled]="isSubmitting()"
-            helpText="Símbolo de moneda (ej. $, €, £, ¥)"
+            [value]="currency()?.symbol || ''"
+            [disabled]="true"
+            helpText="Símbolo de moneda (no editable)"
           ></app-input>
 
+          <!-- Posición del símbolo (editable) -->
+          <div class="space-y-2">
+            <label class="block text-sm font-medium text-gray-700">
+              Posición del Símbolo
+            </label>
+            <select
+              formControlName="position"
+              [disabled]="isSubmitting()"
+              class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option [value]="CurrencyPosition.BEFORE">Antes ($100)</option>
+              <option [value]="CurrencyPosition.AFTER">Después (100$)</option>
+            </select>
+            <p class="text-xs text-gray-500">
+              Ubicación del símbolo respecto al monto
+            </p>
+          </div>
+
+          <!-- Campo configurable: decimales -->
           <app-input
             formControlName="decimal_places"
             label="Decimales"
@@ -81,6 +94,7 @@ import {
             helpText="Número de decimales (0-4, típicamente 2)"
           ></app-input>
 
+          <!-- Estado -->
           <div class="space-y-2">
             <app-selector
               formControlName="state"
@@ -92,23 +106,25 @@ import {
         </div>
       </form>
 
-      <div slot="footer" class="flex justify-end gap-3">
-        <app-button
-          variant="outline"
-          (clicked)="onCancel()"
-          [disabled]="isSubmitting()"
-        >
-          Cancelar
-        </app-button>
-        <app-button
-          variant="primary"
-          (clicked)="onSubmit()"
-          [disabled]="currencyForm.invalid || isSubmitting()"
-          [loading]="isSubmitting()"
-        >
-          Actualizar Moneda
-        </app-button>
-      </div>
+      <ng-container slot="footer">
+        <div class="flex justify-end gap-3">
+          <app-button
+            variant="outline"
+            (clicked)="onCancel()"
+            [disabled]="isSubmitting()"
+          >
+            Cancelar
+          </app-button>
+          <app-button
+            variant="primary"
+            (clicked)="onSubmit()"
+            [disabled]="currencyForm.invalid || isSubmitting()"
+            [loading]="isSubmitting()"
+          >
+            Actualizar Moneda
+          </app-button>
+        </div>
+      </ng-container>
     </app-modal>
   `,
   styles: [
@@ -133,11 +149,13 @@ export class CurrencyEditModalComponent implements OnChanges {
     { value: 'deprecated', label: 'Obsoleta' },
   ];
 
+  // Exponer el enum para usar en el template
+  readonly CurrencyPosition = CurrencyPosition;
+
   private fb = inject(FormBuilder);
 
   currencyForm: FormGroup = this.fb.group({
-    name: ['', [Validators.required, Validators.maxLength(255)]],
-    symbol: ['', [Validators.required, Validators.maxLength(10)]],
+    position: [CurrencyPosition.BEFORE, [Validators.required]],
     decimal_places: [
       2,
       [Validators.required, Validators.min(0), Validators.max(4)],
@@ -145,12 +163,11 @@ export class CurrencyEditModalComponent implements OnChanges {
     state: ['active'],
   });
 
-  ngOnChanges(changes: SimpleChanges): void {
+  ngOnChanges(): void {
     if (this.isOpen() && this.currency()) {
       const currentCurrency = this.currency()!;
       this.currencyForm.patchValue({
-        name: currentCurrency.name,
-        symbol: currentCurrency.symbol,
+        position: currentCurrency.position,
         decimal_places: currentCurrency.decimal_places,
         state: currentCurrency.state,
       });
@@ -160,8 +177,7 @@ export class CurrencyEditModalComponent implements OnChanges {
   onSubmit(): void {
     if (this.currencyForm.valid && this.currency()) {
       const currencyData: UpdateCurrencyDto = {
-        name: this.currencyForm.get('name')?.value,
-        symbol: this.currencyForm.get('symbol')?.value,
+        position: this.currencyForm.get('position')?.value,
         decimal_places: this.currencyForm.get('decimal_places')?.value,
         state: this.currencyForm.get('state')?.value,
       };
@@ -177,8 +193,7 @@ export class CurrencyEditModalComponent implements OnChanges {
 
   resetForm(): void {
     this.currencyForm.reset({
-      name: '',
-      symbol: '',
+      position: CurrencyPosition.BEFORE,
       decimal_places: 2,
       state: 'active',
     });

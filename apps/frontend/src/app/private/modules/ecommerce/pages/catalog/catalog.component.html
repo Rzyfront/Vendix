@@ -74,16 +74,16 @@
             <div class="filter-section">
                 <label>Precio</label>
                 <div class="price-inputs">
-                    <input type="number" [(ngModel)]="min_price" placeholder="Mín" class="filter-input">
-                    <input type="number" [(ngModel)]="max_price" placeholder="Máx" class="filter-input">
+                    <app-input type="number" [(ngModel)]="min_price" placeholder="Mín" size="sm" customWrapperClass="!mt-0"></app-input>
+                    <app-input type="number" [(ngModel)]="max_price" placeholder="Máx" size="sm" customWrapperClass="!mt-0"></app-input>
                 </div>
-                <button class="apply-price-btn" (click)="applyPriceFilter()">Aplicar</button>
+                <app-button variant="primary" size="sm" [fullWidth]="true" (clicked)="applyPriceFilter()">Aplicar</app-button>
             </div>
 
             <!-- Clear Filters -->
-            <button class="clear-filters-btn" (click)="clearFilters()">
+            <app-button variant="ghost" size="sm" [fullWidth]="true" (clicked)="clearFilters()">
                 Limpiar filtros
-            </button>
+            </app-button>
         </aside>
 
         <!-- Products Grid -->
@@ -104,8 +104,8 @@
             @if (products.length > 0) {
             <div class="products-grid">
                 @for (product of products; track product.id) {
-                <app-product-card [product]="product" (add_to_cart)="onAddToCart($event)"
-                    (toggle_wishlist)="onToggleWishlist($event)" (quick_view)="onQuickView($event)" />
+                <app-product-card [product]="product" [in_wishlist]="isInWishlist(product.id)" (add_to_cart)="onAddToCart($event)"
+                    (toggle_wishlist)="onToggleWishlist($event)" (quick_view)="onQuickView($event)" (share)="onShare($event)" />
                 }
             </div>
             } @else {
@@ -145,4 +145,7 @@
 
 <!-- Product Quick View Modal -->
 <app-product-quick-view-modal [isOpen]="quickViewOpen" [productSlug]="selectedProductSlug"
-    (closed)="quickViewOpen = false" (addedToCart)="onAddToCart($event)" />
+    (closed)="quickViewOpen = false" (addedToCart)="onModalAddedToCart($event)" />
+
+<!-- Share Modal -->
+<app-share-modal [isOpen]="shareModalOpen" [product]="shareProduct" (closed)="onShareModalClosed()" />

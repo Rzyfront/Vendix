@@ -6,11 +6,14 @@ import { finalize } from 'rxjs/operators';
 import { WishlistService, Wishlist, WishlistItem } from '../../services/wishlist.service';
 import { CartService } from '../../services/cart.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
+import { ButtonComponent } from '../../../../../shared/components/button/button.component';
+import { ToastService } from '../../../../../shared/components/toast/toast.service';
 
 @Component({
   selector: 'app-wishlist',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent],
+  imports: [CommonModule, RouterModule, IconComponent, ButtonComponent],
   templateUrl: './wishlist.component.html',
   styleUrls: ['./wishlist.component.scss'],
 })
@@ -20,12 +23,13 @@ export class WishlistComponent implements OnInit {
   removing_id: number | null = null;
 
   private destroy_ref = inject(DestroyRef);
+  private toast_service = inject(ToastService);
 
   constructor(
     private wishlist_service: WishlistService,
     private cart_service: CartService,
     private router: Router,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.loadWishlist();
@@ -53,7 +57,9 @@ export class WishlistComponent implements OnInit {
       finalize(() => {
         this.removing_id = null;
       })
-    ).subscribe();
+    ).subscribe({
+      next: () => this.toast_service.info('Producto eliminado de favoritos'),
+    });
   }
 
   addToCart(item: WishlistItem): void {

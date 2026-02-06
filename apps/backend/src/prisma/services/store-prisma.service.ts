@@ -173,7 +173,13 @@ export class StorePrismaService extends BasePrismaService {
         inventory_locations: { store_id: context.store_id },
       },
       purchase_orders: { location: { store_id: context.store_id } },
-      inventory_movements: { products: { store_id: context.store_id } },
+      inventory_movements: {
+        OR: [
+          { products: { store_id: context.store_id } },
+          { from_location: { store_id: context.store_id } },
+          { to_location: { store_id: context.store_id } },
+        ],
+      },
       inventory_transactions: { products: { store_id: context.store_id } },
       shipping_rates: { shipping_zone: { store_id: context.store_id } },
       product_tax_assignments: { products: { store_id: context.store_id } },

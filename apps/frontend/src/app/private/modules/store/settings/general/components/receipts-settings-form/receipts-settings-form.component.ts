@@ -9,6 +9,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
+import { TextareaComponent } from '../../../../../../../shared/components';
 
 export interface ReceiptsSettings {
   print_receipt: boolean;
@@ -21,7 +22,7 @@ export interface ReceiptsSettings {
 @Component({
   selector: 'app-receipts-settings-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, SettingToggleComponent],
+  imports: [CommonModule, ReactiveFormsModule, SettingToggleComponent, TextareaComponent],
   templateUrl: './receipts-settings-form.component.html',
   styleUrls: ['./receipts-settings-form.component.scss'],
 })

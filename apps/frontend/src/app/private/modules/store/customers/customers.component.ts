@@ -1,7 +1,7 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Subject, takeUntil, finalize } from 'rxjs';
-import { CustomerListComponent, CustomerModalComponent } from './components';
+import { CustomerListComponent, CustomerModalComponent, CustomerBulkUploadModalComponent } from './components';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { CustomersService } from './services/customers.service';
 import {
@@ -12,6 +12,7 @@ import {
 } from './models/customer.model';
 import { ToastService, DialogService } from '../../../../shared/components';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
+import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-customers',
@@ -21,6 +22,7 @@ import { AuthFacade } from '../../../../core/store/auth/auth.facade';
     StatsComponent,
     CustomerListComponent,
     CustomerModalComponent,
+    CustomerBulkUploadModalComponent,
   ],
   template: `
     <div class="w-full">
@@ -55,7 +57,7 @@ import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 
         <app-stats
           title="Ingresos Totales"
-          [value]="(stats?.total_revenue || 0 | currency) || '$0.00'"
+          [value]="formatRevenue(stats?.total_revenue || 0)"
           smallText="+15% vs last month"
           iconName="dollar-sign"
           iconBgColor="bg-purple-100"
@@ -72,7 +74,7 @@ import { AuthFacade } from '../../../../core/store/auth/auth.facade';
         (create)="openCreateModal()"
         (edit)="openEditModal($event)"
         (delete)="onDelete($event)"
-        (refresh)="loadCustomers()"
+        (bulkUpload)="openBulkUploadModal()"
       ></app-customer-list>
 
       <!-- Modal -->
@@ -83,10 +85,19 @@ import { AuthFacade } from '../../../../core/store/auth/auth.facade';
         (closed)="closeModal()"
         (save)="onSave($event)"
       ></app-customer-modal>
+
+      <!-- Bulk Upload Modal -->
+      <app-customer-bulk-upload-modal
+        [isOpen]="isBulkUploadModalOpen"
+        (isOpenChange)="isBulkUploadModalOpen = $event"
+        (uploadComplete)="onBulkUploadComplete()"
+      ></app-customer-bulk-upload-modal>
     </div>
   `,
 })
 export class CustomersComponent implements OnInit, OnDestroy {
+  private currencyService = inject(CurrencyFormatService);
+
   stats: CustomerStats | null = null;
   customers: Customer[] = [];
 
@@ -104,6 +115,9 @@ export class CustomersComponent implements OnInit, OnDestroy {
   isModalOpen = false;
   selectedCustomer: Customer | null = null;
 
+  // Bulk Upload Modal
+  isBulkUploadModalOpen = false;
+
   private destroy$ = new Subject<void>();
 
   constructor(
@@ -114,6 +128,9 @@ export class CustomersComponent implements OnInit, OnDestroy {
   ) { }
 
   ngOnInit(): void {
+    // Asegurar que la moneda esté cargada
+    this.currencyService.loadCurrency();
+
     // Subscribe to userStore$ observable to get the store ID
     this.authFacade.userStore$
       .pipe(takeUntil(this.destroy$))
@@ -224,6 +241,10 @@ export class CustomersComponent implements OnInit, OnDestroy {
       });
   }
 
+  formatRevenue(value: number): string {
+    return this.currencyService.format(value || 0);
+  }
+
   onDelete(customer: Customer) {
     this.dialogService
       .confirm({
@@ -249,5 +270,14 @@ export class CustomersComponent implements OnInit, OnDestroy {
             });
         }
       });
+  }
+
+  openBulkUploadModal() {
+    this.isBulkUploadModalOpen = true;
+  }
+
+  onBulkUploadComplete() {
+    this.loadCustomers();
+    this.loadStats();
   }
 }

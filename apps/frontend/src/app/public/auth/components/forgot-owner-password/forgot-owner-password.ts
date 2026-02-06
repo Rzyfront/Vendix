@@ -81,7 +81,7 @@ import { IconComponent } from '../../../../shared/components';
             <!-- Inputs con gap reducido -->
             <div class="space-y-4">
               <app-input
-                label="Vlink"
+                label="V-link"
                 formControlName="vlink"
                 [control]="forgotPasswordForm.get('vlink')"
                 type="text"

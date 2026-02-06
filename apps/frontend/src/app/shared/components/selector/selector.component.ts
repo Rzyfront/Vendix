@@ -17,6 +17,7 @@ import {
 } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
 import { IconComponent } from '../icon/icon.component';
+import { FormStyleVariant } from '../../types/form.types';
 
 export interface SelectorOption {
   value: string | number;
@@ -128,6 +129,7 @@ export class SelectorComponent
   @Input() disabled = false;
   @Input() size: SelectorSize = 'md';
   @Input() variant: SelectorVariant = 'default';
+  @Input() styleVariant: FormStyleVariant = 'modern';
   @Input() options: SelectorOption[] = [];
   @Input() tooltipText?: string;
 
@@ -195,12 +197,25 @@ export class SelectorComponent
   }
 
   get labelClasses(): string {
+    const baseClasses = ['block', 'font-medium', 'mb-2'];
+
+    if (this.styleVariant === 'modern') {
+      return [
+        ...baseClasses,
+        'text-[11px]',
+        'uppercase',
+        'tracking-[0.05em]',
+        'text-[var(--color-text-muted)]',
+        this.disabled ? 'opacity-50 cursor-not-allowed' : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+    }
+
     return [
-      'block',
+      ...baseClasses,
       'text-sm',
-      'font-medium',
       'text-[var(--color-text-primary)]',
-      'mb-2',
       this.disabled ? 'opacity-50 cursor-not-allowed' : '',
     ]
       .filter(Boolean)
@@ -217,42 +232,67 @@ export class SelectorComponent
       'block',
       'w-full',
       'border',
-      'rounded-sm',
       'transition-colors',
       'duration-200',
       'focus:outline-none',
-      'focus:ring-2',
       'bg-[var(--color-surface)]',
       'text-[var(--color-text-primary)]',
       'pr-10', // Space for chevron
     ];
-
-    const sizeClasses = {
-      sm: ['px-3', 'py-1.5', 'text-sm'],
-      md: ['px-4', 'py-2', 'text-base'],
-      lg: ['px-4', 'py-3', 'text-lg'],
-    };
 
     let stateClasses: string[];
     if (this.errorText) {
       stateClasses = [
         'border-[var(--color-destructive)]',
         'focus:border-[var(--color-destructive)]',
-        'focus:ring-[var(--color-destructive)]/30',
-        'bg-[rgba(239, 68, 68, 0.1)]',
+        'bg-[rgba(239,68,68,0.1)]',
       ];
     } else {
       stateClasses = [
         'border-border',
         'hover:border-border',
-        'focus:ring-secondary/40',
         'focus:border-primary',
+      ];
+    }
+
+    let variantClasses: string[];
+
+    // Unified height system (matches ButtonComponent & InputComponent)
+    // sm: 32px mobile → 36px desktop
+    // md: 40px mobile → 44px desktop
+    // lg: 48px mobile → 52px desktop
+    const sizeClasses = {
+      sm: ['h-8', 'sm:h-9', 'px-3', 'text-sm'],
+      md: ['h-10', 'sm:h-11', 'px-3', 'sm:px-4', 'text-sm', 'sm:text-base'],
+      lg: ['h-12', 'sm:h-[52px]', 'px-4', 'text-base', 'sm:text-lg'],
+    };
+
+    if (this.styleVariant === 'modern') {
+      // Modern: iOS-inspired with shadow focus
+      variantClasses = [
+        ...sizeClasses[this.size],
+        'rounded-xl',
+        '!bg-[var(--color-background)]',
+        'focus:!bg-[var(--color-surface)]',
+        this.errorText
+          ? 'focus:shadow-[0_0_0_3px_rgba(239,68,68,0.3)]'
+          : 'focus:shadow-[0_0_0_3px_var(--color-ring)]',
+      ];
+    } else {
+      // Classic: with ring focus
+      variantClasses = [
+        ...sizeClasses[this.size],
+        'rounded-xl',
+        'focus:ring-2',
+        this.errorText
+          ? 'focus:ring-[var(--color-destructive)]/30'
+          : 'focus:ring-secondary/40',
       ];
     }
 
     return [
       ...baseClasses,
-      ...sizeClasses[this.size],
+      ...variantClasses,
       ...stateClasses,
       this.variant && this.variant !== 'default' ? `selector-${this.variant}` : '',
     ]

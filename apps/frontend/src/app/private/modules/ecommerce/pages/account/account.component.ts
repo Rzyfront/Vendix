@@ -7,11 +7,14 @@ import { AccountService, UserProfile, Address } from '../../services/account.ser
 import { AuthFacade } from '../../../../../core/store';
 import { AddressModalComponent } from '../../components/address-modal/address-modal.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { ButtonComponent } from '../../../../../shared/components/button/button.component';
+import { InputComponent } from '../../../../../shared/components/input/input.component';
+import { SelectorComponent, SelectorOption } from '../../../../../shared/components/selector/selector.component';
 
 @Component({
   selector: 'app-account',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, ReactiveFormsModule, AddressModalComponent, IconComponent],
+  imports: [CommonModule, RouterModule, FormsModule, ReactiveFormsModule, AddressModalComponent, IconComponent, ButtonComponent, InputComponent, SelectorComponent],
   templateUrl: './account.component.html',
   styleUrls: ['./account.component.scss'],
 })
@@ -47,6 +50,14 @@ export class AccountComponent implements OnInit {
     home: 'Casa',
     work: 'Trabajo',
   };
+
+  // Document type options for selector
+  document_type_options: SelectorOption[] = [
+    { value: 'CC', label: 'Cédula de Ciudadanía' },
+    { value: 'CE', label: 'Cédula de Extranjería' },
+    { value: 'NIT', label: 'NIT' },
+    { value: 'passport', label: 'Pasaporte' },
+  ];
 
   ngOnInit(): void {
     this.initForms();
@@ -166,22 +177,17 @@ export class AccountComponent implements OnInit {
     this.clearMessages();
   }
 
-  closeAddressModal = (): void => {
-    this.show_address_modal = false;
-    setTimeout(() => {
-      this.address_modal_mode = 'create';
-      this.editing_address = undefined;
-    }, 300);
-  };
-
-  onAddressSaved = (address: Address): void => {
+  onAddressSaved(address: Address): void {
     // Reload profile to get updated addresses
     this.loadProfile();
     this.success_message = this.address_modal_mode === 'create'
       ? 'Dirección agregada correctamente'
       : 'Dirección actualizada correctamente';
     setTimeout(() => this.clearMessages(), 3000);
-  };
+    // Reset modal state after modal closes
+    this.address_modal_mode = 'create';
+    this.editing_address = undefined;
+  }
 
   setAddressPrimary(address_id: number): void {
     this.clearMessages();

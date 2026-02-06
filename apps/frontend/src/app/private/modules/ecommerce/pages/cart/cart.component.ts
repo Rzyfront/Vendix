@@ -11,13 +11,15 @@ import { CatalogService, EcommerceProduct } from '../../services/catalog.service
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
+import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { ProductCarouselComponent } from '../../components/product-carousel/product-carousel.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal/product-quick-view-modal.component';
+import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-cart',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent, QuantityControlComponent, ProductCarouselComponent, ProductQuickViewModalComponent],
+  imports: [CommonModule, RouterModule, IconComponent, QuantityControlComponent, ButtonComponent, ProductCarouselComponent, ProductQuickViewModalComponent, CurrencyPipe],
   templateUrl: './cart.component.html',
   styleUrls: ['./cart.component.scss'],
 })
@@ -35,6 +37,7 @@ export class CartComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
   private catalogService = inject(CatalogService);
   private destroyRef = inject(DestroyRef);
+  private currencyService = inject(CurrencyFormatService);
 
   constructor(
     private cart_service: CartService,
@@ -44,6 +47,9 @@ export class CartComponent implements OnInit, OnDestroy {
   ) { }
 
   ngOnInit(): void {
+    // Asegurar que la moneda esté cargada para mostrar precios correctamente
+    this.currencyService.loadCurrency();
+
     this.auth_facade.isAuthenticated$.pipe(takeUntil(this.destroy$)).subscribe((is_auth: boolean) => {
       this.is_authenticated = is_auth;
       if (is_auth) {

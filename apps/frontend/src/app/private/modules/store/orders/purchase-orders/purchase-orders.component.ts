@@ -1,12 +1,15 @@
 import { Component, OnDestroy, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
-import { Subject } from 'rxjs';
+import { Subject, takeUntil } from 'rxjs';
 
 import { ToastService } from '../../../../../shared/components/index';
 
 // Interfaces
-import { PurchaseOrder } from '../../inventory/interfaces';
+import { PurchaseOrder, ReceivePurchaseOrderItemDto } from '../../inventory/interfaces';
+
+// Services
+import { PurchaseOrdersService } from '../../inventory/services/purchase-orders.service';
 
 // Child Components
 import {
@@ -42,12 +45,14 @@ export class PurchaseOrdersComponent implements OnDestroy {
   // Modal state
   isDetailModalOpen = false;
   selectedOrder: PurchaseOrder | null = null;
+  isReceiving = false;
 
   private destroy$ = new Subject<void>();
 
   constructor(
     private router: Router,
-    private toastService: ToastService
+    private toastService: ToastService,
+    private purchaseOrdersService: PurchaseOrdersService
   ) {}
 
   ngOnDestroy(): void {
@@ -84,17 +89,42 @@ export class PurchaseOrdersComponent implements OnDestroy {
   }
 
   // Handle receive order from detail modal
-  onReceiveOrder(event: any): void {
-    this.toastService.success('Orden recibida exitosamente');
-    this.refreshList();
-    this.closeDetailModal();
+  onReceiveOrder(event: { order_id: number; items: ReceivePurchaseOrderItemDto[] }): void {
+    if (this.isReceiving) return;
+
+    this.isReceiving = true;
+    this.purchaseOrdersService
+      .receivePurchaseOrder(event.order_id, event.items)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Orden recibida exitosamente. Stock actualizado.');
+          this.refreshList();
+          this.closeDetailModal();
+          this.isReceiving = false;
+        },
+        error: (error) => {
+          this.toastService.error(error || 'Error al recibir la orden');
+          this.isReceiving = false;
+        },
+      });
   }
 
   // Handle cancel order from detail modal
-  onCancelOrder(order: any): void {
-    this.toastService.success('Orden cancelada exitosamente');
-    this.refreshList();
-    this.closeDetailModal();
+  onCancelOrder(orderId: number): void {
+    this.purchaseOrdersService
+      .cancelPurchaseOrder(orderId)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Orden cancelada exitosamente');
+          this.refreshList();
+          this.closeDetailModal();
+        },
+        error: (error) => {
+          this.toastService.error(error || 'Error al cancelar la orden');
+        },
+      });
   }
 
   // Handle edit order from detail modal

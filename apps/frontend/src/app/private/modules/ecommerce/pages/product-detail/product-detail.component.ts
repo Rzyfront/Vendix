@@ -10,6 +10,8 @@ import { SpinnerComponent } from '../../../../../shared/components/spinner/spinn
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
+import { ButtonComponent } from '../../../../../shared/components/button/button.component';
+import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
 
 @Component({
   selector: 'app-product-detail',
@@ -24,6 +26,8 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
     ProductQuickViewModalComponent,
     IconComponent,
     QuantityControlComponent,
+    ButtonComponent,
+    ShareModalComponent,
   ],
   template: `
     <div class="product-detail-page">
@@ -99,9 +103,14 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
                 <div class="options-group">
                   <div class="variants-btns">
                     @for (v of p.variants; track v.id) {
-                      <button class="v-btn" [class.active]="selectedVariantId() === v.id" (click)="selectVariant(v)">
+                      <app-button
+                        [variant]="selectedVariantId() === v.id ? 'primary' : 'outline'"
+                        size="sm"
+                        customClasses="v-btn"
+                        (clicked)="selectVariant(v)"
+                      >
                         {{ v.name }}
-                      </button>
+                      </app-button>
                     }
                   </div>
                 </div>
@@ -116,15 +125,26 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
                   [size]="'md'"
                   (valueChange)="quantity.set($event)"
                 />
-                
-                <button
-                  class="btn-cart"
-                  (click)="onAddToCart(p)"
+
+                <app-button
+                  variant="primary"
+                  size="sm"
+                  customClasses="btn-cart"
                   [disabled]="p.stock_quantity === 0"
+                  (clicked)="onAddToCart(p)"
                 >
-                  <app-icon name="shopping-cart" [size]="18" />
+                  <app-icon slot="icon" name="shopping-cart" [size]="18" />
                   {{ p.stock_quantity === 0 ? 'Agotado' : 'Añadir' }}
-                </button>
+                </app-button>
+
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  customClasses="btn-share"
+                  (clicked)="onShareClick()"
+                >
+                  <app-icon slot="icon" name="share" [size]="18" />
+                </app-button>
               </div>
 
               <!-- Stock Minimal -->
@@ -156,9 +176,14 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
                       {{ p.description }}
                     </p>
                     @if (p.description && p.description.length > 150) {
-                      <button class="btn-more" (click)="toggleDescription()">
+                      <app-button
+                        variant="ghost"
+                        size="sm"
+                        customClasses="btn-more"
+                        (clicked)="toggleDescription()"
+                      >
                         {{ isDescriptionExpanded() ? 'Ver menos' : 'Leer más' }}
-                      </button>
+                      </app-button>
                     }
                   </div>
                 </div>
@@ -207,7 +232,15 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
                     }
                   </div>
                   <textarea formControlName="comment" placeholder="Comparte tu opinión..."></textarea>
-                  <button type="submit" [disabled]="reviewForm.invalid">Publicar</button>
+                  <app-button
+                    type="submit"
+                    variant="primary"
+                    size="sm"
+                    [fullWidth]="true"
+                    [disabled]="reviewForm.invalid"
+                  >
+                    Publicar
+                  </app-button>
                 </form>
               </div>
             </div>
@@ -222,6 +255,13 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
       [productSlug]="selectedProductSlug"
       (closed)="quickViewOpen = false"
       (addedToCart)="onAddToCart($event)"
+    />
+
+    <!-- Share Modal -->
+    <app-share-modal
+      [isOpen]="shareModalOpen"
+      [product]="productForShare()"
+      (closed)="shareModalOpen = false"
     />
   `,
   styles: [`
@@ -286,18 +326,18 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
     }
 
     .variants-btns { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-    .v-btn {
-      padding: 0.5rem 1rem; border: 1px solid var(--color-border); background: white;
-      border-radius: var(--radius-md); cursor: pointer; font-size: 0.85rem;
-      &.active { border-color: var(--color-primary); background: var(--color-primary-light); color: var(--color-primary); }
-    }
 
     .purchase-box {
-      display: flex; gap: 1rem; margin-top: 0.5rem; align-items: center;
-      .btn-cart {
-        flex: 1; height: 36px; background: var(--color-primary); color: white; border: none; border-radius: var(--radius-md);
-        font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 0.5rem;
-        cursor: pointer; transition: 0.2s; &:hover { background: var(--color-secondary); } &:disabled { background: var(--color-text-muted); }
+      display: flex; gap: 0.75rem; margin-top: 0.5rem; align-items: center;
+
+      :host ::ng-deep .btn-cart {
+        flex: 1;
+      }
+
+      :host ::ng-deep .btn-share {
+        width: 40px !important;
+        min-width: 40px !important;
+        padding: 0 !important;
       }
     }
 
@@ -328,9 +368,10 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
         display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
         &.expanded { display: block; -webkit-line-clamp: unset; }
       }
-      .btn-more {
-        background: none; border: none; color: var(--color-primary); font-weight: 700; font-size: 0.85rem;
-        padding: 0; margin-top: 0.4rem; cursor: pointer; &:hover { text-decoration: underline; }
+      :host ::ng-deep .btn-more {
+        padding: 0 !important;
+        height: auto !important;
+        margin-top: 0.4rem;
       }
     }
 
@@ -346,7 +387,6 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
         background: var(--color-surface); padding: 1.5rem; border-radius: var(--radius-lg); height: fit-content;
         .star-picker { display: flex; gap: 0.25rem; margin-bottom: 1rem; }
         textarea { width: 100%; height: 80px; padding: 0.75rem; border-radius: var(--radius-md); border: 1px solid var(--color-border); margin-bottom: 1rem; font-size: 0.875rem; resize: none; background: var(--color-background); }
-        button { width: 100%; background: var(--color-primary); color: white; border: none; padding: 0.6rem; border-radius: var(--radius-md); font-weight: 700; cursor: pointer; transition: 0.2s; &:hover { background: var(--color-secondary); } }
       }
     }
   `],
@@ -371,6 +411,9 @@ export class ProductDetailComponent implements OnInit {
   quickViewOpen = false;
   selectedProductSlug: string | null = null;
 
+  // Share Modal
+  shareModalOpen = false;
+
   // Recommendations
   recommendedProducts = signal<EcommerceProduct[]>([]);
 
@@ -387,6 +430,25 @@ export class ProductDetailComponent implements OnInit {
     return [...p.reviews]
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
       .slice(0, 3);
+  });
+
+  // Convert ProductDetail to EcommerceProduct for ShareModal
+  productForShare = computed((): EcommerceProduct | null => {
+    const p = this.product();
+    if (!p) return null;
+    return {
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      description: p.description,
+      base_price: p.base_price,
+      final_price: p.final_price,
+      is_on_sale: p.is_on_sale,
+      image_url: p.image_url,
+      stock_quantity: p.stock_quantity,
+      brand: p.brand,
+      categories: p.categories,
+    } as EcommerceProduct;
   });
 
   ngOnInit(): void {
@@ -435,6 +497,7 @@ export class ProductDetailComponent implements OnInit {
   toggleDescription(): void { this.isDescriptionExpanded.update(v => !v); }
   onAddToCart(product: EcommerceProduct | ProductDetail): void { const result = this.cartService.addToCart(product.id, this.quantity()); if (result) { result.subscribe(); } }
   onQuickView(product: EcommerceProduct): void { this.selectedProductSlug = product.slug; this.quickViewOpen = true; }
+  onShareClick(): void { this.shareModalOpen = true; }
 
   onSubmitReview(): void {
     if (this.reviewForm.invalid) return;

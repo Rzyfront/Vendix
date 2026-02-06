@@ -103,7 +103,7 @@ export interface OrganizationCandidate {
             (ngSubmit)="onSubmit()"
             class="space-y-4 sm:space-y-6"
           >
-            <div>
+            <div class="space-y-4">
               <!-- Vlink Field (only for Vendix context) -->
               @if (contextType === 'vendix') {
                 <div class="vlink-field" [class.show-tooltip]="showVlinkTooltip">

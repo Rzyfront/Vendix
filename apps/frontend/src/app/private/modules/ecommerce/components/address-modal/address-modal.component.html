@@ -1,211 +1,154 @@
-@if (is_open) {
-<div class="modal-overlay" (click)="cancel()">
-    <div class="modal-container" (click)="$event.stopPropagation()">
-        <!-- Modal Header -->
-        <div class="modal-header">
-            <h2>{{ title }}</h2>
-            <button class="close-btn" (click)="cancel()" aria-label="Cerrar modal">
-                <i class="pi pi-times"></i>
-            </button>
-        </div>
-
+<app-modal
+    [isOpen]="isOpen"
+    (isOpenChange)="isOpenChange.emit($event)"
+    (cancel)="close()"
+    [title]="title"
+    size="md"
+>
+    <!-- Body -->
+    <div class="modal-body">
         <!-- Error Message -->
         @if (error_message) {
         <div class="error-message">
-            <i class="pi pi-exclamation-circle"></i>
+            <app-icon name="alert-circle" [size]="18"></app-icon>
             {{ error_message }}
         </div>
         }
 
-        <!-- Modal Body -->
         <form [formGroup]="address_form" (ngSubmit)="save()">
-            <div class="modal-body">
-                <!-- Address Type -->
-                <div class="form-group">
-                    <label for="type">Tipo de dirección *</label>
-                    <select id="type" formControlName="type" [class.error]="f['type'].touched && f['type'].invalid">
-                        @for (type of address_types; track type.value) {
-                        <option [value]="type.value">{{ type.label }}</option>
-                        }
-                    </select>
-                    @if (f['type'].touched && f['type'].hasError('required')) {
-                    <span class="error-text">Este campo es requerido</span>
-                    }
-                </div>
+            <!-- Address Type -->
+            <div class="form-group">
+                <app-selector
+                    label="Tipo de dirección"
+                    formControlName="type"
+                    placeholder="Seleccionar"
+                    [options]="address_type_options"
+                    [required]="true">
+                </app-selector>
+            </div>
 
-                <!-- Address Line 1 -->
-                <div class="form-group">
-                    <label for="address_line1">Dirección (línea 1) *</label>
-                    <input
-                        type="text"
-                        id="address_line1"
-                        formControlName="address_line1"
-                        placeholder="Calle, número, apartamento"
-                        [class.error]="f['address_line1'].touched && f['address_line1'].invalid"
-                    />
-                    @if (f['address_line1'].touched && f['address_line1'].hasError('required')) {
-                    <span class="error-text">Este campo es requerido</span>
-                    } @else if (f['address_line1'].touched && f['address_line1'].hasError('minlength')) {
-                    <span class="error-text">Mínimo 5 caracteres</span>
-                    }
-                </div>
+            <!-- Address Line 1 -->
+            <div class="form-group">
+                <app-input
+                    label="Dirección (línea 1)"
+                    formControlName="address_line1"
+                    placeholder="Calle, número, apartamento"
+                    [control]="address_form.get('address_line1')"
+                    [required]="true">
+                </app-input>
+            </div>
 
-                <!-- Address Line 2 -->
-                <div class="form-group">
-                    <label for="address_line2">Dirección (línea 2)</label>
-                    <input
-                        type="text"
-                        id="address_line2"
-                        formControlName="address_line2"
-                        placeholder="Apartamento, suite, etc. (opcional)"
-                    />
-                </div>
+            <!-- Address Line 2 -->
+            <div class="form-group">
+                <app-input
+                    label="Dirección (línea 2)"
+                    formControlName="address_line2"
+                    placeholder="Apartamento, suite, etc. (opcional)">
+                </app-input>
+            </div>
 
-                <!-- State/Province and Country -->
-                <div class="form-row">
-                    @if (address_form.value.country_code === 'CO') {
-                        <div class="form-group">
-                            <label for="state_province">Departamento *</label>
-                            <select
-                                id="state_province"
-                                formControlName="state_province"
-                                [class.error]="f['state_province'].touched && f['state_province'].invalid"
-                                [disabled]="loading_departments"
-                            >
-                                <option value="">Seleccionar</option>
-                                @if (loading_departments) {
-                                    <option disabled>Cargando...</option>
-                                } @else {
-                                    @for (dept of departments; track dept.id) {
-                                        <option [value]="dept.id">{{ dept.name }}</option>
-                                    }
-                                }
-                            </select>
-                            @if (f['state_province'].touched && f['state_province'].hasError('required')) {
-                            <span class="error-text">Este campo es requerido</span>
-                            }
-                        </div>
-                    } @else {
-                        <div class="form-group">
-                            <label for="state_province">Estado/Provincia</label>
-                            <input
-                                type="text"
-                                id="state_province"
-                                formControlName="state_province"
-                                placeholder="Estado o provincia"
-                            />
-                        </div>
-                    }
-
-                    <div class="form-group">
-                        <label for="country_code">País *</label>
-                        <select
-                            id="country_code"
-                            formControlName="country_code"
-                            [class.error]="f['country_code'].touched && f['country_code'].invalid"
-                        >
-                            @for (country of countries; track country.code) {
-                            <option [value]="country.code">{{ country.name }}</option>
-                            }
-                        </select>
-                        @if (f['country_code'].touched && f['country_code'].hasError('required')) {
-                        <span class="error-text">Este campo es requerido</span>
-                        }
-                    </div>
-                </div>
-
-                <!-- City -->
+            <!-- State/Province and Country -->
+            <div class="form-row">
                 @if (address_form.value.country_code === 'CO') {
                     <div class="form-group">
-                        <label for="city">Ciudad *</label>
-                        <select
-                            id="city"
-                            formControlName="city"
-                            [class.error]="f['city'].touched && f['city'].invalid"
-                            [disabled]="loading_cities || !address_form.value.state_province"
-                        >
-                            <option value="">Seleccionar</option>
-                            @if (loading_cities) {
-                                <option disabled>Cargando...</option>
-                            } @else {
-                                @for (city of cities; track city.id) {
-                                    <option [value]="city.id">{{ city.name }}</option>
-                                }
-                            }
-                        </select>
-                        @if (f['city'].touched && f['city'].hasError('required')) {
-                        <span class="error-text">Este campo es requerido</span>
-                        }
+                        <app-selector
+                            label="Departamento"
+                            formControlName="state_province"
+                            placeholder="{{ loading_departments ? 'Cargando...' : 'Seleccionar' }}"
+                            [options]="department_options"
+                            [disabled]="loading_departments"
+                            [required]="true">
+                        </app-selector>
                     </div>
                 } @else {
                     <div class="form-group">
-                        <label for="city">Ciudad *</label>
-                        <input
-                            type="text"
-                            id="city"
-                            formControlName="city"
-                            placeholder="Ciudad"
-                            [class.error]="f['city'].touched && f['city'].invalid"
-                        />
-                        @if (f['city'].touched && f['city'].hasError('required')) {
-                        <span class="error-text">Este campo es requerido</span>
-                        } @else if (f['city'].touched && f['city'].hasError('minlength')) {
-                        <span class="error-text">Mínimo 2 caracteres</span>
-                        }
+                        <app-input
+                            label="Estado/Provincia"
+                            formControlName="state_province"
+                            placeholder="Estado o provincia">
+                        </app-input>
                     </div>
                 }
 
-                <!-- Postal Code and Phone -->
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="postal_code">Código postal</label>
-                        <input
-                            type="text"
-                            id="postal_code"
-                            formControlName="postal_code"
-                            placeholder="Código postal"
-                        />
-                    </div>
-
-                    <div class="form-group">
-                        <label for="phone_number">Teléfono</label>
-                        <input
-                            type="tel"
-                            id="phone_number"
-                            formControlName="phone_number"
-                            placeholder="+57 300 123 4567"
-                            [class.error]="f['phone_number'].touched && f['phone_number'].invalid"
-                        />
-                        @if (f['phone_number'].touched && f['phone_number'].hasError('pattern')) {
-                        <span class="error-text">Formato inválido</span>
-                        }
-                    </div>
-                </div>
-
-                <!-- Is Primary -->
-                <div class="form-group checkbox-group">
-                    <label class="checkbox-label">
-                        <input type="checkbox" formControlName="is_primary" />
-                        <span>Establecer como dirección principal</span>
-                    </label>
+                <div class="form-group">
+                    <app-selector
+                        label="País"
+                        formControlName="country_code"
+                        [options]="country_options"
+                        [required]="true">
+                    </app-selector>
                 </div>
             </div>
 
-            <!-- Modal Footer -->
-            <div class="modal-footer">
-                <button type="button" class="cancel-btn" (click)="cancel()" [disabled]="is_saving">
-                    Cancelar
-                </button>
-                <button type="submit" class="save-btn" [disabled]="is_saving || address_form.invalid">
-                    @if (is_saving) {
-                    <span class="spinner"></span>
-                    Guardando...
-                    } @else {
-                    Guardar dirección
-                    }
-                </button>
+            <!-- City -->
+            @if (address_form.value.country_code === 'CO') {
+                <div class="form-group">
+                    <app-selector
+                        label="Ciudad"
+                        formControlName="city"
+                        placeholder="{{ loading_cities ? 'Cargando...' : 'Seleccionar' }}"
+                        [options]="city_options"
+                        [disabled]="loading_cities || !address_form.value.state_province"
+                        [required]="true">
+                    </app-selector>
+                </div>
+            } @else {
+                <div class="form-group">
+                    <app-input
+                        label="Ciudad"
+                        formControlName="city"
+                        placeholder="Ciudad"
+                        [control]="address_form.get('city')"
+                        [required]="true">
+                    </app-input>
+                </div>
+            }
+
+            <!-- Postal Code and Phone -->
+            <div class="form-row">
+                <div class="form-group">
+                    <app-input
+                        label="Código postal"
+                        formControlName="postal_code"
+                        placeholder="Código postal">
+                    </app-input>
+                </div>
+
+                <div class="form-group">
+                    <app-input
+                        label="Teléfono"
+                        type="tel"
+                        formControlName="phone_number"
+                        placeholder="+57 300 123 4567"
+                        [control]="address_form.get('phone_number')">
+                    </app-input>
+                </div>
+            </div>
+
+            <!-- Is Primary -->
+            <div class="form-group toggle-group">
+                <app-toggle
+                    formControlName="is_primary"
+                    label="Establecer como dirección principal">
+                </app-toggle>
             </div>
         </form>
     </div>
-</div>
-}
+
+    <!-- Footer -->
+    <div slot="footer">
+        <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+            <app-button variant="outline" (clicked)="close()" [disabled]="is_saving">
+                Cancelar
+            </app-button>
+            <app-button
+                variant="primary"
+                (clicked)="save()"
+                [loading]="is_saving"
+                [disabled]="is_saving || address_form.invalid"
+            >
+                {{ mode === 'create' ? 'Crear dirección' : 'Guardar cambios' }}
+            </app-button>
+        </div>
+    </div>
+</app-modal>

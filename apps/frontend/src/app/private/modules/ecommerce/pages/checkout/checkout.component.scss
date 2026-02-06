@@ -202,7 +202,8 @@
 .address-form {
     margin-top: 1.5rem;
     padding: 1.5rem;
-    background: var(--color-background);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
 }
 
@@ -231,8 +232,7 @@
     }
 
     input,
-    textarea,
-    select {
+    textarea {
         width: 100%;
         padding: var(--control-padding);
         border: 1px solid var(--color-border);
@@ -253,21 +253,38 @@
             cursor: not-allowed;
             background: var(--color-background);
         }
-
-        &.checkout-select {
-            appearance: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
-            background-position: right 0.75rem center;
-            background-repeat: no-repeat;
-            background-size: 1.25rem;
-            padding-right: 2.5rem;
-        }
     }
 
     .error-text {
         font-size: var(--fs-xs);
         color: var(--color-error);
         margin-top: 0.25rem;
+    }
+}
+
+// Save address checkbox
+.save-address-option {
+    margin-top: 1.25rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--color-border);
+
+    .checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        cursor: pointer;
+
+        input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--color-primary);
+            cursor: pointer;
+        }
+
+        .checkbox-text {
+            font-size: var(--fs-sm);
+            color: var(--color-text-primary);
+        }
     }
 }
 

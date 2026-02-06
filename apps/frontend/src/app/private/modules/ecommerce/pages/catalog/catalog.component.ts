@@ -12,13 +12,20 @@ import {
   CatalogQuery,
 } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
+import { WishlistService } from '../../services/wishlist.service';
+import { StoreUiService } from '../../services/store-ui.service';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { ProductCardComponent } from '../../components/product-card/product-card.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal';
+import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
+import { ButtonComponent } from '../../../../../shared/components/button/button.component';
+import { InputComponent } from '../../../../../shared/components/input/input.component';
+import { ToastService } from '../../../../../shared/components/toast/toast.service';
 
 @Component({
   selector: 'app-catalog-page',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, ProductCardComponent, ProductQuickViewModalComponent],
+  imports: [CommonModule, RouterModule, FormsModule, ProductCardComponent, ProductQuickViewModalComponent, ShareModalComponent, ButtonComponent, InputComponent],
   templateUrl: './catalog.component.html',
   styleUrls: ['./catalog.component.scss'],
 })
@@ -48,12 +55,24 @@ export class CatalogComponent implements OnInit, OnDestroy {
   quickViewOpen = false;
   selectedProductSlug: string | null = null;
 
+  // Share Modal
+  shareModalOpen = false;
+  shareProduct: EcommerceProduct | null = null;
+
   private destroy$ = new Subject<void>();
   private search_subject = new Subject<string>();
+
+  // Wishlist state
+  wishlist_product_ids = new Set<number>();
+  private is_authenticated = false;
 
   constructor(
     private catalog_service: CatalogService,
     private cart_service: CartService,
+    private wishlist_service: WishlistService,
+    private store_ui_service: StoreUiService,
+    private auth_facade: AuthFacade,
+    private toast_service: ToastService,
     private route: ActivatedRoute,
     private router: Router,
   ) { }
@@ -85,16 +104,39 @@ export class CatalogComponent implements OnInit, OnDestroy {
     this.route.queryParams
       .pipe(takeUntil(this.destroy$))
       .subscribe((params) => {
+        // Siempre actualizar search_term (vacío si no existe)
+        this.search_term = params['search'] || '';
+
         if (params['category']) {
           this.selected_category_id = +params['category'];
         }
         if (params['brand']) {
           this.selected_brand_id = +params['brand'];
         }
-        if (params['search']) {
-          this.search_term = params['search'];
-        }
         this.loadProducts();
+      });
+
+    // Subscribe to authentication state
+    this.auth_facade.isAuthenticated$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(is_auth => {
+        this.is_authenticated = is_auth;
+        if (is_auth) {
+          // Load wishlist when user is authenticated
+          this.wishlist_service.getWishlist().subscribe();
+        } else {
+          // Clear wishlist state when not authenticated
+          this.wishlist_product_ids.clear();
+        }
+      });
+
+    // Subscribe to wishlist changes
+    this.wishlist_service.wishlist$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(wishlist => {
+        this.wishlist_product_ids = new Set(
+          wishlist?.items.map(item => item.product_id) || []
+        );
       });
   }
 
@@ -213,6 +255,7 @@ export class CatalogComponent implements OnInit, OnDestroy {
   }
 
   onAddToCart(product: EcommerceProduct): void {
+    // Handler para ProductCard - agrega 1 unidad al carrito
     const result = this.cart_service.addToCart(product.id, 1);
     if (result) {
       result.subscribe();
@@ -220,13 +263,49 @@ export class CatalogComponent implements OnInit, OnDestroy {
     // TODO: Show toast notification
   }
 
+  onModalAddedToCart(_product: EcommerceProduct): void {
+    // Handler para QuickViewModal - el modal ya agregó el producto al carrito
+    // Este handler solo se usa para acciones post-adición (ej: cerrar modal, mostrar toast)
+    this.quickViewOpen = false;
+    // TODO: Show toast notification
+  }
+
   onToggleWishlist(product: EcommerceProduct): void {
-    // TODO: Implement wishlist toggle
+    // Check authentication first
+    if (!this.is_authenticated) {
+      this.store_ui_service.openLoginModal();
+      return;
+    }
+
+    // Toggle wishlist with toast feedback
+    if (this.isInWishlist(product.id)) {
+      this.wishlist_service.removeItem(product.id).subscribe({
+        next: () => this.toast_service.info('Producto eliminado de favoritos'),
+      });
+    } else {
+      this.wishlist_service.addItem(product.id).subscribe({
+        next: () => this.toast_service.success('Producto agregado a favoritos'),
+      });
+    }
+  }
+
+  isInWishlist(product_id: number): boolean {
+    return this.wishlist_product_ids.has(product_id);
   }
 
   onQuickView(product: EcommerceProduct): void {
     this.selectedProductSlug = product.slug;
     this.quickViewOpen = true;
+  }
+
+  onShare(product: EcommerceProduct): void {
+    this.shareProduct = product;
+    this.shareModalOpen = true;
+  }
+
+  onShareModalClosed(): void {
+    this.shareModalOpen = false;
+    this.shareProduct = null;
   }
 
   private updateUrl(): void {

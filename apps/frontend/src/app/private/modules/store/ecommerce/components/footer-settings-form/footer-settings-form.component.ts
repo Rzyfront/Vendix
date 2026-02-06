@@ -6,6 +6,7 @@ import { debounceTime, filter, skip } from 'rxjs';
 import {
   InputComponent,
   IconComponent,
+  TextareaComponent,
 } from '../../../../../../shared/components';
 import {
   FooterSettings,
@@ -24,6 +25,7 @@ import {
     ReactiveFormsModule,
     InputComponent,
     IconComponent,
+    TextareaComponent,
   ],
   templateUrl: './footer-settings-form.component.html',
 })

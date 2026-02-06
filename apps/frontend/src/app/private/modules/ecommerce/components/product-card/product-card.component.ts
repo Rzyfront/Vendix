@@ -1,13 +1,15 @@
-import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
+import { Component, Input, Output, EventEmitter, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { EcommerceProduct } from '../../services/catalog.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
+import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 
 @Component({
   selector: 'app-product-card',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent],
+  imports: [CommonModule, RouterModule, IconComponent, CurrencyPipe, ButtonComponent],
   template: `
     <article class="product-card" (click)="onQuickView($event)">
       <div class="product-image">
@@ -18,9 +20,37 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
             <app-icon name="image" [size]="24" class="text-muted"></app-icon>
           </div>
         }
-        <button class="wishlist-btn" (click)="onWishlistClick($event)" [class.active]="in_wishlist">
-          <app-icon name="heart" [size]="18"></app-icon>
-        </button>
+
+        <!-- Stock Badge (POS style con backdrop-blur) -->
+        @if (product.stock_quantity !== null && product.stock_quantity <= 5 && product.stock_quantity > 0) {
+          <div class="stock-badge stock-badge--warning">
+            ¡Últimas {{ product.stock_quantity }}!
+          </div>
+        }
+        @if (product.stock_quantity === 0) {
+          <div class="stock-badge stock-badge--error">
+            Agotado
+          </div>
+        }
+
+        <!-- Action buttons column -->
+        <div class="card-actions">
+          <app-button
+            variant="ghost"
+            size="sm"
+            customClasses="action-btn"
+            [class.active]="in_wishlist"
+            (clicked)="onWishlistClick($event)">
+            <app-icon slot="icon" name="heart" [size]="18"></app-icon>
+          </app-button>
+          <app-button
+            variant="ghost"
+            size="sm"
+            customClasses="action-btn"
+            (clicked)="onShareClick($event)">
+            <app-icon slot="icon" name="share" [size]="18"></app-icon>
+          </app-button>
+        </div>
       </div>
       <div class="product-info">
         @if (product.brand) {
@@ -33,37 +63,58 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
             <span class="original-price">{{ product.base_price | currency }}</span>
           }
         </div>
-        @if (product.stock_quantity !== null && product.stock_quantity <= 5 && product.stock_quantity > 0) {
-          <span class="low-stock">¡Últimas {{ product.stock_quantity }} unidades!</span>
-        }
-        @if (product.stock_quantity === 0) {
-          <span class="out-of-stock">Agotado</span>
-        }
       </div>
       <div class="actions-container">
-        <button class="buy-now-btn" (click)="onBuyNow($event)" [disabled]="product.stock_quantity === 0">
+        <app-button
+          variant="primary"
+          size="sm"
+          customClasses="buy-btn"
+          [disabled]="product.stock_quantity === 0"
+          (clicked)="onBuyNow($event)">
           Comprar
-        </button>
-        <button class="add-btn" (click)="onAddToCart($event)" [disabled]="product.stock_quantity === 0" title="Agregar al carrito">
-          <app-icon name="shopping-cart" [size]="16"></app-icon>
-        </button>
+        </app-button>
+        <app-button
+          variant="outline"
+          size="sm"
+          customClasses="add-to-cart-btn"
+          [disabled]="product.stock_quantity === 0"
+          title="Agregar al carrito"
+          (clicked)="onAddToCart($event)">
+          <app-icon slot="icon" name="shopping-cart" [size]="16"></app-icon>
+        </app-button>
       </div>
     </article>
   `,
   styles: [`
+    /* iOS-style Product Card */
     .product-card {
       background: var(--color-surface);
-      border-radius: var(--radius-lg);
+      border-radius: 1rem;
       border: 1px solid var(--color-border);
       overflow: hidden;
       cursor: pointer;
-      transition: all var(--transition-fast);
+      transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
       display: flex;
       flex-direction: column;
+      -webkit-tap-highlight-color: transparent;
 
       &:hover {
-        box-shadow: var(--shadow-lg);
-        transform: translateY(-4px);
+        box-shadow: 0 8px 25px -8px rgba(0, 0, 0, 0.15);
+        transform: translateY(-2px);
+        border-color: var(--color-primary);
+      }
+
+      &:active {
+        transform: scale(0.97);
+      }
+
+      @media (hover: hover) {
+        &:hover {
+          transform: translateY(-2px);
+        }
+        &:active {
+          transform: scale(0.98);
+        }
       }
     }
 
@@ -77,11 +128,6 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
         width: 100%;
         height: 100%;
         object-fit: cover;
-        transition: transform 0.3s ease;
-      }
-
-      .product-card:hover & img {
-        transform: scale(1.05);
       }
 
       .no-image {
@@ -93,28 +139,63 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
         color: var(--color-text-muted);
         font-size: 3rem;
       }
+    }
 
-      .wishlist-btn {
-        position: absolute;
-        top: 0.75rem;
-        right: 0.75rem;
-        width: 36px;
-        height: 36px;
-        border-radius: var(--radius-pill);
-        border: none;
-        background: var(--color-surface);
-        box-shadow: var(--shadow-sm);
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: var(--color-text-secondary);
-        transition: all var(--transition-fast);
+    /* Stock Badge con backdrop-blur (POS style) */
+    .stock-badge {
+      position: absolute;
+      top: 0.5rem;
+      left: 0.5rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: var(--radius-md);
+      font-size: var(--fs-xs);
+      font-weight: var(--fw-semibold);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid;
+      z-index: 1;
 
-        &:hover, &.active {
-          color: var(--color-error);
-          background: var(--color-error-light);
-        }
+      &--warning {
+        background: rgba(251, 146, 60, 0.8);
+        color: white;
+        border-color: rgba(251, 146, 60, 0.6);
+      }
+
+      &--error {
+        background: rgba(239, 68, 68, 0.8);
+        color: white;
+        border-color: rgba(239, 68, 68, 0.6);
+      }
+    }
+
+    /* Card action buttons column */
+    .card-actions {
+      position: absolute;
+      top: 0.75rem;
+      right: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      z-index: 1;
+    }
+
+    /* Circular action buttons */
+    :host ::ng-deep .action-btn {
+      width: 36px !important;
+      height: 36px !important;
+      min-width: 36px !important;
+      padding: 0 !important;
+      border-radius: 50% !important;
+      background: var(--color-surface) !important;
+      box-shadow: var(--shadow-sm);
+
+      &:hover {
+        background: var(--color-background) !important;
+      }
+
+      &.active {
+        color: var(--color-error) !important;
+        background: var(--color-error-light) !important;
       }
     }
 
@@ -163,84 +244,63 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
       }
     }
 
-    .low-stock {
-      font-size: var(--fs-xs);
-      color: var(--color-warning);
-      font-weight: var(--fw-medium);
-    }
-
-    .out-of-stock {
-      font-size: var(--fs-xs);
-      color: var(--color-error);
-      font-weight: var(--fw-medium);
-    }
-
     .actions-container {
       margin: 0 1rem 1rem;
       display: flex;
       gap: 0.5rem;
-    }
 
-    .buy-now-btn {
-      flex: 1;
-      padding: 0.75rem 1rem;
-      background: var(--color-primary);
-      color: var(--color-text-on-primary);
-      border: none;
-      border-radius: var(--radius-md);
-      font-weight: var(--fw-medium);
-      font-size: var(--fs-sm);
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: background var(--transition-fast);
-
-      &:hover:not(:disabled) {
-        background: var(--color-secondary);
+      /* Botón Comprar (primer app-button) - ocupa todo el espacio */
+      app-button:first-child {
+        flex: 1;
+        min-width: 0;
       }
 
-      &:disabled {
-        background: var(--color-text-muted);
-        cursor: not-allowed;
+      /* Botón Carrito (segundo app-button) - cuadrado fijo */
+      app-button:last-child {
+        flex-shrink: 0;
       }
     }
 
-    .add-btn {
-      width: 42px;
-      padding: 0;
-      background: var(--color-surface-variant);
-      color: var(--color-primary);
-      border: 1px solid var(--color-primary);
-      border-radius: var(--radius-md);
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all var(--transition-fast);
+    /* Botón Comprar - misma altura que carrito */
+    :host ::ng-deep .buy-btn {
+      width: 100% !important;
+      height: 32px !important;
 
-      &:hover:not(:disabled) {
-        background: var(--color-primary-light);
+      @media (min-width: 640px) {
+        height: 36px !important;
       }
+    }
 
-      &:disabled {
-        border-color: var(--color-text-muted);
-        color: var(--color-text-muted);
-        cursor: not-allowed;
+    /* Botón Carrito - cuadrado simétrico */
+    :host ::ng-deep .add-to-cart-btn {
+      width: 32px !important;
+      min-width: 32px !important;
+      height: 32px !important;
+      padding: 0 !important;
+
+      @media (min-width: 640px) {
+        width: 36px !important;
+        min-width: 36px !important;
+        height: 36px !important;
       }
-      
-      i { font-size: 1.2rem; }
     }
   `],
 })
-export class ProductCardComponent {
+export class ProductCardComponent implements OnInit {
   @Input() product!: EcommerceProduct;
   @Input() in_wishlist = false;
   @Output() add_to_cart = new EventEmitter<EcommerceProduct>();
   @Output() toggle_wishlist = new EventEmitter<EcommerceProduct>();
   @Output() quick_view = new EventEmitter<EcommerceProduct>();
+  @Output() share = new EventEmitter<EcommerceProduct>();
 
   private router = inject(Router);
+  private currencyService = inject(CurrencyFormatService);
+
+  ngOnInit(): void {
+    // Asegurar que la moneda esté cargada para mostrar precios correctamente
+    this.currencyService.loadCurrency();
+  }
 
   onQuickView(event: Event): void {
     // Let clicks on buttons/links propagate normally to their handlers
@@ -269,5 +329,11 @@ export class ProductCardComponent {
     event.stopPropagation();
     event.preventDefault();
     this.toggle_wishlist.emit(this.product);
+  }
+
+  onShareClick(event: Event): void {
+    event.stopPropagation();
+    event.preventDefault();
+    this.share.emit(this.product);
   }
 }

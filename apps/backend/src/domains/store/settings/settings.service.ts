@@ -64,13 +64,19 @@ export class SettingsService {
     const secondaryColor = branding.secondary_color || '#2F6F4E';
     const accentColor = branding.accent_color || '#FFFFFF';
 
+    // Sign URLs on-demand before returning to frontend
+    // Keys are stored in DB, but frontend needs signed URLs to access S3 objects
+    const signedStoreLogoUrl = await this.s3Service.signUrl(store?.logo_url);
+    const signedBrandingLogoUrl = await this.s3Service.signUrl(branding.logo_url);
+    const signedFaviconUrl = await this.s3Service.signUrl(branding.favicon_url);
+
     if (!storeSettings || !storeSettings.settings) {
       return {
         ...getDefaultStoreSettings(),
         general: {
           ...getDefaultStoreSettings().general,
           name: store?.name,
-          logo_url: store?.logo_url as string | undefined,
+          logo_url: signedStoreLogoUrl,
           store_type: store?.store_type,
           timezone: store?.timezone || getDefaultStoreSettings().general.timezone,
         },
@@ -80,8 +86,8 @@ export class SettingsService {
           secondary_color: secondaryColor,
           accent_color: accentColor,
           theme: 'default',
-          logo_url: (branding.logo_url || store?.logo_url) as string | undefined,
-          favicon_url: branding.favicon_url as string | undefined,
+          logo_url: signedBrandingLogoUrl || signedStoreLogoUrl,
+          favicon_url: signedFaviconUrl,
         }
       };
     }
@@ -92,7 +98,7 @@ export class SettingsService {
       general: {
         ...settings.general,
         name: store?.name,
-        logo_url: store?.logo_url as string | undefined,
+        logo_url: signedStoreLogoUrl,
         store_type: store?.store_type,
         timezone: store?.timezone || settings.general?.timezone,
       },
@@ -102,8 +108,8 @@ export class SettingsService {
         secondary_color: secondaryColor,
         accent_color: accentColor,
         theme: 'default',
-        logo_url: (branding.logo_url || store?.logo_url) as string | undefined,
-        favicon_url: branding.favicon_url as string | undefined,
+        logo_url: signedBrandingLogoUrl || signedStoreLogoUrl,
+        favicon_url: signedFaviconUrl,
       }
     };
   }

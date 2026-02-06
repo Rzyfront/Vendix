@@ -83,6 +83,7 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
 
   /** Position for mobile dropdown */
   dropdownTop: number | null = null;
+  dropdownRight: number | null = null;
 
   /** Check if we're on mobile/tablet */
   get isMobileOrTablet(): boolean {
@@ -141,20 +142,12 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
 
   toggleDropdown(): void {
     this.isOpen = !this.isOpen;
-    if (this.isOpen) {
-      this.calculateDropdownPosition();
-    }
   }
 
   private calculateDropdownPosition(): void {
-    // Only calculate position for mobile/tablet where we use position: fixed
-    if (this.isMobileOrTablet && this.triggerButton?.nativeElement) {
-      const rect = this.triggerButton.nativeElement.getBoundingClientRect();
-      this.dropdownTop = rect.bottom;
-      this.cdr.markForCheck();
-    } else {
-      this.dropdownTop = null; // Desktop uses CSS positioning
-    }
+    // Position is now handled purely by CSS (position: absolute with top: calc(100% + 4px))
+    // This method is kept for potential future use or scroll handling
+    this.cdr.markForCheck();
   }
 
   closeDropdown(): void {

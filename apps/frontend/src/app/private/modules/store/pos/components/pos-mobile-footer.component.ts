@@ -4,10 +4,12 @@ import {
   Output,
   EventEmitter,
   ChangeDetectionStrategy,
+  inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { CartSummary } from '../models/cart.model';
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-pos-mobile-footer',
@@ -273,6 +275,8 @@ import { CartSummary } from '../models/cart.model';
   ],
 })
 export class PosMobileFooterComponent {
+  private currencyService = inject(CurrencyFormatService);
+
   @Input() cartSummary: CartSummary | null = null;
   @Input() itemCount: number = 0;
 
@@ -281,9 +285,6 @@ export class PosMobileFooterComponent {
   @Output() checkout = new EventEmitter<void>();
 
   formatCurrency(amount: number): string {
-    return new Intl.NumberFormat('es-AR', {
-      style: 'currency',
-      currency: 'ARS',
-    }).format(amount);
+    return this.currencyService.format(amount);
   }
 }

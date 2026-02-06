@@ -380,6 +380,32 @@ export class ProductsService {
       );
   }
 
+  // Carga Masiva de Imágenes
+  getBulkImageUploadTemplate(
+    type: 'example' | 'store-skus' = 'example',
+  ): Observable<Blob> {
+    return this.http
+      .get(`${this.apiUrl}/store/products/bulk-images/template/download`, {
+        params: { type },
+        responseType: 'blob',
+      })
+      .pipe(catchError(this.handleError));
+  }
+
+  uploadBulkImages(file: File): Observable<any> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    return this.http
+      .post<
+        ApiResponse<any>
+      >(`${this.apiUrl}/store/products/bulk-images/upload`, formData)
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
   // Utilidades
   private buildParams(query: ProductQueryDto): HttpParams {
     let params = new HttpParams();

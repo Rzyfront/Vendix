@@ -11,9 +11,9 @@
     <app-icon name="heart" [size]="64" class="text-muted"></app-icon>
     <h2>No tienes favoritos aún</h2>
     <p>Guarda los productos que te gustan para verlos aquí</p>
-    <button class="primary-btn" (click)="continueShopping()">
+    <app-button variant="primary" (clicked)="continueShopping()">
       Ver productos
-    </button>
+    </app-button>
   </div>
   } @else {
   <div class="wishlist-content">
@@ -57,12 +57,12 @@
         </div>
 
         <div class="item-actions">
-          <button class="add-to-cart-btn" (click)="addToCart(item)" [disabled]="item.product.stock_quantity === 0" title="Agregar al carrito">
+          <app-button variant="primary" size="sm" (clicked)="addToCart(item)" [disabled]="item.product.stock_quantity === 0" title="Agregar al carrito">
             <app-icon name="shopping-cart" [size]="16"></app-icon>
-          </button>
-          <button class="remove-btn" (click)="removeFromWishlist(item.product_id)" title="Eliminar de favoritos">
+          </app-button>
+          <app-button variant="ghost" size="sm" (clicked)="removeFromWishlist(item.product_id)" title="Eliminar de favoritos">
             <app-icon name="trash-2" [size]="18"></app-icon>
-          </button>
+          </app-button>
         </div>
       </div>
       }

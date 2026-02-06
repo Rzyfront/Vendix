@@ -37,6 +37,7 @@ export { ResponsiveDataViewComponent } from './responsive-data-view/responsive-d
 export { OptionsDropdownComponent } from './options-dropdown';
 
 // Types
+export type { FormStyleVariant } from '../types/form.types';
 export type { BadgeVariant } from './badge/badge.component';
 export type { ButtonVariant, ButtonSize } from './button/button.component';
 export type { InputType, InputSize } from './input/input.component';

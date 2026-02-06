@@ -452,11 +452,12 @@ model categories {
 }
 
 model currencies {
-  code           String              @id @db.VarChar(3)
-  name           String              @unique @db.VarChar(255)
-  symbol         String              @db.VarChar(10)
-  decimal_places Int                 @default(2) @db.SmallInt
-  state          currency_state_enum @default(active)
+  code           String                       @id @db.VarChar(3)
+  name           String                       @unique @db.VarChar(255)
+  symbol         String                       @db.VarChar(10)
+  decimal_places Int                          @default(2) @db.SmallInt
+  position       currency_position_enum       @default(after)
+  state          currency_state_enum          @default(active)
 }
 
 model inventory_transactions {
@@ -1275,11 +1276,22 @@ model shipping_zones {
   is_system      Boolean          @default(false)
   created_at     DateTime?        @default(now()) @db.Timestamp(6)
   updated_at     DateTime?        @default(now()) @db.Timestamp(6)
-  store          stores?          @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  shipping_rates shipping_rates[]
+
+  // Tracking de copia del sistema (One-Click Magic)
+  copied_from_system_zone_id Int?                           // ID de zona del sistema de donde se copió
+  source_type                zone_source_type_enum?         // 'system_copy' | 'custom'
+
+  // Relaciones
+  store              stores?               @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  shipping_rates     shipping_rates[]
+  copied_from_zone   shipping_zones?       @relation("ZoneCopies", fields: [copied_from_system_zone_id], references: [id], onDelete: SetNull)
+  copied_zones       shipping_zones[]      @relation("ZoneCopies")
+  system_updates     system_zone_updates[]
 
   @@index([store_id])
   @@index([is_system])
+  @@index([copied_from_system_zone_id])
+  @@index([source_type])
 }
 
 model shipping_methods {
@@ -1322,11 +1334,18 @@ model shipping_rates {
   is_active               Boolean                 @default(true)
   created_at              DateTime?               @default(now()) @db.Timestamp(6)
   updated_at              DateTime?               @default(now()) @db.Timestamp(6)
-  shipping_zone           shipping_zones          @relation(fields: [shipping_zone_id], references: [id], onDelete: Cascade)
-  shipping_method         shipping_methods        @relation(fields: [shipping_method_id], references: [id], onDelete: Cascade)
+
+  // Tracking de copia del sistema
+  copied_from_system_rate_id Int?                           // ID de tarifa del sistema de donde se copió
+  source_type                zone_source_type_enum?         // 'system_copy' | 'custom'
+
+  // Relaciones
+  shipping_zone   shipping_zones   @relation(fields: [shipping_zone_id], references: [id], onDelete: Cascade)
+  shipping_method shipping_methods @relation(fields: [shipping_method_id], references: [id], onDelete: Cascade)
 
   @@index([shipping_zone_id])
   @@index([shipping_method_id])
+  @@index([copied_from_system_rate_id])
 }
 
 // Store-specific shipping method configuration (links stores to system shipping methods)
@@ -1348,6 +1367,21 @@ model store_shipping_methods {
 
   @@unique([store_id, system_shipping_method_id])
   @@index([store_id, state])
+}
+
+// Tracking de cambios en zonas del sistema para notificar a tiendas
+model system_zone_updates {
+  id             Int            @id @default(autoincrement())
+  system_zone_id Int
+  change_type    String         @db.VarChar(50) // 'updated' | 'new_rate' | 'rate_updated' | 'deleted'
+  description    String
+  created_at     DateTime       @default(now()) @db.Timestamp(6)
+
+  // Relación con la zona del sistema
+  system_zone shipping_zones @relation(fields: [system_zone_id], references: [id], onDelete: Cascade)
+
+  @@index([system_zone_id])
+  @@index([created_at])
 }
 
 // ===== ECOMMERCE MODELS =====
@@ -1471,6 +1505,11 @@ enum currency_state_enum {
   active
   inactive
   deprecated
+}
+
+enum currency_position_enum {
+  before  // Símbolo antes: $100
+  after   // Símbolo después: 100$
 }
 
 enum inventory_transaction_type_enum {
@@ -1801,6 +1840,11 @@ enum shipping_method_state_enum {
   enabled
   disabled
   archived
+}
+
+enum zone_source_type_enum {
+  system_copy // Copiada automáticamente del sistema al habilitar un método
+  custom      // Creada desde cero o duplicada para personalizar
 }
 
 // Payment processing mode - determines when/how payment is collected

@@ -9,7 +9,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
-import { IconComponent } from '../../index';
+import { IconComponent, InputComponent, SelectorComponent } from '../../index';
 import {
   CountryService,
   Country,
@@ -26,6 +26,8 @@ import {
     FormsModule,
     ReactiveFormsModule,
     IconComponent,
+    InputComponent,
+    SelectorComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
@@ -448,34 +450,25 @@ import {
 
             <div class="form-grid">
               <div class="form-field">
-                <label class="field-label">
-                  Nombre de la tienda
-                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="El nombre visible para tus clientes"></app-icon>
-                  <span class="field-required">*</span>
-                </label>
-                <input
-                  type="text"
-                  class="field-input"
+                <app-input
                   formControlName="name"
+                  [label]="'Nombre de la tienda'"
+                  styleVariant="modern"
                   placeholder="Tienda Principal"
-                />
+                  tooltipText="El nombre visible para tus clientes"
+                  [required]="true"
+                ></app-input>
               </div>
 
               <div class="form-field">
-                <label class="field-label">
-                  Zona horaria
-                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Para reportes y horarios de atención"></app-icon>
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <select class="field-input" formControlName="timezone">
-                  <option value="">Selecciona una zona horaria</option>
-                  <option
-                    *ngFor="let timezone of timezones"
-                    [value]="timezone.value"
-                  >
-                    {{ timezone.label }}
-                  </option>
-                </select>
+                <app-selector
+                  formControlName="timezone"
+                  [label]="'Zona horaria'"
+                  styleVariant="modern"
+                  placeholder="Selecciona una zona horaria"
+                  tooltipText="Para reportes y horarios de atención"
+                  [options]="timezoneOptions"
+                ></app-selector>
               </div>
             </div>
           </div>
@@ -596,75 +589,55 @@ import {
             <!-- Address line - full width -->
             <div class="form-grid" style="margin-bottom: 1rem;">
               <div class="form-field full-width">
-                <label class="field-label">
-                  Calle y número
-                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Dirección principal de la tienda"></app-icon>
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <input
-                  type="text"
-                  class="field-input"
+                <app-input
                   formControlName="address_line1"
+                  [label]="'Calle y número'"
+                  styleVariant="modern"
                   placeholder="Calle Principal #123"
-                />
+                  tooltipText="Dirección principal de la tienda"
+                ></app-input>
               </div>
             </div>
 
             <!-- Location fields - 2 cols on mobile, 4 cols on desktop -->
             <div class="form-grid location-grid">
               <div class="form-field">
-                <label class="field-label">
-                  País
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <select class="field-input" formControlName="country_code">
-                  <option value="">Selecciona</option>
-                  <option
-                    *ngFor="let country of countries"
-                    [value]="country.code"
-                  >
-                    {{ country.name }}
-                  </option>
-                </select>
+                <app-selector
+                  formControlName="country_code"
+                  [label]="'País'"
+                  styleVariant="modern"
+                  placeholder="Selecciona"
+                  [options]="countryOptions"
+                ></app-selector>
               </div>
 
               <div class="form-field">
-                <label class="field-label">
-                  Departamento
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <select class="field-input" formControlName="state_province">
-                  <option value="">Selecciona</option>
-                  <option *ngFor="let dep of departments" [value]="dep.id">
-                    {{ dep.name }}
-                  </option>
-                </select>
+                <app-selector
+                  formControlName="state_province"
+                  [label]="'Departamento'"
+                  styleVariant="modern"
+                  placeholder="Selecciona"
+                  [options]="departmentOptions"
+                ></app-selector>
               </div>
 
               <div class="form-field">
-                <label class="field-label">
-                  Ciudad
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <select class="field-input" formControlName="city">
-                  <option value="">Selecciona</option>
-                  <option *ngFor="let city of cities" [value]="city.id">
-                    {{ city.name }}
-                  </option>
-                </select>
+                <app-selector
+                  formControlName="city"
+                  [label]="'Ciudad'"
+                  styleVariant="modern"
+                  placeholder="Selecciona"
+                  [options]="cityOptions"
+                ></app-selector>
               </div>
 
               <div class="form-field">
-                <label class="field-label">
-                  Código postal
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <input
-                  type="text"
-                  class="field-input"
+                <app-input
                   formControlName="postal_code"
+                  [label]="'Código postal'"
+                  styleVariant="modern"
                   placeholder="06000"
-                />
+                ></app-input>
               </div>
             </div>
           </div>
@@ -764,5 +737,21 @@ export class StoreSetupStepComponent implements OnInit {
   async loadCities(depId: number): Promise<void> {
     this.cities = await this.countryService.getCitiesByDepartment(depId);
     this.cdr.markForCheck();
+  }
+
+  get timezoneOptions() {
+    return this.timezones.map(tz => ({ value: tz.value, label: tz.label }));
+  }
+
+  get countryOptions() {
+    return this.countries.map(c => ({ value: c.code, label: c.name }));
+  }
+
+  get departmentOptions() {
+    return this.departments.map(d => ({ value: d.id, label: d.name }));
+  }
+
+  get cityOptions() {
+    return this.cities.map(c => ({ value: c.id, label: c.name }));
   }
 }
