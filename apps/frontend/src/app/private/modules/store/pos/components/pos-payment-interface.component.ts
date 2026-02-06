@@ -5,6 +5,8 @@ import {
   EventEmitter,
   OnInit,
   OnDestroy,
+  OnChanges,
+  SimpleChanges,
   ChangeDetectorRef,
   inject,
 } from '@angular/core';
@@ -890,7 +892,7 @@ interface PaymentState {
     `,
   ],
 })
-export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
+export class PosPaymentInterfaceComponent implements OnInit, OnDestroy, OnChanges {
   @Input() isOpen = false;
   @Input() cartState: CartState | null = null;
   @Output() closed = new EventEmitter<void>();
@@ -1014,6 +1016,27 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
+  ngOnChanges(changes: SimpleChanges): void {
+    // When modal opens, sync anonymous sale state with current settings
+    if (changes['isOpen'] && changes['isOpen'].currentValue === true) {
+      this.syncAnonymousSaleState();
+    }
+  }
+
+  private syncAnonymousSaleState(): void {
+    // If anonymous sales are not allowed, always disable
+    if (!this.allowAnonymousSales) {
+      this.paymentState.isAnonymousSale = false;
+    } else {
+      // Use the default setting from store settings
+      this.paymentState.isAnonymousSale = this.anonymousSalesAsDefault;
+    }
+    this.cdr.markForCheck();
+  }
+
+  // Track if settings have been loaded at least once
+  private settingsLoaded = false;
+
   private createPaymentForm(): FormGroup {
     return this.fb.group({
       cashReceived: [0, [Validators.required, Validators.min(0)]],
@@ -1061,13 +1084,14 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
   private loadStoreSettings(): void {
     this.storeSettingsSubscription = this.store.select(fromAuth.selectStoreSettings).pipe(takeUntil(this.destroy$)).subscribe((storeSettings: any) => {
       // store_settings has structure: { settings: { pos: { ... }, general: { ... }, ... } }
-      const settings = storeSettings?.settings;
+      const settings = storeSettings;
       if (settings?.pos) {
         const prevAllowAnonymous = this.allowAnonymousSales;
 
         this.allowAnonymousSales = settings.pos.allow_anonymous_sales || false;
         this.anonymousSalesAsDefault = settings.pos.anonymous_sales_as_default || false;
         this.requireCashDrawerOpen = settings.pos.require_cash_drawer_open || false;
+        this.settingsLoaded = true;
 
         console.log('[POS Payment] Store settings updated:', {
           allowAnonymousSales: this.allowAnonymousSales,
@@ -1386,7 +1410,7 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
       reference: '',
       isProcessing: false,
       change: 0,
-      isAnonymousSale: this.allowAnonymousSales && this.anonymousSalesAsDefault,
+      isAnonymousSale: false, // Will be synced when modal opens
     };
     this.paymentForm.reset();
     this.customerForm.reset();
