@@ -6,12 +6,14 @@ import {
   ChangeDetectionStrategy,
   OnChanges,
   SimpleChanges,
+  inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 import { CartState, CartItem } from '../models/cart.model';
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-pos-cart-modal',
@@ -618,6 +620,8 @@ import { CartState, CartItem } from '../models/cart.model';
   ],
 })
 export class PosCartModalComponent implements OnChanges {
+  private currencyService = inject(CurrencyFormatService);
+
   @Input() isOpen: boolean = false;
   @Input() cartState: CartState | null = null;
 
@@ -636,6 +640,8 @@ export class PosCartModalComponent implements OnChanges {
     if (changes['isOpen']) {
       if (this.isOpen) {
         document.body.style.overflow = 'hidden';
+        // Asegurar que la moneda esté cargada cuando el modal se abre
+        this.currencyService.loadCurrency();
       } else {
         document.body.style.overflow = '';
       }
@@ -670,9 +676,6 @@ export class PosCartModalComponent implements OnChanges {
   }
 
   formatCurrency(amount: number): string {
-    return new Intl.NumberFormat('es-AR', {
-      style: 'currency',
-      currency: 'ARS',
-    }).format(amount);
+    return this.currencyService.format(amount);
   }
 }

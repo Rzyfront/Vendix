@@ -110,7 +110,7 @@ export class ExpensesListComponent {
       sortable: true,
       align: 'right',
       priority: 1,
-      transform: (val) => (val ? `$${Number(val).toFixed(2)}` : '$0.00'),
+      transform: (val: any) => (val ? `$${Number(val).toFixed(2)}` : '$0.00'),
     },
     {
       key: 'expense_date',
@@ -118,7 +118,7 @@ export class ExpensesListComponent {
       sortable: true,
       align: 'center',
       priority: 2,
-      transform: (val) => (val ? new Date(val).toLocaleDateString() : ''),
+      transform: (val: any) => (val ? new Date(val).toLocaleDateString() : ''),
     },
     {
       key: 'expense_categories.name',
@@ -141,7 +141,7 @@ export class ExpensesListComponent {
           cancelled: 'default',
         },
       },
-      transform: (val) => this.getStateLabel(val),
+      transform: (val: any) => this.getStateLabel(val),
     },
   ];
 

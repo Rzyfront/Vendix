@@ -2,8 +2,10 @@ import {
   Component,
   OnInit,
   OnDestroy,
+  Input,
   Output,
   EventEmitter,
+  inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -33,6 +35,7 @@ import {
   OrderChannel,
   PaymentStatus,
 } from '../../interfaces/order.interface';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-orders-list',
@@ -49,26 +52,27 @@ import {
   styleUrls: ['./orders-list.component.css'],
 })
 export class OrdersListComponent implements OnInit, OnDestroy {
-  @Output() viewOrder = new EventEmitter<string>();
-  @Output() create = new EventEmitter<void>();
-  @Output() refresh = new EventEmitter<void>();
+  private currencyService = inject(CurrencyFormatService);
 
-  private destroy$ = new Subject<void>();
-
-  // Data
+  // State
   orders: Order[] = [];
-  totalItems = 0;
   loading = false;
-
-  // Filter state
+  totalItems = 0;
   searchTerm = '';
   selectedStatus = '';
   selectedChannel = '';
   selectedPaymentStatus = '';
   selectedDateRange = '';
 
-  // Filters query
-  filters: OrderQuery = {
+  // Lifecycle
+  private destroy$ = new Subject<void>();
+
+  // Outputs
+  @Output() create = new EventEmitter<void>();
+  @Output() viewOrder = new EventEmitter<string>();
+  @Output() refresh = new EventEmitter<void>();
+
+  @Input() filters: OrderQuery = {
     search: '',
     status: undefined,
     channel: undefined,
@@ -203,7 +207,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       label: 'Total',
       sortable: true,
       priority: 1,
-      transform: (value: any) => `$${(value || 0).toFixed(2)}`,
+      transform: (value: any) => this.currencyService.format(value || 0),
     },
     {
       key: 'created_at',
@@ -262,6 +266,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     footerStyle: 'prominent',
     footerTransform: (value: any) => `$${(value || 0).toFixed(2)}`,
     detailKeys: [
+      { key: 'grand_total', label: 'Total', transform: (value: any) => this.currencyService.format(value || 0) },
       {
         key: 'created_at',
         label: 'Fecha',

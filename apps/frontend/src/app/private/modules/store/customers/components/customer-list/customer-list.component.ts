@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, Output, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -15,6 +15,7 @@ import {
   FilterValues,
 } from '../../../../../../shared/components';
 import { Customer } from '../../models/customer.model';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-customer-list',
@@ -100,10 +101,17 @@ import { Customer } from '../../models/customer.model';
     </div>
   `,
 })
-export class CustomerListComponent {
+export class CustomerListComponent implements OnInit {
+  private currencyService = inject(CurrencyFormatService);
+
   @Input() customers: Customer[] = [];
   @Input() loading = false;
   @Input() totalItems = 0;
+
+  ngOnInit(): void {
+    // Asegurar que la moneda esté cargada
+    this.currencyService.loadCurrency();
+  }
 
   @Output() search = new EventEmitter<string>();
   @Output() filter = new EventEmitter<FilterValues>();
@@ -147,19 +155,19 @@ export class CustomerListComponent {
       label: 'Unido',
       sortable: true,
       priority: 3,
-      transform: (val) => (val ? new Date(val).toLocaleDateString() : '-'),
+      transform: (val: any) => (val ? new Date(val).toLocaleDateString() : '-'),
     },
   ];
 
   cardConfig: ItemListCardConfig = {
     titleKey: 'first_name',
-    titleTransform: (item) => `${item.first_name} ${item.last_name}`,
+    titleTransform: (item: any) => `${item.first_name} ${item.last_name}`,
     subtitleKey: 'email',
     avatarFallbackIcon: 'user',
     avatarShape: 'circle',
     badgeKey: 'state',
     badgeConfig: { type: 'status', size: 'sm' },
-    badgeTransform: (v) => (v === 'active' ? 'Activo' : 'Inactivo'),
+    badgeTransform: (v: any) => (v === 'active' ? 'Activo' : 'Inactivo'),
     detailKeys: [
       { key: 'phone', label: 'Teléfono', icon: 'phone' },
       { key: 'document_number', label: 'Documento', icon: 'credit-card' },
@@ -167,18 +175,13 @@ export class CustomerListComponent {
       {
         key: 'created_at',
         label: 'Registrado',
-        transform: (v) => (v ? new Date(v).toLocaleDateString() : '-'),
+        transform: (v: any) => (v ? new Date(v).toLocaleDateString() : '-'),
       },
     ],
     footerKey: 'total_spend',
     footerLabel: 'Total Gastado',
     footerStyle: 'prominent',
-    footerTransform: (v) =>
-      new Intl.NumberFormat('es-CO', {
-        style: 'currency',
-        currency: 'COP',
-        minimumFractionDigits: 0,
-      }).format(v || 0),
+    footerTransform: (v: any) => this.formatCurrency(v || 0),
   };
 
   actions: TableAction[] = [
@@ -186,13 +189,13 @@ export class CustomerListComponent {
       label: 'Editar',
       icon: 'edit',
       variant: 'ghost',
-      action: (row) => this.edit.emit(row),
+      action: (row: any) => this.edit.emit(row),
     },
     {
       label: 'Eliminar',
       icon: 'trash-2',
       variant: 'danger',
-      action: (row) => this.delete.emit(row),
+      action: (row: any) => this.delete.emit(row),
     },
   ];
 
@@ -219,5 +222,9 @@ export class CustomerListComponent {
         this.refresh.emit();
         break;
     }
+  }
+
+  formatCurrency(value: number): string {
+    return this.currencyService.format(value);
   }
 }

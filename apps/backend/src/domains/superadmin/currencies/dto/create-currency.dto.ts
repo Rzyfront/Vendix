@@ -6,6 +6,11 @@ export enum currency_state_enum {
   DEPRECATED = 'deprecated',
 }
 
+export enum currency_position_enum {
+  BEFORE = 'before',
+  AFTER = 'after',
+}
+
 export class CreateCurrencyDto {
   @IsString()
   @MinLength(3)
@@ -27,6 +32,10 @@ export class CreateCurrencyDto {
   @Min(0)
   @Max(4)
   decimal_places: number;
+
+  @IsEnum(currency_position_enum)
+  @IsOptional()
+  position?: currency_position_enum;  // Viene de AppNexus (opcional, usa valor de API si no se proporciona)
 
   @IsOptional()
   @IsEnum(currency_state_enum)

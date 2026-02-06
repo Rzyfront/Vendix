@@ -26,6 +26,7 @@ import {
   StickyHeaderComponent,
   StickyHeaderActionButton,
 } from '../../../../../../shared/components';
+import { CurrencyPipe, CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import {
   CreateProductDto,
   CreateProductImageDto,
@@ -85,6 +86,7 @@ interface GeneratedVariant {
     TaxQuickCreateComponent,
     AdjustmentCreateModalComponent,
     StickyHeaderComponent,
+    CurrencyPipe,
   ],
   templateUrl: './product-create-page.component.html',
 })
@@ -99,6 +101,7 @@ export class ProductCreatePageComponent implements OnInit {
   private router = inject(Router);
   private route = inject(ActivatedRoute);
   private dialogService = inject(DialogService);
+  private currencyService = inject(CurrencyFormatService);
 
   productForm: FormGroup = this.createForm();
   isSubmitting = signal(false);
@@ -163,6 +166,8 @@ export class ProductCreatePageComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    // Asegurar que la moneda esté cargada
+    this.currencyService.loadCurrency();
     this.loadCategoriesAndBrands();
 
     // Check for ID in route to determine edit mode

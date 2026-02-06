@@ -75,8 +75,10 @@ export class OrdersComponent implements OnInit, OnDestroy {
   }
 
   // Navigate to order details page
-  viewOrderDetails(orderId: string): void {
-    this.router.navigate(['/admin/orders', orderId]);
+  viewOrderDetails(orderId: string | Event): void {
+    // Handle Event case (when called from template)
+    const id = typeof orderId === 'string' ? orderId : (orderId as any);
+    this.router.navigate(['/admin/orders', id]);
   }
 
   // Refresh orders and stats

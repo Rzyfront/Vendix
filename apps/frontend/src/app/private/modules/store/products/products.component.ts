@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Subscription } from 'rxjs';
 import { Router } from '@angular/router';
@@ -11,6 +11,7 @@ import { ToastService } from '../../../../shared/components/toast/toast.service'
 import { DialogService } from '../../../../shared/components/dialog/dialog.service';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
+import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 
 // Models
 import {
@@ -73,7 +74,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
 
         <app-stats
           title="Valor Total"
-          [value]="(stats.total_value || 0 | currency) || '$0.00'"
+          [value]="formatCurrencyValue(stats.total_value)"
           [smallText]="'+12% vs last month'"
           iconName="dollar-sign"
           iconBgColor="bg-purple-100"
@@ -113,6 +114,8 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
   `,
 })
 export class ProductsComponent implements OnInit, OnDestroy {
+  private currencyService = inject(CurrencyFormatService);
+
   products: Product[] = [];
   categories: ProductCategory[] = [];
   brands: Brand[] = [];
@@ -154,6 +157,9 @@ export class ProductsComponent implements OnInit, OnDestroy {
   ) { }
 
   ngOnInit(): void {
+    // Asegurar que la moneda esté cargada
+    this.currencyService.loadCurrency();
+
     // Subscribe to userStore$ observable to get the store ID
     const storeSub = this.authFacade.userStore$.subscribe((store: any) => {
       const storeId = store?.id;
@@ -309,5 +315,9 @@ export class ProductsComponent implements OnInit, OnDestroy {
   // Helpers
   getGrowthPercentage(val: number): string {
     return val > 0 ? `+${val}%` : `${val}%`;
+  }
+
+  formatCurrencyValue(value: number): string {
+    return this.currencyService.format(value || 0);
   }
 }

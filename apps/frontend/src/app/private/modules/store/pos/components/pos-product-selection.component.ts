@@ -21,6 +21,7 @@ import {
   FilterConfig,
   FilterValues,
 } from '../../../../../shared/components';
+import { CurrencyPipe } from '../../../../../shared/pipes/currency';
 import { Router } from '@angular/router';
 
 import { PosCartService } from '../services/pos-cart.service';
@@ -45,6 +46,7 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
     ButtonComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
+    CurrencyPipe,
   ],
   schemas: [NO_ERRORS_SCHEMA],
   template: `

@@ -4,26 +4,44 @@ export enum CurrencyState {
   DEPRECATED = 'deprecated',
 }
 
+export enum CurrencyPosition {
+  BEFORE = 'before',
+  AFTER = 'after',
+}
+
 export interface Currency {
   code: string;
   name: string;
   symbol: string;
   decimal_places: number;
+  position: CurrencyPosition;  // NUEVO CAMPO
   state: CurrencyState;
 }
 
+// DTO para activar una moneda desde AppNexus
+export interface ActivateCurrencyDto {
+  code: string;           // From AppNexus (readonly)
+  name: string;           // From AppNexus (readonly)
+  symbol: string;         // From AppNexus (readonly)
+  position: CurrencyPosition; // From AppNexus (valor por defecto, configurable)
+  decimal_places: number; // Configurable
+  state?: CurrencyState;
+}
+
+// DTO actualizado - solo campos configurables
 export interface CreateCurrencyDto {
   code: string;
   name: string;
   symbol: string;
   decimal_places: number;
+  position?: CurrencyPosition;  // Opcional, valor por defecto desde API
   state?: CurrencyState;
 }
 
+// DTO actualizado - solo campos configurables (code, name, symbol no editables)
 export interface UpdateCurrencyDto {
-  name?: string;
-  symbol?: string;
-  decimal_places?: number;
+  decimal_places?: number;  // Solo campos configurables
+  position?: CurrencyPosition;  // Configurable (sobrescribe valor de API)
   state?: CurrencyState;
 }
 

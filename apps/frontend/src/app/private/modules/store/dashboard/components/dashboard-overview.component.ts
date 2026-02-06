@@ -8,6 +8,7 @@ import { StatsComponent } from '../../../../../shared/components/stats/stats.com
 import { ChartComponent } from '../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { DashboardTabsComponent, DashboardTab } from './dashboard-tabs.component';
 
 import { AnalyticsService } from '../../analytics/services/analytics.service';
@@ -292,6 +293,7 @@ export class DashboardOverviewComponent implements OnInit, OnDestroy {
   private dashboardService = inject(StoreDashboardService);
   private toastService = inject(ToastService);
   private router = inject(Router);
+  private currencyService = inject(CurrencyFormatService);
   private destroy$ = new Subject<void>();
 
   storeId = input.required<string>();
@@ -322,6 +324,7 @@ export class DashboardOverviewComponent implements OnInit, OnDestroy {
   };
 
   ngOnInit(): void {
+    this.currencyService.loadCurrency();
     this.loadAllData();
   }
 
@@ -522,9 +525,37 @@ export class DashboardOverviewComponent implements OnInit, OnDestroy {
   }
 
   formatCurrency(value: number): string {
-    if (value >= 1000000) return '$' + (value / 1000000).toFixed(1) + 'M';
-    if (value >= 1000) return '$' + (value / 1000).toFixed(1) + 'K';
-    return '$' + value.toFixed(0);
+    const currency = this.currencyService.currentCurrency();
+
+    // Fallback if currency is not loaded yet
+    if (!currency) {
+      return this.currencyService.format(value);
+    }
+
+    // Apply K/M suffixes for large numbers while preserving currency symbol
+    if (value >= 1000000) {
+      const numValue = (value / 1000000).toFixed(1);
+      if (currency.position === 'before') {
+        return `${currency.symbol}${numValue}M`;
+      } else {
+        return `${numValue}M${currency.symbol}`;
+      }
+    }
+    if (value >= 1000) {
+      const numValue = (value / 1000).toFixed(1);
+      if (currency.position === 'before') {
+        return `${currency.symbol}${numValue}K`;
+      } else {
+        return `${numValue}K${currency.symbol}`;
+      }
+    }
+
+    // For smaller values, use the standard format but remove decimals for cleaner display
+    if (currency.position === 'before') {
+      return `${currency.symbol}${Math.round(value).toLocaleString()}`;
+    } else {
+      return `${Math.round(value).toLocaleString()}${currency.symbol}`;
+    }
   }
 
   getGrowthText(growth?: number): string {

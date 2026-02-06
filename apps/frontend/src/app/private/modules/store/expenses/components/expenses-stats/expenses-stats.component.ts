@@ -1,10 +1,11 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable, map } from 'rxjs';
 import { selectExpenses } from '../../state/selectors/expenses.selectors';
 import { Expense } from '../../interfaces/expense.interface';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'vendix-expenses-stats',
@@ -15,7 +16,7 @@ import { StatsComponent } from '../../../../../../shared/components/stats/stats.
     <ng-container>
       <app-stats
         title="Total Gastos"
-        [value]="((totalAmount$ | async) | currency) || '$0.00'"
+        [value]="formatCurrency((totalAmount$ | async) || 0)"
         [smallText]="(totalCount$ | async) + ' registros'"
         iconName="dollar-sign"
         iconBgColor="bg-blue-100"
@@ -48,8 +49,14 @@ import { StatsComponent } from '../../../../../../shared/components/stats/stats.
     </ng-container>
   `
 })
-export class ExpensesStatsComponent {
+export class ExpensesStatsComponent implements OnInit {
   private store = inject(Store);
+  private currencyService = inject(CurrencyFormatService);
+
+  ngOnInit(): void {
+    // Asegurar que la moneda esté cargada
+    this.currencyService.loadCurrency();
+  }
 
   expenses$: Observable<Expense[]> = this.store.select(selectExpenses);
 
@@ -60,4 +67,8 @@ export class ExpensesStatsComponent {
   pendingCount$ = this.expenses$.pipe(map(e => e.filter(i => i.state === 'pending').length));
   approvedCount$ = this.expenses$.pipe(map(e => e.filter(i => i.state === 'approved').length));
   paidCount$ = this.expenses$.pipe(map(e => e.filter(i => i.state === 'paid').length));
+
+  formatCurrency(value: number): string {
+    return this.currencyService.format(value || 0);
+  }
 }

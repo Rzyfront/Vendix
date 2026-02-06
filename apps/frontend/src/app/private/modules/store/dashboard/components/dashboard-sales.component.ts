@@ -8,6 +8,7 @@ import { ChartComponent } from '../../../../../shared/components/chart/chart.com
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { TableComponent, TableColumn } from '../../../../../shared/components/table/table.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { DashboardTabsComponent, DashboardTab } from './dashboard-tabs.component';
 
 import { AnalyticsService } from '../../analytics/services/analytics.service';
@@ -192,6 +193,7 @@ export class DashboardSalesComponent implements OnInit, OnDestroy {
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
   private router = inject(Router);
+  private currencyService = inject(CurrencyFormatService);
   private destroy$ = new Subject<void>();
 
   storeId = input.required<string>();
@@ -229,6 +231,7 @@ export class DashboardSalesComponent implements OnInit, OnDestroy {
   };
 
   ngOnInit(): void {
+    this.currencyService.loadCurrency();
     this.loadAllData();
   }
 
@@ -362,15 +365,63 @@ export class DashboardSalesComponent implements OnInit, OnDestroy {
   }
 
   formatCurrency(value: number): string {
-    if (value >= 1000000) return '$' + (value / 1000000).toFixed(1) + 'M';
-    if (value >= 1000) return '$' + (value / 1000).toFixed(1) + 'K';
-    return '$' + value.toFixed(0);
+    const currency = this.currencyService.currentCurrency();
+
+    // Fallback if currency is not loaded yet
+    if (!currency) {
+      return this.currencyService.format(value);
+    }
+
+    if (value >= 1000000) {
+      const numValue = (value / 1000000).toFixed(1);
+      if (currency.position === 'before') {
+        return `${currency.symbol}${numValue}M`;
+      } else {
+        return `${numValue}M${currency.symbol}`;
+      }
+    }
+    if (value >= 1000) {
+      const numValue = (value / 1000).toFixed(1);
+      if (currency.position === 'before') {
+        return `${currency.symbol}${numValue}K`;
+      } else {
+        return `${numValue}K${currency.symbol}`;
+      }
+    }
+
+    if (currency.position === 'before') {
+      return `${currency.symbol}${Math.round(value).toLocaleString()}`;
+    } else {
+      return `${Math.round(value).toLocaleString()}${currency.symbol}`;
+    }
   }
 
   formatCompactCurrency(value: number): string {
-    if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
-    if (value >= 1000) return `$${(value / 1000).toFixed(0)}K`;
-    return `$${value}`;
+    const currency = this.currencyService.currentCurrency();
+
+    // Fallback if currency is not loaded yet
+    if (!currency) {
+      return this.currencyService.format(value);
+    }
+
+    if (value >= 1000000) {
+      const numValue = (value / 1000000).toFixed(1);
+      if (currency.position === 'before') {
+        return `${currency.symbol}${numValue}M`;
+      } else {
+        return `${numValue}M${currency.symbol}`;
+      }
+    }
+    if (value >= 1000) {
+      const numValue = (value / 1000).toFixed(0);
+      if (currency.position === 'before') {
+        return `${currency.symbol}${numValue}K`;
+      } else {
+        return `${numValue}K${currency.symbol}`;
+      }
+    }
+
+    return this.currencyService.format(value);
   }
 
   goToProductReport(): void {

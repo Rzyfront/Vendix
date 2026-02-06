@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -25,6 +25,7 @@ import {
 } from '../../../../../../shared/components/index';
 
 import { ProductEmptyStateComponent } from '../product-empty-state.component';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
 // Import styles
 import './product-list.component.css';
@@ -44,6 +45,8 @@ import './product-list.component.css';
   templateUrl: './product-list.component.html',
 })
 export class ProductListComponent implements OnChanges {
+  private currencyService = inject(CurrencyFormatService);
+
   @Input() products: Product[] = [];
   @Input() isLoading = false;
   @Input() categories: ProductCategory[] = [];
@@ -315,11 +318,7 @@ export class ProductListComponent implements OnChanges {
   }
 
   formatCurrency(value: number): string {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-    }).format(value);
+    return this.currencyService.format(value);
   }
 
   getEmptyStateTitle(): string {

@@ -26,6 +26,7 @@ export class CurrenciesService {
         name: createCurrencyDto.name,
         symbol: createCurrencyDto.symbol,
         decimal_places: createCurrencyDto.decimal_places,
+        position: createCurrencyDto.position || 'after',
         state: createCurrencyDto.state || currency_state_enum.ACTIVE,
       },
     });
@@ -84,19 +85,8 @@ export class CurrenciesService {
       throw new NotFoundException(`Currency with code ${code} not found`);
     }
 
-    // Check if name is being changed and if it conflicts with existing currency
-    if (updateCurrencyDto.name && updateCurrencyDto.name !== currency.name) {
-      const existing = await this.globalPrisma.currencies.findFirst({
-        where: {
-          name: updateCurrencyDto.name,
-          code: { not: code },
-        },
-      });
-
-      if (existing) {
-        throw new ConflictException(`Currency with name ${updateCurrencyDto.name} already exists`);
-      }
-    }
+    // Note: name, symbol and code are no longer editable as they come from AppNexus API
+    // Only decimal_places, position and state can be updated
 
     const updated = await this.globalPrisma.currencies.update({
       where: { code },
@@ -205,5 +195,46 @@ export class CurrenciesService {
     };
 
     return this.responseService.success(stats, 'Dashboard stats retrieved successfully');
+  }
+
+  async getAvailableCurrencies() {
+    try {
+      const response = await fetch('https://api.appnexus.com/currency');
+      const data = await response.json();
+
+      if (!data.response?.currencies) {
+        throw new BadRequestException('Invalid response from AppNexus API');
+      }
+
+      return this.responseService.success(
+        data.response.currencies,
+        'Available currencies retrieved successfully',
+      );
+    } catch (error) {
+      throw new BadRequestException(
+        `Failed to fetch currencies from AppNexus: ${error.message}`,
+      );
+    }
+  }
+
+  /**
+   * Obtiene las monedas activas del sistema para uso público
+   * No requiere paginación ya que se espera un número limitado de monedas activas
+   */
+  async getActiveCurrencies() {
+    const currencies = await this.globalPrisma.currencies.findMany({
+      where: { state: currency_state_enum.ACTIVE },
+      orderBy: { code: 'asc' },
+      select: {
+        code: true,
+        name: true,
+        symbol: true,
+        decimal_places: true,
+        position: true,
+        state: true,
+      },
+    });
+
+    return this.responseService.success(currencies, 'Active currencies retrieved successfully');
   }
 }

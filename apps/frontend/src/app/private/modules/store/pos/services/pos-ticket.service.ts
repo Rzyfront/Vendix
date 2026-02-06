@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { Observable, of } from 'rxjs';
 import { delay, map } from 'rxjs/operators';
 import {
@@ -6,11 +6,14 @@ import {
   PrinterConfig,
   PrintOptions,
 } from '../models/ticket.model';
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
 @Injectable({
   providedIn: 'root',
 })
 export class PosTicketService {
+  private currencyService = inject(CurrencyFormatService);
+
   private defaultPrinterConfig: PrinterConfig = {
     name: 'Default Thermal Printer',
     type: 'thermal',
@@ -165,8 +168,8 @@ export class PosTicketService {
         <tr>
           <td style="padding: 2px; vertical-align: top;">${item.name}</td>
           <td style="text-align: center; padding: 2px;">${item.quantity}</td>
-          <td style="text-align: right; padding: 2px;">$${item.unitPrice.toFixed(2)}</td>
-          <td style="text-align: right; padding: 2px;">$${item.totalPrice.toFixed(2)}</td>
+          <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.unitPrice)}</td>
+          <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.totalPrice)}</td>
         </tr>
       `;
     });
@@ -184,7 +187,7 @@ export class PosTicketService {
       const taxAmount = item.tax || calculatedTax;
       const taxPercent = taxAmount ? ((taxAmount / item.totalPrice) * 100).toFixed(2) : '0.00';
       console.log(`Item ${index + 1}: ${item.name}, unitPrice: ${item.unitPrice}, quantity: ${item.quantity}, totalPrice: ${item.totalPrice}, calculatedTax: ${calculatedTax}, taxAmount: ${taxAmount}, taxPercent: ${taxPercent}`);
-      html += `<p style="margin: 2px 0; font-size: 11px;">A${index + 1}. ${item.name} - Imp: ${taxPercent}% - $${taxAmount.toFixed(2)}</p>`;
+      html += `<p style="margin: 2px 0; font-size: 11px;">A${index + 1}. ${item.name} - Imp: ${taxPercent}% - ${this.currencyService.format(taxAmount)}</p>`;
     });
 
     html += `<hr style="border: 1px dashed #000; margin: 10px 0;">`;
@@ -194,25 +197,25 @@ export class PosTicketService {
         <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
           <tr>
             <td style="text-align: left; padding: 2px;">Subtotal:</td>
-            <td style="text-align: right; padding: 2px;">$${ticketData.subtotal.toFixed(2)}</td>
+            <td style="text-align: right; padding: 2px;">${this.currencyService.format(ticketData.subtotal)}</td>
           </tr>
           ${
             ticketData.discount > 0
               ? `
           <tr>
             <td style="text-align: left; padding: 2px;">Descuento:</td>
-            <td style="text-align: right; padding: 2px;">-$${ticketData.discount.toFixed(2)}</td>
+            <td style="text-align: right; padding: 2px;">-${this.currencyService.format(ticketData.discount)}</td>
           </tr>
           `
               : ''
           }
           <tr>
             <td style="text-align: left; padding: 2px;">Impuesto:</td>
-            <td style="text-align: right; padding: 2px;">$${ticketData.tax.toFixed(2)}</td>
+            <td style="text-align: right; padding: 2px;">${this.currencyService.format(ticketData.tax)}</td>
           </tr>
           <tr style="font-weight: bold; border-top: 1px solid #000;">
             <td style="text-align: left; padding: 2px;">TOTAL:</td>
-            <td style="text-align: right; padding: 2px;">$${ticketData.total.toFixed(2)}</td>
+            <td style="text-align: right; padding: 2px;">${this.currencyService.format(ticketData.total)}</td>
           </tr>
         </table>
       </div>
@@ -224,8 +227,8 @@ export class PosTicketService {
         ${
           ticketData.cashReceived
             ? `
-        <p style="margin: 2px 0; font-size: 12px;"><strong>Efectivo recibido:</strong> $${ticketData.cashReceived.toFixed(2)}</p>
-        <p style="margin: 2px 0; font-size: 12px;"><strong>Cambio:</strong> $${ticketData.change!.toFixed(2)}</p>
+        <p style="margin: 2px 0; font-size: 12px;"><strong>Efectivo recibido:</strong> ${this.currencyService.format(ticketData.cashReceived)}</p>
+        <p style="margin: 2px 0; font-size: 12px;"><strong>Cambio:</strong> ${this.currencyService.format(ticketData.change!)}</p>
         `
             : ''
         }
