@@ -182,6 +182,11 @@ export class PosSettingsDto {
   @ApiProperty({ example: false, required: false })
   @IsOptional()
   @IsBoolean()
+  enable_schedule_validation?: boolean;
+
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
   offline_mode_enabled?: boolean;
 
   @ApiProperty({ example: false, required: false })
