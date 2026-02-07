@@ -19,6 +19,10 @@
     <!-- Business Hours -->
     <div>
       <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Horarios de Atención</h4>
+      <div class="mb-4">
+        <app-setting-toggle [formControl]="enableScheduleValidationControl" label="Habilitar Horarios"
+          description="Restringir ventas fuera del horario configurado" (changed)="onFieldChange()"></app-setting-toggle>
+      </div>
       <div class="grid grid-cols-1 gap-2">
         @for (day of daysOfWeek; track day.key) {
         <div class="flex items-center gap-4 p-3 bg-white border border-gray-100 rounded-xl shadow-sm">

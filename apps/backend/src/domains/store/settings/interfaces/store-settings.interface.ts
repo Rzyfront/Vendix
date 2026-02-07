@@ -221,6 +221,7 @@ export interface PosSettings {
   allow_anonymous_sales: boolean;
   anonymous_sales_as_default: boolean;
   business_hours: Record<string, BusinessHours>;
+  enable_schedule_validation: boolean;
   offline_mode_enabled: boolean;
   require_cash_drawer_open: boolean;
   auto_print_receipt: boolean;
