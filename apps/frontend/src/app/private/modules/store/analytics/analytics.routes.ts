@@ -1,4 +1,8 @@
 import { Routes } from '@angular/router';
+import { provideState } from '@ngrx/store';
+import { provideEffects } from '@ngrx/effects';
+import { salesSummaryReducer } from './pages/sales/state/sales-summary.reducer';
+import { SalesSummaryEffects } from './pages/sales/state/sales-summary.effects';
 
 export const analyticsRoutes: Routes = [
   {
@@ -13,6 +17,10 @@ export const analyticsRoutes: Routes = [
       // Sales Analytics
       {
         path: 'sales',
+        providers: [
+          provideState({ name: 'salesSummary', reducer: salesSummaryReducer }),
+          provideEffects(SalesSummaryEffects),
+        ],
         children: [
           {
             path: '',
@@ -22,7 +30,7 @@ export const analyticsRoutes: Routes = [
           {
             path: 'summary',
             loadComponent: () =>
-              import('./pages/sales/sales-summary.component').then(
+              import('./pages/sales/sales-summary/sales-summary.component').then(
                 (c) => c.SalesSummaryComponent,
               ),
           },

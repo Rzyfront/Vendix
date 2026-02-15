@@ -1,0 +1,171 @@
+<div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
+  <!-- Header -->
+  <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div>
+      <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
+        <a routerLink="/admin/analytics" class="hover:text-primary">Analíticas</a>
+        <app-icon name="chevron-right" [size]="14"></app-icon>
+        <span>Ventas</span>
+      </div>
+      <h1 class="text-2xl font-bold text-text-primary">Resumen de Ventas</h1>
+      <p class="text-text-secondary mt-1">Análisis general del rendimiento de ventas</p>
+    </div>
+    <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+      <!-- Date Range Filter -->
+      <vendix-date-range-filter
+        [value]="(dateRange$ | async) ?? undefined"
+        (valueChange)="onDateRangeChange($event)"
+      ></vendix-date-range-filter>
+
+      <!-- Granularity -->
+      <app-selector
+        [options]="granularityOptions"
+        [ngModel]="granularity$ | async"
+        (ngModelChange)="onGranularityChange($event)"
+        size="sm"
+        placeholder="Granularidad"
+      ></app-selector>
+
+      <!-- Channel -->
+      <app-selector
+        [options]="channelOptions"
+        [ngModel]="(channel$ | async) || ''"
+        (ngModelChange)="onChannelChange($event)"
+        size="sm"
+        placeholder="Canal"
+      ></app-selector>
+
+      <!-- Export -->
+      <vendix-export-button
+        [loading]="(exporting$ | async) ?? false"
+        (export)="exportReport()"
+      ></vendix-export-button>
+    </div>
+  </div>
+
+  <!-- Stats Cards -->
+  @if (loading$ | async) {
+    <div class="stats-container">
+      @for (i of [1, 2, 3, 4]; track i) {
+        <div class="bg-surface border border-border rounded-xl p-4 animate-pulse">
+          <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+          <div class="h-8 bg-gray-200 rounded w-3/4"></div>
+        </div>
+      }
+    </div>
+  } @else {
+    <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <app-stats
+        title="Ingresos Totales"
+        [value]="(summary$ | async)?.total_revenue | currency"
+        [smallText]="getGrowthText((summary$ | async)?.revenue_growth)"
+        iconName="dollar-sign"
+        iconBgColor="bg-green-100"
+        iconColor="text-green-600"
+      ></app-stats>
+
+      <app-stats
+        title="Total Órdenes"
+        [value]="(summary$ | async)?.total_orders || 0"
+        [smallText]="getGrowthText((summary$ | async)?.orders_growth)"
+        iconName="shopping-cart"
+        iconBgColor="bg-blue-100"
+        iconColor="text-blue-600"
+      ></app-stats>
+
+      <app-stats
+        title="Ticket Promedio"
+        [value]="(summary$ | async)?.average_order_value | currency"
+        iconName="receipt"
+        iconBgColor="bg-purple-100"
+        iconColor="text-purple-600"
+      ></app-stats>
+
+      <app-stats
+        title="Unidades Vendidas"
+        [value]="(summary$ | async)?.total_units_sold || 0"
+        iconName="package"
+        iconBgColor="bg-orange-100"
+        iconColor="text-orange-600"
+      ></app-stats>
+    </div>
+  }
+
+  <!-- Charts Row -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Revenue Trend Chart -->
+    <div class="bg-surface border border-border rounded-xl overflow-hidden">
+      <div class="p-4 border-b border-border">
+        <h3 class="font-semibold text-text-primary">Tendencia de Ingresos</h3>
+        <p class="text-sm text-text-secondary">Evolución de ingresos en el período</p>
+      </div>
+      <div class="p-4">
+        @if (loadingTrends$ | async) {
+          <div class="h-64 flex items-center justify-center">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+        } @else {
+          <app-chart
+            [options]="revenueChartOptions"
+            size="large"
+          ></app-chart>
+        }
+      </div>
+    </div>
+
+    <!-- Orders Trend Chart -->
+    <div class="bg-surface border border-border rounded-xl overflow-hidden">
+      <div class="p-4 border-b border-border">
+        <h3 class="font-semibold text-text-primary">Tendencia de Órdenes</h3>
+        <p class="text-sm text-text-secondary">Número de órdenes en el período</p>
+      </div>
+      <div class="p-4">
+        @if (loadingTrends$ | async) {
+          <div class="h-64 flex items-center justify-center">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+        } @else {
+          <app-chart
+            [options]="ordersChartOptions"
+            size="large"
+          ></app-chart>
+        }
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick Links -->
+  <div class="bg-surface border border-border rounded-xl p-4">
+    <h3 class="font-semibold text-text-primary mb-4">Reportes Relacionados</h3>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <a
+        routerLink="../by-product"
+        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
+      >
+        <app-icon name="package" [size]="18" class="text-text-secondary"></app-icon>
+        <span class="text-text-primary">Ventas por Producto</span>
+      </a>
+      <a
+        routerLink="../by-category"
+        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
+      >
+        <app-icon name="folder" [size]="18" class="text-text-secondary"></app-icon>
+        <span class="text-text-primary">Ventas por Categoría</span>
+      </a>
+      <a
+        routerLink="../trends"
+        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
+      >
+        <app-icon name="trending-up" [size]="18" class="text-text-secondary"></app-icon>
+        <span class="text-text-primary">Tendencias</span>
+      </a>
+      <a
+        routerLink="../by-customer"
+        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
+      >
+        <app-icon name="users" [size]="18" class="text-text-secondary"></app-icon>
+        <span class="text-text-primary">Ventas por Cliente</span>
+      </a>
+    </div>
+  </div>
+</div>

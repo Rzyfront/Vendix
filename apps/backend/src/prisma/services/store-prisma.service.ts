@@ -448,10 +448,6 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.shipping_rates;
   }
 
-  get store_shipping_methods() {
-    return this.scoped_client.store_shipping_methods;
-  }
-
   get expenses() {
     return this.scoped_client.expenses;
   }

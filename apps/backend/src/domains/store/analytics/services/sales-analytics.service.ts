@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import { SalesAnalyticsQueryDto, DatePreset, Granularity } from '../dto/analytics-query.dto';
 
 @Injectable()
@@ -187,8 +189,9 @@ export class SalesAnalyticsService {
   async getSalesByCategory(query: SalesAnalyticsQueryDto) {
     const { startDate, endDate } = this.parseDateRange(query);
 
-    // Get all sales with category info
-    const sales = await this.prisma.order_items.findMany({
+    // Step 1: Aggregate order_items by product_id at DB level
+    const productAggregates = await this.prisma.order_items.groupBy({
+      by: ['product_id'],
       where: {
         orders: {
           state: { in: this.COMPLETED_STATES },
@@ -198,41 +201,56 @@ export class SalesAnalyticsService {
           },
         },
       },
-      include: {
-        products: {
-          include: {
-            product_categories: {
-              include: {
-                categories: true,
-              },
-            },
-          },
+      _sum: {
+        quantity: true,
+        total_price: true,
+      },
+    });
+
+    const productIds = productAggregates.map((r) => r.product_id).filter(Boolean) as number[];
+
+    // Step 2: Get product->category mappings with a lightweight select
+    const productCategories = await this.prisma.product_categories.findMany({
+      where: {
+        product_id: { in: productIds },
+      },
+      select: {
+        product_id: true,
+        category_id: true,
+        categories: {
+          select: { id: true, name: true },
         },
       },
     });
 
-    // Aggregate by category
+    // Build product -> categories map
+    const productCategoryMap = new Map<number, { id: number; name: string }[]>();
+    for (const pc of productCategories) {
+      const cats = productCategoryMap.get(pc.product_id) || [];
+      if (pc.categories) {
+        cats.push({ id: pc.categories.id, name: pc.categories.name });
+      }
+      productCategoryMap.set(pc.product_id, cats);
+    }
+
+    // Step 3: Aggregate by category in memory (iterating over product aggregates, not all order_items)
     const categoryMap = new Map<number, { name: string; units: number; revenue: number }>();
     let totalRevenue = 0;
 
-    for (const item of sales) {
-      const revenue = Number(item.total_price || 0);
-      const units = Number(item.quantity || 0);
+    for (const agg of productAggregates) {
+      const revenue = Number(agg._sum.total_price || 0);
+      const units = Number(agg._sum.quantity || 0);
       totalRevenue += revenue;
 
-      const categories = item.products?.product_categories || [];
+      const categories = productCategoryMap.get(agg.product_id as number) || [];
       if (categories.length > 0) {
-        for (const pc of categories) {
-          const cat = pc.categories;
-          if (cat) {
-            const existing = categoryMap.get(cat.id) || { name: cat.name, units: 0, revenue: 0 };
-            existing.units += units;
-            existing.revenue += revenue;
-            categoryMap.set(cat.id, existing);
-          }
+        for (const cat of categories) {
+          const existing = categoryMap.get(cat.id) || { name: cat.name, units: 0, revenue: 0 };
+          existing.units += units;
+          existing.revenue += revenue;
+          categoryMap.set(cat.id, existing);
         }
       } else {
-        // Uncategorized
         const existing = categoryMap.get(0) || { name: 'Sin categoría', units: 0, revenue: 0 };
         existing.units += units;
         existing.revenue += revenue;
@@ -305,47 +323,82 @@ export class SalesAnalyticsService {
   async getSalesTrends(query: SalesAnalyticsQueryDto) {
     const { startDate, endDate } = this.parseDateRange(query);
     const granularity = query.granularity || Granularity.DAY;
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
 
-    const orders = await this.prisma.orders.findMany({
-      where: {
-        state: { in: this.COMPLETED_STATES },
-        ...(query.channel && { channel: query.channel }),
-        created_at: {
-          gte: startDate,
-          lte: endDate,
-        },
-      },
-      include: {
-        order_items: true,
-      },
-      orderBy: {
-        created_at: 'asc',
-      },
+    // Map granularity to PostgreSQL DATE_TRUNC interval
+    // Use Prisma.raw() so the interval is inlined as a SQL literal
+    // instead of parameterized (avoids GROUP BY mismatch with SELECT)
+    const truncSql = Prisma.raw(`'${this.getDateTruncInterval(granularity)}'`);
+
+    // Use raw SQL to aggregate at DB level, bypassing in-memory processing
+    const results = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{
+        period: Date;
+        revenue: any;
+        order_count: bigint;
+        units_sold: any;
+      }>
+    >`
+      SELECT
+        DATE_TRUNC(${truncSql}, o.created_at) AS period,
+        COALESCE(SUM(o.grand_total), 0) AS revenue,
+        COUNT(DISTINCT o.id) AS order_count,
+        COALESCE(SUM(oi.quantity), 0) AS units_sold
+      FROM orders o
+      LEFT JOIN order_items oi ON oi.order_id = o.id
+      WHERE o.store_id = ${storeId}
+        AND o.state IN ('delivered', 'finished')
+        AND o.created_at >= ${startDate}
+        AND o.created_at <= ${endDate}
+        ${query.channel ? Prisma.sql`AND o.channel = ${query.channel}::order_channel_enum` : Prisma.empty}
+      GROUP BY DATE_TRUNC(${truncSql}, o.created_at)
+      ORDER BY period ASC
+    `;
+
+    return results.map((r) => {
+      const revenue = Number(r.revenue);
+      const orders = Number(r.order_count);
+      return {
+        period: this.formatPeriodFromDate(new Date(r.period), granularity),
+        revenue,
+        orders,
+        units_sold: Number(r.units_sold),
+        average_order_value: orders > 0 ? revenue / orders : 0,
+      };
     });
+  }
 
-    // Group by period
-    const periodMap = new Map<string, { revenue: number; orders: number; units: number }>();
-
-    for (const order of orders) {
-      const period = this.getPeriodKey(order.created_at, granularity);
-      const existing = periodMap.get(period) || { revenue: 0, orders: 0, units: 0 };
-
-      existing.revenue += Number(order.grand_total || 0);
-      existing.orders += 1;
-      existing.units += order.order_items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-
-      periodMap.set(period, existing);
+  private getDateTruncInterval(granularity: Granularity): string {
+    switch (granularity) {
+      case Granularity.HOUR: return 'hour';
+      case Granularity.DAY: return 'day';
+      case Granularity.WEEK: return 'week';
+      case Granularity.MONTH: return 'month';
+      case Granularity.YEAR: return 'year';
+      default: return 'day';
     }
+  }
 
-    return Array.from(periodMap.entries())
-      .map(([period, data]) => ({
-        period,
-        revenue: data.revenue,
-        orders: data.orders,
-        units_sold: data.units,
-        average_order_value: data.orders > 0 ? data.revenue / data.orders : 0,
-      }))
-      .sort((a, b) => a.period.localeCompare(b.period));
+  private formatPeriodFromDate(date: Date, granularity: Granularity): string {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+
+    switch (granularity) {
+      case Granularity.HOUR:
+        return `${y}-${m}-${d}T${String(date.getHours()).padStart(2, '0')}:00`;
+      case Granularity.DAY:
+        return `${y}-${m}-${d}`;
+      case Granularity.WEEK:
+        return `${y}-${m}-${d}`;
+      case Granularity.MONTH:
+        return `${y}-${m}`;
+      case Granularity.YEAR:
+        return `${y}`;
+      default:
+        return `${y}-${m}-${d}`;
+    }
   }
 
   async getSalesByCustomer(query: SalesAnalyticsQueryDto) {
@@ -464,9 +517,13 @@ export class SalesAnalyticsService {
   // Helper methods
   private parseDateRange(query: SalesAnalyticsQueryDto): { startDate: Date; endDate: Date } {
     if (query.date_from && query.date_to) {
+      // date_to comes as 'YYYY-MM-DD' which parses to midnight UTC.
+      // Set to end-of-day so orders created during that day are included.
+      const endDate = new Date(query.date_to);
+      endDate.setUTCHours(23, 59, 59, 999);
       return {
         startDate: new Date(query.date_from),
-        endDate: new Date(query.date_to),
+        endDate,
       };
     }
 
@@ -523,9 +580,12 @@ export class SalesAnalyticsService {
       case Granularity.DAY:
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       case Granularity.WEEK:
-        const weekStart = new Date(d);
-        weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-        return `${weekStart.getFullYear()}-W${String(Math.ceil((weekStart.getDate()) / 7)).padStart(2, '0')}`;
+        // ISO-8601 week number calculation
+        const target = new Date(d.valueOf());
+        target.setDate(target.getDate() + 3 - ((target.getDay() + 6) % 7));
+        const yearStart = new Date(target.getFullYear(), 0, 4);
+        const weekNo = 1 + Math.round(((target.getTime() - yearStart.getTime()) / 86400000 - 3 + ((yearStart.getDay() + 6) % 7)) / 7);
+        return `${target.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
       case Granularity.MONTH:
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       case Granularity.YEAR:

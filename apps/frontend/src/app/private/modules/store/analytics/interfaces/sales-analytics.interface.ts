@@ -76,6 +76,7 @@ export interface SalesAnalyticsQueryDto {
   category_id?: number;
   brand_id?: number;
   payment_method?: string;
+  channel?: string;
   page?: number;
   limit?: number;
   sort_by?: string;

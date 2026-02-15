@@ -406,3 +406,52 @@ export interface ExtendedOrderStats extends OrderStats {
   completedGrowthRate?: number;
   revenueGrowthRate?: number;
 }
+
+// ── Order Flow DTOs ──────────────────────────────────────────────
+
+export type PaymentType = 'direct' | 'online';
+
+export interface PayOrderDto {
+  store_payment_method_id: number;
+  payment_type: PaymentType;
+  amount_received?: number;
+}
+
+export interface ShipOrderDto {
+  tracking_number?: string;
+  carrier?: string;
+  notes?: string;
+}
+
+export interface DeliverOrderDto {
+  delivery_notes?: string;
+  delivered_to?: string;
+}
+
+export interface CancelOrderDto {
+  reason: string;
+}
+
+export interface RefundOrderDto {
+  amount?: number;
+  reason: string;
+}
+
+export interface PayOrderResponse {
+  order: Order;
+  payment: {
+    transaction_id: string;
+    change?: number;
+  };
+}
+
+export interface OrderFlowMetadata {
+  tracking_number?: string;
+  carrier?: string;
+  shipping_notes?: string;
+  delivery_notes?: string;
+  delivered_to?: string;
+  cancellation_reason?: string;
+  refund_reason?: string;
+  refund_amount?: number;
+}

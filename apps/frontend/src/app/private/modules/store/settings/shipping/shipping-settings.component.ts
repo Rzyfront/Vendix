@@ -325,7 +325,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
           this.is_enabling = true;
           this.shipping_methods_service
             .enableShippingMethod(method.id, {
-              display_name: method.name,
+              name: method.name,
             })
             .pipe(takeUntil(this.destroy$))
             .subscribe({
@@ -375,7 +375,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
   }
 
   toggleShippingMethod(method: StoreShippingMethod): void {
-    if (method.state === 'enabled') {
+    if (method.is_active) {
       this.shipping_methods_service
         .disableShippingMethod(method.id)
         .pipe(takeUntil(this.destroy$))
