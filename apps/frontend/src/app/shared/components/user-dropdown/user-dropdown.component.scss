@@ -115,7 +115,7 @@
     visibility: hidden;
     transform: translateY(-8px);
     transition: all 0.2s ease;
-    z-index: 99999;
+    z-index: 100000;
     overflow: hidden;
 
     &.show {

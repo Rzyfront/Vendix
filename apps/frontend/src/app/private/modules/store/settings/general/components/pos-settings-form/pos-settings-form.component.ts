@@ -20,6 +20,7 @@ export interface PosSettings {
   allow_anonymous_sales: boolean;
   anonymous_sales_as_default: boolean;
   business_hours: Record<string, BusinessHours>;
+  enable_schedule_validation: boolean;
   offline_mode_enabled: boolean;
   require_cash_drawer_open: boolean;
   auto_print_receipt: boolean;
@@ -45,6 +46,7 @@ export class PosSettingsForm implements OnInit, OnChanges {
     allow_anonymous_sales: new FormControl(false),
     anonymous_sales_as_default: new FormControl(false),
     business_hours: new FormControl(this.getDefaultBusinessHours()),
+    enable_schedule_validation: new FormControl(false),
     offline_mode_enabled: new FormControl(false),
     require_cash_drawer_open: new FormControl(false),
     auto_print_receipt: new FormControl(true),
@@ -101,6 +103,10 @@ export class PosSettingsForm implements OnInit, OnChanges {
     return this.form.get(
       'allow_refund_without_approval',
     ) as FormControl<boolean>;
+  }
+
+  get enableScheduleValidationControl(): FormControl<boolean> {
+    return this.form.get('enable_schedule_validation') as FormControl<boolean>;
   }
 
   ngOnInit() {

@@ -700,6 +700,34 @@ interface PaymentState {
         cursor: pointer;
       }
 
+      /* Create Customer Action - Always visible */
+      .create-customer-action {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--color-border);
+      }
+
+      .create-customer-btn {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 12px;
+        background: var(--color-primary);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: filter 0.2s;
+      }
+
+      .create-customer-btn:hover {
+        filter: brightness(1.1);
+      }
+
       /* Create Customer Form */
       .create-customer-form {
         margin-top: 12px;
@@ -918,6 +946,8 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy, OnChange
   allowAnonymousSales = false;
   anonymousSalesAsDefault = false;
   requireCashDrawerOpen = false;
+  enableScheduleValidation = false;
+  businessHours: Record<string, { open: string; close: string }> = {};
 
   // Currency symbol (computed signal from CurrencyFormatService)
   currencySymbol: any;
@@ -1081,6 +1111,44 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy, OnChange
       });
   }
 
+  private isWithinBusinessHours(): boolean {
+    // If schedule validation is disabled, always allow
+    if (!this.enableScheduleValidation) {
+      return true;
+    }
+
+    // Get current day and time in store timezone
+    const now = new Date();
+    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const currentDayName = dayNames[now.getDay()];
+
+    // Get business hours for current day
+    const todayHours = this.businessHours?.[currentDayName];
+
+    // If no hours configured for today, allow by default
+    if (!todayHours) {
+      return true;
+    }
+
+    // If day is marked as closed, don't allow sales
+    if (todayHours.open === 'closed' || todayHours.close === 'closed') {
+      return false;
+    }
+
+    // Parse current time to minutes for comparison
+    const currentTime = now.getHours() * 60 + now.getMinutes();
+
+    // Parse opening and closing times
+    const [openHour, openMinute] = todayHours.open.split(':').map(Number);
+    const [closeHour, closeMinute] = todayHours.close.split(':').map(Number);
+
+    const openTime = openHour * 60 + openMinute;
+    const closeTime = closeHour * 60 + closeMinute;
+
+    // Check if current time is within business hours
+    return currentTime >= openTime && currentTime <= closeTime;
+  }
+
   private loadStoreSettings(): void {
     this.storeSettingsSubscription = this.store.select(fromAuth.selectStoreSettings).pipe(takeUntil(this.destroy$)).subscribe((storeSettings: any) => {
       // store_settings has structure: { settings: { pos: { ... }, general: { ... }, ... } }
@@ -1091,12 +1159,16 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy, OnChange
         this.allowAnonymousSales = settings.pos.allow_anonymous_sales || false;
         this.anonymousSalesAsDefault = settings.pos.anonymous_sales_as_default || false;
         this.requireCashDrawerOpen = settings.pos.require_cash_drawer_open || false;
+        this.enableScheduleValidation = settings.pos.enable_schedule_validation || false;
+        this.businessHours = settings.pos.business_hours || {};
         this.settingsLoaded = true;
 
         console.log('[POS Payment] Store settings updated:', {
           allowAnonymousSales: this.allowAnonymousSales,
           anonymousSalesAsDefault: this.anonymousSalesAsDefault,
           requireCashDrawerOpen: this.requireCashDrawerOpen,
+          enableScheduleValidation: this.enableScheduleValidation,
+          businessHours: this.businessHours,
           prevAllowAnonymous,
           isAnonymousSale: this.paymentState.isAnonymousSale,
           rawSettings: settings,
@@ -1251,6 +1323,18 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy, OnChange
       return;
     }
 
+    // Check business hours if validation is enabled
+    if (!this.isWithinBusinessHours()) {
+      const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+      const today = dayNames[new Date().getDay()];
+      this.toastService.show({
+        variant: 'error',
+        title: 'Fuera del horario de atención',
+        description: `El POS está cerrado. Hoy ${today} no se permite realizar ventas fuera del horario configurado.`,
+      });
+      return;
+    }
+
     this.paymentState.isProcessing = true;
 
     const payment_request = {
@@ -1322,6 +1406,18 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy, OnChange
       this.toastService.info('Configure la caja para continuar');
       this.requestRegisterConfig.emit();
       this.onModalClosed();
+      return;
+    }
+
+    // Check business hours if validation is enabled
+    if (!this.isWithinBusinessHours()) {
+      const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+      const today = dayNames[new Date().getDay()];
+      this.toastService.show({
+        variant: 'error',
+        title: 'Fuera del horario de atención',
+        description: `El POS está cerrado. Hoy ${today} no se permite realizar ventas fuera del horario configurado.`,
+      });
       return;
     }
 
