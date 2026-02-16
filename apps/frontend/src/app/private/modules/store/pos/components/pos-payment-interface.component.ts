@@ -979,9 +979,6 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy, OnChange
   // Currency symbol (computed signal from CurrencyFormatService)
   currencySymbol: any;
 
-  // Currency symbol (computed signal from CurrencyFormatService)
-  currencySymbol: any;
-
   // Document type options for customer creation
   documentTypeOptions = [
     { value: 'dni', label: 'DNI' },
