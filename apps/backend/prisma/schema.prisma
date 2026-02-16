@@ -1369,21 +1369,6 @@ model system_zone_updates {
   @@index([created_at])
 }
 
-// Tracking de cambios en zonas del sistema para notificar a tiendas
-model system_zone_updates {
-  id             Int            @id @default(autoincrement())
-  system_zone_id Int
-  change_type    String         @db.VarChar(50) // 'updated' | 'new_rate' | 'rate_updated' | 'deleted'
-  description    String
-  created_at     DateTime       @default(now()) @db.Timestamp(6)
-
-  // Relación con la zona del sistema
-  system_zone shipping_zones @relation(fields: [system_zone_id], references: [id], onDelete: Cascade)
-
-  @@index([system_zone_id])
-  @@index([created_at])
-}
-
 // ===== ECOMMERCE MODELS =====
 
 model carts {
@@ -1834,11 +1819,6 @@ enum shipping_rate_type_enum {
   price_based
   carrier_calculated
   free
-}
-
-enum zone_source_type_enum {
-  system_copy // Copiada automáticamente del sistema al habilitar un método
-  custom      // Creada desde cero o duplicada para personalizar
 }
 
 enum zone_source_type_enum {
