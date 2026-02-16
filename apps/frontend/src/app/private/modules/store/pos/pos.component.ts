@@ -157,10 +157,11 @@ import { PosCartModalComponent } from './components/pos-cart-modal.component';
               <!-- Settings Button -->
               <app-button
                 variant="ghost"
-                size="md"
+                size="xsm"
                 (clicked)="onOpenRegisterConfigModal()"
                 title="Configurar Caja"
-                class="w-9 h-9 lg:w-10 lg:h-10 !p-0 flex items-center justify-center rounded-lg text-text-secondary hover:text-primary hover:bg-primary-light/10 transition-colors"
+                class="w-9 h-9 lg:w-10 lg:h-10 flex items-center justify-center rounded-lg text-text-secondary hover:text-primary hover:bg-primary-light/10 transition-colors"
+                customClasses="!p-0 !h-full !w-full !rounded-lg"
               >
                 <app-icon
                   name="settings"

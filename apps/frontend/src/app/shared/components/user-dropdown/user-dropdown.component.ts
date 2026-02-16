@@ -181,7 +181,7 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
     },
     {
       label: 'Configuración',
-      icon: 'settings',
+      icon: 'user-cog',
       action: () => this.goToSettings(),
     },
     {

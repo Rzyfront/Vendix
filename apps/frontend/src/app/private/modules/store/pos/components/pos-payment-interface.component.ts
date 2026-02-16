@@ -893,6 +893,33 @@ interface PaymentState {
         }
       }
 
+      /* Desktop: 3-column horizontal layout */
+      @media (min-width: 1024px) {
+        .payment-content {
+          display: grid;
+          grid-template-columns: 3fr 5fr 4fr;
+          gap: 16px;
+          height: 100%;
+          min-height: 0;
+        }
+
+        .payment-section {
+          display: flex;
+          flex-direction: column;
+          overflow-y: auto;
+          height: 100%;
+        }
+
+        .product-list {
+          max-height: none;
+          flex: 1;
+        }
+
+        .search-results {
+          max-height: 200px;
+        }
+      }
+
       /* Responsive */
       @media (max-width: 480px) {
         .payment-content {

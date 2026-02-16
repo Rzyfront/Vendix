@@ -60,13 +60,13 @@
   /* Default Theme Colors (Light) */
   --color-background: #f4f4f4;
   --color-surface: #ffffff;
-  --color-primary: #7ed7a5;
+  --color-primary: #2ecc71;
   /* Vendix green */
-  --color-secondary: #2f6f4e;
-  --color-accent: #ffffff;
+  --color-secondary: #162b21;
+  --color-accent: #a1f4d9;
   --color-destructive: #c46363;
   --color-border: #e6edf3;
-  --color-ring: rgba(47, 111, 78, 0.4);
+  --color-ring: #162b21;
 
   /* RGB values for gradient/rgba usage */
   --color-primary-rgb: 126, 215, 165;
@@ -555,6 +555,7 @@ footer {
 .scrollbar-none::-webkit-scrollbar {
   display: none;
 }
+
 .scrollbar-none {
   -ms-overflow-style: none;
   scrollbar-width: none;

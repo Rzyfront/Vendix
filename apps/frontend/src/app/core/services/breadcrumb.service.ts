@@ -753,6 +753,12 @@ export class BreadcrumbService {
       icon: 'dollar-sign',
     },
     {
+      path: '/admin/analytics/sales/summary',
+      title: 'Resumen de Ventas',
+      parent: 'Ventas',
+      icon: 'bar-chart',
+    },
+    {
       path: '/admin/analytics/traffic',
       title: 'Tráfico',
       parent: 'Analíticas',

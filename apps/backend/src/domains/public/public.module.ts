@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PublicDomainsModule } from './domains/public-domains.module';
+import { PublicSeoModule } from './seo/public-seo.module';
 
 /**
  * 🌐 Public Domain Module
@@ -9,13 +10,12 @@ import { PublicDomainsModule } from './domains/public-domains.module';
  *
  * Current modules:
  * - PublicDomainsModule: Domain resolution and availability checking
- *
- * Future modules can be added here as needed.
+ * - PublicSeoModule: Sitemap.xml and robots.txt generation
  */
 @Module({
   imports: [
     PublicDomainsModule,
-    // Future public modules can be added here
+    PublicSeoModule,
   ],
 })
 export class PublicDomainModule {}

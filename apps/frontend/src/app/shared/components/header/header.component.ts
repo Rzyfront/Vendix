@@ -216,6 +216,11 @@ export class HeaderComponent implements OnInit, OnDestroy {
     const brandingContext = this.globalFacade.getBrandingContext();
     if (brandingContext?.logo?.url) {
       this.storeLogo = brandingContext.logo.url;
+    } else {
+      const navContext = this.globalFacade.getNavigationContext();
+      if (navContext?.isVendixDomain) {
+        this.storeLogo = 'vlogo.png';
+      }
     }
 
     const userContext = this.globalFacade.getUserContext();

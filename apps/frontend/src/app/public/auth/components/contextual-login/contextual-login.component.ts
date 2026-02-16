@@ -68,12 +68,18 @@ export interface OrganizationCandidate {
         <!-- Contextual Branding -->
         <div class="text-center">
           <div class="mx-auto flex items-center justify-center space-x-2 sm:space-x-3 mb-3 sm:mb-4">
-            <div
-              class="w-8 h-8 sm:w-10 sm:h-10 bg-[var(--color-primary)] rounded-xl flex items-center justify-center"
-            >
-              <app-icon name="cart" [size]="20" class="sm:hidden" color="white"></app-icon>
-              <app-icon name="cart" [size]="24" class="hidden sm:block" color="white"></app-icon>
-            </div>
+            @if (logoUrl) {
+              <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center overflow-hidden">
+                <img [src]="logoUrl" alt="Logo" class="w-full h-full object-contain" />
+              </div>
+            } @else {
+              <div
+                class="w-8 h-8 sm:w-10 sm:h-10 bg-[var(--color-primary)] rounded-xl flex items-center justify-center"
+              >
+                <app-icon name="cart" [size]="20" class="sm:hidden" color="white"></app-icon>
+                <app-icon name="cart" [size]="24" class="hidden sm:block" color="white"></app-icon>
+              </div>
+            }
             <h1 class="text-lg sm:text-xl font-semibold text-[var(--color-text-primary)]">
               {{ displayName || 'Vendix' }}
             </h1>
@@ -498,6 +504,9 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     }
     this.loginForm.get('vlink')?.updateValueAndValidity();
     this.logoUrl = appConfig.branding?.logo?.url || '';
+    if (!this.logoUrl && domainConfig.isVendixDomain) {
+      this.logoUrl = 'vlogo.png';
+    }
   }
 
   /**

@@ -8,6 +8,7 @@ import {
 import { HeaderComponent } from '../../../shared/components/header/header.component';
 import { IconComponent } from '../../../shared/components/icon/icon.component';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
+import { ConfigFacade } from '../../../core/store/config';
 import { OnboardingWizardService } from '../../../core/services/onboarding-wizard.service';
 import { OnboardingModalComponent } from '../../../shared/components/onboarding-modal';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
@@ -127,6 +128,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
 
   // Panel UI menu filtering
   private menuFilterService = inject(MenuFilterService);
+  private configFacade = inject(ConfigFacade);
 
   // ALL possible menu items (constant)
   private allMenuItems: MenuItem[] = [
@@ -325,7 +327,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     this.storeDomainHostname$ = this.authFacade.userDomainHostname$;
     this.storeType$ = this.authFacade.userStoreType$;
     this.storeLogo$ = this.authFacade.userStore$.pipe(
-      map(store => store?.logo_url || null)
+      map(store => {
+        if (store?.logo_url) return store.logo_url;
+        const isVendix = this.configFacade.getCurrentConfig()?.domainConfig?.isVendixDomain;
+        return isVendix ? 'vlogo.png' : null;
+      })
     );
   }
 

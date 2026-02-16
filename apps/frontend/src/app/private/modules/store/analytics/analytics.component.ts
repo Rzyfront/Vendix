@@ -111,6 +111,7 @@ export class AnalyticsComponent {
         { id: 'stock-levels', label: 'Niveles de Stock', description: '', route: './inventory/stock-levels' },
         { id: 'low-stock', label: 'Alertas de Stock Bajo', description: '', route: './inventory/low-stock' },
         { id: 'movements', label: 'Movimientos', description: '', route: './inventory/movements' },
+        { id: 'movement-analysis', label: 'Análisis de Movimientos', description: '', route: './inventory/movement-analysis' },
         { id: 'valuation', label: 'Valoración', description: '', route: './inventory/valuation' },
       ],
     },

@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   ReactiveFormsModule,
@@ -53,12 +53,18 @@ interface RegistrationError {
         <!-- Branding -->
         <div class="text-center">
           <div class="mx-auto flex items-center justify-center space-x-2 sm:space-x-3 mb-3 sm:mb-4">
-            <div
-              class="w-8 h-8 sm:w-10 sm:h-10 bg-[var(--color-primary)] rounded-xl flex items-center justify-center"
-            >
-              <app-icon name="cart" [size]="20" class="sm:hidden" color="white"></app-icon>
-              <app-icon name="cart" [size]="24" class="hidden sm:block" color="white"></app-icon>
-            </div>
+            @if (logoUrl) {
+              <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center overflow-hidden">
+                <img [src]="logoUrl" alt="Logo" class="w-full h-full object-contain" />
+              </div>
+            } @else {
+              <div
+                class="w-8 h-8 sm:w-10 sm:h-10 bg-[var(--color-primary)] rounded-xl flex items-center justify-center"
+              >
+                <app-icon name="cart" [size]="20" class="sm:hidden" color="white"></app-icon>
+                <app-icon name="cart" [size]="24" class="hidden sm:block" color="white"></app-icon>
+              </div>
+            }
             <h1 class="text-lg sm:text-xl font-semibold text-[var(--color-text-primary)]">
               Vendix
             </h1>
@@ -222,7 +228,7 @@ interface RegistrationError {
     `,
   ],
 })
-export class RegisterOwnerComponent {
+export class RegisterOwnerComponent implements OnInit {
   private fb = inject(FormBuilder);
   private authService = inject(AuthService);
   private authFacade = inject(AuthFacade);
@@ -235,6 +241,7 @@ export class RegisterOwnerComponent {
 
   registrationState: RegistrationState = 'idle';
   registrationError: RegistrationError | null = null;
+  logoUrl: string = '';
 
   isLoading = false;
 
@@ -253,6 +260,16 @@ export class RegisterOwnerComponent {
     ],
     password: ['', [Validators.required, passwordValidator]],
   });
+
+  ngOnInit(): void {
+    const appConfig = this.configFacade.getCurrentConfig();
+    if (appConfig) {
+      this.logoUrl = appConfig.branding?.logo?.url || '';
+      if (!this.logoUrl && appConfig.domainConfig?.isVendixDomain) {
+        this.logoUrl = 'vlogo.png';
+      }
+    }
+  }
 
   onFieldBlur(fieldName: string): void {
     const field = this.registerForm.get(fieldName);

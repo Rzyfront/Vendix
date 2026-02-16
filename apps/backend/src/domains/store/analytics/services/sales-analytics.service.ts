@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { SalesAnalyticsQueryDto, DatePreset, Granularity } from '../dto/analytics-query.dto';
+import { fillTimeSeries } from '../utils/fill-time-series.util';
 
 @Injectable()
 export class SalesAnalyticsService {
@@ -356,7 +357,7 @@ export class SalesAnalyticsService {
       ORDER BY period ASC
     `;
 
-    return results.map((r) => {
+    const mapped = results.map((r) => {
       const revenue = Number(r.revenue);
       const orders = Number(r.order_count);
       return {
@@ -367,6 +368,15 @@ export class SalesAnalyticsService {
         average_order_value: orders > 0 ? revenue / orders : 0,
       };
     });
+
+    return fillTimeSeries(
+      mapped,
+      startDate,
+      endDate,
+      granularity,
+      { revenue: 0, orders: 0, units_sold: 0, average_order_value: 0 },
+      this.formatPeriodFromDate.bind(this),
+    );
   }
 
   private getDateTruncInterval(granularity: Granularity): string {
@@ -512,6 +522,69 @@ export class SalesAnalyticsService {
         percentage: total > 0 ? (Number(r._sum.grand_total || 0) / total) * 100 : 0,
       }))
       .sort((a, b) => b.revenue - a.revenue);
+  }
+
+  async getOrdersForExport(query: SalesAnalyticsQueryDto) {
+    const { startDate, endDate } = this.parseDateRange(query);
+
+    const orders = await this.prisma.orders.findMany({
+      where: {
+        state: { in: this.COMPLETED_STATES },
+        ...(query.channel && { channel: query.channel }),
+        created_at: { gte: startDate, lte: endDate },
+      },
+      include: {
+        order_items: {
+          include: {
+            products: { select: { name: true, sku: true } },
+          },
+        },
+        users: {
+          select: { first_name: true, last_name: true, email: true },
+        },
+        payments: {
+          where: { state: 'succeeded' },
+          include: {
+            store_payment_method: {
+              include: { system_payment_method: { select: { display_name: true } } },
+            },
+          },
+          take: 1,
+        },
+      },
+      orderBy: { created_at: 'desc' },
+      take: 10000,
+    });
+
+    // Flatten: one row per order_item
+    return orders.flatMap(order => {
+      const customer = order.users;
+      const customerName = customer
+        ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'Cliente'
+        : 'Anónimo';
+      const paymentMethod = order.payments?.[0]?.store_payment_method
+        ?.system_payment_method?.display_name || 'N/A';
+
+      return order.order_items.map(item => ({
+        order_number: order.order_number,
+        date: order.created_at?.toISOString().split('T')[0] || '',
+        customer_name: customerName,
+        customer_email: customer?.email || '',
+        channel: order.channel,
+        product_name: item.product_name,
+        sku: item.products?.sku || item.variant_sku || '',
+        quantity: Number(item.quantity),
+        unit_price: Number(item.unit_price),
+        item_total: Number(item.total_price),
+        subtotal: Number(order.subtotal_amount),
+        discount: Number(order.discount_amount),
+        tax: Number(order.tax_amount),
+        shipping: Number(order.shipping_cost),
+        grand_total: Number(order.grand_total),
+        payment_method: paymentMethod,
+        state: order.state,
+      }));
+    });
   }
 
   // Helper methods

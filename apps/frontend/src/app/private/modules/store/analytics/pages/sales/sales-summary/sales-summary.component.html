@@ -1,48 +1,4 @@
-<div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
-  <!-- Header -->
-  <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-    <div>
-      <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-        <a routerLink="/admin/analytics" class="hover:text-primary">Analíticas</a>
-        <app-icon name="chevron-right" [size]="14"></app-icon>
-        <span>Ventas</span>
-      </div>
-      <h1 class="text-2xl font-bold text-text-primary">Resumen de Ventas</h1>
-      <p class="text-text-secondary mt-1">Análisis general del rendimiento de ventas</p>
-    </div>
-    <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-      <!-- Date Range Filter -->
-      <vendix-date-range-filter
-        [value]="(dateRange$ | async) ?? undefined"
-        (valueChange)="onDateRangeChange($event)"
-      ></vendix-date-range-filter>
-
-      <!-- Granularity -->
-      <app-selector
-        [options]="granularityOptions"
-        [ngModel]="granularity$ | async"
-        (ngModelChange)="onGranularityChange($event)"
-        size="sm"
-        placeholder="Granularidad"
-      ></app-selector>
-
-      <!-- Channel -->
-      <app-selector
-        [options]="channelOptions"
-        [ngModel]="(channel$ | async) || ''"
-        (ngModelChange)="onChannelChange($event)"
-        size="sm"
-        placeholder="Canal"
-      ></app-selector>
-
-      <!-- Export -->
-      <vendix-export-button
-        [loading]="(exporting$ | async) ?? false"
-        (export)="exportReport()"
-      ></vendix-export-button>
-    </div>
-  </div>
-
+<div class="md:space-y-4">
   <!-- Stats Cards -->
   @if (loading$ | async) {
     <div class="stats-container">
@@ -76,6 +32,7 @@
       <app-stats
         title="Ticket Promedio"
         [value]="(summary$ | async)?.average_order_value | currency"
+        smallText="Valor promedio por orden"
         iconName="receipt"
         iconBgColor="bg-purple-100"
         iconColor="text-purple-600"
@@ -84,12 +41,45 @@
       <app-stats
         title="Unidades Vendidas"
         [value]="(summary$ | async)?.total_units_sold || 0"
+        smallText="Total en el período"
         iconName="package"
         iconBgColor="bg-orange-100"
         iconColor="text-orange-600"
       ></app-stats>
     </div>
   }
+
+  <!-- Filter Bar: sticky below stats on mobile, standard on desktop -->
+  <div class="sticky top-[99px] z-10 bg-background px-2 py-0.5 -mt-[11px] md:-mt-2 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border">
+    <div class="flex items-center justify-between gap-2">
+      <div class="min-w-0">
+        <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-base md:font-semibold md:text-text-primary truncate">
+          Analíticas y Reportes de Ventas
+        </h2>
+        <p class="text-[11px] text-gray-400 md:text-xs md:text-text-secondary truncate">
+          Filtra, analiza y exporta reportes especializados
+        </p>
+      </div>
+
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <vendix-export-button
+          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+          [loading]="(exporting$ | async) ?? false"
+          (export)="exportReport()"
+        ></vendix-export-button>
+
+        <app-options-dropdown
+          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+          [filters]="filterConfigs"
+          [filterValues]="filterValues"
+          title="Filtros"
+          triggerLabel="Filtros"
+          (filterChange)="onFilterChange($event)"
+          (clearAllFilters)="onClearAllFilters()"
+        ></app-options-dropdown>
+      </div>
+    </div>
+  </div>
 
   <!-- Charts Row -->
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -101,7 +101,7 @@ export class SalesSummaryEffects {
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `ventas_${new Date().toISOString().split('T')[0]}.csv`;
+            a.download = `ventas_${new Date().toISOString().split('T')[0]}.xlsx`;
             a.click();
             window.URL.revokeObjectURL(url);
             this.toastService.success('Reporte exportado correctamente');

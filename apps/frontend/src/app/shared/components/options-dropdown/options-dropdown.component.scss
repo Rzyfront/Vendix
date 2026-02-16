@@ -4,8 +4,8 @@
 .options-dropdown-container {
   position: relative;
   display: inline-block;
-  // Ensure container creates its own stacking context above other elements
-  z-index: 100;
+  // Stacking context for dropdown content; must stay below sidebar backdrop (z-index: 54)
+  z-index: var(--z-dropdown);
   // Ensure dropdown can overflow outside this container
   overflow: visible;
 }

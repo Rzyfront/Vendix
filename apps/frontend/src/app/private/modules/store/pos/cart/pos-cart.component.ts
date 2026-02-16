@@ -131,7 +131,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         <!-- Empty State -->
         <div
           *ngIf="isEmpty$ | async"
-          class="flex flex-col items-center justify-center h-full min-h-[200px] text-center opacity-60"
+          class="flex flex-col items-center pt-10 min-h-[200px] text-center opacity-60"
         >
           <div
             class="w-12 h-12 bg-muted/20 rounded-full flex items-center justify-center mb-3"
