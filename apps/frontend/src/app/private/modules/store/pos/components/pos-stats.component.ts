@@ -33,6 +33,16 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         iconColor="text-blue-600"
       ></app-stats>
 
+      <!-- Subtotal -->
+      <app-stats
+        title="Subtotal"
+        [value]="formatCurrency(getSubtotal())"
+        smallText="Antes de impuestos"
+        iconName="calculator"
+        iconBgColor="bg-purple-100"
+        iconColor="text-purple-600"
+      ></app-stats>
+
       <!-- Total Carrito -->
       <app-stats
         title="Total"
@@ -57,6 +67,10 @@ export class PosStatsComponent {
         0,
       ) || 0
     );
+  }
+
+  getSubtotal(): number {
+    return this.cartState?.summary?.subtotal || 0;
   }
 
   getTotalAmount(): number {

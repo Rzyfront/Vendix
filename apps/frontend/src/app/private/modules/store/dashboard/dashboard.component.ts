@@ -23,14 +23,14 @@ import {
 } from '../analytics/interfaces/sales-analytics.interface';
 import { StoreDashboardService } from './services/store-dashboard.service';
 
-// Channel colors for the pie chart
-const CHANNEL_CONFIG: Record<string, { color: string }> = {
-  pos: { color: '#3b82f6' },
-  ecommerce: { color: '#10b981' },
-  whatsapp: { color: '#22c55e' },
-  agent: { color: '#8b5cf6' },
-  marketplace: { color: '#f59e0b' },
-  default: { color: '#6b7280' },
+// Channel → CSS variable mapping for the pie chart
+const CHANNEL_COLOR_VAR: Record<string, string> = {
+  pos: '--color-primary',
+  ecommerce: '--color-secondary',
+  whatsapp: '--color-accent',
+  agent: '--color-warning',
+  marketplace: '--color-error',
+  default: '--color-muted-foreground',
 };
 
 // Quick-access links configuration
@@ -80,32 +80,32 @@ const QUICK_LINKS: QuickLink[] = [
             [value]="formatCurrency(summary()?.total_revenue || 0)"
             [smallText]="getGrowthText(summary()?.revenue_growth)"
             iconName="dollar-sign"
-            iconBgColor="bg-emerald-100"
-            iconColor="text-emerald-500"
+            iconBgColor="bg-primary/10"
+            iconColor="text-primary"
           />
           <app-stats
             title="Órdenes"
             [value]="summary()?.total_orders || 0"
             [smallText]="getGrowthText(summary()?.orders_growth)"
             iconName="shopping-cart"
-            iconBgColor="bg-blue-100"
-            iconColor="text-blue-500"
+            iconBgColor="bg-secondary/10"
+            iconColor="text-secondary"
           />
           <app-stats
             title="Ticket Prom."
             [value]="formatCurrency(summary()?.average_order_value || 0)"
             [smallText]="(summary()?.total_units_sold || 0) + ' uds. vendidas'"
             iconName="receipt"
-            iconBgColor="bg-purple-100"
-            iconColor="text-purple-500"
+            iconBgColor="bg-accent/10"
+            iconColor="text-accent"
           />
           <app-stats
             title="Clientes"
             [value]="summary()?.total_customers || 0"
             smallText="clientes únicos"
             iconName="users"
-            iconBgColor="bg-amber-100"
-            iconColor="text-amber-500"
+            iconBgColor="bg-warning/10"
+            iconColor="text-warning"
           />
         </div>
       }
@@ -182,71 +182,71 @@ const QUICK_LINKS: QuickLink[] = [
             } @else {
               @if (lowStockCount() > 0) {
                 <div
-                  class="flex items-center gap-3 p-3 bg-amber-50 rounded-lg cursor-pointer hover:bg-amber-100 transition-colors"
+                  class="flex items-center gap-3 p-3 bg-warning-light rounded-lg cursor-pointer hover:bg-warning/15 transition-colors"
                   (click)="navigateTo('/admin/analytics/inventory/low-stock')"
                 >
-                  <div class="flex-shrink-0 w-7 h-7 bg-amber-100 rounded-full flex items-center justify-center">
-                    <app-icon name="alert-triangle" [size]="14" class="text-amber-600"></app-icon>
+                  <div class="flex-shrink-0 w-7 h-7 bg-warning/20 rounded-full flex items-center justify-center">
+                    <app-icon name="alert-triangle" [size]="14" class="text-warning"></app-icon>
                   </div>
                   <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-amber-800">{{ lowStockCount() }} bajo stock</p>
+                    <p class="text-sm font-medium text-warning">{{ lowStockCount() }} bajo stock</p>
                   </div>
-                  <app-icon name="chevron-right" [size]="14" class="text-amber-400"></app-icon>
+                  <app-icon name="chevron-right" [size]="14" class="text-warning/60"></app-icon>
                 </div>
               }
 
               @if (outOfStockCount() > 0) {
                 <div
-                  class="flex items-center gap-3 p-3 bg-red-50 rounded-lg cursor-pointer hover:bg-red-100 transition-colors"
+                  class="flex items-center gap-3 p-3 bg-error-light rounded-lg cursor-pointer hover:bg-error/15 transition-colors"
                   (click)="navigateTo('/admin/analytics/inventory/stock-levels')"
                 >
-                  <div class="flex-shrink-0 w-7 h-7 bg-red-100 rounded-full flex items-center justify-center">
-                    <app-icon name="x-circle" [size]="14" class="text-red-600"></app-icon>
+                  <div class="flex-shrink-0 w-7 h-7 bg-error/20 rounded-full flex items-center justify-center">
+                    <app-icon name="x-circle" [size]="14" class="text-error"></app-icon>
                   </div>
                   <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-red-800">{{ outOfStockCount() }} agotados</p>
+                    <p class="text-sm font-medium text-error">{{ outOfStockCount() }} agotados</p>
                   </div>
-                  <app-icon name="chevron-right" [size]="14" class="text-red-400"></app-icon>
+                  <app-icon name="chevron-right" [size]="14" class="text-error/60"></app-icon>
                 </div>
               }
 
               @if (dispatchPendingCount() > 0) {
                 <div
-                  class="flex items-center gap-3 p-3 bg-blue-50 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors"
+                  class="flex items-center gap-3 p-3 bg-primary/10 rounded-lg cursor-pointer hover:bg-primary/15 transition-colors"
                   (click)="navigateTo('/admin/orders/sales?status=processing&delivery=home_delivery')"
                 >
-                  <div class="flex-shrink-0 w-7 h-7 bg-blue-100 rounded-full flex items-center justify-center">
-                    <app-icon name="truck" [size]="14" class="text-blue-600"></app-icon>
+                  <div class="flex-shrink-0 w-7 h-7 bg-primary/20 rounded-full flex items-center justify-center">
+                    <app-icon name="truck" [size]="14" class="text-primary"></app-icon>
                   </div>
                   <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-blue-800">{{ dispatchPendingCount() }} listas para despachar</p>
+                    <p class="text-sm font-medium text-primary">{{ dispatchPendingCount() }} listas para despachar</p>
                   </div>
-                  <app-icon name="chevron-right" [size]="14" class="text-blue-400"></app-icon>
+                  <app-icon name="chevron-right" [size]="14" class="text-primary/60"></app-icon>
                 </div>
               }
 
               @if (refundPendingCount() > 0) {
                 <div
-                  class="flex items-center gap-3 p-3 bg-purple-50 rounded-lg cursor-pointer hover:bg-purple-100 transition-colors"
+                  class="flex items-center gap-3 p-3 bg-accent/10 rounded-lg cursor-pointer hover:bg-accent/15 transition-colors"
                   (click)="navigateTo('/admin/orders/sales?status=refunded')"
                 >
-                  <div class="flex-shrink-0 w-7 h-7 bg-purple-100 rounded-full flex items-center justify-center">
-                    <app-icon name="rotate-ccw" [size]="14" class="text-purple-600"></app-icon>
+                  <div class="flex-shrink-0 w-7 h-7 bg-accent/20 rounded-full flex items-center justify-center">
+                    <app-icon name="rotate-ccw" [size]="14" class="text-accent"></app-icon>
                   </div>
                   <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-purple-800">{{ refundPendingCount() }} reembolsos pendientes</p>
+                    <p class="text-sm font-medium text-accent">{{ refundPendingCount() }} reembolsos pendientes</p>
                   </div>
-                  <app-icon name="chevron-right" [size]="14" class="text-purple-400"></app-icon>
+                  <app-icon name="chevron-right" [size]="14" class="text-accent/60"></app-icon>
                 </div>
               }
 
               @if (lowStockCount() === 0 && outOfStockCount() === 0 && dispatchPendingCount() === 0 && refundPendingCount() === 0) {
                 <div class="py-4 text-center">
-                  <div class="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-2">
-                    <app-icon name="check-circle" [size]="20" class="text-emerald-600"></app-icon>
+                  <div class="w-10 h-10 bg-success-light rounded-full flex items-center justify-center mx-auto mb-2">
+                    <app-icon name="check-circle" [size]="20" class="text-success"></app-icon>
                   </div>
-                  <p class="text-sm font-medium text-gray-700">Todo en orden</p>
-                  <p class="text-xs text-gray-500">Sin alertas pendientes</p>
+                  <p class="text-sm font-medium text-text-primary">Todo en orden</p>
+                  <p class="text-xs text-text-secondary">Sin alertas pendientes</p>
                 </div>
               }
             }
@@ -261,10 +261,10 @@ const QUICK_LINKS: QuickLink[] = [
           <div class="p-3 grid grid-cols-2 gap-1">
             @for (link of quickLinks; track link.route) {
               <button
-                class="flex items-center gap-2 px-3 py-2.5 text-sm text-gray-700 hover:bg-gray-50 rounded-lg transition-colors text-left"
+                class="flex items-center gap-2 px-3 py-2.5 text-sm text-text-primary hover:bg-primary/5 rounded-lg transition-colors text-left"
                 (click)="navigateTo(link.route)"
               >
-                <app-icon [name]="link.icon" [size]="15" class="text-gray-400"></app-icon>
+                <app-icon [name]="link.icon" [size]="15" class="text-text-secondary"></app-icon>
                 <span class="truncate">{{ link.label }}</span>
               </button>
             }
@@ -499,6 +499,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private updateTrendChart(trends: SalesTrend[]): void {
     if (!trends.length) return;
 
+    const style = getComputedStyle(document.documentElement);
+    const primaryColor = style.getPropertyValue('--color-primary').trim() || '#2ecc71';
+    const accentColor = style.getPropertyValue('--color-accent').trim() || '#06b6d4';
+    const mutedColor = style.getPropertyValue('--color-muted-foreground').trim() || '#6b7280';
+    const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
+
     const labels = trends.map((t) =>
       new Date(t.period).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }),
     );
@@ -517,14 +523,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
       legend: {
         data: ['Ingresos', 'Órdenes'],
         bottom: 0,
-        textStyle: { color: '#6b7280', fontSize: 11 },
+        textStyle: { color: mutedColor, fontSize: 11 },
       },
       grid: { left: '3%', right: '4%', bottom: '15%', top: '5%', containLabel: true },
       xAxis: {
         type: 'category',
         data: labels,
-        axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: '#6b7280', fontSize: 10 },
+        axisLine: { lineStyle: { color: borderColor } },
+        axisLabel: { color: mutedColor, fontSize: 10 },
       },
       yAxis: [
         {
@@ -532,17 +538,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
           position: 'left',
           axisLine: { show: false },
           axisLabel: {
-            color: '#6b7280',
+            color: mutedColor,
             fontSize: 10,
             formatter: (value: number) => this.currencyService.formatChartAxis(value),
           },
-          splitLine: { lineStyle: { color: '#f3f4f6' } },
+          splitLine: { lineStyle: { color: borderColor } },
         },
         {
           type: 'value',
           position: 'right',
           axisLine: { show: false },
-          axisLabel: { color: '#6b7280', fontSize: 10 },
+          axisLabel: { color: mutedColor, fontSize: 10 },
           splitLine: { show: false },
         },
       ],
@@ -558,20 +564,20 @@ export class DashboardComponent implements OnInit, OnDestroy {
               type: 'linear',
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: 'rgba(16, 185, 129, 0.3)' },
-                { offset: 1, color: 'rgba(16, 185, 129, 0.05)' },
+                { offset: 0, color: primaryColor + '4D' },
+                { offset: 1, color: primaryColor + '0D' },
               ],
             },
           },
-          lineStyle: { color: '#10b981', width: 2 },
-          itemStyle: { color: '#10b981' },
+          lineStyle: { color: primaryColor, width: 2 },
+          itemStyle: { color: primaryColor },
         },
         {
           name: 'Órdenes',
           type: 'bar',
           data: orders,
           yAxisIndex: 1,
-          itemStyle: { color: 'rgba(59, 130, 246, 0.6)', borderRadius: [2, 2, 0, 0] },
+          itemStyle: { color: accentColor + '99', borderRadius: [2, 2, 0, 0] },
           barMaxWidth: 16,
         },
       ],
@@ -581,9 +587,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private updateChannelChart(channels: SalesByChannel[]): void {
     if (!channels.length) return;
 
+    const style = getComputedStyle(document.documentElement);
+    const mutedColor = style.getPropertyValue('--color-muted-foreground').trim() || '#6b7280';
+    const textColor = style.getPropertyValue('--color-text-primary').trim() || '#374151';
+    const surfaceColor = style.getPropertyValue('--color-surface').trim() || '#fff';
+
     const channelColors = channels.map((c) => {
-      const config = CHANNEL_CONFIG[c.channel.toLowerCase()] || CHANNEL_CONFIG['default'];
-      return config.color;
+      const cssVar = CHANNEL_COLOR_VAR[c.channel.toLowerCase()] || CHANNEL_COLOR_VAR['default'];
+      return style.getPropertyValue(cssVar).trim() || '#6b7280';
     });
 
     this.channelChartOptions.set({
@@ -596,7 +607,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         bottom: 0,
         left: 'center',
         orient: 'horizontal',
-        textStyle: { color: '#6b7280', fontSize: 10 },
+        textStyle: { color: mutedColor, fontSize: 10 },
         itemWidth: 12,
         itemHeight: 12,
         itemGap: 10,
@@ -609,17 +620,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
           radius: [30, 110],
           center: ['50%', '45%'],
           roseType: 'area',
-          itemStyle: { borderRadius: 4, borderColor: '#fff', borderWidth: 2 },
+          itemStyle: { borderRadius: 4, borderColor: surfaceColor, borderWidth: 2 },
           label: {
             show: true,
             fontSize: 11,
-            color: '#374151',
+            color: textColor,
           },
           labelLine: {
             show: true,
             length: 10,
             length2: 15,
-            lineStyle: { color: '#9ca3af' },
+            lineStyle: { color: mutedColor },
           },
           emphasis: {
             label: { show: true, fontSize: 13, fontWeight: 'bold' },

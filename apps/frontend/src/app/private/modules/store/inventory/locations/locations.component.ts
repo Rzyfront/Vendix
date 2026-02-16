@@ -45,12 +45,13 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
         LocationFormModalComponent,
     ],
     template: `
-    <div class="w-full">
+    <div class="w-full overflow-x-hidden">
       <!-- Stats Grid: sticky at top on mobile, static on desktop -->
       <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Total Ubicaciones"
           [value]="stats.total"
+          smallText="Registradas en el sistema"
           iconName="map-pin"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
@@ -59,6 +60,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
         <app-stats
           title="Almacenes"
           [value]="stats.warehouses"
+          smallText="Puntos de almacenamiento"
           iconName="warehouse"
           iconBgColor="bg-purple-100"
           iconColor="text-purple-600"
@@ -67,6 +69,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
         <app-stats
           title="Activas"
           [value]="stats.active"
+          smallText="Operativas actualmente"
           iconName="check-circle"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
@@ -75,6 +78,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
         <app-stats
           title="Inactivas"
           [value]="stats.inactive"
+          smallText="Fuera de operación"
           iconName="x-circle"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-600"
@@ -135,7 +139,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
         </div>
 
         <!-- Table -->
-        <div *ngIf="!is_loading && filtered_locations.length > 0" class="px-2 pb-2 pt-1 md:p-4">
+        <div *ngIf="!is_loading && filtered_locations.length > 0" class="px-2 pb-2 pt-3 md:p-4">
           <app-responsive-data-view
             [data]="filtered_locations"
             [columns]="table_columns"

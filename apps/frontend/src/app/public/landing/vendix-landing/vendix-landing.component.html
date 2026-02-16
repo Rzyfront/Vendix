@@ -38,11 +38,18 @@
           </a>
         </nav>
 
-        <!-- Mobile Menu Button -->
-        <button class="md:hidden p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
-          (click)="toggleMobileMenu()">
-          <app-icon [name]="mobileMenuOpen ? 'x' : 'menu'" [size]="24" color="var(--color-text-primary)"></app-icon>
-        </button>
+        <!-- Mobile Actions -->
+        <div class="flex md:hidden items-center gap-1">
+          <a routerLink="/auth/login"
+            class="flex items-center gap-1.5 text-sm font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 px-3 py-2 rounded-lg hover:bg-gray-50">
+            <app-icon name="log-in" [size]="18" color="currentColor"></app-icon>
+            Ingresar
+          </a>
+          <button class="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
+            (click)="toggleMobileMenu()">
+            <app-icon [name]="mobileMenuOpen ? 'x' : 'menu'" [size]="24" color="var(--color-text-primary)"></app-icon>
+          </button>
+        </div>
       </div>
     </div>
   </header>

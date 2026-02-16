@@ -79,16 +79,21 @@ export class EnabledShippingMethodsListComponent {
       {
         key: 'provider_name',
         label: 'Proveedor',
+        transform: (val: string) => val || 'Sin proveedor',
       },
       {
-        key: 'display_order',
-        label: 'Orden',
+        key: 'min_days',
+        label: 'Tiempo estimado',
+        icon: 'clock',
+        transform: (_val: number, item: StoreShippingMethod) =>
+          this.formatDeliveryTime(item?.min_days, item?.max_days),
       },
     ],
-    footerKey: 'created_at',
-    footerLabel: 'Agregado',
-    footerTransform: (val: string) =>
-      val ? new Date(val).toLocaleDateString() : '-',
+    footerKey: 'min_days',
+    footerLabel: 'Entrega',
+    footerStyle: 'default',
+    footerTransform: (_val: number, item: StoreShippingMethod) =>
+      this.formatDeliveryTime(item?.min_days, item?.max_days),
   };
 
   // Table columns for desktop
@@ -164,5 +169,12 @@ export class EnabledShippingMethodsListComponent {
       third_party_provider: 'Externo',
     };
     return type_map[type] || type;
+  }
+
+  private formatDeliveryTime(min_days?: number, max_days?: number): string {
+    if (!min_days && !max_days) return 'Sin definir';
+    if (min_days === max_days) return `${min_days} días`;
+    if (!max_days) return `${min_days}+ días`;
+    return `${min_days}-${max_days} días`;
   }
 }

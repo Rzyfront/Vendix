@@ -129,6 +129,7 @@
   --z-sticky: 20;
   --z-fixed: 30;
   --z-sidebar: 30;
+  --z-header: 35;
   --z-modal-backdrop: 40;
   --z-modal: 50;
   --z-notification: 60;
@@ -145,7 +146,7 @@
   /* Maximum width for mobile overlay */
   --sidebar-backdrop-opacity: 0.5;
   --sidebar-mobile-z-index: 55;
-  /* Above header (50), below notifications (60) */
+  /* Above header (35), below notifications (60) */
 
   /* Misc */
   --border-width: 1px;

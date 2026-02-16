@@ -1,11 +1,11 @@
 import {
   Component,
-  input,
-  output,
-  signal,
+  Input,
+  Output,
+  EventEmitter,
   OnInit,
-  ChangeDetectorRef,
   inject,
+  ChangeDetectorRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
@@ -27,13 +27,9 @@ import {
   ToggleComponent,
   IconComponent,
   SelectorComponent,
+  ButtonComponent,
+  ToastService,
 } from '../../../../../../../shared/components/index';
-
-interface CountryOption {
-  value: string;
-  label: string;
-  flag: string;
-}
 
 @Component({
   selector: 'app-zone-modal',
@@ -46,202 +42,251 @@ interface CountryOption {
     ToggleComponent,
     IconComponent,
     SelectorComponent,
+    ButtonComponent,
   ],
   template: `
     <app-modal
-      [isOpen]="is_open()"
-      [title]="mode() === 'create' ? 'Crear Zona de Envío' : 'Editar Zona de Envío'"
+      [isOpen]="true"
+      [title]="mode === 'create' ? 'Crear Zona de Envío' : 'Editar Zona de Envío'"
+      [subtitle]="'Define el alcance geográfico para calcular envíos'"
+      (closed)="close.emit()"
       size="md"
-      (close)="onClose()"
     >
-      <form [formGroup]="form" (ngSubmit)="onSubmit()">
-        <div class="space-y-4">
-          <!-- Name -->
-          <app-input
-            label="Nombre interno"
-            placeholder="ej: Zona Norte"
-            formControlName="name"
-            [error]="getError('name')"
-            hint="Usado para identificar la zona internamente"
-          />
+      <div slot="header">
+        <div
+          class="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center border border-indigo-100"
+        >
+          <app-icon name="map-pin" size="20" class="text-indigo-600"></app-icon>
+        </div>
+      </div>
 
-          <!-- Display Name -->
-          <app-input
-            label="Nombre para mostrar (opcional)"
-            placeholder="ej: Región Norte del País"
-            formControlName="display_name"
-            hint="Se muestra a los clientes en el checkout"
-          />
+      <form
+        [formGroup]="form"
+        id="zoneForm"
+        (ngSubmit)="onSubmit()"
+        class="space-y-4"
+      >
+        <!-- Name -->
+        <app-input
+          label="Nombre interno"
+          placeholder="ej: Zona Norte"
+          formControlName="name"
+          [required]="true"
+          hint="Usado para identificar la zona internamente"
+        ></app-input>
 
-          <!-- Country Selector -->
+        <!-- Display Name -->
+        <app-input
+          label="Nombre para mostrar (opcional)"
+          placeholder="ej: Región Norte del País"
+          formControlName="display_name"
+          hint="Se muestra a los clientes en el checkout"
+        ></app-input>
+
+        <!-- Country Selector -->
+        <div>
           <app-selector
             label="País de Cobertura"
             formControlName="country"
             [options]="countryOptions"
-            placeholder="Selecciona un país"
             [required]="true"
             (valueChange)="onCountryChange()"
-          />
+          ></app-selector>
+          <p
+            class="text-[10px] text-gray-400 mt-1.5 px-1 flex items-center gap-1"
+          >
+            <app-icon name="info" size="10"></app-icon>
+            Actualmente se soporta un país por zona para una gestión regional
+            optimizada.
+          </p>
+        </div>
 
-          <!-- Departments/Regions for Colombia -->
-          @if (showRegionsSelector()) {
-            <div class="animate-in fade-in-0 slide-in-from-top-2">
-              @if (loadingRegions()) {
-                <div class="flex items-center gap-2 py-4 text-muted-foreground">
-                  <app-icon name="loader-2" class="h-5 w-5 animate-spin" />
-                  <span>Cargando departamentos...</span>
-                </div>
-              } @else {
-                <div>
-                  <label class="text-sm font-medium mb-2 block">
-                    Departamentos
-                    <span class="text-muted-foreground font-normal">(opcional - dejar vacío para todo el país)</span>
-                  </label>
-                  <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-60 overflow-y-auto p-1">
-                    @for (dep of departments(); track dep.id) {
-                      <button
-                        type="button"
-                        class="flex items-center gap-2 p-2 rounded-lg border text-sm transition-colors text-left"
-                        [class.border-primary]="isRegionSelected(dep.name)"
-                        [class.bg-primary/5]="isRegionSelected(dep.name)"
-                        [class.border-border]="!isRegionSelected(dep.name)"
-                        (click)="toggleRegion(dep.name)"
-                      >
-                        <span class="truncate flex-1">{{ dep.name }}</span>
-                        @if (isRegionSelected(dep.name)) {
-                          <app-icon name="check" class="h-4 w-4 text-primary shrink-0" />
-                        }
-                      </button>
-                    }
-                  </div>
-                </div>
-              }
+        <!-- Departments/Regions for Colombia -->
+        <div
+          *ngIf="showRegions"
+          class="animate-in slide-in-from-top-2 duration-200 mt-6"
+        >
+          <div class="flex items-center justify-between mb-4">
+            <label
+              class="block text-sm font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide"
+              >Departamentos / Regiones</label
+            >
+            <div *ngIf="!loadingRegions" class="flex items-center gap-2">
+              <span
+                class="text-[10px] font-bold text-gray-400 bg-gray-100 px-2 py-0.5 rounded-md uppercase"
+              >
+                {{ selectedRegions.size }} seleccionados
+              </span>
             </div>
-          }
+          </div>
 
-          <!-- Manual Regions Input for other countries -->
-          @if (!showRegionsSelector() && form.get('country')?.value) {
-            <app-input
-              label="Regiones/Provincias (opcional)"
-              placeholder="ej: Santiago, La Vega, Puerto Plata"
-              formControlName="regions_text"
-              hint="Separa con comas. Dejar vacío para incluir todo el país."
-            />
-          }
+          <div
+            *ngIf="loadingRegions"
+            class="flex items-center justify-center p-12 bg-gray-50/50 rounded-2xl border border-dashed text-gray-400 gap-2"
+          >
+            <app-icon name="loader-2" size="20" [spin]="true"></app-icon>
+            <span class="text-sm font-medium">Cargando departamentos...</span>
+          </div>
 
-          <!-- Cities (optional) -->
-          <app-input
-            label="Ciudades específicas (opcional)"
-            placeholder="ej: Santiago de los Caballeros, Moca"
-            formControlName="cities_text"
-            hint="Separa con comas. Dejar vacío para no restringir."
-          />
-
-          <!-- Zip codes (optional) -->
-          <app-input
-            label="Códigos postales (opcional)"
-            placeholder="ej: 51000, 10100, 10200"
-            formControlName="zip_codes_text"
-            hint="Separa con comas. Dejar vacío para no restringir."
-          />
-
-          <!-- Is Active -->
-          <div class="flex items-center justify-between pt-2">
-            <div>
-              <p class="font-medium">Estado activo</p>
-              <p class="text-sm text-muted-foreground">
-                Las zonas inactivas no se usan para calcular envíos
-              </p>
+          <div
+            *ngIf="!loadingRegions"
+            class="border border-[var(--color-border)] rounded-2xl p-4 bg-gray-50/30"
+          >
+            <div
+              class="flex items-center justify-between mb-4 pb-3 border-b border-gray-200/60"
+            >
+              <div class="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  [checked]="allRegionsSelected"
+                  (change)="toggleAllRegions($event)"
+                  id="all-regions"
+                  class="w-5 h-5 rounded border-gray-300 text-[var(--color-primary)] focus:ring-[var(--color-primary)]/20 transition-all cursor-pointer"
+                />
+                <label
+                  for="all-regions"
+                  class="text-sm font-bold text-[var(--color-text-primary)] cursor-pointer"
+                  >Seleccionar Todos</label
+                >
+              </div>
+              <span
+                class="text-xs text-gray-400 font-medium italic"
+                *ngIf="selectedRegions.size === 0"
+                >Se asume "Todo el país"</span
+              >
             </div>
-            <app-toggle formControlName="is_active" />
+
+            <div
+              class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-60 overflow-y-auto pr-2 custom-scrollbar"
+            >
+              <div
+                *ngFor="let dep of departments"
+                [class.bg-white]="isRegionSelected(dep.name)"
+                [class.border-[var(--color-primary)]]="isRegionSelected(dep.name)"
+                class="flex items-center gap-3 p-3 rounded-xl border border-transparent hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all cursor-pointer"
+                (click)="toggleRegion(dep.name)"
+              >
+                <input
+                  type="checkbox"
+                  [checked]="isRegionSelected(dep.name)"
+                  (change)="toggleRegion(dep.name)"
+                  [id]="'dep-' + dep.id"
+                  class="w-4 h-4 rounded border-gray-300 text-[var(--color-primary)] focus:ring-[var(--color-primary)]/20 transition-all pointer-events-none"
+                />
+                <label
+                  [for]="'dep-' + dep.id"
+                  class="text-sm font-medium text-gray-700 cursor-pointer pointer-events-none"
+                  >{{ dep.name }}</label
+                >
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- Footer -->
-        <div class="flex justify-end gap-3 mt-6 pt-4 border-t">
-          <button
-            type="button"
-            class="px-4 py-2 text-sm font-medium rounded-lg border border-border hover:bg-muted transition-colors"
-            (click)="onClose()"
-          >
-            Cancelar
-          </button>
-          <button
-            type="submit"
-            class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            [disabled]="is_saving() || form.invalid"
-          >
-            @if (is_saving()) {
-              <div class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
-              Guardando...
-            } @else {
-              {{ mode() === 'create' ? 'Crear Zona' : 'Guardar Cambios' }}
-            }
-          </button>
+        <!-- Manual Regions Input for other countries -->
+        <app-input
+          *ngIf="!showRegions && form.get('country')?.value"
+          label="Regiones/Provincias (opcional)"
+          placeholder="ej: Santiago, La Vega, Puerto Plata"
+          formControlName="regions_text"
+          hint="Separa con comas. Dejar vacío para incluir todo el país."
+        ></app-input>
+
+        <!-- Cities (optional) -->
+        <app-input
+          label="Ciudades específicas (opcional)"
+          placeholder="ej: Santiago de los Caballeros, Moca"
+          formControlName="cities_text"
+          hint="Separa con comas. Dejar vacío para no restringir."
+        ></app-input>
+
+        <!-- Zip codes (optional) -->
+        <app-input
+          label="Códigos postales (opcional)"
+          placeholder="ej: 51000, 10100, 10200"
+          formControlName="zip_codes_text"
+          hint="Separa con comas. Dejar vacío para no restringir."
+        ></app-input>
+
+        <!-- Status -->
+        <div
+          class="flex items-center justify-between p-4 rounded-xl border border-[var(--color-border)] bg-gray-50/30 mt-6"
+        >
+          <div class="flex items-center gap-3">
+            <div
+              class="w-8 h-8 rounded-lg bg-green-50 flex items-center justify-center border border-green-100"
+            >
+              <app-icon
+                name="check"
+                size="16"
+                class="text-green-600"
+              ></app-icon>
+            </div>
+            <div>
+              <span class="text-sm font-bold text-[var(--color-text-primary)]"
+                >Estado Activo</span
+              >
+              <p class="text-xs text-[var(--color-text-secondary)]">
+                Las zonas inactivas no se usan para calcular envíos.
+              </p>
+            </div>
+          </div>
+          <app-toggle formControlName="is_active"></app-toggle>
         </div>
       </form>
+
+      <div slot="footer" class="flex items-center justify-end gap-3 w-full">
+        <app-button variant="ghost" (clicked)="close.emit()">
+          Cancelar
+        </app-button>
+        <app-button
+          variant="primary"
+          [loading]="isSubmitting"
+          [disabled]="form.invalid"
+          (clicked)="onSubmit()"
+        >
+          <app-icon name="save" size="18" slot="icon" class="mr-2"></app-icon>
+          {{ mode === 'edit' ? 'Guardar Cambios' : 'Crear Zona' }}
+        </app-button>
+      </div>
     </app-modal>
   `,
-  styles: [`
-    .animate-in {
-      animation: animateIn 0.2s ease-out;
-    }
-    @keyframes animateIn {
-      from {
-        opacity: 0;
-        transform: translateY(-8px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-  `],
 })
 export class ZoneModalComponent implements OnInit {
+  @Input() zone?: ShippingZone;
+  @Input() mode: 'create' | 'edit' = 'create';
+  @Output() close = new EventEmitter<void>();
+  @Output() saved = new EventEmitter<void>();
+
+  private fb = inject(FormBuilder);
+  private shippingService = inject(ShippingMethodsService);
   private countryService = inject(CountryService);
+  private toast = inject(ToastService);
   private cdr = inject(ChangeDetectorRef);
 
-  // Inputs
-  readonly is_open = input<boolean>(false);
-  readonly mode = input<'create' | 'edit'>('create');
-  readonly zone = input<ShippingZone | null>(null);
-
-  // Outputs
-  readonly close = output<void>();
-  readonly save = output<CreateZoneDto>();
-
-  // State
-  readonly is_saving = signal(false);
-  readonly selected_regions = signal<Set<string>>(new Set());
-  readonly departments = signal<Department[]>([]);
-  readonly loadingRegions = signal(false);
-
-  // Form
   form: FormGroup;
+  isSubmitting = false;
 
-  // Country options for selector
   countryOptions: { value: string; label: string }[] = [];
+  departments: Department[] = [];
+  loadingRegions = false;
+  selectedRegions: Set<string> = new Set();
 
-  // Countries with flag emoji support
   private countryFlags: Record<string, string> = {
-    DO: '🇩🇴',
-    CO: '🇨🇴',
-    MX: '🇲🇽',
-    US: '🇺🇸',
-    PR: '🇵🇷',
-    PA: '🇵🇦',
-    VE: '🇻🇪',
-    AR: '🇦🇷',
-    CL: '🇨🇱',
-    PE: '🇵🇪',
-    ES: '🇪🇸',
+    DO: '\u{1F1E9}\u{1F1F4}',
+    CO: '\u{1F1E8}\u{1F1F4}',
+    MX: '\u{1F1F2}\u{1F1FD}',
+    US: '\u{1F1FA}\u{1F1F8}',
+    PR: '\u{1F1F5}\u{1F1F7}',
+    PA: '\u{1F1F5}\u{1F1E6}',
+    VE: '\u{1F1FB}\u{1F1EA}',
+    AR: '\u{1F1E6}\u{1F1F7}',
+    CL: '\u{1F1E8}\u{1F1F1}',
+    PE: '\u{1F1F5}\u{1F1EA}',
+    ES: '\u{1F1EA}\u{1F1F8}',
   };
 
-  constructor(
-    private fb: FormBuilder,
-    private shipping_service: ShippingMethodsService
-  ) {
+  constructor() {
     this.form = this.fb.group({
       name: ['', [Validators.required, Validators.maxLength(100)]],
       display_name: ['', Validators.maxLength(100)],
@@ -254,115 +299,99 @@ export class ZoneModalComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    // Load countries from CountryService
+    // Load country options
     const countries = this.countryService.getCountries();
     this.countryOptions = countries.map((c) => ({
       value: c.code,
       label: `${this.countryFlags[c.code] || ''} ${c.name}`.trim(),
     }));
 
-    // Watch for zone input changes to populate form
-    const zone = this.zone();
-    if (zone && this.mode() === 'edit') {
-      this.populateForm(zone);
+    // If editing, populate the form
+    if (this.zone && this.mode === 'edit') {
+      this.populateForm(this.zone);
     }
   }
 
   private async populateForm(zone: ShippingZone): Promise<void> {
-    // Set country (use first country from array)
     const country = zone.countries?.[0] || '';
 
     this.form.patchValue({
       name: zone.name,
       display_name: zone.display_name || '',
       country: country,
-      regions_text: '', // Will be set below or via regions selector
+      regions_text: '',
       cities_text: zone.cities?.join(', ') || '',
       zip_codes_text: zone.zip_codes?.join(', ') || '',
       is_active: zone.is_active,
     });
 
-    // If it's Colombia, load departments and set selected regions
+    // If Colombia, load departments and pre-select regions
     if (country === 'CO' && zone.regions?.length) {
       await this.loadDepartments();
-      this.selected_regions.set(new Set(zone.regions));
+      this.selectedRegions = new Set(zone.regions);
+    } else if (country === 'CO') {
+      await this.loadDepartments();
     } else {
-      // For other countries, use text input
       this.form.patchValue({
         regions_text: zone.regions?.join(', ') || '',
       });
     }
   }
 
-  showRegionsSelector(): boolean {
+  get showRegions(): boolean {
     return this.form.get('country')?.value === 'CO';
   }
 
+  get allRegionsSelected(): boolean {
+    return (
+      this.departments.length > 0 &&
+      this.selectedRegions.size === this.departments.length
+    );
+  }
+
   async onCountryChange(): Promise<void> {
-    const country = this.form.get('country')?.value;
-
-    // Reset regions when country changes
-    this.selected_regions.set(new Set());
+    this.selectedRegions = new Set();
     this.form.patchValue({ regions_text: '' });
-    this.departments.set([]);
+    this.departments = [];
 
-    if (country === 'CO') {
+    if (this.form.get('country')?.value === 'CO') {
       await this.loadDepartments();
     }
   }
 
   private async loadDepartments(): Promise<void> {
-    this.loadingRegions.set(true);
+    this.loadingRegions = true;
     try {
       const deps = await this.countryService.getDepartments();
-      // Sort alphabetically
       deps.sort((a, b) => a.name.localeCompare(b.name));
-      this.departments.set(deps);
+      this.departments = deps;
     } catch (error) {
       console.error('Error loading departments:', error);
-      this.departments.set([]);
+      this.departments = [];
     } finally {
-      this.loadingRegions.set(false);
+      this.loadingRegions = false;
       this.cdr.markForCheck();
     }
   }
 
-  isRegionSelected(name: string): boolean {
-    return this.selected_regions().has(name);
+  isRegionSelected(regionName: string): boolean {
+    return this.selectedRegions.has(regionName);
   }
 
-  toggleRegion(name: string): void {
-    const current = new Set(this.selected_regions());
-    if (current.has(name)) {
-      current.delete(name);
+  toggleRegion(regionName: string): void {
+    if (this.selectedRegions.has(regionName)) {
+      this.selectedRegions.delete(regionName);
     } else {
-      current.add(name);
+      this.selectedRegions.add(regionName);
     }
-    this.selected_regions.set(current);
   }
 
-  getError(field: string): string {
-    const control = this.form.get(field);
-    if (control?.touched && control?.errors) {
-      if (control.errors['required']) return 'Este campo es requerido';
-      if (control.errors['maxlength']) return 'Máximo 100 caracteres';
+  toggleAllRegions(event: any): void {
+    if (event.target.checked) {
+      this.departments.forEach((d) => this.selectedRegions.add(d.name));
+    } else {
+      this.selectedRegions.clear();
     }
-    return '';
-  }
-
-  onClose(): void {
-    this.form.reset({
-      name: '',
-      display_name: '',
-      country: '',
-      regions_text: '',
-      cities_text: '',
-      zip_codes_text: '',
-      is_active: true,
-    });
-    this.selected_regions.set(new Set());
-    this.departments.set([]);
-    this.close.emit();
   }
 
   onSubmit(): void {
@@ -371,21 +400,17 @@ export class ZoneModalComponent implements OnInit {
       return;
     }
 
+    this.isSubmitting = true;
     const values = this.form.value;
 
-    // Parse comma-separated values into arrays
     const parseList = (text: string): string[] =>
       text
-        ? text
-            .split(',')
-            .map((s) => s.trim())
-            .filter((s) => s.length > 0)
+        ? text.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
         : [];
 
-    // Get regions: from selector for Colombia, from text input for others
     let regions: string[] = [];
     if (values.country === 'CO') {
-      regions = Array.from(this.selected_regions());
+      regions = Array.from(this.selectedRegions);
     } else {
       regions = parseList(values.regions_text);
     }
@@ -393,35 +418,32 @@ export class ZoneModalComponent implements OnInit {
     const dto: CreateZoneDto = {
       name: values.name,
       display_name: values.display_name || undefined,
-      countries: [values.country], // Single country per zone
+      countries: [values.country],
       regions: regions,
       cities: parseList(values.cities_text),
       zip_codes: parseList(values.zip_codes_text),
       is_active: values.is_active,
     };
 
-    this.save.emit(dto);
-  }
+    const request$ = this.zone && this.mode === 'edit'
+      ? this.shippingService.updateZone(this.zone.id, dto)
+      : this.shippingService.createZone(dto);
 
-  setIsSaving(value: boolean): void {
-    this.is_saving.set(value);
-  }
-
-  async resetAndPopulate(zone: ShippingZone | null): Promise<void> {
-    if (zone) {
-      await this.populateForm(zone);
-    } else {
-      this.form.reset({
-        name: '',
-        display_name: '',
-        country: '',
-        regions_text: '',
-        cities_text: '',
-        zip_codes_text: '',
-        is_active: true,
-      });
-      this.selected_regions.set(new Set());
-      this.departments.set([]);
-    }
+    request$.subscribe({
+      next: () => {
+        this.isSubmitting = false;
+        this.toast.success(
+          this.mode === 'edit'
+            ? 'Zona actualizada correctamente'
+            : 'Zona creada correctamente'
+        );
+        this.saved.emit();
+        this.close.emit();
+      },
+      error: (err) => {
+        this.isSubmitting = false;
+        this.toast.error('Error al guardar la zona: ' + (err.message || 'Error desconocido'));
+      },
+    });
   }
 }

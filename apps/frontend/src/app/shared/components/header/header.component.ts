@@ -29,7 +29,8 @@ import { GlobalFacade } from '../../../core/store/global.facade';
   ],
   template: `
     <header
-      class="bg-transparent border-b-0 sticky top-0 backdrop-blur-md text-slate-900 relative z-[150]"
+      class="bg-transparent border-b-0 sticky top-0 backdrop-blur-md text-slate-900 relative"
+      style="z-index: var(--z-header)"
     >
       <div
         class="flex items-center justify-between px-2 py-1 sm:px-3 sm:py-2 md:p-2 gap-1.5 md:gap-6"

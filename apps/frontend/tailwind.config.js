@@ -38,6 +38,12 @@ module.exports = {
         "destructive-foreground": "var(--color-destructive-foreground)",
         "text-primary": "var(--color-text-primary)",
         "text-secondary": "var(--color-text-secondary)",
+        success: "var(--color-success)",
+        "success-light": "var(--color-success-light)",
+        warning: "var(--color-warning)",
+        "warning-light": "var(--color-warning-light)",
+        error: "var(--color-error)",
+        "error-light": "var(--color-error-light)",
       },
       borderRadius: {
         sm: "0.375rem" /* 6px */,

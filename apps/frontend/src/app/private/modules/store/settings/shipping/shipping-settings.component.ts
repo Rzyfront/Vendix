@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, signal, ViewChild } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Subject, takeUntil } from 'rxjs';
 import { ShippingMethodsService } from './services/shipping-methods.service';
@@ -10,7 +10,6 @@ import {
 import {
   ShippingZone,
   ZoneStats,
-  CreateZoneDto,
 } from './interfaces/shipping-zones.interface';
 import {
   ToastService,
@@ -150,22 +149,20 @@ import {
           </div>
         </div>
 
-        <!-- Zone Modal -->
+        <!-- Zone Modal (*ngIf mounts/unmounts for clean lifecycle) -->
         <app-zone-modal
-          #zoneModal
-          [is_open]="is_zone_modal_open()"
-          [mode]="zone_modal_mode()"
-          [zone]="selected_zone()"
+          *ngIf="show_zone_modal"
+          [zone]="selected_zone"
+          [mode]="zone_modal_mode"
           (close)="closeZoneModal()"
-          (save)="saveZone($event)"
+          (saved)="onZoneSaved()"
         ></app-zone-modal>
 
-        <!-- Rates Modal -->
+        <!-- Rates Modal (*ngIf mounts/unmounts for clean lifecycle) -->
         <app-rates-modal
-          #ratesModal
-          [is_open]="is_rates_modal_open()"
-          [zone]="selected_zone_for_rates()"
-          [is_read_only]="is_rates_read_only()"
+          *ngIf="show_rates_modal"
+          [zone]="selected_zone_for_rates!"
+          [is_read_only]="is_rates_read_only"
           (close)="closeRatesModal()"
           (rates_changed)="onRatesChanged()"
         ></app-rates-modal>
@@ -182,9 +179,6 @@ import {
   ],
 })
 export class ShippingSettingsComponent implements OnInit, OnDestroy {
-  @ViewChild('zoneModal') zoneModal!: ZoneModalComponent;
-  @ViewChild('ratesModal') ratesModal!: RatesModalComponent;
-
   private destroy$ = new Subject<void>();
 
   // Tabs configuration (Dashboard-style)
@@ -213,15 +207,15 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
   readonly is_loading_system_zones = signal(false);
   readonly is_loading_store_zones = signal(false);
 
-  // Zone modal state
-  readonly is_zone_modal_open = signal(false);
-  readonly zone_modal_mode = signal<'create' | 'edit'>('create');
-  readonly selected_zone = signal<ShippingZone | null>(null);
+  // Zone modal state (plain booleans — *ngIf handles lifecycle)
+  show_zone_modal = false;
+  zone_modal_mode: 'create' | 'edit' = 'create';
+  selected_zone?: ShippingZone;
 
-  // Rates modal state
-  readonly is_rates_modal_open = signal(false);
-  readonly selected_zone_for_rates = signal<ShippingZone | null>(null);
-  readonly is_rates_read_only = signal(false);
+  // Rates modal state (plain booleans — *ngIf handles lifecycle)
+  show_rates_modal = false;
+  selected_zone_for_rates?: ShippingZone;
+  is_rates_read_only = false;
 
   constructor(
     private shipping_methods_service: ShippingMethodsService,
@@ -467,61 +461,20 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
 
   // Zone modal
   openZoneModal(mode: 'create' | 'edit', zone?: ShippingZone): void {
-    this.zone_modal_mode.set(mode);
-    this.selected_zone.set(zone || null);
-    this.is_zone_modal_open.set(true);
-
-    // Reset form when modal opens
-    setTimeout(() => {
-      this.zoneModal?.resetAndPopulate(zone || null);
-    }, 0);
+    this.zone_modal_mode = mode;
+    this.selected_zone = zone;
+    this.show_zone_modal = true;
   }
 
   closeZoneModal(): void {
-    this.is_zone_modal_open.set(false);
-    this.selected_zone.set(null);
+    this.show_zone_modal = false;
+    this.selected_zone = undefined;
   }
 
-  saveZone(dto: CreateZoneDto): void {
-    this.zoneModal?.setIsSaving(true);
-
-    if (this.zone_modal_mode() === 'create') {
-      this.shipping_methods_service
-        .createZone(dto)
-        .pipe(takeUntil(this.destroy$))
-        .subscribe({
-          next: () => {
-            this.toast_service.success('Zona creada correctamente');
-            this.closeZoneModal();
-            this.loadStoreZones();
-            this.loadZoneStats();
-            this.zoneModal?.setIsSaving(false);
-          },
-          error: (error) => {
-            this.toast_service.error('Error al crear zona: ' + error.message);
-            this.zoneModal?.setIsSaving(false);
-          },
-        });
-    } else {
-      const zone = this.selected_zone();
-      if (!zone) return;
-
-      this.shipping_methods_service
-        .updateZone(zone.id, dto)
-        .pipe(takeUntil(this.destroy$))
-        .subscribe({
-          next: () => {
-            this.toast_service.success('Zona actualizada correctamente');
-            this.closeZoneModal();
-            this.loadStoreZones();
-            this.zoneModal?.setIsSaving(false);
-          },
-          error: (error) => {
-            this.toast_service.error('Error al actualizar zona: ' + error.message);
-            this.zoneModal?.setIsSaving(false);
-          },
-        });
-    }
+  onZoneSaved(): void {
+    this.closeZoneModal();
+    this.loadStoreZones();
+    this.loadZoneStats();
   }
 
   confirmDeleteZone(zone: ShippingZone): void {
@@ -554,19 +507,14 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
 
   // Rates modal
   openRatesModal(zone: ShippingZone, readOnly: boolean): void {
-    this.selected_zone_for_rates.set(zone);
-    this.is_rates_read_only.set(readOnly);
-    this.is_rates_modal_open.set(true);
-
-    // Load rates when modal opens
-    setTimeout(() => {
-      this.ratesModal?.loadRates();
-    }, 0);
+    this.selected_zone_for_rates = zone;
+    this.is_rates_read_only = readOnly;
+    this.show_rates_modal = true;
   }
 
   closeRatesModal(): void {
-    this.is_rates_modal_open.set(false);
-    this.selected_zone_for_rates.set(null);
+    this.show_rates_modal = false;
+    this.selected_zone_for_rates = undefined;
   }
 
   onRatesChanged(): void {

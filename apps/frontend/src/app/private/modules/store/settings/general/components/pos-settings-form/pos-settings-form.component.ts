@@ -10,25 +10,7 @@ import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
-
-export interface BusinessHours {
-  open: string;
-  close: string;
-}
-
-export interface PosSettings {
-  allow_anonymous_sales: boolean;
-  anonymous_sales_as_default: boolean;
-  business_hours: Record<string, BusinessHours>;
-  enable_schedule_validation: boolean;
-  offline_mode_enabled: boolean;
-  require_cash_drawer_open: boolean;
-  auto_print_receipt: boolean;
-  allow_price_edit: boolean;
-  allow_discount: boolean;
-  max_discount_percentage: number;
-  allow_refund_without_approval: boolean;
-}
+import { PosSettings, BusinessHours } from '../../../../../../../core/models/store-settings.interface';
 
 
 @Component({

@@ -26,6 +26,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
       <app-stats
         title="Pendientes"
         [value]="(pendingCount$ | async) || 0"
+        smallText="Por aprobar"
         iconName="clock"
         iconBgColor="bg-yellow-100"
         iconColor="text-yellow-600"
@@ -34,6 +35,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
       <app-stats
         title="Aprobados"
         [value]="(approvedCount$ | async) || 0"
+        smallText="Listos para pago"
         iconName="check-circle"
         iconBgColor="bg-green-100"
         iconColor="text-green-600"
@@ -42,6 +44,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
       <app-stats
         title="Pagados"
         [value]="(paidCount$ | async) || 0"
+        smallText="Gastos liquidados"
         iconName="wallet"
         iconBgColor="bg-purple-100"
         iconColor="text-purple-600"
