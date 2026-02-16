@@ -1,6 +1,6 @@
 <app-modal
   [isOpen]="isOpen"
-  [size]="'lg'"
+  [size]="'xl'"
   [title]="'Procesar Pago'"
   [subtitle]="'Selecciona método de pago y cliente'"
   (closed)="onModalClosed()"
@@ -251,10 +251,12 @@
           </button>
         </div>
 
-        <!-- No Results -->
-        <div *ngIf="!showCreateCustomerForm && customerSearchQuery && customerSearchResults.length === 0" class="no-results">
-          <p>No se encontraron clientes</p>
-          <button type="button" (click)="switchToCreateCustomer()">Crear nuevo cliente</button>
+        <!-- Create Customer Button - Always visible when not in create mode -->
+        <div *ngIf="!showCreateCustomerForm" class="create-customer-action">
+          <button type="button" class="create-customer-btn" (click)="switchToCreateCustomer()">
+            <app-icon name="user-plus" [size]="16"></app-icon>
+            <span>Crear nuevo cliente</span>
+          </button>
         </div>
 
         <!-- Create Customer Form -->

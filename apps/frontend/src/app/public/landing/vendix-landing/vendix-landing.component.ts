@@ -99,67 +99,68 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
       cta_secondary: 'Ver Demo en Vivo',
     };
 
-    this.plans = [
-      {
-        name: 'Plan Inicial',
-        price: '$49.900',
-        period: '/mes',
-        description: 'Todas las funcionalidades básicas sin IA',
-        features: [
-          'Hasta 1,000 productos',
-          'POS tradicional completo',
-          'Gestión de inventario manual',
-          'Reportes básicos',
-          'Facturación electrónica',
-          'Soporte por email',
-          '2 usuarios',
-          'API básica',
-        ],
-        highlighted: false,
-        cta_text: 'Comenzar Gratis',
-      },
-      {
-        name: 'Plan Pro',
-        price: '$149.900',
-        period: '/mes',
-        description: 'Funcionalidades limitadas de IA',
-        features: [
-          'Productos ilimitados',
-          'POS con IA básica',
-          'Inventario semi-automatizado',
-          'Analytics con IA',
-          'Chatbot básico',
-          'Recomendaciones simples',
-          'Hasta 10 usuarios',
-          'API completa',
-          'Integraciones principales',
-          'Soporte prioritario',
-        ],
-        highlighted: true,
-        cta_text: 'Probar 14 días gratis',
-      },
-      {
-        name: 'Plan Ultra',
-        price: '$399.900',
-        period: '/mes',
-        description: 'Todas las funciones con IA sin límites',
-        features: [
-          'Todo en Plan Pro',
-          'Usuarios ilimitados',
-          'IA predictiva avanzada',
-          'Machine learning personalizado',
-          'Automatización total',
-          'Análisis avanzado con IA',
-          'Chatbots multi-idioma',
-          'Soporte 24/7',
-          'Consultoría IA incluida',
-          'SLA garantizado',
-          'Personalización a medida',
-        ],
-        highlighted: false,
-        cta_text: 'Contactar Expertos',
-      },
-    ];
+    // PLANS ARRAY - COMMENTED OUT FOR EARLY ACCESS (all features are currently free)
+    // this.plans = [
+    //   {
+    //     name: 'Plan Inicial',
+    //     price: '$49.900',
+    //     period: '/mes',
+    //     description: 'Todas las funcionalidades básicas sin IA',
+    //     features: [
+    //       'Hasta 1,000 productos',
+    //       'POS tradicional completo',
+    //       'Gestión de inventario manual',
+    //       'Reportes básicos',
+    //       'Facturación electrónica',
+    //       'Soporte por email',
+    //       '2 usuarios',
+    //       'API básica',
+    //     ],
+    //     highlighted: false,
+    //     cta_text: 'Comenzar Gratis',
+    //   },
+    //   {
+    //     name: 'Plan Pro',
+    //     price: '$149.900',
+    //     period: '/mes',
+    //     description: 'Funcionalidades limitadas de IA',
+    //     features: [
+    //       'Productos ilimitados',
+    //       'POS con IA básica',
+    //       'Inventario semi-automatizado',
+    //       'Analytics con IA',
+    //       'Chatbot básico',
+    //       'Recomendaciones simples',
+    //       'Hasta 10 usuarios',
+    //       'API completa',
+    //       'Integraciones principales',
+    //       'Soporte prioritario',
+    //     ],
+    //     highlighted: true,
+    //     cta_text: 'Probar 14 días gratis',
+    //   },
+    //   {
+    //     name: 'Plan Ultra',
+    //     price: '$399.900',
+    //     period: '/mes',
+    //     description: 'Todas las funciones con IA sin límites',
+    //     features: [
+    //       'Todo en Plan Pro',
+    //       'Usuarios ilimitados',
+    //       'IA predictiva avanzada',
+    //       'Machine learning personalizado',
+    //       'Automatización total',
+    //       'Análisis avanzado con IA',
+    //       'Chatbots multi-idioma',
+    //       'Soporte 24/7',
+    //       'Consultoría IA incluida',
+    //       'SLA garantizado',
+    //       'Personalización a medida',
+    //     ],
+    //     highlighted: false,
+    //     cta_text: 'Contactar Expertos',
+    //   },
+    // ];
 
     this.features = [
       {
@@ -236,7 +237,7 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
   }
 
   scrollToPlans() {
-    const plansSection = document.getElementById('pricing');
+    const plansSection = document.getElementById('early-access');
     plansSection?.scrollIntoView({ behavior: 'smooth' });
   }
 

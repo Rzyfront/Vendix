@@ -13,6 +13,11 @@ services:
       - vendix_pgdata:/var/lib/postgresql/data
     networks:
       - vendix_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   backend:
     build:
@@ -36,6 +41,11 @@ services:
     networks:
       - vendix_net
     command: sh -c "npx prisma generate && npx prisma migrate deploy && npm run start:dev"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   frontend:
     build:
@@ -57,6 +67,11 @@ services:
       - /app/node_modules
     networks:
       - vendix_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   nginx:
     image: nginx:alpine
@@ -73,6 +88,38 @@ services:
       - frontend
     networks:
       - vendix_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Docker cleanup - limpieza automática cada 24h
+  docker-cleanup:
+    image: docker:cli
+    container_name: vendix_cleanup
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        echo "Cleanup service started"
+        while true; do
+          sleep 86400
+          echo "Running cleanup at $$(date)"
+          docker image prune -af --filter "until=168h"
+          docker container prune -f --filter "until=24h"
+          docker volume prune -f --filter "label!=keep"
+          echo "Cleanup done"
+        done
+    networks:
+      - vendix_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "1"
 
 volumes:
   vendix_pgdata:

@@ -4,6 +4,21 @@ import { User } from '../services/auth.service';
 // --- UNIFIED HYDRATION LOGIC ---
 
 /**
+ * Checks if a JWT token is expired by decoding its payload.
+ * Uses a 30-second buffer to account for clock skew.
+ */
+export function isTokenExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    if (!payload.exp) return false;
+    const bufferMs = 30 * 1000;
+    return Date.now() >= payload.exp * 1000 - bufferMs;
+  } catch {
+    return true;
+  }
+}
+
+/**
  * Rehydrates the authentication state from localStorage.
  * This is the single source of truth for re-creating the session on page load.
  */
@@ -47,6 +62,12 @@ export function hydrateAuthState(): Partial<AuthState> {
 
       if (!parsedState.tokens.access_token) {
         console.warn('[HYDRATE] Token de acceso no encontrado');
+        localStorage.removeItem('vendix_auth_state');
+        return getCleanAuthState();
+      }
+
+      if (isTokenExpired(parsedState.tokens.access_token)) {
+        console.warn('[HYDRATE] Token de acceso expirado, limpiando sesión');
         localStorage.removeItem('vendix_auth_state');
         return getCleanAuthState();
       }

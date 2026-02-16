@@ -167,6 +167,47 @@ export class CurrencyFormatService {
   }
 
   /**
+   * Formatea un monto con sufijos compactos (K/M) respetando la posición de la moneda.
+   * Ideal para stats cards, tooltips y celdas de tabla.
+   */
+  formatCompact(amount: number): string {
+    const currency = this.currentCurrency();
+    const symbol = currency?.symbol || '$';
+    const position = currency?.position || 'before';
+
+    let formatted: string;
+    if (Math.abs(amount) >= 1_000_000) {
+      formatted = `${(amount / 1_000_000).toFixed(1)}M`;
+    } else if (Math.abs(amount) >= 1_000) {
+      formatted = `${(amount / 1_000).toFixed(1)}K`;
+    } else {
+      formatted = Math.round(amount).toLocaleString('en-US');
+    }
+
+    return position === 'before' ? `${symbol}${formatted}` : `${formatted}${symbol}`;
+  }
+
+  /**
+   * Formato compacto para ejes de gráficos: K enteros, sin decimales.
+   */
+  formatChartAxis(value: number): string {
+    const currency = this.currentCurrency();
+    const symbol = currency?.symbol || '$';
+    const position = currency?.position || 'before';
+
+    let formatted: string;
+    if (Math.abs(value) >= 1_000_000) {
+      formatted = `${Math.round(value / 1_000_000)}M`;
+    } else if (Math.abs(value) >= 1_000) {
+      formatted = `${Math.round(value / 1_000)}K`;
+    } else {
+      formatted = `${Math.round(value)}`;
+    }
+
+    return position === 'before' ? `${symbol}${formatted}` : `${formatted}${symbol}`;
+  }
+
+  /**
    * Limpia la caché y recarga la moneda
    */
   async refresh(): Promise<void> {

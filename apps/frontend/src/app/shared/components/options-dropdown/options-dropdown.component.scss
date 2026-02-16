@@ -4,8 +4,8 @@
 .options-dropdown-container {
   position: relative;
   display: inline-block;
-  // Ensure container creates its own stacking context above other elements
-  z-index: 100;
+  // Stacking context for dropdown content; must stay below sidebar backdrop (z-index: 54)
+  z-index: var(--z-dropdown);
   // Ensure dropdown can overflow outside this container
   overflow: visible;
 }
@@ -211,6 +211,29 @@
   font-size: var(--fs-xs);
   color: var(--color-text-secondary);
   margin-top: 0.25rem;
+}
+
+.date-filter-input {
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  font-size: var(--fs-sm);
+  font-family: var(--font-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+  transition: all 0.2s ease;
+
+  &:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px var(--color-ring);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }
 
 // Actions Section

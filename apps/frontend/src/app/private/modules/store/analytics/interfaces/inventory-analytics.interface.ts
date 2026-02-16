@@ -76,6 +76,24 @@ export interface ExpiringProduct {
   status: 'ok' | 'warning' | 'critical' | 'expired';
 }
 
+// Movement Summary (aggregated by type)
+export interface MovementSummaryItem {
+  movement_type: string;
+  count: number;
+  total_quantity: number;
+  percentage: number;
+}
+
+// Movement Trend (time-series)
+export interface MovementTrend {
+  period: string;
+  stock_in: number;
+  stock_out: number;
+  adjustments: number;
+  transfers: number;
+  total: number;
+}
+
 // Query DTO for Inventory Analytics
 export interface InventoryAnalyticsQueryDto {
   date_range?: DateRangeFilter;
@@ -83,6 +101,7 @@ export interface InventoryAnalyticsQueryDto {
   category_id?: number;
   status?: 'in_stock' | 'low_stock' | 'out_of_stock' | 'overstock';
   movement_type?: string;
+  granularity?: 'hour' | 'day' | 'week' | 'month' | 'year';
   days_threshold?: number;
   page?: number;
   limit?: number;

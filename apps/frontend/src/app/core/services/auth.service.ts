@@ -265,6 +265,8 @@ export class AuthService {
    * La navegación y toasts son manejados por SessionService.
    */
   logout(options?: { redirect?: boolean }): void {
+    // Capture tokens BEFORE clearing state so the HTTP request can carry them
+    const accessToken = this.getToken();
     const refreshToken = this.getRefreshToken();
 
     // 1. Limpieza Local Inmediata
@@ -281,9 +283,14 @@ export class AuthService {
     // 2. Notificación Backend (Fire and forget)
     // No esperamos la respuesta para bloquear la UI
     if (refreshToken) {
+      const headers: Record<string, string> = {};
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+
       this.http.post(`${this.API_URL}/logout`, {
         refresh_token: refreshToken,
-      }).pipe(
+      }, { headers }).pipe(
         take(1)
       ).subscribe({
         error: (err) => console.warn('[AuthService] Backend logout signaling failed', err)

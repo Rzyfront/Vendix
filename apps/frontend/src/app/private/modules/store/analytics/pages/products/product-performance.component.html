@@ -1,0 +1,175 @@
+<div class="space-y-6 w-full max-w-[1600px] mx-auto md:py-4">
+  <!-- Stats Cards -->
+  @if (loading$ | async) {
+    <div class="stats-container">
+      @for (i of [1, 2, 3, 4]; track i) {
+        <div class="bg-surface border border-border rounded-xl p-4 animate-pulse">
+          <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+          <div class="h-8 bg-gray-200 rounded w-3/4"></div>
+        </div>
+      }
+    </div>
+  } @else {
+    <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <app-stats
+        title="Ingresos Productos"
+        [value]="(summary$ | async)?.total_revenue | currency"
+        [smallText]="getGrowthText((summary$ | async)?.revenue_growth)"
+        iconName="dollar-sign"
+        iconBgColor="bg-green-100"
+        iconColor="text-green-600"
+      ></app-stats>
+
+      <app-stats
+        title="Unidades Vendidas"
+        [value]="(summary$ | async)?.total_units_sold || 0"
+        [smallText]="getGrowthText((summary$ | async)?.units_growth)"
+        iconName="package"
+        iconBgColor="bg-blue-100"
+        iconColor="text-blue-600"
+      ></app-stats>
+
+      <app-stats
+        title="Productos Activos"
+        [value]="(summary$ | async)?.active_products || 0"
+        [smallText]="'de ' + ((summary$ | async)?.total_products || 0) + ' totales'"
+        iconName="box"
+        iconBgColor="bg-purple-100"
+        iconColor="text-purple-600"
+      ></app-stats>
+
+      <app-stats
+        title="Ingreso Promedio"
+        [value]="(summary$ | async)?.avg_revenue_per_product | currency"
+        smallText="por producto activo"
+        iconName="bar-chart-2"
+        iconBgColor="bg-orange-100"
+        iconColor="text-orange-600"
+      ></app-stats>
+    </div>
+  }
+
+  <!-- Filter Bar -->
+  <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
+    <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
+      <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
+        Rendimiento de Productos
+      </h2>
+
+      <div class="flex items-center gap-2 flex-wrap">
+        <vendix-date-range-filter
+          [value]="(dateRange$ | async) ?? undefined"
+          (valueChange)="onDateRangeChange($event)"
+        ></vendix-date-range-filter>
+
+        <app-inputsearch
+          placeholder="Buscar producto..."
+          size="sm"
+          (searchChange)="onSearchChange($event)"
+        ></app-inputsearch>
+
+        <vendix-export-button
+          [loading]="(exporting$ | async) ?? false"
+          (export)="exportReport()"
+        ></vendix-export-button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Top Sellers Chart -->
+  <div class="bg-surface border border-border rounded-xl overflow-hidden">
+    <div class="p-4 border-b border-border flex items-center justify-between">
+      <div>
+        <h3 class="font-semibold text-text-primary">Top 10 Productos Más Vendidos</h3>
+        <p class="text-sm text-text-secondary">Por ingresos en el período seleccionado</p>
+      </div>
+      <a routerLink="../top-sellers" class="text-sm text-primary hover:underline">Ver detalle</a>
+    </div>
+    <div class="p-4">
+      @if (loadingTopSellers$ | async) {
+        <div class="h-80 flex items-center justify-center">
+          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        </div>
+      } @else {
+        <app-chart
+          [options]="topSellersChartOptions"
+          size="large"
+        ></app-chart>
+      }
+    </div>
+  </div>
+
+  <!-- Products Table -->
+  <div class="bg-surface border border-border rounded-xl overflow-hidden">
+    <div class="p-4 border-b border-border">
+      <h3 class="font-semibold text-text-primary">Listado de Productos</h3>
+      <p class="text-sm text-text-secondary">Métricas de venta por producto en el período</p>
+    </div>
+
+    <app-responsive-data-view
+      [data]="(products$ | async) ?? []"
+      [columns]="tableColumns"
+      [cardConfig]="cardConfig"
+      [loading]="(loadingTable$ | async) ?? false"
+      [sortable]="true"
+      emptyMessage="No se encontraron productos"
+      emptyIcon="package"
+      (sort)="onSort($event)"
+    ></app-responsive-data-view>
+
+    <!-- Pagination -->
+    @if (totalProducts$ | async; as total) {
+      @if (total > currentLimit) {
+        <div class="flex items-center justify-between p-4 border-t border-border">
+          <span class="text-sm text-text-secondary">
+            Mostrando {{ (currentPage - 1) * currentLimit + 1 }} - {{ min(currentPage * currentLimit, total) }} de {{ total }}
+          </span>
+          <div class="flex gap-2">
+            <button
+              class="px-3 py-1.5 text-sm border border-border rounded-lg hover:bg-background disabled:opacity-50"
+              [disabled]="currentPage === 1"
+              (click)="onPageChange(currentPage - 1)"
+            >
+              Anterior
+            </button>
+            <button
+              class="px-3 py-1.5 text-sm border border-border rounded-lg hover:bg-background disabled:opacity-50"
+              [disabled]="currentPage * currentLimit >= total"
+              (click)="onPageChange(currentPage + 1)"
+            >
+              Siguiente
+            </button>
+          </div>
+        </div>
+      }
+    }
+  </div>
+
+  <!-- Quick Links -->
+  <div class="bg-surface border border-border rounded-xl p-4">
+    <h3 class="font-semibold text-text-primary mb-4">Reportes Relacionados</h3>
+    <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+      <a
+        routerLink="../top-sellers"
+        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
+      >
+        <app-icon name="trophy" [size]="18" class="text-text-secondary"></app-icon>
+        <span class="text-text-primary">Top Vendidos</span>
+      </a>
+      <a
+        routerLink="../profitability"
+        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
+      >
+        <app-icon name="percent" [size]="18" class="text-text-secondary"></app-icon>
+        <span class="text-text-primary">Rentabilidad</span>
+      </a>
+      <a
+        routerLink="../../sales/by-product"
+        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
+      >
+        <app-icon name="trending-up" [size]="18" class="text-text-secondary"></app-icon>
+        <span class="text-text-primary">Ventas por Producto</span>
+      </a>
+    </div>
+  </div>
+</div>

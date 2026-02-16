@@ -8,6 +8,8 @@ import {
 } from '@angular/core';
 import { Subject, takeUntil } from 'rxjs';
 import { CommonModule } from '@angular/common';
+import { Router } from '@angular/router';
+import { Store } from '@ngrx/store';
 
 import {
   ButtonComponent,
@@ -18,6 +20,7 @@ import {
   BadgeComponent,
   DialogService,
 } from '../../../../shared/components';
+import { selectStoreSettings } from '../../../../core/store/auth/auth.selectors';
 import {
   PosCartService,
   CartState,
@@ -154,10 +157,11 @@ import { PosCartModalComponent } from './components/pos-cart-modal.component';
               <!-- Settings Button -->
               <app-button
                 variant="ghost"
-                size="md"
+                size="xsm"
                 (clicked)="onOpenRegisterConfigModal()"
                 title="Configurar Caja"
-                class="w-9 h-9 lg:w-10 lg:h-10 !p-0 flex items-center justify-center rounded-lg text-text-secondary hover:text-primary hover:bg-primary-light/10 transition-colors"
+                class="w-9 h-9 lg:w-10 lg:h-10 flex items-center justify-center rounded-lg text-text-secondary hover:text-primary hover:bg-primary-light/10 transition-colors"
+                customClasses="!p-0 !h-full !w-full !rounded-lg"
               >
                 <app-icon
                   name="settings"
@@ -335,6 +339,11 @@ export class PosComponent implements OnInit, OnDestroy {
   // Mobile detection signal
   isMobile = signal(false);
 
+  // Store settings for schedule validation
+  storeSettingsSubscription: any;
+  enableScheduleValidation = false;
+  businessHours: Record<string, { open: string; close: string }> = {};
+
   private destroy$ = new Subject<void>();
 
   constructor(
@@ -344,6 +353,8 @@ export class PosComponent implements OnInit, OnDestroy {
     private toastService: ToastService,
     private dialogService: DialogService,
     private cdr: ChangeDetectorRef,
+    private router: Router,
+    private store: Store,
   ) {}
 
   @HostListener('window:resize')
@@ -358,6 +369,7 @@ export class PosComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.checkMobile();
     this.setupSubscriptions();
+    this.loadStoreSettings();
   }
 
   ngOnDestroy(): void {
@@ -655,5 +667,67 @@ export class PosComponent implements OnInit, OnDestroy {
   onCheckoutFromModal(): void {
     this.showCartModal = false;
     this.onCheckout();
+  }
+
+  private loadStoreSettings(): void {
+    this.storeSettingsSubscription = this.store.select(selectStoreSettings).pipe(takeUntil(this.destroy$)).subscribe((storeSettings: any) => {
+      const settings = storeSettings;
+      if (settings?.pos) {
+        this.enableScheduleValidation = settings.pos.enable_schedule_validation || false;
+        this.businessHours = settings.pos.business_hours || {};
+
+        // Check if outside business hours and show modal
+        if (this.enableScheduleValidation && !this.isWithinBusinessHours()) {
+          this.showScheduleWarningModal();
+        }
+      }
+    });
+  }
+
+  private isWithinBusinessHours(): boolean {
+    if (!this.enableScheduleValidation) {
+      return true;
+    }
+
+    const now = new Date();
+    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const currentDayName = dayNames[now.getDay()];
+
+    const todayHours = this.businessHours?.[currentDayName];
+
+    if (!todayHours) {
+      return true;
+    }
+
+    if (todayHours.open === 'closed' || todayHours.close === 'closed') {
+      return false;
+    }
+
+    const currentTime = now.getHours() * 60 + now.getMinutes();
+
+    const [openHour, openMinute] = todayHours.open.split(':').map(Number);
+    const [closeHour, closeMinute] = todayHours.close.split(':').map(Number);
+
+    const openTime = openHour * 60 + openMinute;
+    const closeTime = closeHour * 60 + closeMinute;
+
+    return currentTime >= openTime && currentTime <= closeTime;
+  }
+
+  private showScheduleWarningModal(): void {
+    const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    const today = dayNames[new Date().getDay()];
+
+    this.dialogService.confirm({
+      title: 'POS Fuera de Horario',
+      message: `El punto de venta está fuera del horario de atención configurado para hoy <strong>${today}</strong>. No se podrán realizar ventas hasta dentro del horario establecido.`,
+      confirmText: 'Ir a Configuración',
+      cancelText: 'Cerrar',
+      confirmVariant: 'primary',
+    }).then((confirmed) => {
+      if (confirmed) {
+        this.router.navigate(['/admin/settings/general']);
+      }
+    });
   }
 }

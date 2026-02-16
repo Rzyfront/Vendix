@@ -41,7 +41,7 @@
     </app-product-empty-state>
 
     <!-- Products List -->
-    <div *ngIf="!isLoading && products.length > 0" class="px-2 pb-2 pt-0 md:p-4">
+    <div *ngIf="!isLoading && products.length > 0" class="px-2 pb-2 pt-3 md:p-4">
       <app-responsive-data-view [data]="products" [columns]="tableColumns" [actions]="tableActions"
         [cardConfig]="cardConfig" [loading]="isLoading" [sortable]="true" (sort)="sort.emit($event)"
         (rowClick)="edit.emit($event)">

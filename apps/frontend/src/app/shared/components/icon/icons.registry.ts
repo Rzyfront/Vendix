@@ -137,6 +137,15 @@ import {
   // POP icons
   PackageCheck,
   FilePlus,
+  // Analytics icons
+  Trophy,
+  Percent,
+  BarChart2,
+  Box,
+  Receipt,
+  Folder,
+  UserCog,
+  Calculator,
 } from 'lucide-angular';
 
 /**
@@ -322,6 +331,16 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   // POP icons
   'package-check': PackageCheck,
   'file-plus': FilePlus,
+
+  // Analytics icons
+  trophy: Trophy,
+  percent: Percent,
+  'bar-chart-2': BarChart2,
+  box: Box,
+  receipt: Receipt,
+  folder: Folder,
+  'user-cog': UserCog,
+  calculator: Calculator,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

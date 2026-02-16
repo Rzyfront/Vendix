@@ -32,12 +32,13 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
     AdjustmentListComponent,
   ],
   template: `
-    <div class="w-full">
+    <div class="w-full overflow-x-hidden">
       <!-- Stats Grid: sticky at top on mobile, static on desktop -->
       <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Total Ajustes"
           [value]="stats.total"
+          smallText="Movimientos registrados"
           iconName="clipboard-list"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
@@ -46,6 +47,7 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
         <app-stats
           title="Pérdidas"
           [value]="stats.losses"
+          smallText="Productos extraviados"
           iconName="trending-down"
           iconBgColor="bg-red-100"
           iconColor="text-red-600"
@@ -54,6 +56,7 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
         <app-stats
           title="Daños"
           [value]="stats.damages"
+          smallText="Productos dañados"
           iconName="alert-triangle"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-600"
@@ -62,6 +65,7 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
         <app-stats
           title="Correcciones"
           [value]="stats.corrections"
+          smallText="Ajustes de inventario"
           iconName="edit-3"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"

@@ -3,6 +3,7 @@
   <app-stats
     title="Órdenes"
     [value]="formatNumber(stats.total)"
+    smallText="Órdenes de compra"
     iconName="file-text"
     iconBgColor="bg-blue-100"
     iconColor="text-blue-500"
@@ -11,6 +12,7 @@
   <app-stats
     title="Pendientes"
     [value]="formatNumber(stats.pending)"
+    smallText="Por recibir"
     iconName="clock"
     iconBgColor="bg-amber-100"
     iconColor="text-amber-500"
@@ -19,6 +21,7 @@
   <app-stats
     title="Recibidas"
     [value]="formatNumber(stats.received)"
+    smallText="Completadas exitosamente"
     iconName="check-circle"
     iconBgColor="bg-emerald-100"
     iconColor="text-emerald-500"
@@ -27,6 +30,7 @@
   <app-stats
     title="Valor Total"
     [value]="formatCurrency(stats.total_value)"
+    smallText="Inversión en compras"
     iconName="dollar-sign"
     iconBgColor="bg-purple-100"
     iconColor="text-purple-500"

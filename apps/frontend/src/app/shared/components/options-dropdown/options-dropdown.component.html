@@ -60,7 +60,7 @@
           <!-- Single Select Filter -->
           <ng-container *ngIf="filter.type === 'select'">
             <app-selector
-              [options]="filter.options"
+              [options]="filter.options || []"
               [ngModel]="getFilterValue(filter.key)"
               (valueChange)="onFilterChange(filter.key, $event)"
               size="sm"
@@ -72,13 +72,24 @@
           <!-- Multi Select Filter -->
           <ng-container *ngIf="filter.type === 'multi-select'">
             <app-multi-selector
-              [options]="filter.options"
+              [options]="filter.options || []"
               [ngModel]="getMultiFilterValues(filter.key)"
               (valueChange)="onMultiFilterChange(filter.key, $event)"
               size="sm"
               [placeholder]="filter.placeholder || 'Seleccionar'"
               [disabled]="filter.disabled || false"
             ></app-multi-selector>
+          </ng-container>
+
+          <!-- Date Filter -->
+          <ng-container *ngIf="filter.type === 'date'">
+            <input
+              type="date"
+              [ngModel]="getFilterValue(filter.key)"
+              (ngModelChange)="onFilterChange(filter.key, $event)"
+              class="date-filter-input"
+              [disabled]="filter.disabled || false"
+            />
           </ng-container>
 
           <div *ngIf="filter.helpText" class="filter-help-text">

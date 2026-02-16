@@ -77,6 +77,22 @@ export class SalesAnalyticsQueryDto extends AnalyticsQueryDto {
   channel?: order_channel_enum;
 }
 
+export class ProductsAnalyticsQueryDto extends AnalyticsQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  category_id?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  brand_id?: number;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+}
+
 export class InventoryAnalyticsQueryDto extends AnalyticsQueryDto {
   @IsOptional()
   @Type(() => Number)

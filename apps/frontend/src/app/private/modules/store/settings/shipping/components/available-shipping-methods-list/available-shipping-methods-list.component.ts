@@ -62,9 +62,9 @@ export class AvailableShippingMethodsListComponent {
   // Card configuration for mobile
   card_config: ItemListCardConfig = {
     titleKey: 'name',
-    subtitleKey: 'type',
+    subtitleKey: 'description',
     subtitleTransform: (item: SystemShippingMethod) =>
-      this.getTypeLabel(item.type),
+      item.description || 'Sin descripción',
     avatarFallbackIcon: 'plus-circle',
     avatarShape: 'square',
     badgeKey: 'type',
@@ -82,13 +82,22 @@ export class AvailableShippingMethodsListComponent {
     badgeTransform: (value: string) => this.getTypeLabel(value),
     detailKeys: [
       {
-        key: 'description',
-        label: 'Descripción',
+        key: 'provider_name',
+        label: 'Proveedor',
+        transform: (val: string) => val || 'Propio',
+      },
+      {
+        key: 'min_days',
+        label: 'Tiempo estimado',
+        icon: 'clock',
+        transform: (_val: number, item: SystemShippingMethod) =>
+          this.formatDeliveryTime(item?.min_days, item?.max_days),
       },
     ],
     footerKey: 'min_days',
-    footerLabel: 'Tiempo',
-    footerTransform: (val: number) => (val ? `${val} días` : '-'),
+    footerLabel: 'Entrega',
+    footerTransform: (_val: number, item: SystemShippingMethod) =>
+      this.formatDeliveryTime(item?.min_days, item?.max_days),
   };
 
   // Table columns for desktop

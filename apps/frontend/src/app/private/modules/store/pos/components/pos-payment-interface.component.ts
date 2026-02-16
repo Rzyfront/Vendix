@@ -5,6 +5,8 @@ import {
   EventEmitter,
   OnInit,
   OnDestroy,
+  OnChanges,
+  SimpleChanges,
   ChangeDetectorRef,
   inject,
 } from '@angular/core';
@@ -698,6 +700,34 @@ interface PaymentState {
         cursor: pointer;
       }
 
+      /* Create Customer Action - Always visible */
+      .create-customer-action {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--color-border);
+      }
+
+      .create-customer-btn {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 12px;
+        background: var(--color-primary);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: filter 0.2s;
+      }
+
+      .create-customer-btn:hover {
+        filter: brightness(1.1);
+      }
+
       /* Create Customer Form */
       .create-customer-form {
         margin-top: 12px;
@@ -863,6 +893,33 @@ interface PaymentState {
         }
       }
 
+      /* Desktop: 3-column horizontal layout */
+      @media (min-width: 1024px) {
+        .payment-content {
+          display: grid;
+          grid-template-columns: 3fr 5fr 4fr;
+          gap: 16px;
+          height: 100%;
+          min-height: 0;
+        }
+
+        .payment-section {
+          display: flex;
+          flex-direction: column;
+          overflow-y: auto;
+          height: 100%;
+        }
+
+        .product-list {
+          max-height: none;
+          flex: 1;
+        }
+
+        .search-results {
+          max-height: 200px;
+        }
+      }
+
       /* Responsive */
       @media (max-width: 480px) {
         .payment-content {
@@ -890,7 +947,7 @@ interface PaymentState {
     `,
   ],
 })
-export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
+export class PosPaymentInterfaceComponent implements OnInit, OnDestroy, OnChanges {
   @Input() isOpen = false;
   @Input() cartState: CartState | null = null;
   @Output() closed = new EventEmitter<void>();
@@ -916,6 +973,11 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
   allowAnonymousSales = false;
   anonymousSalesAsDefault = false;
   requireCashDrawerOpen = false;
+  enableScheduleValidation = false;
+  businessHours: Record<string, { open: string; close: string }> = {};
+
+  // Currency symbol (computed signal from CurrencyFormatService)
+  currencySymbol: any;
 
   // Currency symbol (computed signal from CurrencyFormatService)
   currencySymbol: any;
@@ -1014,6 +1076,27 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
+  ngOnChanges(changes: SimpleChanges): void {
+    // When modal opens, sync anonymous sale state with current settings
+    if (changes['isOpen'] && changes['isOpen'].currentValue === true) {
+      this.syncAnonymousSaleState();
+    }
+  }
+
+  private syncAnonymousSaleState(): void {
+    // If anonymous sales are not allowed, always disable
+    if (!this.allowAnonymousSales) {
+      this.paymentState.isAnonymousSale = false;
+    } else {
+      // Use the default setting from store settings
+      this.paymentState.isAnonymousSale = this.anonymousSalesAsDefault;
+    }
+    this.cdr.markForCheck();
+  }
+
+  // Track if settings have been loaded at least once
+  private settingsLoaded = false;
+
   private createPaymentForm(): FormGroup {
     return this.fb.group({
       cashReceived: [0, [Validators.required, Validators.min(0)]],
@@ -1058,21 +1141,64 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
       });
   }
 
+  private isWithinBusinessHours(): boolean {
+    // If schedule validation is disabled, always allow
+    if (!this.enableScheduleValidation) {
+      return true;
+    }
+
+    // Get current day and time in store timezone
+    const now = new Date();
+    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const currentDayName = dayNames[now.getDay()];
+
+    // Get business hours for current day
+    const todayHours = this.businessHours?.[currentDayName];
+
+    // If no hours configured for today, allow by default
+    if (!todayHours) {
+      return true;
+    }
+
+    // If day is marked as closed, don't allow sales
+    if (todayHours.open === 'closed' || todayHours.close === 'closed') {
+      return false;
+    }
+
+    // Parse current time to minutes for comparison
+    const currentTime = now.getHours() * 60 + now.getMinutes();
+
+    // Parse opening and closing times
+    const [openHour, openMinute] = todayHours.open.split(':').map(Number);
+    const [closeHour, closeMinute] = todayHours.close.split(':').map(Number);
+
+    const openTime = openHour * 60 + openMinute;
+    const closeTime = closeHour * 60 + closeMinute;
+
+    // Check if current time is within business hours
+    return currentTime >= openTime && currentTime <= closeTime;
+  }
+
   private loadStoreSettings(): void {
     this.storeSettingsSubscription = this.store.select(fromAuth.selectStoreSettings).pipe(takeUntil(this.destroy$)).subscribe((storeSettings: any) => {
       // store_settings has structure: { settings: { pos: { ... }, general: { ... }, ... } }
-      const settings = storeSettings?.settings;
+      const settings = storeSettings;
       if (settings?.pos) {
         const prevAllowAnonymous = this.allowAnonymousSales;
 
         this.allowAnonymousSales = settings.pos.allow_anonymous_sales || false;
         this.anonymousSalesAsDefault = settings.pos.anonymous_sales_as_default || false;
         this.requireCashDrawerOpen = settings.pos.require_cash_drawer_open || false;
+        this.enableScheduleValidation = settings.pos.enable_schedule_validation || false;
+        this.businessHours = settings.pos.business_hours || {};
+        this.settingsLoaded = true;
 
         console.log('[POS Payment] Store settings updated:', {
           allowAnonymousSales: this.allowAnonymousSales,
           anonymousSalesAsDefault: this.anonymousSalesAsDefault,
           requireCashDrawerOpen: this.requireCashDrawerOpen,
+          enableScheduleValidation: this.enableScheduleValidation,
+          businessHours: this.businessHours,
           prevAllowAnonymous,
           isAnonymousSale: this.paymentState.isAnonymousSale,
           rawSettings: settings,
@@ -1227,6 +1353,18 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
       return;
     }
 
+    // Check business hours if validation is enabled
+    if (!this.isWithinBusinessHours()) {
+      const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+      const today = dayNames[new Date().getDay()];
+      this.toastService.show({
+        variant: 'error',
+        title: 'Fuera del horario de atención',
+        description: `El POS está cerrado. Hoy ${today} no se permite realizar ventas fuera del horario configurado.`,
+      });
+      return;
+    }
+
     this.paymentState.isProcessing = true;
 
     const payment_request = {
@@ -1298,6 +1436,18 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
       this.toastService.info('Configure la caja para continuar');
       this.requestRegisterConfig.emit();
       this.onModalClosed();
+      return;
+    }
+
+    // Check business hours if validation is enabled
+    if (!this.isWithinBusinessHours()) {
+      const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+      const today = dayNames[new Date().getDay()];
+      this.toastService.show({
+        variant: 'error',
+        title: 'Fuera del horario de atención',
+        description: `El POS está cerrado. Hoy ${today} no se permite realizar ventas fuera del horario configurado.`,
+      });
       return;
     }
 
@@ -1386,7 +1536,7 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
       reference: '',
       isProcessing: false,
       change: 0,
-      isAnonymousSale: this.allowAnonymousSales && this.anonymousSalesAsDefault,
+      isAnonymousSale: false, // Will be synced when modal opens
     };
     this.paymentForm.reset();
     this.customerForm.reset();

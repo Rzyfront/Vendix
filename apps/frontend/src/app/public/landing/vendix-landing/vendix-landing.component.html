@@ -6,8 +6,8 @@
       <div class="flex items-center justify-between h-16">
         <!-- Logo Section -->
         <div class="flex items-center space-x-3">
-          <div class="w-10 h-10 bg-[var(--color-primary)] rounded-xl flex items-center justify-center">
-            <app-icon name="cart" [size]="24" color="white"></app-icon>
+          <div class="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
+            <img src="vlogo.png" alt="Vendix" class="w-full h-full object-contain" />
           </div>
           <h1 class="text-xl font-semibold text-[var(--color-text-primary)]">
             {{ tenantConfig?.branding?.name || "Vendix" }}
@@ -24,9 +24,9 @@
             class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
             Soluciones
           </a>
-          <a href="#pricing"
+          <a href="#early-access"
             class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
-            Precios
+            Acceso Gratis
           </a>
           <a routerLink="/auth/login"
             class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
@@ -38,11 +38,18 @@
           </a>
         </nav>
 
-        <!-- Mobile Menu Button -->
-        <button class="md:hidden p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
-          (click)="toggleMobileMenu()">
-          <app-icon [name]="mobileMenuOpen ? 'x' : 'menu'" [size]="24" color="var(--color-text-primary)"></app-icon>
-        </button>
+        <!-- Mobile Actions -->
+        <div class="flex md:hidden items-center gap-1">
+          <a routerLink="/auth/login"
+            class="flex items-center gap-1.5 text-sm font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 px-3 py-2 rounded-lg hover:bg-gray-50">
+            <app-icon name="log-in" [size]="18" color="currentColor"></app-icon>
+            Ingresar
+          </a>
+          <button class="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
+            (click)="toggleMobileMenu()">
+            <app-icon [name]="mobileMenuOpen ? 'x' : 'menu'" [size]="24" color="var(--color-text-primary)"></app-icon>
+          </button>
+        </div>
       </div>
     </div>
   </header>
@@ -60,8 +67,8 @@
         <!-- Mobile Menu Header -->
         <div class="flex items-center justify-between p-4 border-b border-gray-200">
           <div class="flex items-center space-x-3">
-            <div class="w-8 h-8 bg-[var(--color-primary)] rounded-lg flex items-center justify-center">
-              <app-icon name="cart" [size]="20" color="white"></app-icon>
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden">
+              <img src="vlogo.png" alt="Vendix" class="w-full h-full object-contain" />
             </div>
             <h2 class="text-lg font-semibold text-[var(--color-text-primary)]">
               {{ tenantConfig?.branding?.name || "Vendix" }}
@@ -91,12 +98,12 @@
               <span class="text-[var(--color-text-primary)] font-medium">Soluciones</span>
             </a>
 
-            <a href="#pricing"
+            <a href="#early-access"
               class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
               (click)="closeMobileMenu()">
-              <app-icon name="credit-card" [size]="20" color="var(--color-text-secondary)"
+              <app-icon name="sparkles" [size]="20" color="var(--color-text-secondary)"
                 class="mr-3 group-hover:text-[var(--color-primary)]"></app-icon>
-              <span class="text-[var(--color-text-primary)] font-medium">Precios</span>
+              <span class="text-[var(--color-text-primary)] font-medium">Acceso Gratis</span>
             </a>
 
             <div class="border-t border-gray-200 my-4"></div>
@@ -382,7 +389,7 @@
       </div>
     </section>
 
-    <!-- Pricing Section -->
+    <!-- PRICING SECTION - COMMENTED OUT FOR EARLY ACCESS
     <section id="pricing" class="min-h-screen bg-[var(--color-surface)] py-20 md:py-32">
       <div class="container mx-auto px-4 sm:px-6 lg:px-8">
         <div class="text-center mb-12 md:mb-16">
@@ -395,105 +402,291 @@
             <span class="text-[var(--color-primary)]">Tu Negocio</span>
           </h2>
           <p class="text-lg md:text-xl text-[var(--color-text-secondary)] max-w-3xl mx-auto leading-relaxed">
-            Elige el plan perfecto según tus necesidades. Cancela cuando
-            quieras.
+            Elige el plan perfecto según tus necesidades. Cancela cuando quieras.
+          </p>
+        </div>
+      </div>
+    </section>
+    -->
+
+    <!-- Early Access Section -->
+    <section id="early-access" class="min-h-screen bg-[var(--color-surface)] py-20 md:py-32">
+      <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-7xl">
+
+        <!-- Header -->
+        <div class="text-center mb-12 md:mb-16">
+          <div class="inline-flex items-center gap-2 bg-[var(--color-primary)] px-4 py-2 rounded-full mb-6">
+            <app-icon name="sparkles" [size]="14" color="var(--color-accent)"></app-icon>
+            <span class="text-sm font-medium text-[var(--color-accent)]">Acceso Anticipado Gratuito</span>
+          </div>
+          <h2 class="text-3xl md:text-5xl font-bold text-[var(--color-text-primary)] mb-6 tracking-tight">
+            Todas las Herramientas.<br />
+            <span class="text-[var(--color-primary)]">Gratis. Sin Límites.</span>
+          </h2>
+          <p class="text-lg md:text-xl text-[var(--color-text-secondary)] max-w-3xl mx-auto leading-relaxed">
+            Vendix está en acceso anticipado. Regístrate hoy y obtén acceso completo a todas las funcionalidades
+            sin costo alguno, sin tarjeta de crédito, sin compromisos.
           </p>
         </div>
 
-        <!-- Mobile-First Pricing Cards -->
-        <div class="space-y-2 md:space-y-4 md:space-y-0 md:grid md:grid-cols-3 lg:grid-cols-3 gap-2 md:p-4 md:gap-2 md:p-6 max-w-7xl mx-auto">
-          @for (plan of plans; track plan.name) {
-          <div class="relative bg-white rounded-2xl border border-[var(--color-border)] {{
-                plan.highlighted
-                  ? 'ring-2 ring-[var(--color-primary)]/50 shadow-xl'
-                  : 'shadow-lg'
-              }} transition-all duration-300 hover:shadow-xl hover:scale-[1.02] overflow-hidden">
-            @if (plan.highlighted) {
-            <div class="absolute -top-4 left-1/2 transform -translate-x-1/2 z-10">
-              <span class="bg-[var(--color-primary)] text-white px-4 py-2 rounded-full text-sm font-semibold shadow-lg">
-                Más Popular
+        <!-- Hero Card -->
+        <div class="max-w-2xl mx-auto mb-16">
+          <div
+            class="relative bg-white rounded-2xl border-2 border-[var(--color-primary)]/30 shadow-xl p-8 md:p-10 text-center overflow-hidden">
+            <!-- Decorative gradient -->
+            <div
+              class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-secondary)]">
+            </div>
+
+            <div class="mb-6">
+              <span class="text-2xl md:text-3xl text-[var(--color-text-secondary)] line-through opacity-60">$69.900/mes</span>
+            </div>
+            <div class="mb-4">
+              <span class="text-5xl md:text-7xl font-bold text-[var(--color-primary)]">GRATIS</span>
+            </div>
+            <p class="text-lg text-[var(--color-text-secondary)] mb-8">
+              durante Early Access
+            </p>
+            <div class="flex flex-wrap justify-center gap-3 mb-8 text-sm md:text-base text-[var(--color-text-secondary)]">
+              <span class="flex items-center gap-1.5">
+                <app-icon name="check" [size]="16" color="var(--color-success)"></app-icon>
+                Usuarios Ilimitados
+              </span>
+              <span class="text-[var(--color-border)]">·</span>
+              <span class="flex items-center gap-1.5">
+                <app-icon name="check" [size]="16" color="var(--color-success)"></app-icon>
+                Productos Ilimitados
+              </span>
+              <span class="text-[var(--color-border)]">·</span>
+              <span class="flex items-center gap-1.5">
+                <app-icon name="check" [size]="16" color="var(--color-success)"></app-icon>
+                Tiendas Ilimitadas
               </span>
             </div>
-            }
-
-            <!-- Mobile Header -->
-            <div class="p-2 md:p-4 md:p-2 md:p-6">
-              <!-- Plan Name and Price Header -->
-              <div class="text-center mb-6 md:mb-8">
-                <h3 class="text-xl md:text-2xl font-bold text-[var(--color-text-primary)] mb-3">
-                  {{ plan.name }}
-                </h3>
-                <p class="text-sm md:text-base text-[var(--color-text-secondary)] mb-6 leading-relaxed">
-                  {{ plan.description }}
-                </p>
-                <div class="flex items-baseline justify-center mb-2">
-                  <span class="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)]">{{ plan.price }}</span>
-                  <span class="text-[var(--color-text-secondary)] ml-2 text-base md:text-lg">{{ plan.period }}</span>
-                </div>
-              </div>
-
-              <!-- Features List -->
-              <div class="mb-8">
-                <ul class="space-y-3 md:space-y-2 md:space-y-4">
-                  @for (feature of plan.features; track feature) {
-                  <li class="flex items-start group">
-                    <app-icon name="check" [size]="18" color="var(--color-success)"
-                      class="mr-3 mt-1 flex-shrink-0 group-hover:scale-110 transition-transform duration-200"></app-icon>
-                    <span
-                      class="text-sm md:text-base text-[var(--color-text-secondary)] leading-relaxed group-hover:text-[var(--color-text-primary)] transition-colors duration-200">{{
-                      feature }}</span>
-                  </li>
-                  }
-                </ul>
-              </div>
-
-              <!-- CTA Button and Terms -->
-              <div class="space-y-2 md:space-y-4">
-                <a routerLink="/auth/register" class="block w-full py-3 md:py-4 px-6 rounded-xl text-base md:text-lg font-semibold text-center transition-all duration-300 min-h-[52px] flex items-center justify-center {{
-                      plan.highlighted
-                        ? 'bg-[var(--color-primary)] text-white hover:bg-[var(--color-secondary)] shadow-lg hover:shadow-xl'
-                        : 'bg-[var(--color-background)] text-[var(--color-text-primary)] border-2 border-[var(--color-border)] hover:border-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-white'
-                    }}">
-                  {{ plan.cta_text }}
-                </a>
-
-                <!-- Términos y condiciones -->
-                <p class="text-center text-sm text-[var(--color-text-secondary)]">
-                  <a href="#" (click)="showTermsAndConditions()"
-                    class="hover:text-[var(--color-primary)] underline transition-colors duration-200">
-                    Términos y condiciones
-                  </a>
-                </p>
-              </div>
-            </div>
-
-            <!-- Mobile Highlight Border -->
-            @if (plan.highlighted) {
-            <div
-              class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-secondary)]">
-            </div>
-            }
-          </div>
-          }
-        </div>
-
-        <!-- Mobile Additional Info -->
-        <div class="mt-12 md:mt-16 text-center">
-          <div class="bg-[var(--color-primary)]/5 rounded-2xl p-2 md:p-4 md:p-2 md:p-6 border border-[var(--color-primary)]/20">
-            <h3 class="text-lg md:text-xl font-semibold text-[var(--color-primary)] mb-3">
-              ¿No estás seguro qué plan elegir?
-            </h3>
-            <p class="text-[var(--color-text-secondary)] mb-4 leading-relaxed">
-              Contáctanos para una asesoría personalizada y encuentra el plan
-              perfecto para tu negocio.
-            </p>
-            <a href="mailto:quicks.dev@gmail.com?subject=Consulta%20de%20Planes%20Vendix"
-              class="inline-flex items-center text-[var(--color-primary)] hover:text-[var(--color-secondary)] font-semibold transition-colors duration-200">
-              <app-icon name="mail-check" [size]="18" color="currentColor" class="mr-2"></app-icon>
-              Hablar con un experto
+            <a routerLink="/auth/register"
+              class="inline-flex items-center gap-2 bg-[var(--color-primary)] text-white px-8 py-4 rounded-xl text-lg font-semibold hover:bg-[var(--color-secondary)] shadow-lg hover:shadow-xl transition-all duration-300">
+              <app-icon name="zap" [size]="20" color="white"></app-icon>
+              Comenzar Gratis Ahora
             </a>
           </div>
         </div>
+
+        <!-- Feature Grid -->
+        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 mb-16">
+
+          <!-- Punto de Venta (POS) -->
+          <div
+            class="group bg-white p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
+            <div
+              class="w-12 h-12 bg-[var(--color-accent-light)] rounded-xl flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
+              <app-icon name="credit-card" [size]="24" color="var(--color-accent)"></app-icon>
+            </div>
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">Punto de Venta (POS)</h3>
+            <ul class="space-y-3 text-[var(--color-text-secondary)]">
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Escaneo de códigos de barras</span>
+              </li>
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Pagos en efectivo y tarjeta</span>
+              </li>
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Impresión de tickets y facturas</span>
+              </li>
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Inventario en tiempo real</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Gestión de Inventario -->
+          <div
+            class="group bg-white p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
+            <div
+              class="w-12 h-12 bg-[var(--color-success-light)] rounded-xl flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
+              <app-icon name="package" [size]="24" color="var(--color-success)"></app-icon>
+            </div>
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">Gestión de Inventario</h3>
+            <ul class="space-y-3 text-[var(--color-text-secondary)]">
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Ajustes de stock y ubicaciones</span>
+              </li>
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Gestión de proveedores</span>
+              </li>
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Punto de compra automático</span>
+              </li>
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Seguimiento por número de serie</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- E-commerce Completo -->
+          <div
+            class="group bg-white p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
+            <div
+              class="w-12 h-12 bg-[var(--color-primary-light)] rounded-xl flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
+              <app-icon name="shopping-bag" [size]="24" color="var(--color-primary)"></app-icon>
+            </div>
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">E-commerce Completo</h3>
+            <ul class="space-y-3 text-[var(--color-text-secondary)]">
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Tienda online personalizable</span>
+              </li>
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Carrito de compras configurable</span>
+              </li>
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Checkout con WhatsApp</span>
+              </li>
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Catálogo con variantes</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Analíticas Avanzadas -->
+          <div
+            class="group bg-white p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
+            <div
+              class="w-12 h-12 bg-[var(--color-primary-light)] rounded-xl flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
+              <app-icon name="chart-line" [size]="24" color="var(--color-primary)"></app-icon>
+            </div>
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">Analíticas Avanzadas</h3>
+            <ul class="space-y-3 text-[var(--color-text-secondary)]">
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Resumen de ventas en tiempo real</span>
+              </li>
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Análisis de inventario</span>
+              </li>
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Rendimiento de productos y top sellers</span>
+              </li>
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Pérdidas y ganancias</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Marketing y Clientes -->
+          <div
+            class="group bg-white p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
+            <div
+              class="w-12 h-12 bg-[var(--color-accent-light)] rounded-xl flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
+              <app-icon name="users" [size]="24" color="var(--color-accent)"></app-icon>
+            </div>
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">Marketing y Clientes</h3>
+            <ul class="space-y-3 text-[var(--color-text-secondary)]">
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Directorio de clientes</span>
+              </li>
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Promociones y cupones</span>
+              </li>
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Reseñas y calificaciones</span>
+              </li>
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Segmentación de clientes</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Multi-tienda y Organización -->
+          <div
+            class="group bg-white p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
+            <div
+              class="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
+              <app-icon name="building" [size]="24" color="var(--color-primary)"></app-icon>
+            </div>
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">Multi-tienda y Organización</h3>
+            <ul class="space-y-3 text-[var(--color-text-secondary)]">
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Gestión multi-tienda</span>
+              </li>
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Roles y permisos por usuario</span>
+              </li>
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Dominios personalizados</span>
+              </li>
+              <li class="flex items-start">
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
+                <span>Auditoría y cumplimiento</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Urgency Banner -->
+        <div class="text-center">
+          <div
+            class="bg-[var(--color-primary)]/5 rounded-2xl p-6 md:p-8 border border-[var(--color-primary)]/20 max-w-3xl mx-auto">
+            <app-icon name="zap" [size]="28" color="var(--color-primary)" class="mb-3"></app-icon>
+            <h3 class="text-lg md:text-xl font-semibold text-[var(--color-primary)] mb-3">
+              El acceso gratuito es por tiempo limitado
+            </h3>
+            <p class="text-[var(--color-text-secondary)] mb-5 leading-relaxed">
+              Aprovecha ahora: cuando lancemos los planes de pago, los usuarios de Early Access
+              conservarán beneficios exclusivos.
+            </p>
+            <a routerLink="/auth/register"
+              class="inline-flex items-center text-[var(--color-primary)] hover:text-[var(--color-secondary)] font-semibold transition-colors duration-200">
+              Crear mi cuenta gratis
+              <app-icon name="arrow-right" [size]="18" color="currentColor" class="ml-2"></app-icon>
+            </a>
+          </div>
+        </div>
+
       </div>
     </section>
 
@@ -529,15 +722,13 @@
   </main>
 
   <!-- Footer -->
-  <footer class="bg-[var(--color-text-primary)] text-white py-16">
+  <footer class="bg-[var(--color-secondary)] text-white py-16">
     <div class="container mx-auto px-4 sm:px-6 lg:px-8">
       <div class="grid md:grid-cols-4 gap-2 md:p-6 mb-12">
         <div class="md:col-span-1">
           <div class="flex items-center space-x-3 mb-4">
-            <div class="w-10 h-10 bg-white rounded-xl flex items-center justify-center">
-              <svg class="w-6 h-6 text-[var(--color-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
+            <div class="w-10 h-10 bg-transparent rounded-xl flex items-center justify-center overflow-hidden">
+              <img src="vlogo.png" alt="Vendix" class="w-full h-full object-contain" />
             </div>
             <h3 class="text-xl font-semibold">Vendix</h3>
           </div>
@@ -552,7 +743,7 @@
           <div class="space-y-3">
             <a href="#features" class="block text-white/70 hover:text-white transition-colors">Características</a>
             <a href="#solutions" class="block text-white/70 hover:text-white transition-colors">Soluciones</a>
-            <a href="#pricing" class="block text-white/70 hover:text-white transition-colors">Precios</a>
+            <a href="#early-access" class="block text-white/70 hover:text-white transition-colors">Acceso Gratis</a>
           </div>
         </div>
 

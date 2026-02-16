@@ -9,7 +9,7 @@ import {
   DestroyRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
+import { Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
@@ -167,6 +167,18 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
                 <app-icon slot="icon" name="share" [size]="18" />
               </app-button>
             </div>
+
+            <!-- Buy Now -->
+            <app-button
+              variant="success"
+              size="lg"
+              [fullWidth]="true"
+              [disabled]="product.stock_quantity === 0"
+              (clicked)="onBuyNow()"
+            >
+              <app-icon slot="icon" name="shopping-bag" [size]="18" />
+              Comprar ahora
+            </app-button>
 
             <!-- View Full Details Link -->
             <a class="view-details-link" [routerLink]="['/catalog', product.slug]" (click)="onClose()">
@@ -438,6 +450,7 @@ export class ProductQuickViewModalComponent implements OnChanges {
   private destroyRef = inject(DestroyRef);
   private catalogService = inject(CatalogService);
   private cartService = inject(CartService);
+  private router = inject(Router);
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['isOpen'] && this.isOpen && this.productSlug) {
@@ -519,6 +532,26 @@ export class ProductQuickViewModalComponent implements OnChanges {
     this.addedToCart.emit(this.product);
     // Optionally close modal after adding
     // this.onClose();
+  }
+
+  onBuyNow(): void {
+    if (!this.product) return;
+    const result = this.cartService.addToCart(this.product.id, this.quantity);
+    if (result) {
+      result.subscribe({
+        next: () => {
+          this.onClose();
+          this.router.navigate(['/cart']);
+        },
+        error: () => {
+          this.onClose();
+          this.router.navigate(['/cart']);
+        },
+      });
+    } else {
+      this.onClose();
+      this.router.navigate(['/cart']);
+    }
   }
 
   onShareClick(): void {

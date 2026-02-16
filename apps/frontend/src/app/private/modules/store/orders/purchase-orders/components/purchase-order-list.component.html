@@ -2,7 +2,7 @@
   <!-- Lista de Órdenes de Compra -->
   <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border md:min-h-[600px] md:overflow-hidden">
     <!-- Search Section: sticky below stats on mobile, normal on desktop -->
-    <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
+    <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
       <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
         <!-- Title - smaller on mobile, larger on desktop -->
         <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
@@ -51,7 +51,7 @@
     </app-purchase-order-empty-state>
 
     <!-- Orders List -->
-    <div *ngIf="!loading && orders.length > 0" class="px-2 pb-2 pt-1 md:p-4">
+    <div *ngIf="!loading && orders.length > 0" class="px-2 pb-2 pt-3 md:p-4">
       <app-responsive-data-view
         [data]="orders"
         [columns]="table_columns"

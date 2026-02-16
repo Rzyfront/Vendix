@@ -18,27 +18,41 @@ export class StoreShippingMethodsService {
 
   /**
    * Get available shipping methods for a store to enable
-   * Shows system methods that are active and not yet enabled
+   * Shows system methods that are active and not yet copied to this store
    */
   async getAvailableForStore() {
-    // Get already enabled methods (StorePrismaService automatically filters by store_id)
-    const enabled_methods = await this.prisma.store_shipping_methods.findMany({
-      select: { system_shipping_method_id: true },
-    });
+    // Get store_id from context
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
 
-    const enabled_ids = enabled_methods.map((m) => m.system_shipping_method_id);
+    if (!store_id) {
+      throw new ForbiddenException('Store context required for this operation');
+    }
 
-    // Use withoutScope() to query system methods (which have store_id = null)
-    // The scoped client would overwrite store_id: null with the current store's ID
+    // Use base client to query across scopes
     const base_client = this.prisma.withoutScope();
 
-    // Get system shipping methods that are active and not yet enabled
+    // Get system method IDs already copied to this store
+    const copied_methods = await base_client.shipping_methods.findMany({
+      where: {
+        store_id: store_id,
+        is_system: false,
+        copied_from_system_method_id: { not: null },
+      },
+      select: { copied_from_system_method_id: true },
+    });
+
+    const copied_ids = copied_methods
+      .map((m) => m.copied_from_system_method_id)
+      .filter((id): id is number => id !== null);
+
+    // Get system shipping methods that are active and not yet copied
     const available_methods = await base_client.shipping_methods.findMany({
       where: {
         is_active: true,
         is_system: true,
-        store_id: null, // Only system-wide methods
-        id: { notIn: enabled_ids },
+        store_id: null,
+        id: { notIn: copied_ids },
       },
       orderBy: [{ display_order: 'asc' }, { name: 'asc' }],
     });
@@ -48,11 +62,12 @@ export class StoreShippingMethodsService {
 
   /**
    * Get enabled shipping methods for a store
+   * Returns store's own copies of system methods (is_system=false, store_id=current)
    */
   async getEnabledForStore() {
-    return this.prisma.store_shipping_methods.findMany({
-      include: {
-        system_shipping_method: true,
+    return this.prisma.shipping_methods.findMany({
+      where: {
+        is_system: false,
       },
       orderBy: { display_order: 'asc' },
     });
@@ -66,12 +81,10 @@ export class StoreShippingMethodsService {
       throw new NotFoundException('Invalid shipping method ID');
     }
 
-    const method = await this.prisma.store_shipping_methods.findUnique({
+    const method = await this.prisma.shipping_methods.findFirst({
       where: {
         id: method_id,
-      },
-      include: {
-        system_shipping_method: true,
+        is_system: false,
       },
     });
 
@@ -85,10 +98,9 @@ export class StoreShippingMethodsService {
   /**
    * Enable a system shipping method for a store (One-Click Magic)
    *
-   * When enabling a shipping method:
-   * 1. Creates the store_shipping_methods record
-   * 2. Auto-copies all system zones that have rates for this method
-   * 3. Copies all rates for this method within those zones
+   * Creates a COPY of the system method in shipping_methods with the store's store_id.
+   * Also auto-copies all system zones that have rates for this method,
+   * and copies all rates referencing the NEW store method ID.
    *
    * All operations are wrapped in a transaction for atomicity.
    */
@@ -96,7 +108,6 @@ export class StoreShippingMethodsService {
     system_shipping_method_id: number,
     enable_dto: EnableShippingMethodDto,
   ) {
-    // Get store_id from context for create operation
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
 
@@ -104,7 +115,6 @@ export class StoreShippingMethodsService {
       throw new ForbiddenException('Store context required for this operation');
     }
 
-    // Use base client to bypass store filtering for system methods (store_id = null)
     const base_client = this.prisma.withoutScope();
 
     // Verify system method exists and is active
@@ -120,39 +130,33 @@ export class StoreShippingMethodsService {
       throw new BadRequestException('System shipping method not available');
     }
 
-    // Check if already enabled
-    const existing = await base_client.store_shipping_methods.findFirst({
+    // Check if already copied to this store
+    const existing = await base_client.shipping_methods.findFirst({
       where: {
         store_id: store_id,
-        system_shipping_method_id: system_shipping_method_id,
+        copied_from_system_method_id: system_shipping_method_id,
       },
     });
 
     if (existing) {
-      if (existing.state !== 'enabled') {
-        // Re-enable: Also reactivate previously copied zones and rates
+      if (!existing.is_active) {
+        // Re-enable: reactivate the existing copy and its rates
         return base_client.$transaction(async (tx) => {
-          // Re-enable the store_shipping_method
-          const updated_method = await tx.store_shipping_methods.update({
+          const updated_method = await tx.shipping_methods.update({
             where: { id: existing.id },
             data: {
-              state: 'enabled',
-              ...(enable_dto.display_name && {
-                display_name: enable_dto.display_name,
-              }),
+              is_active: true,
+              ...(enable_dto.name && { name: enable_dto.name }),
               ...(enable_dto.custom_config && {
                 custom_config: enable_dto.custom_config,
               }),
             },
-            include: {
-              system_shipping_method: true,
-            },
           });
 
-          // Reactivate rates for this method in store zones
+          // Reactivate rates for this store method in store zones
           await tx.shipping_rates.updateMany({
             where: {
-              shipping_method_id: system_shipping_method_id,
+              shipping_method_id: existing.id,
               shipping_zone: { store_id: store_id },
               source_type: 'system_copy',
             },
@@ -168,26 +172,32 @@ export class StoreShippingMethodsService {
       );
     }
 
-    // NEW: Wrap everything in a transaction for atomicity (One-Click Magic)
+    // NEW: Create a copy of the system method + copy zones/rates
     return base_client.$transaction(async (tx) => {
-      // 1. Create store_shipping_methods record
-      const store_method = await tx.store_shipping_methods.create({
+      // 1. Create a copy of the system method for this store
+      const store_method = await tx.shipping_methods.create({
         data: {
           store_id: store_id,
-          system_shipping_method_id: system_shipping_method_id,
-          display_name: enable_dto.display_name || system_method.name,
-          custom_config: enable_dto.custom_config,
-          state: 'enabled',
+          name: enable_dto.name || system_method.name,
+          code: system_method.code,
+          description: system_method.description,
+          logo_url: system_method.logo_url,
+          type: system_method.type,
+          provider_name: system_method.provider_name,
+          tracking_url: system_method.tracking_url,
+          min_days: system_method.min_days,
+          max_days: system_method.max_days,
+          is_active: true,
+          is_system: false,
           display_order: enable_dto.display_order || 0,
+          custom_config: enable_dto.custom_config,
           min_order_amount: enable_dto.min_order_amount,
           max_order_amount: enable_dto.max_order_amount,
-        },
-        include: {
-          system_shipping_method: true,
+          copied_from_system_method_id: system_shipping_method_id,
         },
       });
 
-      // 2. Find all system zones that have rates for this method
+      // 2. Find all system zones that have rates for this system method
       const system_zones = await tx.shipping_zones.findMany({
         where: {
           is_system: true,
@@ -219,7 +229,6 @@ export class StoreShippingMethodsService {
         let target_zone_id: number;
 
         if (existing_zone_copy) {
-          // Zone already copied, just ensure it's active and add rates if needed
           target_zone_id = existing_zone_copy.id;
           if (!existing_zone_copy.is_active) {
             await tx.shipping_zones.update({
@@ -228,7 +237,6 @@ export class StoreShippingMethodsService {
             });
           }
         } else {
-          // Create a new copy of the zone
           const zone_copy = await tx.shipping_zones.create({
             data: {
               store_id: store_id,
@@ -248,13 +256,12 @@ export class StoreShippingMethodsService {
           copied_zones_count++;
         }
 
-        // 4. Copy rates for this zone
+        // 4. Copy rates — use the NEW store method ID, not the system method ID
         for (const system_rate of system_zone.shipping_rates) {
-          // Check if rate already exists
           const existing_rate = await tx.shipping_rates.findFirst({
             where: {
               shipping_zone_id: target_zone_id,
-              shipping_method_id: system_shipping_method_id,
+              shipping_method_id: store_method.id,
               copied_from_system_rate_id: system_rate.id,
             },
           });
@@ -263,7 +270,7 @@ export class StoreShippingMethodsService {
             await tx.shipping_rates.create({
               data: {
                 shipping_zone_id: target_zone_id,
-                shipping_method_id: system_shipping_method_id,
+                shipping_method_id: store_method.id,
                 name: system_rate.name,
                 type: system_rate.type,
                 base_cost: system_rate.base_cost,
@@ -278,7 +285,6 @@ export class StoreShippingMethodsService {
             });
             copied_rates_count++;
           } else if (!existing_rate.is_active) {
-            // Reactivate if it was deactivated
             await tx.shipping_rates.update({
               where: { id: existing_rate.id },
               data: { is_active: true },
@@ -287,7 +293,6 @@ export class StoreShippingMethodsService {
         }
       }
 
-      // Return the method with copy statistics for user feedback
       return {
         ...store_method,
         _copy_stats: {
@@ -302,15 +307,13 @@ export class StoreShippingMethodsService {
    * Update store shipping method configuration
    */
   async updateStoreMethod(
-    store_shipping_method_id: number,
+    method_id: number,
     update_dto: UpdateStoreShippingMethodDto,
   ) {
-    const method = await this.prisma.store_shipping_methods.findFirst({
+    const method = await this.prisma.shipping_methods.findFirst({
       where: {
-        id: store_shipping_method_id,
-      },
-      include: {
-        system_shipping_method: true,
+        id: method_id,
+        is_system: false,
       },
     });
 
@@ -318,22 +321,20 @@ export class StoreShippingMethodsService {
       throw new NotFoundException('Shipping method not found for this store');
     }
 
-    return this.prisma.store_shipping_methods.update({
-      where: { id: store_shipping_method_id },
+    return this.prisma.shipping_methods.update({
+      where: { id: method_id },
       data: update_dto,
-      include: {
-        system_shipping_method: true,
-      },
     });
   }
 
   /**
    * Re-enable a disabled store shipping method
    */
-  async reEnableForStore(store_shipping_method_id: number) {
-    const method = await this.prisma.store_shipping_methods.findFirst({
+  async reEnableForStore(method_id: number) {
+    const method = await this.prisma.shipping_methods.findFirst({
       where: {
-        id: store_shipping_method_id,
+        id: method_id,
+        is_system: false,
       },
     });
 
@@ -341,16 +342,13 @@ export class StoreShippingMethodsService {
       throw new NotFoundException('Shipping method not found for this store');
     }
 
-    if (method.state === 'enabled') {
+    if (method.is_active) {
       throw new BadRequestException('Shipping method is already enabled');
     }
 
-    return this.prisma.store_shipping_methods.update({
-      where: { id: store_shipping_method_id },
-      data: { state: 'enabled' },
-      include: {
-        system_shipping_method: true,
-      },
+    return this.prisma.shipping_methods.update({
+      where: { id: method_id },
+      data: { is_active: true },
     });
   }
 
@@ -358,13 +356,10 @@ export class StoreShippingMethodsService {
    * Disable shipping method for a store
    *
    * When disabling:
-   * 1. Marks the store_shipping_method as disabled
+   * 1. Marks the shipping method as inactive
    * 2. Deactivates (not deletes) all rates for this method in store zones
-   *
-   * This preserves user customizations for potential re-enabling later.
    */
-  async disableForStore(store_shipping_method_id: number) {
-    // Get store_id from context
+  async disableForStore(method_id: number) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
 
@@ -372,9 +367,10 @@ export class StoreShippingMethodsService {
       throw new ForbiddenException('Store context required for this operation');
     }
 
-    const method = await this.prisma.store_shipping_methods.findFirst({
+    const method = await this.prisma.shipping_methods.findFirst({
       where: {
-        id: store_shipping_method_id,
+        id: method_id,
+        is_system: false,
       },
     });
 
@@ -384,19 +380,17 @@ export class StoreShippingMethodsService {
 
     const base_client = this.prisma.withoutScope();
 
-    // Wrap in transaction to ensure consistency
     return base_client.$transaction(async (tx) => {
-      // 1. Disable the store_shipping_method
-      const updated_method = await tx.store_shipping_methods.update({
-        where: { id: store_shipping_method_id },
-        data: { state: 'disabled' },
+      // 1. Disable the shipping method
+      const updated_method = await tx.shipping_methods.update({
+        where: { id: method_id },
+        data: { is_active: false },
       });
 
-      // 2. Deactivate all rates for this method in zones belonging to this store
-      // This includes both system_copy and custom zones
+      // 2. Deactivate all rates for THIS store method in zones belonging to this store
       await tx.shipping_rates.updateMany({
         where: {
-          shipping_method_id: method.system_shipping_method_id,
+          shipping_method_id: method_id,
           shipping_zone: { store_id: store_id },
         },
         data: { is_active: false },
@@ -409,10 +403,11 @@ export class StoreShippingMethodsService {
   /**
    * Delete/remove shipping method from store
    */
-  async removeFromStore(store_shipping_method_id: number) {
-    const method = await this.prisma.store_shipping_methods.findFirst({
+  async removeFromStore(method_id: number) {
+    const method = await this.prisma.shipping_methods.findFirst({
       where: {
-        id: store_shipping_method_id,
+        id: method_id,
+        is_system: false,
       },
     });
 
@@ -420,11 +415,8 @@ export class StoreShippingMethodsService {
       throw new NotFoundException('Shipping method not found for this store');
     }
 
-    // TODO: Check if used in any orders before allowing deletion
-    // For now, we allow deletion since orders reference shipping_methods directly
-
-    await this.prisma.store_shipping_methods.delete({
-      where: { id: store_shipping_method_id },
+    await this.prisma.shipping_methods.delete({
+      where: { id: method_id },
     });
 
     return { success: true, message: 'Shipping method removed from store' };
@@ -435,9 +427,10 @@ export class StoreShippingMethodsService {
    */
   async reorderMethods(order_dto: ReorderShippingMethodsDto) {
     const updates = order_dto.methods.map((item, index) =>
-      this.prisma.store_shipping_methods.updateMany({
+      this.prisma.shipping_methods.updateMany({
         where: {
           id: item.id,
+          is_system: false,
         },
         data: {
           display_order: index,
@@ -452,26 +445,21 @@ export class StoreShippingMethodsService {
 
   /**
    * Get shipping method statistics for the store
-   * Enhanced with zone and rate statistics for the new shipping module design
    */
   async getStats() {
-    // Get all shipping methods for this store
-    const all_methods = await this.prisma.store_shipping_methods.findMany({
-      select: {
-        state: true,
-      },
+    // Get all store shipping methods (is_system=false, scoped by store_id)
+    const all_methods = await this.prisma.shipping_methods.findMany({
+      where: { is_system: false },
+      select: { is_active: true },
     });
 
-    // Count methods by state
+    // Count methods by active state
     const method_stats = all_methods.reduce(
       (acc, method) => {
-        switch (method.state) {
-          case 'enabled':
-            acc.enabled_methods++;
-            break;
-          case 'disabled':
-            acc.disabled_methods++;
-            break;
+        if (method.is_active) {
+          acc.enabled_methods++;
+        } else {
+          acc.disabled_methods++;
         }
         acc.total_methods++;
         return acc;

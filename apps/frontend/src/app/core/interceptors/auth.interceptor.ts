@@ -70,6 +70,17 @@ export class AuthInterceptor implements HttpInterceptor {
           req.url.startsWith(environment.apiUrl) &&
           !req.url.includes('/auth/login')
         ) {
+          // Only handle as session expiration if we actually sent a token.
+          // A 401 on a request WITHOUT a token means the user is simply
+          // not authenticated — not that their session expired.
+          if (!req.headers.has('Authorization')) {
+            console.log(
+              '[AUTH INTERCEPTOR] 401 on unauthenticated request (no token sent), passing through:',
+              req.url,
+            );
+            return throwError(() => error);
+          }
+
           console.warn(
             '[AUTH INTERCEPTOR] 401 detected for request:',
             req.url,

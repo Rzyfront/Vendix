@@ -190,22 +190,12 @@ export class ShippingMethodsService {
     return label_map[type] || type;
   }
 
-  getShippingMethodStateLabel(state: string): string {
-    const label_map: Record<string, string> = {
-      enabled: 'Activo',
-      disabled: 'Inactivo',
-      archived: 'Archivado',
-    };
-    return label_map[state] || state;
+  getShippingMethodStateLabel(is_active: boolean): string {
+    return is_active ? 'Activo' : 'Inactivo';
   }
 
-  getShippingMethodStateColor(state: string): string {
-    const color_map: Record<string, string> = {
-      enabled: 'success',
-      disabled: 'warning',
-      archived: 'neutral',
-    };
-    return color_map[state] || 'neutral';
+  getShippingMethodStateColor(is_active: boolean): string {
+    return is_active ? 'success' : 'warning';
   }
 
   formatDeliveryTime(min_days?: number, max_days?: number): string {

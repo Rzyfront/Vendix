@@ -21,6 +21,10 @@ import {
   ConfirmationModalComponent,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  OptionsDropdownComponent,
+  FilterConfig,
+  DropdownAction,
+  FilterValues,
 } from '../../../../../shared/components/index';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { StoreDomainsService } from './store-domains.service';
@@ -46,85 +50,84 @@ import { DomainFormModalComponent } from './components/domain-form-modal.compone
     InputsearchComponent,
     DomainFormModalComponent,
     ConfirmationModalComponent,
+    OptionsDropdownComponent,
   ],
   template: `
     <div class="w-full">
-      <!-- 4 Stats Cards Grid -->
+      <!-- Stats Cards — sticky on mobile, static on desktop -->
       <div
-        class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-4 md:mb-6 lg:mb-8"
+        class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
           title="Total"
           [value]="stats.total"
           iconName="globe"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-500"
         ></app-stats>
         <app-stats
           title="Activos"
           [value]="stats.active"
           iconName="check-circle"
-          iconBgColor="bg-green-50"
-          iconColor="text-green-600"
+          iconBgColor="bg-emerald-100"
+          iconColor="text-emerald-500"
         ></app-stats>
         <app-stats
           title="Pendientes"
           [value]="stats.pending"
           iconName="clock"
-          iconBgColor="bg-yellow-50"
-          iconColor="text-yellow-600"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-500"
         ></app-stats>
         <app-stats
           title="Principal"
           [value]="stats.primary"
           iconName="star"
-          iconBgColor="bg-blue-50"
+          iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
         ></app-stats>
       </div>
 
-      <!-- List Component Container -->
+      <!-- List Component Container — mobile-first: surface styles only on desktop -->
       <div
-        class="bg-surface rounded-card shadow-card border border-border min-h-[600px]"
+        class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border md:min-h-[600px] md:overflow-hidden"
       >
-        <!-- Header -->
-        <div class="p-2 md:px-6 md:py-4 border-b border-border">
+        <!-- Search Section — sticky on mobile -->
+        <div
+          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                 md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+        >
           <div
-            class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+            class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
           >
-            <div class="flex-1 min-w-0">
-              <h2 class="text-lg font-semibold text-text-primary">
-                Dominios ({{ domains.length }})
-              </h2>
-              <p class="text-sm text-text-muted mt-0.5">
-                Administra los dominios y subdominios de tu tienda
-              </p>
-            </div>
-
-            <div
-              class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+            <h2
+              class="text-[13px] font-bold text-gray-600 tracking-wide
+                     md:text-lg md:font-semibold md:text-text-primary"
             >
-              <!-- Search -->
+              Dominios ({{ domains.length }})
+            </h2>
+            <div class="flex items-center gap-2 w-full md:w-auto">
               <app-inputsearch
-                class="w-full sm:w-64"
+                class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                size="sm"
                 placeholder="Buscar dominios..."
+                [debounceTime]="300"
                 (search)="onSearch($event)"
-              ></app-inputsearch>
-
-              <!-- Actions -->
-              <div class="flex gap-2">
-                <app-button variant="outline" (clicked)="loadDomains()">
-                  <app-icon name="refresh" [size]="16"></app-icon>
-                </app-button>
-                <app-button variant="primary" (clicked)="openCreateModal()">
-                  <app-icon name="plus" [size]="16" class="mr-2"></app-icon>
-                  Nuevo
-                </app-button>
-              </div>
+              />
+              <app-options-dropdown
+                [filters]="filterConfigs"
+                [actions]="dropdownActions"
+                [filterValues]="filterValues"
+                (actionClick)="onActionClick($event)"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="clearFilters()"
+              />
             </div>
           </div>
         </div>
 
-        <!-- Table -->
-        <div class="p-2 md:p-4">
+        <!-- Content Area -->
+        <div class="px-2 pb-2 pt-0 md:p-4">
           <!-- Loading State -->
           <div
             *ngIf="is_loading"
@@ -267,6 +270,38 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
     primary: 'Ninguno',
   };
 
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'status',
+      label: 'Estado',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos' },
+        { value: 'active', label: 'Activo' },
+        { value: 'pending_dns', label: 'Pendiente DNS' },
+        { value: 'pending_ssl', label: 'Pendiente SSL' },
+        { value: 'disabled', label: 'Deshabilitado' },
+      ],
+    },
+    {
+      key: 'domain_type',
+      label: 'Tipo',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos' },
+        { value: 'store', label: 'Tienda' },
+        { value: 'ecommerce', label: 'E-commerce' },
+        { value: 'organization', label: 'Organización' },
+      ],
+    },
+  ];
+
+  filterValues: FilterValues = {};
+
+  dropdownActions: DropdownAction[] = [
+    { label: 'Nuevo Dominio', icon: 'plus', action: 'create', variant: 'primary' },
+  ];
+
   table_columns: TableColumn[] = [
     {
       key: 'hostname',
@@ -389,6 +424,23 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
 
   onSearch(term: string): void {
     this.loadDomains({ search: term });
+  }
+
+  onActionClick(action: string): void {
+    if (action === 'create') this.openCreateModal();
+  }
+
+  onFilterChange(values: FilterValues): void {
+    this.filterValues = values;
+    const query: StoreDomainQueryDto = {};
+    if (values['status']) query.status = values['status'] as any;
+    if (values['domain_type']) query.domain_type = values['domain_type'] as any;
+    this.loadDomains(query);
+  }
+
+  clearFilters(): void {
+    this.filterValues = {};
+    this.loadDomains();
   }
 
   openCreateModal(): void {

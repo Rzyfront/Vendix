@@ -45,9 +45,8 @@ export class EnabledShippingMethodsListComponent {
     const term = this.search_term.toLowerCase();
     return methods.filter(
       (m) =>
-        m.display_name?.toLowerCase().includes(term) ||
-        m.system_shipping_method?.name?.toLowerCase().includes(term) ||
-        m.system_shipping_method?.provider_name?.toLowerCase().includes(term)
+        m.name?.toLowerCase().includes(term) ||
+        m.provider_name?.toLowerCase().includes(term)
     );
   });
 
@@ -62,53 +61,58 @@ export class EnabledShippingMethodsListComponent {
 
   // Card configuration for mobile
   card_config: ItemListCardConfig = {
-    titleKey: 'display_name',
+    titleKey: 'name',
     titleTransform: (item: StoreShippingMethod) =>
-      item.display_name || item.system_shipping_method?.name || 'Sin nombre',
-    subtitleKey: 'system_shipping_method.type',
+      item.name || 'Sin nombre',
+    subtitleKey: 'type',
     subtitleTransform: (item: StoreShippingMethod) =>
-      this.getTypeLabel(item.system_shipping_method?.type),
+      this.getTypeLabel(item.type),
     avatarFallbackIcon: 'truck',
     avatarShape: 'square',
-    badgeKey: 'state',
+    badgeKey: 'is_active',
     badgeConfig: {
       type: 'status',
       size: 'sm',
     },
-    badgeTransform: (value: string) => this.getStateLabel(value),
+    badgeTransform: (value: boolean) => value ? 'Activo' : 'Inactivo',
     detailKeys: [
       {
-        key: 'system_shipping_method.provider_name',
+        key: 'provider_name',
         label: 'Proveedor',
+        transform: (val: string) => val || 'Sin proveedor',
       },
       {
-        key: 'display_order',
-        label: 'Orden',
+        key: 'min_days',
+        label: 'Tiempo estimado',
+        icon: 'clock',
+        transform: (_val: number, item: StoreShippingMethod) =>
+          this.formatDeliveryTime(item?.min_days, item?.max_days),
       },
     ],
-    footerKey: 'created_at',
-    footerLabel: 'Agregado',
-    footerTransform: (val: string) =>
-      val ? new Date(val).toLocaleDateString() : '-',
+    footerKey: 'min_days',
+    footerLabel: 'Entrega',
+    footerStyle: 'default',
+    footerTransform: (_val: number, item: StoreShippingMethod) =>
+      this.formatDeliveryTime(item?.min_days, item?.max_days),
   };
 
   // Table columns for desktop
   table_columns: TableColumn[] = [
     {
-      key: 'display_name',
+      key: 'name',
       label: 'Método',
       sortable: true,
       priority: 1,
       transform: (value: string) => value || 'Sin nombre',
     },
     {
-      key: 'system_shipping_method.type',
+      key: 'type',
       label: 'Tipo',
       priority: 2,
       transform: (value: string) => this.getTypeLabel(value),
     },
     {
-      key: 'state',
+      key: 'is_active',
       label: 'Estado',
       badge: true,
       priority: 1,
@@ -116,10 +120,10 @@ export class EnabledShippingMethodsListComponent {
         type: 'status',
         size: 'sm',
       },
-      transform: (value: string) => this.getStateLabel(value),
+      transform: (value: boolean) => value ? 'Activo' : 'Inactivo',
     },
     {
-      key: 'system_shipping_method.min_days',
+      key: 'min_days',
       label: 'Tiempo',
       priority: 3,
       defaultValue: '-',
@@ -136,9 +140,9 @@ export class EnabledShippingMethodsListComponent {
     },
     {
       label: (method: StoreShippingMethod) =>
-        method.state === 'enabled' ? 'Desactivar' : 'Activar',
+        method.is_active ? 'Desactivar' : 'Activar',
       icon: (method: StoreShippingMethod) =>
-        method.state === 'enabled' ? 'pause' : 'play',
+        method.is_active ? 'pause' : 'play',
       action: (method: StoreShippingMethod) => this.toggle.emit(method),
       variant: 'ghost',
     },
@@ -156,15 +160,6 @@ export class EnabledShippingMethodsListComponent {
   }
 
   // Helper methods
-  private getStateLabel(state: string): string {
-    const label_map: Record<string, string> = {
-      enabled: 'Activo',
-      disabled: 'Inactivo',
-      archived: 'Archivado',
-    };
-    return label_map[state] || state;
-  }
-
   private getTypeLabel(type: string): string {
     const type_map: Record<string, string> = {
       custom: 'Personalizado',
@@ -177,7 +172,7 @@ export class EnabledShippingMethodsListComponent {
   }
 
   private formatDeliveryTime(min_days?: number, max_days?: number): string {
-    if (!min_days && !max_days) return '-';
+    if (!min_days && !max_days) return 'Sin definir';
     if (min_days === max_days) return `${min_days} días`;
     if (!max_days) return `${min_days}+ días`;
     return `${min_days}-${max_days} días`;

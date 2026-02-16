@@ -3,7 +3,7 @@ import { SelectorOption } from '../selector/selector.component';
 /**
  * Filter type determines how the filter is rendered and behaves
  */
-export type FilterType = 'select' | 'multi-select';
+export type FilterType = 'select' | 'multi-select' | 'date';
 
 /**
  * Configuration for a single filter in the dropdown
@@ -15,8 +15,8 @@ export interface FilterConfig {
   label: string;
   /** Type of filter control */
   type: FilterType;
-  /** Available options for the filter */
-  options: SelectorOption[];
+  /** Available options for the filter (not required for date type) */
+  options?: SelectorOption[];
   /** Placeholder text when no value is selected */
   placeholder?: string;
   /** Whether the filter is disabled */

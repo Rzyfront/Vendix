@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { catchError } from 'rxjs/operators';
+import { catchError, map } from 'rxjs/operators';
 import { throwError } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
@@ -17,6 +17,12 @@ import {
   CreateOrderItemDto,
   UpdateOrderStatusDto,
   UpdatePaymentStatusDto,
+  PayOrderDto,
+  PayOrderResponse,
+  ShipOrderDto,
+  DeliverOrderDto,
+  CancelOrderDto,
+  RefundOrderDto,
 } from '../interfaces/order.interface';
 
 // Caché estático global (persiste entre instancias del servicio)
@@ -346,6 +352,85 @@ export class StoreOrdersService {
       return error;
     }
     return 'Unknown error occurred';
+  }
+
+  // ── Order Flow Methods ──────────────────────────────────────
+
+  getValidTransitions(orderId: string): Observable<OrderState[]> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/transitions`;
+    return this.http.get<any>(url).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error fetching valid transitions:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
+  flowPayOrder(orderId: string, dto: PayOrderDto): Observable<PayOrderResponse> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/pay`;
+    return this.http.post<any>(url, dto).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error processing payment:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
+  flowShipOrder(orderId: string, dto: ShipOrderDto): Observable<Order> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/ship`;
+    return this.http.post<any>(url, dto).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error shipping order:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
+  flowDeliverOrder(orderId: string, dto: DeliverOrderDto): Observable<Order> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/deliver`;
+    return this.http.post<any>(url, dto).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error delivering order:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
+  flowConfirmDelivery(orderId: string): Observable<Order> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/confirm-delivery`;
+    return this.http.post<any>(url, {}).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error confirming delivery:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
+  flowCancelOrder(orderId: string, dto: CancelOrderDto): Observable<Order> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/cancel`;
+    return this.http.post<any>(url, dto).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error cancelling order:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
+  flowRefundOrder(orderId: string, dto: RefundOrderDto): Observable<Order> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/refund`;
+    return this.http.post<any>(url, dto).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error refunding order:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
   }
 
   /**

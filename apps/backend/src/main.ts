@@ -5,6 +5,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AllExceptionsFilter } from '@common/filters/http-exception.filter';
 import { DomainConfigService } from '@common/config/domain.config';
 import { GlobalPrismaService } from './prisma/services/global-prisma.service';
+import { PublicSeoService } from './domains/public/seo/public-seo.service';
 import { json, urlencoded } from 'express';
 
 async function bootstrap() {
@@ -137,6 +138,39 @@ async function bootstrap() {
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api-docs', app, document);
+
+  // SEO routes (must be registered before global prefix)
+  const seoService = app.get(PublicSeoService);
+  const httpAdapter = app.getHttpAdapter();
+
+  httpAdapter.get('/sitemap.xml', async (req, res) => {
+    try {
+      const hostname = req.headers['x-forwarded-host'] || req.headers['host'];
+      const xml = await seoService.generateSitemap(hostname);
+      res.setHeader('Content-Type', 'application/xml');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.status(200).send(xml);
+    } catch (error) {
+      res.status(500).send('<?xml version="1.0"?><error>Internal Server Error</error>');
+    }
+  });
+
+  httpAdapter.get('/robots.txt', async (req, res) => {
+    try {
+      const hostname = req.headers['x-forwarded-host'] || req.headers['host'];
+      const txt = await seoService.generateRobotsTxt(hostname);
+      res.setHeader('Content-Type', 'text/plain');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.status(200).send(txt);
+    } catch (error) {
+      res.status(500).send('User-agent: *\nAllow: /');
+    }
+  });
+
+  httpAdapter.get('/google002d194fa98388f5.html', (_req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    res.status(200).send('google-site-verification: google002d194fa98388f5.html');
+  });
 
   // API prefix
   app.setGlobalPrefix(process.env.API_PREFIX || 'api');

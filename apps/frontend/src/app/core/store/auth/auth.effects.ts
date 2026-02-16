@@ -16,6 +16,7 @@ import { NavigationService } from '../../services/navigation.service';
 import { AppConfigService } from '../../services/app-config.service';
 import { ConfigFacade } from '../config';
 import { AuthFacade } from './auth.facade';
+import { isTokenExpired } from '../persistence';
 import { ThemeService } from '../../services/theme.service';
 import * as AuthActions from './auth.actions';
 import * as ConfigActions from '../config/config.actions';
@@ -346,6 +347,11 @@ export class AuthEffects {
           if (authState) {
             const parsedState = JSON.parse(authState);
             if (parsedState.user && parsedState.tokens?.access_token) {
+              if (isTokenExpired(parsedState.tokens.access_token)) {
+                console.warn('[checkAuthStatus] Token expirado, limpiando sesión');
+                localStorage.removeItem('vendix_auth_state');
+                return AuthActions.clearAuthState();
+              }
               return AuthActions.restoreAuthState({
                 user: parsedState.user,
                 user_settings: parsedState.user_settings,

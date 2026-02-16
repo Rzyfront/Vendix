@@ -22,6 +22,7 @@
 
 .sidebar.collapsed .menu-text,
 .sidebar.collapsed .logo-text,
+.sidebar.collapsed .logo-text-container,
 .sidebar.collapsed .submenu,
 .sidebar.collapsed .badge,
 .sidebar.collapsed .chevron,
@@ -43,6 +44,7 @@
 .sidebar.collapsed .sidebar-header {
   justify-content: center;
   padding: 1rem;
+  gap: 0;
 }
 
 .sidebar.collapsed .menu-item {
@@ -240,7 +242,8 @@
 }
 
 .submenu-item a.active {
-  color: var(--color-text-primary);
+  background-color: var(--color-primary);
+  color: var(--color-text-on-primary);
   font-weight: 500;
 }
 
@@ -398,6 +401,7 @@
     /* Ensure all text and elements are visible in mobile */
     &.collapsed .menu-text,
     &.collapsed .logo-text,
+    &.collapsed .logo-text-container,
     &.collapsed .submenu,
     &.collapsed .badge,
     &.collapsed .chevron,

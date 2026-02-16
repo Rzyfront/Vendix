@@ -1,7 +1,7 @@
 import {
   IsString,
   IsOptional,
-  IsEnum,
+  IsBoolean,
   IsObject,
   IsNumber,
   IsInt,
@@ -11,13 +11,12 @@ import {
   MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { shipping_method_state_enum } from '@prisma/client';
 
 export class EnableShippingMethodDto {
   @IsOptional()
   @IsString()
   @MaxLength(100)
-  display_name?: string;
+  name?: string;
 
   @IsOptional()
   @IsObject()
@@ -46,15 +45,15 @@ export class UpdateStoreShippingMethodDto {
   @IsOptional()
   @IsString()
   @MaxLength(100)
-  display_name?: string;
+  name?: string;
 
   @IsOptional()
   @IsObject()
   custom_config?: any;
 
   @IsOptional()
-  @IsEnum(shipping_method_state_enum)
-  state?: shipping_method_state_enum;
+  @IsBoolean()
+  is_active?: boolean;
 
   @IsOptional()
   @IsNumber()

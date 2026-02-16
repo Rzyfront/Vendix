@@ -13,7 +13,7 @@ import { Observable, Subject, takeUntil } from 'rxjs';
 
 import { IconComponent } from '../icon/icon.component';
 import { UserUiService } from '../../services/user-ui.service';
-import { AuthService } from '../../../core/services/auth.service';
+import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { GlobalFacade } from '../../../core/store/global.facade';
 import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
 import { EnvironmentContextService } from '../../../core/services/environment-context.service';
@@ -107,7 +107,7 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
 
   private router = inject(Router);
-  private authService = inject(AuthService);
+  private authFacade = inject(AuthFacade);
   private globalFacade = inject(GlobalFacade);
   private environmentSwitchService = inject(EnvironmentSwitchService);
   private environmentContextService = inject(EnvironmentContextService);
@@ -181,7 +181,7 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
     },
     {
       label: 'Configuración',
-      icon: 'settings',
+      icon: 'user-cog',
       action: () => this.goToSettings(),
     },
     {
@@ -270,7 +270,7 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
   }
 
   private logout() {
-    this.authService.logout();
+    this.authFacade.logout();
     this.isOpen = false;
     this.closeDropdown.emit();
   }

@@ -50,7 +50,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         <app-stats
           title="Productos Totales"
           [value]="stats.total_products"
-          [smallText]="getGrowthPercentage(5.2) + ' vs last month'"
+          smallText="Catálogo completo"
           iconName="package"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
@@ -59,7 +59,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         <app-stats
           title="Productos Activos"
           [value]="stats.active_products"
-          [smallText]="getGrowthPercentage(2.1) + ' vs last month'"
+          smallText="Disponibles para venta"
           iconName="check-circle"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
@@ -68,7 +68,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         <app-stats
           title="Stock Bajo"
           [value]="stats.low_stock_products"
-          [smallText]="stats.out_of_stock_products + ' out of stock'"
+          [smallText]="stats.out_of_stock_products + ' sin stock'"
           iconName="alert-triangle"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-600"
@@ -77,7 +77,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         <app-stats
           title="Valor Total"
           [value]="formatCurrencyValue(stats.total_value)"
-          [smallText]="'+12% vs last month'"
+          smallText="Valor del inventario"
           iconName="dollar-sign"
           iconBgColor="bg-purple-100"
           iconColor="text-purple-600"

@@ -1,4 +1,5 @@
 import { Component, OnInit, inject, OnDestroy } from '@angular/core';
+import { ConfigFacade } from '../../../../core/store/config';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router, ActivatedRoute } from '@angular/router';
 import {
@@ -37,11 +38,17 @@ import { IconComponent } from '../../../../shared/components';
         <!-- Header section with logo and title -->
         <div class="text-center my-3">
           <div class="mx-auto flex items-center justify-center space-x-3 mb-4">
-            <div
-              class="w-10 h-10 bg-[var(--color-primary)] rounded-xl flex items-center justify-center"
-            >
-              <app-icon name="cart" [size]="24" color="white"></app-icon>
-            </div>
+            @if (logoUrl) {
+              <div class="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
+                <img [src]="logoUrl" alt="Vendix" class="w-full h-full object-contain" />
+              </div>
+            } @else {
+              <div
+                class="w-10 h-10 bg-[var(--color-primary)] rounded-xl flex items-center justify-center"
+              >
+                <app-icon name="cart" [size]="24" color="white"></app-icon>
+              </div>
+            }
             <h1 class="text-xl font-semibold text-[var(--color-text-primary)]">
               Vendix
             </h1>
@@ -169,8 +176,10 @@ export class EmailVerificationComponent implements OnInit, OnDestroy {
   error: string | null = null;
   resendLoading = false;
   token: string | null = null;
+  logoUrl: string = '';
 
   private toast = inject(ToastService);
+  private configFacade = inject(ConfigFacade);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private destroy$ = new Subject<void>();
@@ -183,6 +192,15 @@ export class EmailVerificationComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    // Load branding logo
+    const appConfig = this.configFacade.getCurrentConfig();
+    if (appConfig) {
+      this.logoUrl = appConfig.branding?.logo?.url || '';
+      if (!this.logoUrl && appConfig.domainConfig?.isVendixDomain) {
+        this.logoUrl = 'vlogo.png';
+      }
+    }
+
     // Get the token from the route parameters
     this.token = this.route.snapshot.queryParamMap.get('token');
 

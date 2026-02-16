@@ -91,7 +91,6 @@ export const authReducer = createReducer(
     try {
       if (typeof localStorage !== 'undefined') {
         localStorage.removeItem('vendix_user_environment');
-        localStorage.removeItem('vendix_logged_out_recently');
         localStorage.removeItem('vendix_app_config');
         localStorage.removeItem('auth_state');
       }

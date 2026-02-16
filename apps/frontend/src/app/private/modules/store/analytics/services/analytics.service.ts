@@ -26,7 +26,16 @@ import {
   InventoryAging,
   ExpiringProduct,
   InventoryAnalyticsQueryDto,
+  MovementSummaryItem,
+  MovementTrend,
 } from '../interfaces/inventory-analytics.interface';
+import {
+  ProductsSummary,
+  TopSellingProduct,
+  ProductAnalyticsRow,
+  ProductsAnalyticsQueryDto,
+} from '../interfaces/products-analytics.interface';
+import { PaginatedResponse } from '../interfaces/analytics.interface';
 
 // Cache entry interface
 interface CacheEntry<T> {
@@ -170,6 +179,44 @@ export class AnalyticsService {
     });
   }
 
+  // ==================== PRODUCTS ANALYTICS ====================
+
+  getProductsSummary(
+    query: ProductsAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<ProductsSummary>> {
+    const cacheKey = `products-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<ProductsSummary>>(this.getApiUrl('products/summary'), {
+        params: this.buildParams(query),
+      }),
+    );
+  }
+
+  getTopSellingProducts(
+    query: ProductsAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<TopSellingProduct[]>> {
+    return this.http.get<ApiResponse<TopSellingProduct[]>>(
+      this.getApiUrl('products/top-sellers'),
+      { params: this.buildParams(query) },
+    );
+  }
+
+  getProductsTable(
+    query: ProductsAnalyticsQueryDto = {},
+  ): Observable<PaginatedResponse<ProductAnalyticsRow>> {
+    return this.http.get<PaginatedResponse<ProductAnalyticsRow>>(
+      this.getApiUrl('products/table'),
+      { params: this.buildParams(query) },
+    );
+  }
+
+  exportProductsAnalytics(query: ProductsAnalyticsQueryDto = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('products/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
   // ==================== INVENTORY ANALYTICS ====================
 
   getInventorySummary(
@@ -236,6 +283,31 @@ export class AnalyticsService {
       this.getApiUrl('inventory/expiring'),
       { params: this.buildParams(query) },
     );
+  }
+
+  getMovementSummary(
+    query: InventoryAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<MovementSummaryItem[]>> {
+    return this.http.get<ApiResponse<MovementSummaryItem[]>>(
+      this.getApiUrl('inventory/movement-summary'),
+      { params: this.buildParams(query) },
+    );
+  }
+
+  getMovementTrends(
+    query: InventoryAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<MovementTrend[]>> {
+    return this.http.get<ApiResponse<MovementTrend[]>>(
+      this.getApiUrl('inventory/movement-trends'),
+      { params: this.buildParams(query) },
+    );
+  }
+
+  exportMovementsXlsx(query: InventoryAnalyticsQueryDto = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('inventory/movements/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
   }
 
   exportInventoryAnalytics(query: InventoryAnalyticsQueryDto = {}): Observable<Blob> {

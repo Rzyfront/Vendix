@@ -29,7 +29,8 @@ import { GlobalFacade } from '../../../core/store/global.facade';
   ],
   template: `
     <header
-      class="bg-transparent border-b-0 sticky top-0 backdrop-blur-md text-slate-900 relative z-50"
+      class="bg-transparent border-b-0 sticky top-0 backdrop-blur-md text-slate-900 relative"
+      style="z-index: var(--z-header)"
     >
       <div
         class="flex items-center justify-between px-2 py-1 sm:px-3 sm:py-2 md:p-2 gap-1.5 md:gap-6"
@@ -216,6 +217,11 @@ export class HeaderComponent implements OnInit, OnDestroy {
     const brandingContext = this.globalFacade.getBrandingContext();
     if (brandingContext?.logo?.url) {
       this.storeLogo = brandingContext.logo.url;
+    } else {
+      const navContext = this.globalFacade.getNavigationContext();
+      if (navContext?.isVendixDomain) {
+        this.storeLogo = 'vlogo.png';
+      }
     }
 
     const userContext = this.globalFacade.getUserContext();

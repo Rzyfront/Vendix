@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
-import { InventoryAnalyticsQueryDto } from '../dto/analytics-query.dto';
+import { RequestContextService } from '@common/context/request-context.service';
+import { InventoryAnalyticsQueryDto, DatePreset, Granularity } from '../dto/analytics-query.dto';
+import { fillTimeSeries } from '../utils/fill-time-series.util';
 
 @Injectable()
 export class InventoryAnalyticsService {
@@ -295,16 +298,225 @@ export class InventoryAnalyticsService {
       .sort((a, b) => b.total_value - a.total_value);
   }
 
+  async getMovementSummary(query: InventoryAnalyticsQueryDto) {
+    const { startDate, endDate } = this.parseDateRange(query);
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+
+    const results = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{
+        movement_type: string;
+        count: bigint;
+        total_quantity: any;
+      }>
+    >`
+      SELECT
+        im.movement_type,
+        COUNT(*)::bigint AS count,
+        COALESCE(SUM(ABS(im.quantity)), 0) AS total_quantity
+      FROM inventory_movements im
+      INNER JOIN products p ON p.id = im.product_id
+      WHERE p.store_id = ${storeId}
+        AND im.created_at >= ${startDate}
+        AND im.created_at <= ${endDate}
+        ${query.location_id ? Prisma.sql`AND (im.from_location_id = ${query.location_id} OR im.to_location_id = ${query.location_id})` : Prisma.empty}
+      GROUP BY im.movement_type
+      ORDER BY count DESC
+    `;
+
+    const totalCount = results.reduce((sum, r) => sum + Number(r.count), 0);
+
+    return results.map((r) => ({
+      movement_type: r.movement_type,
+      count: Number(r.count),
+      total_quantity: Number(r.total_quantity),
+      percentage: totalCount > 0 ? (Number(r.count) / totalCount) * 100 : 0,
+    }));
+  }
+
+  async getMovementTrends(query: InventoryAnalyticsQueryDto) {
+    const { startDate, endDate } = this.parseDateRange(query);
+    const granularity = query.granularity || Granularity.DAY;
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+
+    const truncSql = Prisma.raw(`'${this.getDateTruncInterval(granularity)}'`);
+
+    const results = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{
+        period: Date;
+        stock_in: any;
+        stock_out: any;
+        adjustments: any;
+        transfers: any;
+        total: any;
+      }>
+    >`
+      SELECT
+        DATE_TRUNC(${truncSql}, im.created_at) AS period,
+        COALESCE(SUM(CASE WHEN im.movement_type IN ('stock_in', 'return') THEN ABS(im.quantity) ELSE 0 END), 0) AS stock_in,
+        COALESCE(SUM(CASE WHEN im.movement_type IN ('stock_out', 'sale', 'damage', 'expiration') THEN ABS(im.quantity) ELSE 0 END), 0) AS stock_out,
+        COALESCE(SUM(CASE WHEN im.movement_type = 'adjustment' THEN ABS(im.quantity) ELSE 0 END), 0) AS adjustments,
+        COALESCE(SUM(CASE WHEN im.movement_type = 'transfer' THEN ABS(im.quantity) ELSE 0 END), 0) AS transfers,
+        COALESCE(SUM(ABS(im.quantity)), 0) AS total
+      FROM inventory_movements im
+      INNER JOIN products p ON p.id = im.product_id
+      WHERE p.store_id = ${storeId}
+        AND im.created_at >= ${startDate}
+        AND im.created_at <= ${endDate}
+        ${query.location_id ? Prisma.sql`AND (im.from_location_id = ${query.location_id} OR im.to_location_id = ${query.location_id})` : Prisma.empty}
+      GROUP BY DATE_TRUNC(${truncSql}, im.created_at)
+      ORDER BY period ASC
+    `;
+
+    const mapped = results.map((r) => ({
+      period: this.formatPeriodFromDate(new Date(r.period), granularity),
+      stock_in: Number(r.stock_in),
+      stock_out: Number(r.stock_out),
+      adjustments: Number(r.adjustments),
+      transfers: Number(r.transfers),
+      total: Number(r.total),
+    }));
+
+    return fillTimeSeries(
+      mapped,
+      startDate,
+      endDate,
+      granularity,
+      { stock_in: 0, stock_out: 0, adjustments: 0, transfers: 0, total: 0 },
+      this.formatPeriodFromDate.bind(this),
+    );
+  }
+
+  async getMovementsForExport(query: InventoryAnalyticsQueryDto) {
+    const { startDate, endDate } = this.parseDateRange(query);
+
+    const movements = await this.prisma.inventory_movements.findMany({
+      where: {
+        created_at: {
+          gte: startDate,
+          lte: endDate,
+        },
+        ...(query.movement_type && { movement_type: query.movement_type as any }),
+      },
+      include: {
+        products: {
+          select: {
+            name: true,
+            sku: true,
+          },
+        },
+        from_location: {
+          select: {
+            name: true,
+          },
+        },
+        to_location: {
+          select: {
+            name: true,
+          },
+        },
+        users: {
+          select: {
+            username: true,
+          },
+        },
+      },
+      orderBy: {
+        created_at: 'desc',
+      },
+      take: 10000,
+    });
+
+    return movements.map((m) => ({
+      Fecha: m.created_at?.toISOString().split('T')[0] || '',
+      Producto: m.products?.name || 'Desconocido',
+      SKU: m.products?.sku || '',
+      Tipo: m.movement_type,
+      Cantidad: Number(m.quantity || 0),
+      Origen: m.from_location?.name || '-',
+      Destino: m.to_location?.name || '-',
+      Usuario: m.users?.username || '-',
+      Razón: m.reason || '-',
+    }));
+  }
+
+  private getDateTruncInterval(granularity: Granularity): string {
+    switch (granularity) {
+      case Granularity.HOUR: return 'hour';
+      case Granularity.DAY: return 'day';
+      case Granularity.WEEK: return 'week';
+      case Granularity.MONTH: return 'month';
+      case Granularity.YEAR: return 'year';
+      default: return 'day';
+    }
+  }
+
+  private formatPeriodFromDate(date: Date, granularity: Granularity): string {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+
+    switch (granularity) {
+      case Granularity.HOUR:
+        return `${y}-${m}-${d}T${String(date.getHours()).padStart(2, '0')}:00`;
+      case Granularity.DAY:
+        return `${y}-${m}-${d}`;
+      case Granularity.WEEK:
+        return `${y}-${m}-${d}`;
+      case Granularity.MONTH:
+        return `${y}-${m}`;
+      case Granularity.YEAR:
+        return `${y}`;
+      default:
+        return `${y}-${m}-${d}`;
+    }
+  }
+
   private parseDateRange(query: InventoryAnalyticsQueryDto): { startDate: Date; endDate: Date } {
     if (query.date_from && query.date_to) {
+      const endDate = new Date(query.date_to);
+      endDate.setUTCHours(23, 59, 59, 999);
       return {
         startDate: new Date(query.date_from),
-        endDate: new Date(query.date_to),
+        endDate,
       };
     }
 
     const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    return { startDate: monthStart, endDate: now };
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    switch (query.date_preset) {
+      case DatePreset.TODAY:
+        return { startDate: today, endDate: now };
+      case DatePreset.YESTERDAY:
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        return { startDate: yesterday, endDate: today };
+      case DatePreset.THIS_WEEK:
+        const weekStart = new Date(today);
+        weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+        return { startDate: weekStart, endDate: now };
+      case DatePreset.LAST_WEEK:
+        const lastWeekEnd = new Date(today);
+        lastWeekEnd.setDate(lastWeekEnd.getDate() - lastWeekEnd.getDay());
+        const lastWeekStart = new Date(lastWeekEnd);
+        lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+        return { startDate: lastWeekStart, endDate: lastWeekEnd };
+      case DatePreset.LAST_MONTH:
+        const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+        const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        return { startDate: lastMonthStart, endDate: lastMonthEnd };
+      case DatePreset.THIS_YEAR:
+        return { startDate: new Date(today.getFullYear(), 0, 1), endDate: now };
+      case DatePreset.LAST_YEAR:
+        return {
+          startDate: new Date(today.getFullYear() - 1, 0, 1),
+          endDate: new Date(today.getFullYear() - 1, 11, 31),
+        };
+      case DatePreset.THIS_MONTH:
+      default:
+        return { startDate: new Date(today.getFullYear(), today.getMonth(), 1), endDate: now };
+    }
   }
 }

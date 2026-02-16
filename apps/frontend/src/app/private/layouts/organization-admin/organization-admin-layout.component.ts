@@ -12,7 +12,9 @@ import { OnboardingModalComponent } from '../../../shared/components/onboarding-
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
 
 import { Observable, Subject } from 'rxjs';
-import { take, takeUntil } from 'rxjs/operators';
+import { take, takeUntil, map } from 'rxjs/operators';
+
+import { ConfigFacade } from '../../../core/store/config';
 
 // Store related imports
 import { OrganizationStoresService } from '../../../private/modules/organization/stores/services/organization-stores.service';
@@ -38,6 +40,7 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
         #sidebarRef
         [menuItems]="filteredMenuItems"
         [title]="(organizationName$ | async) || 'Cargando...'"
+        [logoUrl]="logoUrl$ | async"
         subtitle="Administrador de Organización"
         [vlink]="(organizationSlug$ | async) || 'slug'"
         [domainHostname]="organizationDomainHostname"
@@ -94,6 +97,7 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
   organizationSlug$: Observable<string | null>;
   organizationDomainHostname$: Observable<string | null>;
   organizationDomainHostname: string | null = null;
+  logoUrl$: Observable<string | null>;
 
   // Onboarding Modal
   showOnboardingModal = false;
@@ -102,6 +106,7 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
 
   // Panel UI menu filtering
   private menuFilterService = inject(MenuFilterService);
+  private configFacade = inject(ConfigFacade);
 
   // Stores
   stores: StoreListItem[] = [];
@@ -176,6 +181,13 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
     this.organizationName$ = this.authFacade.userOrganizationName$;
     this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
     this.organizationDomainHostname$ = this.authFacade.userDomainHostname$;
+    this.logoUrl$ = this.authFacade.userOrganization$.pipe(
+      map(org => {
+        if (org?.logo_url) return org.logo_url;
+        const isVendix = this.configFacade.getCurrentConfig()?.domainConfig?.isVendixDomain;
+        return isVendix ? 'vlogo.png' : null;
+      })
+    );
   }
 
   ngOnInit(): void {

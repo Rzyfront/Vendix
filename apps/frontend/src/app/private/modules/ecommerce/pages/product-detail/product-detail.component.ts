@@ -1,6 +1,6 @@
 import { Component, OnInit, inject, DestroyRef, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule, ActivatedRoute } from '@angular/router';
+import { RouterModule, ActivatedRoute, Router } from '@angular/router';
 import { FormsModule, ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CatalogService, ProductDetail, EcommerceProduct, CatalogQuery } from '../../services/catalog.service';
@@ -146,6 +146,18 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                   <app-icon slot="icon" name="share" [size]="18" />
                 </app-button>
               </div>
+
+              <!-- Buy Now -->
+              <app-button
+                variant="primary"
+                size="md"
+                [fullWidth]="true"
+                customClasses="btn-buy-now"
+                [disabled]="p.stock_quantity === 0"
+                (clicked)="onBuyNow(p)"
+              >
+                {{ p.stock_quantity === 0 ? 'Agotado' : 'Comprar ahora' }}
+              </app-button>
 
               <!-- Stock Minimal -->
               <div class="stock-minimal">
@@ -341,6 +353,12 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
       }
     }
 
+    :host ::ng-deep .btn-buy-now {
+      font-weight: 700;
+      font-size: 1rem;
+      padding: 0.85rem 1.5rem;
+    }
+
     .stock-minimal {
       display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; 
       .s-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; &.warn { background: #f59e0b; } &.err { background: #ef4444; } }
@@ -393,6 +411,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
 })
 export class ProductDetailComponent implements OnInit {
   private route = inject(ActivatedRoute);
+  private router = inject(Router);
   private catalogService = inject(CatalogService);
   private cartService = inject(CartService);
   private destroyRef = inject(DestroyRef);
@@ -498,6 +517,14 @@ export class ProductDetailComponent implements OnInit {
   onAddToCart(product: EcommerceProduct | ProductDetail): void { const result = this.cartService.addToCart(product.id, this.quantity()); if (result) { result.subscribe(); } }
   onQuickView(product: EcommerceProduct): void { this.selectedProductSlug = product.slug; this.quickViewOpen = true; }
   onShareClick(): void { this.shareModalOpen = true; }
+  onBuyNow(product: ProductDetail): void {
+    const result = this.cartService.addToCart(product.id, this.quantity());
+    if (result) {
+      result.subscribe(() => this.router.navigate(['/cart']));
+    } else {
+      this.router.navigate(['/cart']);
+    }
+  }
 
   onSubmitReview(): void {
     if (this.reviewForm.invalid) return;
