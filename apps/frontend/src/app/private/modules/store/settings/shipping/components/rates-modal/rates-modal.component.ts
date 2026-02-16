@@ -157,23 +157,23 @@ interface RateTypeOption {
               <div class="grid grid-cols-2 gap-4">
                 <div>
                   <label class="text-sm text-muted-foreground">Método</label>
-                  <p class="font-medium">{{ selectedRate?.shipping_method?.name || '-' }}</p>
+                  <p class="font-medium">{{ selectedRate.shipping_method?.name || '-' }}</p>
                 </div>
                 <div>
                   <label class="text-sm text-muted-foreground">Tipo</label>
-                  <p class="font-medium">{{ getRateTypeLabel(selectedRate?.type || '') }}</p>
+                  <p class="font-medium">{{ getRateTypeLabel(selectedRate.type || '') }}</p>
                 </div>
                 <div>
                   <label class="text-sm text-muted-foreground">Costo base</label>
-                  <p class="font-medium">{{ formatCost(selectedRate?.base_cost || 0) }}</p>
+                  <p class="font-medium">{{ formatCost(selectedRate.base_cost || 0) }}</p>
                 </div>
-                <div *ngIf="selectedRate?.per_unit_cost">
+                <div *ngIf="selectedRate.per_unit_cost">
                   <label class="text-sm text-muted-foreground">Costo por unidad</label>
-                  <p class="font-medium">{{ formatCost(selectedRate?.per_unit_cost || 0) }}</p>
+                  <p class="font-medium">{{ formatCost(selectedRate.per_unit_cost || 0) }}</p>
                 </div>
-                <div *ngIf="selectedRate?.free_shipping_threshold">
+                <div *ngIf="selectedRate.free_shipping_threshold">
                   <label class="text-sm text-muted-foreground">Envío gratis desde</label>
-                  <p class="font-medium">{{ formatCost(selectedRate?.free_shipping_threshold || 0) }}</p>
+                  <p class="font-medium">{{ formatCost(selectedRate.free_shipping_threshold || 0) }}</p>
                 </div>
               </div>
             </div>
