@@ -8,7 +8,7 @@ import {
 } from '@angular/core';
 import { Subject, takeUntil } from 'rxjs';
 import { CommonModule } from '@angular/common';
-import { Router } from '@angular/router';
+import { Router, ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
 
 import {
@@ -32,6 +32,8 @@ import {
   PosCustomer,
 } from './services/pos-customer.service';
 import { PosPaymentService } from './services/pos-payment.service';
+import { PosOrderService } from './services/pos-order.service';
+import { StoreOrdersService } from '../orders/services/store-orders.service';
 import { PosStatsComponent } from './components/pos-stats.component';
 import { PosProductSelectionComponent } from './components/pos-product-selection.component';
 import { PosCustomerModalComponent } from './components/pos-customer-modal.component';
@@ -91,11 +93,16 @@ import { PosCartModalComponent } from './components/pos-cart-modal.component';
               </div>
               <div class="flex flex-col">
                 <h1 class="font-bold text-text-primary text-base lg:text-lg leading-none flex items-center gap-2">
-                  <span class="hidden sm:inline">Vendix</span> POS
-                  <app-badge variant="success" class="hidden sm:inline-flex">Vende</app-badge>
+                  @if (isEditMode()) {
+                    <span>Editando Orden #{{ editingOrderNumber() }}</span>
+                    <app-badge variant="warning" class="hidden sm:inline-flex">Edición</app-badge>
+                  } @else {
+                    <span class="hidden sm:inline">Vendix</span> POS
+                    <app-badge variant="success" class="hidden sm:inline-flex">Vende</app-badge>
+                  }
                 </h1>
                 <span class="text-[10px] lg:text-xs text-text-secondary font-medium hidden sm:inline">
-                  Punto de venta
+                  {{ isEditMode() ? 'Modificar items de la orden' : 'Punto de venta' }}
                 </span>
               </div>
             </div>
@@ -190,6 +197,7 @@ import { PosCartModalComponent } from './components/pos-cart-modal.component';
             <div class="h-full min-h-0">
               <app-pos-cart
                 class="h-full block"
+                [isEditMode]="isEditMode()"
                 (saveDraft)="onSaveDraft()"
                 (checkout)="onCheckout()"
               ></app-pos-cart>
@@ -336,6 +344,11 @@ export class PosComponent implements OnInit, OnDestroy {
     totalItems: 0,
   };
 
+  // Edit mode
+  isEditMode = signal(false);
+  editingOrderId = signal<string | null>(null);
+  editingOrderNumber = signal<string | null>(null);
+
   // Mobile detection signal
   isMobile = signal(false);
 
@@ -355,6 +368,9 @@ export class PosComponent implements OnInit, OnDestroy {
     private cdr: ChangeDetectorRef,
     private router: Router,
     private store: Store,
+    private route: ActivatedRoute,
+    private posOrderService: PosOrderService,
+    private ordersService: StoreOrdersService,
   ) {}
 
   @HostListener('window:resize')
@@ -370,6 +386,7 @@ export class PosComponent implements OnInit, OnDestroy {
     this.checkMobile();
     this.setupSubscriptions();
     this.loadStoreSettings();
+    this.checkEditMode();
   }
 
   ngOnDestroy(): void {
@@ -526,6 +543,11 @@ export class PosComponent implements OnInit, OnDestroy {
   onCheckout(): void {
     if (!this.cartState || this.isEmpty) return;
 
+    if (this.isEditMode()) {
+      this.updateExistingOrder();
+      return;
+    }
+
     // Open payment modal instead of processing directly
     this.showPaymentModal = true;
   }
@@ -559,6 +581,10 @@ export class PosComponent implements OnInit, OnDestroy {
             quantity: item.quantity,
             unit_price: item.unitPrice,
             total_price: item.totalPrice,
+            variant_id: item.variant_id,
+            variant_sku: item.variant_sku,
+            variant_attributes: item.variant_attributes,
+            variant_display_name: item.variant_display_name,
           })),
         subtotal: paymentData.order?.subtotal || this.cartSummary.subtotal,
         tax_amount: paymentData.order?.tax_amount || this.cartSummary.taxAmount,
@@ -667,6 +693,76 @@ export class PosComponent implements OnInit, OnDestroy {
   onCheckoutFromModal(): void {
     this.showCartModal = false;
     this.onCheckout();
+  }
+
+  private checkEditMode(): void {
+    this.route.queryParams.pipe(takeUntil(this.destroy$)).subscribe((params) => {
+      const editOrderId = params['editOrder'];
+      if (editOrderId) {
+        this.loadOrderForEditing(editOrderId.toString());
+      }
+    });
+  }
+
+  private loadOrderForEditing(orderId: string): void {
+    this.loading = true;
+    this.ordersService.getOrderById(orderId).pipe(
+      takeUntil(this.destroy$),
+    ).subscribe({
+      next: (response: any) => {
+        const order = response.data || response;
+
+        if (order.state !== 'created') {
+          this.loading = false;
+          this.toastService.error('Solo se pueden editar ordenes en estado "Creada"');
+          this.router.navigate(['/admin/orders', orderId]);
+          return;
+        }
+
+        // Load order items into cart
+        this.cartService.loadFromOrder(order).pipe(
+          takeUntil(this.destroy$),
+        ).subscribe({
+          next: () => {
+            this.isEditMode.set(true);
+            this.editingOrderId.set(orderId);
+            this.editingOrderNumber.set(order.order_number);
+            this.loading = false;
+            this.toastService.info(`Editando Orden #${order.order_number}`);
+          },
+          error: (err) => {
+            this.loading = false;
+            this.toastService.error('Error al cargar los productos de la orden');
+          },
+        });
+      },
+      error: (err) => {
+        this.loading = false;
+        this.toastService.error('Error al cargar la orden para edición');
+        this.router.navigate(['/admin/orders']);
+      },
+    });
+  }
+
+  private updateExistingOrder(): void {
+    if (!this.cartState || !this.editingOrderId()) return;
+
+    this.loading = true;
+    this.posOrderService.updateOrderItems(this.editingOrderId()!, this.cartState).pipe(
+      takeUntil(this.destroy$),
+    ).subscribe({
+      next: () => {
+        this.loading = false;
+        this.toastService.success('Orden actualizada exitosamente');
+        this.cartService.clearCart().pipe(takeUntil(this.destroy$)).subscribe();
+        this.isEditMode.set(false);
+        this.router.navigate(['/admin/orders', this.editingOrderId()]);
+      },
+      error: (err) => {
+        this.loading = false;
+        this.toastService.error(err.message || 'Error al actualizar la orden');
+      },
+    });
   }
 
   private loadStoreSettings(): void {

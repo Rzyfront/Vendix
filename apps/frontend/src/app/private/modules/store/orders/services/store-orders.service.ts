@@ -400,12 +400,45 @@ export class StoreOrdersService {
     );
   }
 
+  flowConfirmPayment(orderId: string): Observable<Order> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/confirm-payment`;
+    return this.http.post<any>(url, {}).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error confirming payment:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
   flowConfirmDelivery(orderId: string): Observable<Order> {
     const url = `${this.apiUrl}/store/orders/${orderId}/flow/confirm-delivery`;
     return this.http.post<any>(url, {}).pipe(
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error confirming delivery:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
+  flowCancelPayment(orderId: string, dto?: { reason?: string }): Observable<Order> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/cancel-payment`;
+    return this.http.post<any>(url, dto || {}).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error cancelling payment:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
+  updateOrderItems(orderId: string, dto: any): Observable<Order> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/items`;
+    return this.http.put<any>(url, dto).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error updating order items:', error);
         return throwError(() => new Error(this.extractErrorMessage(error)));
       }),
     );

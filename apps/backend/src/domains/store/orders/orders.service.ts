@@ -6,7 +6,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
-import { CreateOrderDto, UpdateOrderDto, OrderQueryDto } from './dto';
+import { CreateOrderDto, UpdateOrderDto, OrderQueryDto, UpdateOrderItemsDto } from './dto';
 import { Prisma, order_state_enum } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { OrderStatsDto } from './dto/order-stats.dto';
@@ -179,6 +179,14 @@ export class OrdersService {
         addresses_orders_billing_address_idToaddresses: true,
         addresses_orders_shipping_address_idToaddresses: true,
         payments: true,
+        shipping_method: {
+          select: { id: true, name: true, type: true, provider_name: true, min_days: true, max_days: true, logo_url: true },
+        },
+        shipping_rate: {
+          include: {
+            shipping_zone: { select: { id: true, name: true, display_name: true } },
+          },
+        },
         users: {
           select: {
             id: true,
@@ -210,6 +218,14 @@ export class OrdersService {
         addresses_orders_billing_address_idToaddresses: true,
         addresses_orders_shipping_address_idToaddresses: true,
         payments: true,
+        shipping_method: {
+          select: { id: true, name: true, type: true, provider_name: true, min_days: true, max_days: true, logo_url: true },
+        },
+        shipping_rate: {
+          include: {
+            shipping_zone: { select: { id: true, name: true, display_name: true } },
+          },
+        },
         users: {
           select: {
             id: true,
@@ -221,6 +237,81 @@ export class OrdersService {
           },
         },
       },
+    });
+  }
+
+  async updateOrderItems(id: number, dto: UpdateOrderItemsDto) {
+    const order = await this.findOne(id);
+
+    if (order.state !== 'created') {
+      throw new BadRequestException(
+        `Cannot modify items for order in state '${order.state}'. Order must be in 'created' state.`
+      );
+    }
+
+    // Calculate totals from items
+    const subtotal = dto.subtotal ?? dto.items.reduce((sum, item) => sum + item.total_price, 0);
+    const taxAmount = dto.tax_amount ?? dto.items.reduce((sum, item) => sum + (item.tax_amount_item || 0), 0);
+    const discountAmount = dto.discount_amount ?? 0;
+    const grandTotal = dto.total_amount ?? (subtotal + taxAmount - discountAmount);
+
+    return this.prisma.$transaction(async (tx) => {
+      // Delete existing items
+      await tx.order_items.deleteMany({
+        where: { order_id: id },
+      });
+
+      // Create new items
+      await tx.order_items.createMany({
+        data: dto.items.map((item) => ({
+          order_id: id,
+          product_id: item.product_id,
+          product_variant_id: item.product_variant_id,
+          product_name: item.product_name,
+          variant_sku: item.variant_sku,
+          variant_attributes: item.variant_attributes,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          total_price: item.total_price,
+          tax_rate: item.tax_rate,
+          tax_amount_item: item.tax_amount_item,
+          updated_at: new Date(),
+        })),
+      });
+
+      // Update order totals
+      await tx.orders.update({
+        where: { id },
+        data: {
+          subtotal_amount: subtotal,
+          tax_amount: taxAmount,
+          discount_amount: discountAmount,
+          grand_total: grandTotal,
+          updated_at: new Date(),
+        },
+      });
+
+      // Return updated order with all includes
+      return tx.orders.findFirst({
+        where: { id },
+        include: {
+          stores: { select: { id: true, name: true, store_code: true } },
+          order_items: { include: { products: true, product_variants: true } },
+          addresses_orders_billing_address_idToaddresses: true,
+          addresses_orders_shipping_address_idToaddresses: true,
+          payments: true,
+          users: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+              phone: true,
+              avatar_url: true,
+            },
+          },
+        },
+      });
     });
   }
 

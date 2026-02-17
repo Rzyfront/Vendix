@@ -4,9 +4,18 @@ import { ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angula
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { Subject, takeUntil, forkJoin } from 'rxjs';
 import { StoreOrdersService } from '../../services/store-orders.service';
-import { Order, OrderState, OrderFlowMetadata, PaymentType } from '../../interfaces/order.interface';
+import {
+  Order,
+  OrderState,
+  OrderFlowMetadata,
+  PaymentType,
+  DeliveryType,
+  OrderActionConfig,
+  PayOrderDto,
+} from '../../interfaces/order.interface';
 import { DialogService, ModalComponent, ToastService } from '../../../../../../shared/components';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import {
   StickyHeaderComponent,
@@ -15,6 +24,9 @@ import {
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { PaymentMethodsService } from '../../../settings/payments/services/payment-methods.service';
 import { StorePaymentMethod, PaymentMethodState } from '../../../settings/payments/interfaces/payment-methods.interface';
+import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency';
+import { OrderPaymentModalComponent } from '../../components/order-payment-modal/order-payment-modal.component';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
 export interface LifecycleStep {
   key: string;
@@ -30,9 +42,12 @@ export interface LifecycleStep {
     RouterModule,
     ReactiveFormsModule,
     ButtonComponent,
+    CardComponent,
     IconComponent,
     StickyHeaderComponent,
     ModalComponent,
+    CurrencyPipe,
+    OrderPaymentModalComponent,
   ],
   templateUrl: './order-details-page.component.html',
   styleUrls: ['./order-details-page.component.css'],
@@ -43,6 +58,9 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
   timeline: any[] = [];
   isLoading = signal(false);
   error: string | null = null;
+
+  // Role check
+  isPrivilegedUser = signal(false);
 
   // Flow modal visibility signals
   showPayModal = signal(false);
@@ -57,12 +75,14 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
   // Payment methods for pay modal
   paymentMethods = signal<StorePaymentMethod[]>([]);
 
-  // Reactive forms
-  payForm!: FormGroup;
+  // Reactive forms (ship, deliver, cancel, refund — pay is now in its own component)
   shipForm!: FormGroup;
   deliverForm!: FormGroup;
   cancelForm!: FormGroup;
   refundForm!: FormGroup;
+
+  // Currency
+  currencySymbol;
 
   // ── Computed signals ───────────────────────────────────────
 
@@ -85,34 +105,65 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     'finished',
   ];
 
-  private readonly STEP_LABELS: Record<string, string> = {
-    created: 'Creada',
-    pending_payment: 'Pago Pendiente',
-    processing: 'Procesando',
-    shipped: 'Enviada',
-    delivered: 'Entregada',
-    finished: 'Finalizada',
-  };
+  // ── Step Labels (delivery-type aware) ──────────────────────
+
+  readonly stepLabels = computed<Record<string, string>>(() => {
+    const delivery = this.order()?.delivery_type || 'direct_delivery';
+
+    const labels: Record<DeliveryType, Record<string, string>> = {
+      home_delivery: {
+        created: 'Creada',
+        pending_payment: 'Pago Pendiente',
+        processing: 'Procesando',
+        shipped: 'Enviada',
+        delivered: 'Entregada',
+        finished: 'Finalizada',
+      },
+      pickup: {
+        created: 'Creada',
+        pending_payment: 'Pago Pendiente',
+        processing: 'Preparando',
+        shipped: 'Lista para Recoger',
+        delivered: 'Recogida',
+        finished: 'Finalizada',
+      },
+      direct_delivery: {
+        created: 'Creada',
+        pending_payment: 'Pago Pendiente',
+        processing: 'Procesando',
+        shipped: 'Despachada',
+        delivered: 'Entregada',
+        finished: 'Finalizada',
+      },
+      other: {
+        created: 'Creada',
+        pending_payment: 'Pago Pendiente',
+        processing: 'Procesando',
+        shipped: 'Despachada',
+        delivered: 'Entregada',
+        finished: 'Finalizada',
+      },
+    };
+
+    return labels[delivery] || labels.direct_delivery;
+  });
 
   readonly lifecycleSteps = computed<LifecycleStep[]>(() => {
     const order = this.order();
     if (!order) return [];
 
     const state = order.state;
+    const labels = this.stepLabels();
 
-    // Terminal states get special handling
+    // Terminal states
     if (state === 'cancelled' || state === 'refunded') {
       const terminalLabel = state === 'cancelled' ? 'Cancelada' : 'Reembolsada';
-      // Show steps up to where the order was before terminal + the terminal step
-      const steps: LifecycleStep[] = this.HAPPY_PATH.map((key) => ({
-        key,
-        label: this.STEP_LABELS[key],
-        status: 'completed' as const,
-      }));
-      // Mark all as completed up to a reasonable point, then add terminal
-      // We can infer how far the order got from the metadata
       return [
-        ...steps.slice(0, 1).map((s) => ({ ...s, status: 'completed' as const })),
+        ...this.HAPPY_PATH.slice(0, 1).map((key) => ({
+          key,
+          label: labels[key] || key,
+          status: 'completed' as const,
+        })),
         { key: state, label: terminalLabel, status: 'terminal' as const },
       ];
     }
@@ -122,7 +173,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
 
     return this.HAPPY_PATH.map((key, i) => ({
       key,
-      label: this.STEP_LABELS[key],
+      label: labels[key] || key,
       status:
         i < currentIndex
           ? ('completed' as const)
@@ -132,7 +183,189 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     }));
   });
 
-  // Sticky Header Configuration
+  // ── Channel Config ─────────────────────────────────────────
+
+  readonly channelConfig = computed(() => {
+    const channel = this.order()?.channel;
+    const configs: Record<string, { label: string; icon: string; color: string }> = {
+      pos: { label: 'POS', icon: 'monitor', color: 'blue' },
+      ecommerce: { label: 'E-commerce', icon: 'shopping-cart', color: 'green' },
+      whatsapp: { label: 'WhatsApp', icon: 'message-circle', color: 'emerald' },
+      agent: { label: 'Agente', icon: 'headphones', color: 'purple' },
+      marketplace: { label: 'Marketplace', icon: 'store', color: 'orange' },
+    };
+    return configs[channel || 'pos'] || configs['pos'];
+  });
+
+  readonly deliveryConfig = computed(() => {
+    const delivery = this.order()?.delivery_type || 'direct_delivery';
+    const configs: Record<string, { label: string; icon: string }> = {
+      home_delivery: { label: 'Envio a domicilio', icon: 'truck' },
+      pickup: { label: 'Retiro en tienda', icon: 'map-pin' },
+      direct_delivery: { label: 'Entrega directa', icon: 'package' },
+      other: { label: 'Otro', icon: 'box' },
+    };
+    return configs[delivery] || configs['direct_delivery'];
+  });
+
+  // ── Available Actions (state + delivery_type + channel aware) ──
+
+  readonly availableActions = computed<OrderActionConfig[]>(() => {
+    const order = this.order();
+    if (!order) return [];
+
+    const state = order.state;
+    const delivery = order.delivery_type || 'direct_delivery';
+    const channel = order.channel || 'pos';
+    const actions: OrderActionConfig[] = [];
+
+    switch (state) {
+      case 'created':
+        if (channel !== 'pos' || !this.hasSuccessfulPayment()) {
+          actions.push({ id: 'pay', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' });
+        }
+        if (this.isPrivilegedUser()) {
+          actions.push({ id: 'edit-order', label: 'Modificar Orden', icon: 'edit', variant: 'warning' });
+        }
+        actions.push({ id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' });
+        break;
+
+      case 'pending_payment':
+        actions.push({ id: 'confirm-payment', label: 'Confirmar Pago', icon: 'check-circle', variant: 'primary' });
+        actions.push({ id: 'info', label: 'Esperando confirmacion de pago', icon: 'clock', type: 'alert', color: 'warning' });
+        actions.push({ id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' });
+        break;
+
+      case 'processing':
+        if (delivery === 'home_delivery') {
+          actions.push({ id: 'ship', label: 'Marcar como Enviado', icon: 'truck', variant: 'primary' });
+        } else if (delivery === 'pickup') {
+          actions.push({ id: 'ship', label: 'Listo para Recoger', icon: 'package', variant: 'primary' });
+        } else {
+          actions.push({ id: 'ship', label: 'Despachar Orden', icon: 'package', variant: 'primary' });
+        }
+        if (this.isPrivilegedUser()) {
+          actions.push({ id: 'cancel-payment', label: 'Cancelar Pago', icon: 'credit-card', variant: 'warning' });
+        }
+        actions.push({ id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' });
+        break;
+
+      case 'shipped':
+        if (delivery === 'home_delivery') {
+          actions.push({ id: 'deliver', label: 'Marcar como Entregado', icon: 'package-check', variant: 'primary' });
+        } else if (delivery === 'pickup') {
+          actions.push({ id: 'deliver', label: 'Confirmar Recogida', icon: 'user-check', variant: 'primary' });
+        } else {
+          actions.push({ id: 'deliver', label: 'Confirmar Entrega', icon: 'check-circle', variant: 'primary' });
+        }
+        break;
+
+      case 'delivered':
+        actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
+        actions.push({ id: 'refund', label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning' });
+        break;
+
+      case 'finished':
+        actions.push({ id: 'refund', label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning' });
+        break;
+
+      case 'cancelled':
+      case 'refunded':
+        // No actions
+        break;
+    }
+
+    return actions;
+  });
+
+  // ── Ship Modal Config (delivery-type aware) ────────────────
+
+  readonly shipModalConfig = computed(() => {
+    const order = this.order();
+    const delivery = order?.delivery_type || 'direct_delivery';
+    const hasShippingInfo = !!order?.shipping_method;
+
+    switch (delivery) {
+      case 'home_delivery':
+        return {
+          title: 'Marcar como Enviado',
+          showTracking: true,
+          showCarrier: !hasShippingInfo,
+          showNotes: true,
+          showShippingInfo: hasShippingInfo,
+          confirmLabel: 'Confirmar Envio',
+        };
+      case 'pickup':
+        return {
+          title: 'Marcar Listo para Recoger',
+          showTracking: false,
+          showCarrier: false,
+          showNotes: true,
+          showShippingInfo: hasShippingInfo,
+          confirmLabel: 'Confirmar',
+        };
+      case 'direct_delivery':
+      default:
+        return {
+          title: 'Despachar Orden',
+          showTracking: false,
+          showCarrier: !hasShippingInfo,
+          showNotes: true,
+          showShippingInfo: hasShippingInfo,
+          confirmLabel: 'Confirmar Despacho',
+        };
+    }
+  });
+
+  // ── Shipment Tracking ─────────────────────────────────────
+
+  readonly showShipmentTracking = computed(() => {
+    const order = this.order();
+    if (!order) return false;
+    const delivery = order.delivery_type || 'direct_delivery';
+    return (
+      delivery === 'home_delivery' ||
+      !!this.flowMetadata().tracking_number ||
+      !!this.flowMetadata().carrier
+    );
+  });
+
+  readonly trackingSteps = computed(() => {
+    const order = this.order();
+    if (!order) return [];
+
+    const state = order.state;
+    const stateOrder = ['created', 'pending_payment', 'processing', 'shipped', 'delivered', 'finished'];
+    const stateIndex = stateOrder.indexOf(state);
+
+    const steps = [
+      { key: 'received', label: 'Orden recibida', status: 'pending' as string },
+      { key: 'preparing', label: 'Preparando envio', status: 'pending' as string },
+      { key: 'in_transit', label: 'En camino', status: 'pending' as string },
+      { key: 'delivered', label: 'Entregado', status: 'pending' as string },
+    ];
+
+    // Map order states to tracking steps
+    if (stateIndex >= 0) steps[0].status = 'completed'; // received
+    if (stateIndex >= 2) steps[1].status = 'completed'; // preparing (processing)
+    if (stateIndex >= 3) {
+      steps[1].status = 'completed';
+      steps[2].status = stateIndex === 3 ? 'current' : 'completed'; // in_transit (shipped)
+    }
+    if (stateIndex >= 4) {
+      steps[2].status = 'completed';
+      steps[3].status = 'completed'; // delivered
+    }
+
+    // Mark current step
+    if (stateIndex === 2) steps[1].status = 'current';
+    if (stateIndex <= 1 && stateIndex >= 0) steps[0].status = 'current';
+
+    return steps;
+  });
+
+  // ── Sticky Header Configuration ───────────────────────────
+
   readonly headerTitle = computed(() => {
     const order = this.order();
     return order ? `Orden #${order.order_number}` : 'Cargando...';
@@ -181,12 +414,11 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     private dialogService: DialogService,
     private toastService: ToastService,
     private paymentMethodsService: PaymentMethodsService,
+    private currencyService: CurrencyFormatService,
+    private authFacade: AuthFacade,
   ) {
-    this.payForm = this.fb.group({
-      store_payment_method_id: [null, Validators.required],
-      payment_type: ['direct' as PaymentType, Validators.required],
-      amount_received: [null],
-    });
+    this.currencySymbol = this.currencyService.currencySymbol;
+    this.isPrivilegedUser.set(this.authFacade.isAdmin() || this.authFacade.isOwner());
 
     this.shipForm = this.fb.group({
       tracking_number: [''],
@@ -255,14 +487,14 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
           this.timeline = (timeline as any).data || timeline || [];
           this.isLoading.set(false);
 
-          // Load payment methods if order is in created state
+          // Load payment methods if order can accept payment
           if (orderData.state === 'created') {
             this.loadPaymentMethods();
           }
         },
         error: (err) => {
           console.error('Error loading order data:', err);
-          this.error = 'No se pudo cargar la información de la orden.';
+          this.error = 'No se pudo cargar la informacion de la orden.';
           this.isLoading.set(false);
         },
       });
@@ -283,27 +515,52 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
       });
   }
 
+  // ── Action Dispatcher ──────────────────────────────────────
+
+  executeAction(actionId: string): void {
+    switch (actionId) {
+      case 'pay':
+        this.openPayModal();
+        break;
+      case 'confirm-payment':
+        this.confirmPayment();
+        break;
+      case 'cancel-payment':
+        this.cancelPayment();
+        break;
+      case 'edit-order':
+        this.editOrderInPos();
+        break;
+      case 'ship':
+        this.openShipModal();
+        break;
+      case 'deliver':
+        this.openDeliverModal();
+        break;
+      case 'finish':
+        this.confirmDelivery();
+        break;
+      case 'cancel':
+        this.openCancelModal();
+        break;
+      case 'refund':
+        this.openRefundModal();
+        break;
+    }
+  }
+
   // ── Flow Actions ───────────────────────────────────────────
 
   openPayModal(): void {
-    this.payForm.reset({ payment_type: 'direct' });
     if (this.paymentMethods().length === 0) {
       this.loadPaymentMethods();
     }
     this.showPayModal.set(true);
   }
 
-  submitPayment(): void {
-    if (this.payForm.invalid || !this.orderId) return;
-
+  onPaymentSubmitted(dto: PayOrderDto): void {
+    if (!this.orderId) return;
     this.isProcessingAction.set(true);
-    const dto = this.payForm.value;
-    dto.store_payment_method_id = Number(dto.store_payment_method_id);
-    if (dto.amount_received) {
-      dto.amount_received = Number(dto.amount_received);
-    } else {
-      delete dto.amount_received;
-    }
 
     this.ordersService
       .flowPayOrder(this.orderId, dto)
@@ -312,7 +569,9 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
         next: (res) => {
           this.showPayModal.set(false);
           this.isProcessingAction.set(false);
-          const changeMsg = res.payment?.change ? ` — Cambio: $${res.payment.change.toFixed(2)}` : '';
+          const changeMsg = res.payment?.change
+            ? ` — Cambio: ${this.currencyService.format(res.payment.change)}`
+            : '';
           this.toastService.success(`Pago registrado exitosamente${changeMsg}`);
           this.loadData();
         },
@@ -333,7 +592,6 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
 
     this.isProcessingAction.set(true);
     const dto = this.shipForm.value;
-    // Remove empty strings
     Object.keys(dto).forEach((key) => {
       if (dto[key] === '' || dto[key] === null) delete dto[key];
     });
@@ -383,6 +641,38 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
           this.isProcessingAction.set(false);
           this.toastService.error(err.message || 'Error al marcar la entrega');
         },
+      });
+  }
+
+  confirmPayment(): void {
+    if (!this.orderId) return;
+
+    this.dialogService
+      .confirm({
+        title: 'Confirmar Pago',
+        message: '¿Confirmar que el pago de esta orden ha sido recibido?',
+        confirmText: 'Confirmar Pago',
+        cancelText: 'Cancelar',
+        confirmVariant: 'primary',
+      })
+      .then((confirmed: boolean) => {
+        if (!confirmed || !this.orderId) return;
+
+        this.isProcessingAction.set(true);
+        this.ordersService
+          .flowConfirmPayment(this.orderId)
+          .pipe(takeUntil(this.destroy$))
+          .subscribe({
+            next: () => {
+              this.isProcessingAction.set(false);
+              this.toastService.success('Pago confirmado exitosamente');
+              this.loadData();
+            },
+            error: (err) => {
+              this.isProcessingAction.set(false);
+              this.toastService.error(err.message || 'Error al confirmar el pago');
+            },
+          });
       });
   }
 
@@ -481,6 +771,15 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
       });
   }
 
+  copyTrackingNumber(): void {
+    const tracking = this.flowMetadata().tracking_number;
+    if (tracking) {
+      navigator.clipboard.writeText(tracking).then(() => {
+        this.toastService.success('Numero de rastreo copiado');
+      });
+    }
+  }
+
   // ── Header & Navigation ────────────────────────────────────
 
   onHeaderAction(actionId: string): void {
@@ -498,6 +797,78 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
   }
 
   // ── Helpers ────────────────────────────────────────────────
+
+  hasSuccessfulPayment(): boolean {
+    const order = this.order();
+    if (!order?.payments) return false;
+    return order.payments.some((p) => p.state === 'succeeded');
+  }
+
+  cancelPayment(): void {
+    if (!this.orderId) return;
+
+    this.dialogService
+      .confirm({
+        title: 'Cancelar Pago',
+        message: '¿Estás seguro de cancelar el pago de esta orden? La orden volverá al estado "Creada" y podrás registrar un nuevo pago.',
+        confirmText: 'Cancelar Pago',
+        cancelText: 'Volver',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed: boolean) => {
+        if (!confirmed || !this.orderId) return;
+
+        this.isProcessingAction.set(true);
+        this.ordersService
+          .flowCancelPayment(this.orderId, { reason: 'Cancelado desde panel de administración' })
+          .pipe(takeUntil(this.destroy$))
+          .subscribe({
+            next: () => {
+              this.isProcessingAction.set(false);
+              this.toastService.success('Pago cancelado exitosamente. La orden ha vuelto a estado "Creada".');
+              this.loadData();
+            },
+            error: (err) => {
+              this.isProcessingAction.set(false);
+              this.toastService.error(err.message || 'Error al cancelar el pago');
+            },
+          });
+      });
+  }
+
+  editOrderInPos(): void {
+    const order = this.order();
+    if (!order) return;
+    this.router.navigate(['/admin/pos'], { queryParams: { editOrder: order.id } });
+  }
+
+  getPaymentStateClass(state: string): string {
+    const classes: Record<string, string> = {
+      pending: 'bg-yellow-500/20 text-yellow-400',
+      succeeded: 'bg-green-500/20 text-green-400',
+      failed: 'bg-red-500/20 text-red-400',
+      cancelled: 'bg-gray-500/20 text-gray-400',
+      refunded: 'bg-orange-500/20 text-orange-400',
+      authorized: 'bg-blue-500/20 text-blue-400',
+      captured: 'bg-green-500/20 text-green-400',
+      partially_refunded: 'bg-orange-500/20 text-orange-400',
+    };
+    return classes[state] || 'bg-gray-500/20 text-gray-400';
+  }
+
+  getPaymentStateLabel(state: string): string {
+    const labels: Record<string, string> = {
+      pending: 'Pendiente',
+      succeeded: 'Exitoso',
+      failed: 'Fallido',
+      cancelled: 'Cancelado',
+      refunded: 'Reembolsado',
+      authorized: 'Autorizado',
+      captured: 'Capturado',
+      partially_refunded: 'Reembolso Parcial',
+    };
+    return labels[state] || state;
+  }
 
   getStatusColor(status: string | undefined): string {
     const colors: Record<string, string> = {
@@ -533,12 +904,42 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     return new Date(dateString).toLocaleString();
   }
 
+  getTimelineLabel(log: any): string {
+    // Flow-specific labels based on the new state in the audit log
+    const newState = log.new_values?.state;
+    if (newState) {
+      const stateLabels: Record<string, string> = {
+        pending_payment: 'Pago Iniciado',
+        processing: 'Pago Confirmado',
+        shipped: 'Orden Enviada',
+        delivered: 'Orden Entregada',
+        finished: 'Orden Finalizada',
+        cancelled: 'Orden Cancelada',
+        refunded: 'Orden Reembolsada',
+      };
+      if (stateLabels[newState]) return stateLabels[newState];
+    }
+
+    // Fallback to generic action labels
+    const action = log.action?.toUpperCase();
+    const actionLabels: Record<string, string> = {
+      CREATE: 'Orden Creada',
+      UPDATE: 'Orden Actualizada',
+      DELETE: 'Orden Eliminada',
+    };
+    return actionLabels[action] || log.action || 'Evento';
+  }
+
   getAuditActionLabel(action: string): string {
     const labels: Record<string, string> = {
       create: 'Orden Creada',
       update: 'Orden Actualizada',
       delete: 'Orden Eliminada',
       view: 'Orden Vista',
+      CREATE: 'Orden Creada',
+      UPDATE: 'Orden Actualizada',
+      DELETE: 'Orden Eliminada',
+      VIEW: 'Orden Vista',
     };
     return labels[action] || action;
   }

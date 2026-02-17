@@ -27,8 +27,10 @@ import { Router } from '@angular/router';
 import { PosCartService } from '../services/pos-cart.service';
 import {
   PosProductService,
+  PosProductVariant,
   SearchResult,
 } from '../services/pos-product.service';
+import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
 import { environment } from '../../../../../../environments/environment';
 import {
   selectAccessToken,
@@ -47,6 +49,7 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
     InputsearchComponent,
     OptionsDropdownComponent,
     CurrencyPipe,
+    PosVariantSelectorComponent,
   ],
   schemas: [NO_ERRORS_SCHEMA],
   template: `
@@ -193,6 +196,15 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
                   product.stock === 0 ? 'AGOTADO' : 'Últimas ' + product.stock
                 }}
               </div>
+
+              <!-- Variant Indicator -->
+              <div
+                *ngIf="product.has_variants"
+                class="absolute top-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold backdrop-blur-sm bg-surface/80 border border-border/60 flex items-center gap-1"
+              >
+                <app-icon name="layers" [size]="12" class="text-primary"></app-icon>
+                <span class="text-text-secondary">{{ product.product_variants?.length }}</span>
+              </div>
             </div>
 
             <!-- Product Info -->
@@ -220,6 +232,18 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
                 <div class="flex flex-col">
                   <span class="text-text-primary font-bold text-sm sm:text-lg">
                     {{ product.final_price | currency }}
+                  </span>
+                  <!-- Stock indicator for non-variant products -->
+                  <span
+                    *ngIf="!product.has_variants"
+                    class="text-[10px] sm:text-xs leading-tight"
+                    [class]="product.stock === 0
+                      ? 'text-error font-semibold'
+                      : product.stock <= 5
+                        ? 'text-warning font-medium'
+                        : 'text-text-muted'"
+                  >
+                    {{ product.stock === 0 ? 'Sin stock' : product.stock + ' en stock' }}
                   </span>
                 </div>
 
@@ -267,6 +291,15 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
         </div>
       </div>
     </div>
+
+    <!-- Variant Selector Modal -->
+    <app-pos-variant-selector
+      *ngIf="showVariantSelector && selectedProductForVariant"
+      [product]="selectedProductForVariant"
+      [variants]="selectedProductForVariant.product_variants"
+      (variantSelected)="onVariantSelected($event)"
+      (closed)="onVariantSelectorClosed()"
+    ></app-pos-variant-selector>
   `,
   styles: [
     `
@@ -351,6 +384,10 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   categories: any[] = [];
   brands: any[] = [];
   addingToCart = new Set<string>();
+
+  // Variant selection state
+  showVariantSelector = false;
+  selectedProductForVariant: any = null;
 
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
@@ -666,6 +703,52 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
       return;
     }
 
+    // Intercept products with variants — open selector modal
+    if (product.has_variants && product.product_variants?.length > 0) {
+      this.showVariantSelector = true;
+      this.selectedProductForVariant = product;
+      return;
+    }
+
+    this.addToCartNormal(product);
+  }
+
+  onVariantSelected(variant: PosProductVariant): void {
+    this.showVariantSelector = false;
+    const product = this.selectedProductForVariant;
+    this.selectedProductForVariant = null;
+
+    if (!product) return;
+
+    this.addingToCart.add(product.id);
+
+    this.cartService
+      .addToCart({
+        product,
+        quantity: 1,
+        variant,
+      })
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.addingToCart.delete(product.id);
+          const variantLabel = variant.attributes?.map(a => a.attribute_value).join(' / ') || '';
+          this.toastService.success(`${product.name} (${variantLabel}) agregado al carrito`);
+          this.productAddedToCart.emit({ product, quantity: 1 });
+        },
+        error: () => {
+          this.addingToCart.delete(product.id);
+          this.toastService.error('Error al agregar variante al carrito');
+        },
+      });
+  }
+
+  onVariantSelectorClosed(): void {
+    this.showVariantSelector = false;
+    this.selectedProductForVariant = null;
+  }
+
+  private addToCartNormal(product: any): void {
     if (product.stock > 0 && product.stock <= 5) {
       this.toastService.warning(
         `Producto con existencias bajo (${product.stock} unidades restantes)`,

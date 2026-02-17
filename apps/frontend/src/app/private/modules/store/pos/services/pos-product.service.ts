@@ -25,6 +25,8 @@ export interface Product {
   createdAt: Date;
   updatedAt: Date;
   tax_assignments?: ProductTaxAssignment[];
+  has_variants: boolean;
+  product_variants: PosProductVariant[];
 }
 
 export interface ProductTaxAssignment {
@@ -62,6 +64,22 @@ export interface Category {
 export interface Brand {
   id: string;
   name: string;
+}
+
+export interface PosVariantAttribute {
+  attribute_name: string;
+  attribute_value: string;
+}
+
+export interface PosProductVariant {
+  id: number;
+  sku: string | null;
+  price_override: number | null;
+  cost_price: number | null;
+  stock: number;
+  is_active: boolean;
+  attributes: PosVariantAttribute[];
+  image_url?: string;
 }
 
 export interface SearchFilters {
@@ -272,6 +290,26 @@ export class PosProductService {
         imageUrl = product.image;
       }
 
+      // Map product variants
+      const rawVariants = product.product_variants || [];
+      const productVariants: PosProductVariant[] = rawVariants.map((v: any) => ({
+        id: v.id,
+        sku: v.sku || null,
+        price_override: v.price_override != null ? Number(v.price_override) : null,
+        cost_price: v.cost_price != null ? Number(v.cost_price) : null,
+        stock: v.stock ?? v.stock_levels?.[0]?.quantity_available ?? v.stock_quantity ?? 0,
+        is_active: v.is_active ?? true,
+        attributes: Array.isArray(v.attributes)
+          ? v.attributes
+          : (v.attributes && typeof v.attributes === 'object'
+            ? Object.entries(v.attributes).map(([key, value]: [string, any]) => ({
+                attribute_name: key,
+                attribute_value: String(value),
+              }))
+            : []),
+        image_url: v.image_url || v.product_images?.image_url || undefined,
+      }));
+
       const transformed = {
         id: product.id?.toString() || '',
         name: product.name || '',
@@ -287,7 +325,7 @@ export class PosProductService {
         stock: totalStock,
         minStock: product.min_stock_level || 5,
         image: imageUrl,
-        image_url: imageUrl, // Also include as image_url for compatibility
+        image_url: imageUrl,
         description: product.description || '',
         barcode: product.barcode || '',
         tags: product.tags || [],
@@ -295,10 +333,11 @@ export class PosProductService {
         createdAt: new Date(product.created_at),
         updatedAt: new Date(product.updated_at),
         tax_assignments: product.product_tax_assignments || [],
-        // Include additional data for debugging
+        has_variants: product.has_variants ?? productVariants.length > 0,
+        product_variants: productVariants,
         _rawStockLevels: product.stock_levels,
         _rawStockQuantity: product.stock_quantity,
-        _rawImageUrl: product.image_url, // Debug: preserve original
+        _rawImageUrl: product.image_url,
       };
 
       // Debug log for first product

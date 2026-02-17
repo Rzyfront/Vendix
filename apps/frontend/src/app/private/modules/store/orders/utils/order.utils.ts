@@ -30,7 +30,7 @@ export class OrderUtils {
    */
   static canRefundOrder(order: Order): boolean {
     const refundableStates: OrderState[] = ['delivered', 'finished'];
-    const refundablePaymentStatuses: PaymentStatus[] = ['completed'];
+    const refundablePaymentStatuses: PaymentStatus[] = ['succeeded'];
 
     return (
       refundableStates.includes(order.state) &&

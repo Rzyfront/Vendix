@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
+import { BehaviorSubject, Observable, of, throwError, forkJoin } from 'rxjs';
 import { catchError, delay, map, tap } from 'rxjs/operators';
 import {
   CartItem,
@@ -19,6 +19,7 @@ export type {
   CartState,
 } from '../models/cart.model';
 import { PosCustomer } from '../models/customer.model';
+import { PosProductService, Product, PosProductVariant } from './pos-product.service';
 
 @Injectable({
   providedIn: 'root',
@@ -29,7 +30,7 @@ export class PosCartService {
   );
   private readonly loading$ = new BehaviorSubject<boolean>(false);
 
-  constructor() { }
+  constructor(private productService: PosProductService) { }
 
   // Observable getters
   get cartState(): Observable<CartState> {
@@ -169,6 +170,84 @@ export class PosCartService {
   }
 
   /**
+   * Load items from an existing order into the cart for editing
+   */
+  loadFromOrder(order: any): Observable<CartState> {
+    if (!order?.order_items || order.order_items.length === 0) {
+      return of(this.getInitialState());
+    }
+
+    // Fetch full product data for each order item
+    const productRequests: Observable<{ item: any; product: Product | null }>[] = order.order_items.map((item: any) =>
+      this.productService.getProductById(item.product_id.toString()).pipe(
+        map((product: Product | null) => ({ item, product })),
+        catchError(() => of({ item, product: null as Product | null })),
+      )
+    );
+
+    return forkJoin(productRequests).pipe(
+      map((results) => {
+        const cartItems: CartItem[] = results.map((result: any) => {
+          const { item, product } = result;
+
+          // If product was found from API, use it; otherwise create a stub
+          const cartProduct: Product = product || {
+            id: item.product_id.toString(),
+            name: item.product_name,
+            sku: item.variant_sku || '',
+            price: Number(item.unit_price),
+            final_price: Number(item.unit_price),
+            category: '',
+            stock: 9999,
+            minStock: 0,
+            isActive: true,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            has_variants: false,
+            product_variants: [],
+          };
+
+          const unitPrice = Number(item.unit_price);
+          const quantity = Number(item.quantity);
+          const totalPrice = Number(item.total_price);
+          const taxAmount = Number(item.tax_amount_item || 0) * quantity;
+
+          return {
+            id: this.generateItemId(),
+            product: cartProduct,
+            quantity,
+            unitPrice,
+            finalPrice: totalPrice / quantity,
+            totalPrice,
+            taxAmount,
+            addedAt: new Date(),
+          } as CartItem;
+        });
+
+        const newState: CartState = {
+          items: cartItems,
+          customer: order.users ? {
+            id: order.users.id,
+            name: `${order.users.first_name} ${order.users.last_name}`,
+            first_name: order.users.first_name,
+            last_name: order.users.last_name,
+            email: order.users.email,
+            phone: order.users.phone || '',
+          } as PosCustomer : null,
+          notes: '',
+          appliedDiscounts: [],
+          summary: this.calculateSummary(cartItems, []),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        return newState;
+      }),
+      tap((newState) => this.cartState$.next(newState)),
+    );
+  }
+
+  /**
    * Get current cart state value
    */
   getCurrentState(): CartState {
@@ -208,9 +287,17 @@ export class PosCartService {
    */
   private processAddToCart(request: AddToCartRequest): CartState {
     const currentState = this.cartState$.value;
+
+    // Identity: product.id + variant_id (null-safe comparison)
     const existingItemIndex = currentState.items.findIndex(
-      (item) => item.product.id === request.product.id,
+      (item) =>
+        item.product.id === request.product.id &&
+        (item.variant_id || null) === (request.variant?.id || null),
     );
+
+    // Variant-aware pricing
+    const basePrice = request.variant?.price_override ?? request.product.price;
+    const baseCost = request.variant?.cost_price ?? request.product.cost;
 
     let updatedItems: CartItem[];
 
@@ -218,38 +305,39 @@ export class PosCartService {
       // Update existing item
       const existingItem = currentState.items[existingItemIndex];
       const newQuantity = existingItem.quantity + request.quantity;
+      const finalUnitPrice = this.calculateItemFinalPriceWithBase(request.product, basePrice);
 
       updatedItems = [...currentState.items];
       updatedItems[existingItemIndex] = {
         ...existingItem,
         quantity: newQuantity,
-        taxAmount: this.calculateItemTax(existingItem.product, newQuantity),
-        finalPrice: this.calculateItemFinalPrice(existingItem.product),
-        totalPrice: newQuantity * this.calculateItemFinalPrice(existingItem.product),
+        taxAmount: this.calculateItemTaxWithBase(request.product, basePrice, newQuantity),
+        finalPrice: finalUnitPrice,
+        totalPrice: newQuantity * finalUnitPrice,
         notes: request.notes || existingItem.notes,
       };
     } else {
       // Add new item
-      const rateSum =
-        request.product.tax_assignments?.reduce((rateSum, assignment) => {
-          const assignmentRate =
-            assignment.tax_categories?.tax_rates?.reduce(
-              (sum, tr) => sum + parseFloat(tr.rate || '0'),
-              0,
-            ) || 0;
-          return rateSum + assignmentRate;
-        }, 0) || 0;
-      const finalUnitPrice = request.product.final_price || this.calculateItemFinalPrice(request.product);
+      const finalUnitPrice = request.variant
+        ? this.calculateItemFinalPriceWithBase(request.product, basePrice)
+        : (request.product.final_price || this.calculateItemFinalPrice(request.product));
+
       const newItem: CartItem = {
         id: this.generateItemId(),
         product: request.product,
         quantity: request.quantity,
-        unitPrice: request.product.price,
-        taxAmount: this.calculateItemTax(request.product, request.quantity),
+        unitPrice: basePrice,
+        taxAmount: this.calculateItemTaxWithBase(request.product, basePrice, request.quantity),
         finalPrice: finalUnitPrice,
         totalPrice: request.quantity * finalUnitPrice,
         addedAt: new Date(),
         notes: request.notes,
+        variant_id: request.variant?.id,
+        variant_sku: request.variant?.sku ?? undefined,
+        variant_attributes: request.variant?.attributes
+          ?.map(a => `${a.attribute_name}: ${a.attribute_value}`).join(', '),
+        variant_display_name: request.variant?.attributes
+          ?.map(a => a.attribute_value).join(' / '),
       };
       updatedItems = [newItem, ...currentState.items];
     }
@@ -434,6 +522,22 @@ export class PosCartService {
   }
 
   /**
+   * Calculate tax with a specific base price (for variants)
+   */
+  private calculateItemTaxWithBase(product: any, basePrice: number, quantity: number): number {
+    const rateSum = this.calculateRateSum(product);
+    return basePrice * quantity * rateSum;
+  }
+
+  /**
+   * Calculate final price with a specific base price (for variants)
+   */
+  private calculateItemFinalPriceWithBase(product: any, basePrice: number): number {
+    const rateSum = this.calculateRateSum(product);
+    return basePrice * (1 + rateSum);
+  }
+
+  /**
    * Helper to calculate sum of tax rates
    */
   private calculateRateSum(product: any): number {
@@ -475,10 +579,11 @@ export class PosCartService {
       });
     }
 
-    if (request.product && request.quantity > request.product.stock) {
+    const availableStock = request.variant ? request.variant.stock : request.product.stock;
+    if (request.product && request.quantity > availableStock) {
       errors.push({
         field: 'quantity',
-        message: `Stock insuficiente. Disponible: ${request.product.stock}`,
+        message: `Stock insuficiente. Disponible: ${availableStock}`,
       });
     }
 

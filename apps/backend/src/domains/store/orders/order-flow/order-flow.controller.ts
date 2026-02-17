@@ -7,6 +7,8 @@ import {
   ParseIntPipe,
   HttpCode,
   HttpStatus,
+  UseGuards,
+  Req,
 } from '@nestjs/common';
 import { OrderFlowService } from './order-flow.service';
 import {
@@ -15,8 +17,12 @@ import {
   DeliverOrderDto,
   CancelOrderDto,
   RefundOrderDto,
+  CancelPaymentDto,
 } from './dto';
 import { ResponseService } from '@common/responses/response.service';
+import { RolesGuard } from '../../../auth/guards/roles.guard';
+import { Roles } from '../../../auth/decorators/roles.decorator';
+import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 
 @Controller('store/orders/:orderId/flow')
 export class OrderFlowController {
@@ -66,6 +72,27 @@ export class OrderFlowController {
   async confirmDelivery(@Param('orderId', ParseIntPipe) orderId: number) {
     const order = await this.orderFlowService.confirmDelivery(orderId);
     return this.responseService.success(order, 'Delivery confirmed successfully');
+  }
+
+  @Post('confirm-payment')
+  @HttpCode(HttpStatus.OK)
+  async confirmPayment(@Param('orderId', ParseIntPipe) orderId: number) {
+    const order = await this.orderFlowService.confirmPayment(orderId);
+    return this.responseService.success(order, 'Payment confirmed successfully');
+  }
+
+  @Post('cancel-payment')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'admin', 'OWNER', 'ADMIN')
+  async cancelPayment(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Body() dto: CancelPaymentDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const cancelledBy = req.user?.email || req.user?.id?.toString() || 'unknown';
+    const order = await this.orderFlowService.cancelPayment(orderId, dto, cancelledBy);
+    return this.responseService.success(order, 'Payment cancelled successfully');
   }
 
   @Post('cancel')

@@ -212,6 +212,7 @@ export interface CreateProductVariantDto {
   stock_quantity: number;
   image_id?: number;
   attributes?: Record<string, any>;
+  variant_image_url?: string;
 }
 
 export interface CreateProductImageDto {

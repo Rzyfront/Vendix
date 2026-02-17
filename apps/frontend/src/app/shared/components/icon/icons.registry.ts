@@ -146,6 +146,7 @@ import {
   Folder,
   UserCog,
   Calculator,
+  Camera,
 } from 'lucide-angular';
 
 /**
@@ -341,6 +342,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   folder: Folder,
   'user-cog': UserCog,
   calculator: Calculator,
+  camera: Camera,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

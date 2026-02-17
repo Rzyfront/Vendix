@@ -85,6 +85,9 @@ export class PosOrderService {
         unit_price: Number(item.unitPrice.toFixed(2)),
         total_price: Number(item.totalPrice.toFixed(2)),
         cost: item.product.cost,
+        product_variant_id: item.variant_id || null,
+        variant_sku: item.variant_sku || null,
+        variant_attributes: item.variant_attributes || null,
       })),
       subtotal: Number(cartState.summary.subtotal.toFixed(2)),
       tax_amount: Number(cartState.summary.taxAmount.toFixed(2)),
@@ -225,6 +228,9 @@ export class PosOrderService {
         unit_price: Number(item.unitPrice.toFixed(2)),
         total_price: Number(item.totalPrice.toFixed(2)),
         cost: item.cost,
+        product_variant_id: (item as any).variant_id || null,
+        variant_sku: (item as any).variant_sku || null,
+        variant_attributes: (item as any).variant_attributes || null,
       })),
       subtotal: Number((request.subtotal || 0).toFixed(2)),
       tax_amount: Number((request.taxAmount || 0).toFixed(2)),
@@ -946,6 +952,50 @@ export class PosOrderService {
   /**
    * Get current store ID
    */
+  /**
+   * Update order items for an existing order (edit mode)
+   */
+  updateOrderItems(orderId: string, cartState: CartState): Observable<any> {
+    const dto = {
+      items: cartState.items.map((item) => ({
+        product_id: parseInt(item.product.id),
+        product_name: item.product.name,
+        variant_sku: item.variant_sku || item.product.sku || undefined,
+        quantity: item.quantity,
+        unit_price: Number(item.unitPrice.toFixed(2)),
+        total_price: Number(item.totalPrice.toFixed(2)),
+        tax_rate: this.calculateItemTaxRate(item),
+        tax_amount_item: item.taxAmount > 0 ? Number((item.taxAmount / item.quantity).toFixed(5)) : undefined,
+        product_variant_id: item.variant_id || null,
+        variant_attributes: item.variant_attributes || null,
+      })),
+      subtotal: Number(cartState.summary.subtotal.toFixed(2)),
+      tax_amount: Number(cartState.summary.taxAmount.toFixed(2)),
+      discount_amount: Number(cartState.summary.discountAmount.toFixed(2)),
+      total_amount: Number(cartState.summary.total.toFixed(2)),
+    };
+
+    return this.http.put(`${this.apiUrl}/store/orders/${orderId}/items`, dto).pipe(
+      map((response: any) => response.data || response),
+      catchError((error) => {
+        return throwError(() => new Error(error?.error?.message || 'Error updating order items'));
+      }),
+    );
+  }
+
+  private calculateItemTaxRate(item: any): number | undefined {
+    const product = item.product;
+    if (!product?.tax_assignments?.length) return undefined;
+    const rateSum = product.tax_assignments.reduce((sum: number, assignment: any) => {
+      const assignmentRate = assignment.tax_categories?.tax_rates?.reduce(
+        (rSum: number, tr: any) => rSum + (parseFloat(tr.rate || '0') / 100),
+        0,
+      ) || 0;
+      return sum + assignmentRate;
+    }, 0);
+    return rateSum || undefined;
+  }
+
   private getStoreId(): number {
     return this.storeContextService.getStoreIdOrThrow();
   }

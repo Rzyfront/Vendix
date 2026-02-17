@@ -1,4 +1,4 @@
-import { Product } from '../services/pos-product.service';
+import { Product, PosProductVariant } from '../services/pos-product.service';
 import { PosCustomer } from '../models/customer.model';
 
 export interface CartItem {
@@ -12,6 +12,10 @@ export interface CartItem {
   addedAt: Date;
   notes?: string;
   discounts?: CartDiscount[];
+  variant_id?: number;
+  variant_sku?: string;
+  variant_attributes?: string;
+  variant_display_name?: string;
 }
 
 export interface CartDiscount {
@@ -45,6 +49,7 @@ export interface AddToCartRequest {
   product: Product;
   quantity: number;
   notes?: string;
+  variant?: PosProductVariant;
 }
 
 export interface UpdateCartItemRequest {

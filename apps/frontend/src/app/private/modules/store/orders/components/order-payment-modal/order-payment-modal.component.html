@@ -1,0 +1,234 @@
+<app-modal
+  [isOpen]="isOpen()"
+  [size]="'lg'"
+  [title]="'Procesar Pago'"
+  [subtitle]="order() ? 'Orden #' + order()!.order_number : ''"
+  (isOpenChange)="onIsOpenChange($event)"
+  (closed)="onModalClosed()"
+>
+  <div class="payment-content">
+    <!-- LEFT: Payment Method + Cash/Reference -->
+    <section class="payment-section">
+      <!-- Total Display -->
+      <div class="text-center mb-4 pb-4 border-b border-border">
+        <span class="text-xs font-bold text-text-secondary uppercase">Total a Cobrar</span>
+        <p class="text-3xl font-black text-primary-600 font-mono mt-1">
+          {{ orderTotal() | currency }}
+        </p>
+      </div>
+
+      <!-- Payment Method Selection -->
+      <div class="section-header">
+        <app-icon name="credit-card" [size]="16" class="section-icon"></app-icon>
+        <h2 class="section-title">Metodo de Pago</h2>
+      </div>
+
+      @if (displayMethods().length > 0) {
+        <div class="payment-methods-grid">
+          @for (method of displayMethods(); track method.id) {
+            <button
+              type="button"
+              (click)="selectPaymentMethod(method)"
+              class="payment-method-btn"
+              [class.selected]="selectedMethod()?.id === method.id"
+            >
+              <app-icon [name]="method.icon" [size]="24"></app-icon>
+              <span class="method-name">{{ method.display_name }}</span>
+            </button>
+          }
+        </div>
+      } @else {
+        <div class="text-center py-6 text-text-secondary">
+          <app-icon name="credit-card" [size]="24" class="mb-2"></app-icon>
+          <p class="text-sm">No hay metodos de pago configurados</p>
+        </div>
+      }
+
+      <!-- Cash Input Section -->
+      @if (selectedMethod()?.type === 'cash') {
+        <div class="cash-section">
+          <div class="cash-inputs">
+            <div class="cash-input-group">
+              <label>Monto Recibido</label>
+              <div class="cash-input" [class.error]="isCashInsufficient()">
+                <span class="currency">{{ currencySymbol() }}</span>
+                <input
+                  type="number"
+                  [value]="cashReceived()"
+                  (input)="cashReceived.set($any($event.target).valueAsNumber || 0); calculateChange()"
+                  placeholder="0.00"
+                  step="0.01"
+                />
+              </div>
+              @if (isCashInsufficient()) {
+                <span class="error-text">
+                  Faltan: {{ missingAmount() | currency }}
+                </span>
+              }
+            </div>
+            <div class="cash-input-group">
+              <label>Cambio</label>
+              <div class="change-display">
+                <span>{{ change() | currency }}</span>
+                <app-icon name="coins" [size]="18"></app-icon>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Amounts -->
+          <div class="quick-amounts">
+            <button type="button" (click)="setHalfAmount()" class="quick-btn">
+              <span>1/2 Pago</span>
+              <span class="quick-value">{{ orderTotal() / 2 | currency }}</span>
+            </button>
+            <button type="button" (click)="setFullAmount()" class="quick-btn primary">
+              <span>Total</span>
+              <app-icon name="check" [size]="16"></app-icon>
+            </button>
+          </div>
+
+          <!-- Numeric Keypad -->
+          <div class="keypad">
+            @for (num of [1, 2, 3, 4, 5, 6, 7, 8, 9]; track num) {
+              <button type="button" (click)="appendNumber(num)" class="keypad-btn">
+                {{ num }}
+              </button>
+            }
+            <button type="button" (click)="clearCashAmount()" class="keypad-btn clear">C</button>
+            <button type="button" (click)="appendNumber(0)" class="keypad-btn">0</button>
+            <button type="button" (click)="backspace()" class="keypad-btn">
+              <app-icon name="delete" [size]="20"></app-icon>
+            </button>
+          </div>
+        </div>
+      }
+
+      <!-- Reference Input -->
+      @if (selectedMethod()?.requiresReference) {
+        <div class="reference-section">
+          <div class="reference-header">
+            <app-icon [name]="selectedMethod()?.icon || 'credit-card'" [size]="28"></app-icon>
+            <p>Ingresa el numero de referencia</p>
+          </div>
+          <app-input
+            [formControl]="referenceControl"
+            [label]="selectedMethod()?.referenceLabel || 'Referencia'"
+            [placeholder]="'Ingresa la referencia'"
+            [size]="'lg'"
+            [error]="getReferenceError()"
+          ></app-input>
+        </div>
+      }
+    </section>
+
+    <!-- RIGHT: Payment Type -->
+    <section class="payment-section">
+      <div class="section-header">
+        <app-icon name="settings" [size]="16" class="section-icon"></app-icon>
+        <h2 class="section-title">Tipo de Pago</h2>
+      </div>
+
+      <div class="flex flex-col gap-3">
+        <!-- Direct Payment -->
+        <button
+          type="button"
+          class="payment-type-btn"
+          [class.selected]="paymentType() === 'direct'"
+          (click)="selectPaymentType('direct')"
+        >
+          <div class="radio-indicator">
+            @if (paymentType() === 'direct') {
+              <div class="radio-dot"></div>
+            }
+          </div>
+          <app-icon name="banknote" [size]="20"></app-icon>
+          <div class="type-info">
+            <span class="type-name">Directo (inmediato)</span>
+            <span class="type-desc">El pago se registra como completado</span>
+          </div>
+        </button>
+
+        <!-- Online Payment -->
+        <button
+          type="button"
+          class="payment-type-btn"
+          [class.selected]="paymentType() === 'online'"
+          (click)="selectPaymentType('online')"
+        >
+          <div class="radio-indicator">
+            @if (paymentType() === 'online') {
+              <div class="radio-dot"></div>
+            }
+          </div>
+          <app-icon name="globe" [size]="20"></app-icon>
+          <div class="type-info">
+            <span class="type-name">En Linea (pendiente)</span>
+            <span class="type-desc">La orden quedara en pago pendiente</span>
+          </div>
+        </button>
+      </div>
+
+      <!-- Info banner for online -->
+      @if (paymentType() === 'online') {
+        <div class="mt-4 bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-start gap-3">
+          <app-icon name="info" [size]="16" class="text-blue-600 mt-0.5"></app-icon>
+          <span class="text-xs text-blue-700">
+            El pago en linea dejara la orden en estado <strong>Pago Pendiente</strong> hasta que se confirme.
+          </span>
+        </div>
+      }
+
+      <!-- Selected Method Summary -->
+      @if (selectedMethod(); as method) {
+        <div class="mt-6 p-4 bg-[var(--color-surface)] rounded-xl border border-border">
+          <h3 class="text-xs font-bold text-text-secondary uppercase tracking-wider mb-3">Resumen</h3>
+          <div class="space-y-2 text-sm">
+            <div class="flex justify-between">
+              <span class="text-text-secondary">Metodo</span>
+              <span class="font-semibold">{{ method.display_name }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-text-secondary">Tipo</span>
+              <span class="font-semibold">{{ paymentType() === 'direct' ? 'Directo' : 'En Linea' }}</span>
+            </div>
+            @if (method.type === 'cash' && cashReceived() > 0) {
+              <div class="flex justify-between">
+                <span class="text-text-secondary">Recibido</span>
+                <span class="font-semibold">{{ cashReceived() | currency }}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-text-secondary">Cambio</span>
+                <span class="font-bold text-green-600">{{ change() | currency }}</span>
+              </div>
+            }
+            <div class="flex justify-between pt-2 border-t border-border">
+              <span class="font-bold">Total</span>
+              <span class="font-black text-primary-600">{{ orderTotal() | currency }}</span>
+            </div>
+          </div>
+        </div>
+      }
+    </section>
+  </div>
+
+  <!-- Footer -->
+  <div slot="footer" class="payment-footer">
+    <div class="flex gap-3">
+      <app-button variant="outline" (clicked)="onModalClosed()" class="flex-1">
+        Cancelar
+      </app-button>
+      <app-button
+        variant="primary"
+        [fullWidth]="true"
+        [disabled]="!canProcess()"
+        [loading]="isProcessing()"
+        [showTextWhileLoading]="true"
+        (clicked)="confirmPayment()"
+        customClasses="flex-[2]"
+      >
+        <app-icon slot="icon" name="check-circle" [size]="20"></app-icon>
+        {{ isProcessing() ? 'Procesando...' : 'Confirmar Pago' }}
+      </app-button>
+    </div>
+  </div>
+</app-modal>

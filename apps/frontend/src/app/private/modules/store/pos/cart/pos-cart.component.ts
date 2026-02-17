@@ -3,6 +3,7 @@ import {
   OnInit,
   OnDestroy,
   ChangeDetectionStrategy,
+  Input,
   Output,
   EventEmitter,
 } from '@angular/core';
@@ -97,8 +98,8 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
               [disabled]="(isEmpty$ | async) ?? false"
               class="!h-10 text-sm font-bold px-6"
             >
-              <app-icon name="credit-card" [size]="18" slot="icon"></app-icon>
-              Cobrar
+              <app-icon [name]="isEditMode ? 'check' : 'credit-card'" [size]="18" slot="icon"></app-icon>
+              {{ isEditMode ? 'Actualizar Orden' : 'Cobrar' }}
             </app-button>
           </div>
         </div>
@@ -183,6 +184,12 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
               <h4 class="text-sm font-semibold text-text-primary truncate leading-tight">
                 {{ item.product.name }}
               </h4>
+              <p
+                *ngIf="item.variant_display_name"
+                class="text-[10px] text-primary font-medium truncate leading-tight"
+              >
+                {{ item.variant_display_name }}
+              </p>
               <div class="flex items-center gap-2 mt-0.5">
                 <span class="text-[10px] text-text-muted">
                   Base: {{ formatCurrency(item.unitPrice) }}
@@ -242,6 +249,7 @@ export class PosCartComponent implements OnInit, OnDestroy {
   isEmpty$: Observable<boolean>;
   summary$: Observable<any>;
 
+  @Input() isEditMode = false;
   @Output() saveDraft = new EventEmitter<void>();
   @Output() checkout = new EventEmitter<void>();
 
