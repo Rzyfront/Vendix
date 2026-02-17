@@ -14,6 +14,7 @@ import {
   DeliverOrderDto,
   CancelOrderDto,
   RefundOrderDto,
+  CancelPaymentDto,
 } from './dto';
 
 type OrderState = order_state_enum;
@@ -224,25 +225,105 @@ export class OrderFlowService {
   }
 
   /**
-   * Confirm payment from webhook (pending_payment -> processing)
-   * This method should only be called from WebhookHandlerService
+   * Confirm payment (pending_payment -> processing)
+   * Called from webhook handlers or manually by admin
    */
-  async confirmPayment(orderId: number): Promise<void> {
+  async confirmPayment(orderId: number) {
     const order = await this.getOrder(orderId);
 
     if (order.state !== 'pending_payment') {
       this.logger.warn(
         `Attempted to confirm payment for order #${orderId} in state '${order.state}'`
       );
-      return;
+      return order;
+    }
+
+    // Update payment state from 'pending' to 'succeeded'
+    const pendingPayment = order.payments.find((p) => p.state === 'pending');
+    if (pendingPayment) {
+      await this.prisma.payments.update({
+        where: { id: pendingPayment.id },
+        data: {
+          state: 'succeeded',
+          paid_at: new Date(),
+          updated_at: new Date(),
+        },
+      });
     }
 
     this.validateTransition(order.state as OrderState, 'processing');
-    await this.updateOrderState(orderId, 'processing', {
+    const updatedOrder = await this.updateOrderState(orderId, 'processing', {
       paid_at: new Date(),
     });
 
     this.logger.log(`Order #${orderId} payment confirmed, moved to processing`);
+    return updatedOrder;
+  }
+
+  /**
+   * Cancel payment of a processing order (processing -> created)
+   * Privileged reverse transition — bypasses normal state machine
+   * Only admin/owner can perform this action
+   */
+  async cancelPayment(orderId: number, dto: CancelPaymentDto, cancelledBy: string) {
+    const order = await this.getOrder(orderId);
+
+    if (order.state !== 'processing') {
+      throw new BadRequestException(
+        `Cannot cancel payment for order in state '${order.state}'. Order must be in 'processing' state.`
+      );
+    }
+
+    // Find the active payment (succeeded or pending — pending covers online payments not yet confirmed)
+    const activePayment = order.payments.find(
+      (p) => p.state === 'succeeded' || p.state === 'pending'
+    );
+    if (!activePayment) {
+      throw new BadRequestException('No active payment found for this order');
+    }
+
+    // Cancel the payment and revert order state in a transaction
+    await this.prisma.$transaction(async (tx) => {
+      // Mark payment as cancelled with metadata
+      await tx.payments.update({
+        where: { id: activePayment.id },
+        data: {
+          state: 'cancelled',
+          updated_at: new Date(),
+          gateway_response: {
+            ...(typeof activePayment.gateway_response === 'object' && activePayment.gateway_response !== null
+              ? activePayment.gateway_response as Record<string, any>
+              : {}),
+            cancelled_by: cancelledBy,
+            cancelled_at: new Date().toISOString(),
+            cancellation_reason: dto.reason || 'Payment cancelled by admin',
+          },
+        },
+      });
+
+      // Bypass state machine — revert order to 'created'
+      await tx.orders.update({
+        where: { id: orderId },
+        data: {
+          state: 'created',
+          completed_at: null,
+          updated_at: new Date(),
+        },
+      });
+    });
+
+    // Return updated order with all includes
+    const updatedOrder = await this.prisma.orders.findFirst({
+      where: { id: orderId },
+      include: {
+        stores: { select: { id: true, name: true, store_code: true } },
+        order_items: { include: { products: true, product_variants: true } },
+        payments: true,
+      },
+    });
+
+    this.logger.log(`Order #${orderId} payment cancelled by ${cancelledBy}: ${dto.reason || 'No reason provided'}`);
+    return updatedOrder;
   }
 
   /**
@@ -326,6 +407,20 @@ export class OrderFlowService {
       );
     }
 
+    // Cancel any active payments when the order is cancelled
+    const activePayments = order.payments.filter(
+      (p) => p.state === 'pending' || p.state === 'succeeded'
+    );
+    for (const payment of activePayments) {
+      await this.prisma.payments.update({
+        where: { id: payment.id },
+        data: {
+          state: 'cancelled',
+          updated_at: new Date(),
+        },
+      });
+    }
+
     this.validateTransition(order.state as OrderState, 'cancelled');
     const updatedOrder = await this.updateOrderState(orderId, 'cancelled', {
       cancelled_at: new Date(),
@@ -361,9 +456,23 @@ export class OrderFlowService {
         amount: refundAmount,
         reason: dto.reason,
         state: 'completed',
-        refunded_at: new Date(),
+        processed_at: new Date(),
       },
     });
+
+    // Update the original payment state to 'refunded'
+    const activePayment = order.payments.find(
+      (p) => p.state === 'succeeded' || p.state === 'pending'
+    );
+    if (activePayment) {
+      await this.prisma.payments.update({
+        where: { id: activePayment.id },
+        data: {
+          state: 'refunded',
+          updated_at: new Date(),
+        },
+      });
+    }
 
     this.validateTransition(order.state as OrderState, 'refunded');
     const updatedOrder = await this.updateOrderState(orderId, 'refunded', {

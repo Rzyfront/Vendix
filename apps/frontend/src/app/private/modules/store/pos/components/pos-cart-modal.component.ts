@@ -117,8 +117,11 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
               <!-- Item Info -->
               <div class="item-info">
                 <h4 class="item-name">{{ item.product.name }}</h4>
+                <p *ngIf="item.variant_display_name" style="font-size: 11px; color: var(--color-primary); font-weight: 500; margin: 0 0 2px 0;">
+                  {{ item.variant_display_name }}
+                </p>
                 <div class="item-meta">
-                  <span *ngIf="item.product.sku" class="item-sku">{{ item.product.sku }}</span>
+                  <span *ngIf="item.variant_sku || item.product.sku" class="item-sku">{{ item.variant_sku || item.product.sku }}</span>
                   <span class="item-unit-price">{{ formatCurrency(item.finalPrice) }} c/u</span>
                 </div>
               </div>

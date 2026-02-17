@@ -52,10 +52,12 @@ export class OrderFormatUtils {
   static formatPaymentStatus(status: PaymentStatus): string {
     const statusMap: Record<PaymentStatus, string> = {
       pending: 'Pending',
-      processing: 'Processing',
-      completed: 'Completed',
+      succeeded: 'Succeeded',
       failed: 'Failed',
+      authorized: 'Authorized',
+      captured: 'Captured',
       refunded: 'Refunded',
+      partially_refunded: 'Partially Refunded',
       cancelled: 'Cancelled',
     };
     return statusMap[status] || status;
@@ -84,10 +86,12 @@ export class OrderFormatUtils {
   static getPaymentStatusColor(status: PaymentStatus): string {
     const colorMap: Record<PaymentStatus, string> = {
       pending: 'yellow',
-      processing: 'purple',
-      completed: 'green',
+      succeeded: 'green',
       failed: 'red',
+      authorized: 'blue',
+      captured: 'purple',
       refunded: 'gray',
+      partially_refunded: 'orange',
       cancelled: 'red',
     };
     return colorMap[status] || 'gray';

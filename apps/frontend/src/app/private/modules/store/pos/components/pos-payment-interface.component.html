@@ -17,7 +17,7 @@
       <!-- Product List -->
       <div class="product-list">
         <div *ngFor="let item of cartState?.items" class="product-item">
-          <span class="product-name">{{ item.product.name }}</span>
+          <span class="product-name">{{ item.product.name }}<span *ngIf="item.variant_display_name" style="font-size: 0.85em; opacity: 0.7;"> - {{ item.variant_display_name }}</span></span>
           <span class="product-qty">x{{ item.quantity }}</span>
         </div>
         <div *ngIf="!cartState?.items?.length" class="empty-cart">

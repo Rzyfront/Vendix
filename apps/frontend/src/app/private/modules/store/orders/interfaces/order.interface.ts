@@ -1,6 +1,34 @@
 // Order channel types
 export type OrderChannel = 'pos' | 'ecommerce' | 'agent' | 'whatsapp' | 'marketplace';
 
+// Delivery type - aligned with Prisma enum
+export type DeliveryType = 'pickup' | 'home_delivery' | 'direct_delivery' | 'other';
+
+// Shipping entities - Aligned with backend shipping models
+export interface ShippingMethod {
+  id: number;
+  name: string;
+  type: string;
+  provider_name?: string;
+  min_days?: number;
+  max_days?: number;
+  logo_url?: string;
+}
+
+export interface ShippingZone {
+  id: number;
+  name: string;
+  display_name?: string;
+}
+
+export interface ShippingRate {
+  id: number;
+  name?: string;
+  type: string;
+  base_cost: number;
+  shipping_zone?: ShippingZone;
+}
+
 // Core entities - Aligned with backend models
 export interface Order {
   id: number;
@@ -9,6 +37,11 @@ export interface Order {
   order_number: string;
   state: OrderState;
   channel?: OrderChannel;
+  delivery_type?: DeliveryType;
+  shipping_method_id?: number;
+  shipping_rate_id?: number;
+  shipping_method?: ShippingMethod;
+  shipping_rate?: ShippingRate;
   subtotal_amount: number;
   tax_amount: number;
   shipping_cost: number;
@@ -132,10 +165,12 @@ export type OrderState =
 
 export type PaymentStatus =
   | 'pending'
-  | 'processing'
-  | 'completed'
+  | 'succeeded'
   | 'failed'
+  | 'authorized'
+  | 'captured'
   | 'refunded'
+  | 'partially_refunded'
   | 'cancelled';
 
 // Query and response interfaces
@@ -454,4 +489,24 @@ export interface OrderFlowMetadata {
   cancellation_reason?: string;
   refund_reason?: string;
   refund_amount?: number;
+}
+
+// ── Order Detail UI Types ──────────────────────────────────────
+
+export interface OrderActionConfig {
+  id: string;
+  label: string;
+  icon: string;
+  variant?: 'primary' | 'success' | 'danger' | 'warning';
+  type?: 'button' | 'alert';
+  color?: string;
+}
+
+export interface OrderPaymentMethod {
+  id: number;
+  display_name: string;
+  type: string; // 'cash' | 'card' | 'bank_transfer' | 'digital_wallet'
+  icon: string;
+  requiresReference: boolean;
+  referenceLabel?: string;
 }

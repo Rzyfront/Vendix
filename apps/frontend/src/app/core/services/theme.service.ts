@@ -57,8 +57,18 @@ export class ThemeService {
          this.setCssVariables({
              '--color-primary': this.currentBranding.colors.primary,
              '--color-secondary': this.currentBranding.colors.secondary,
-             '--color-surface': this.currentBranding.colors.surface,
+             '--color-accent': this.currentBranding.colors.accent,
              '--color-background': this.currentBranding.colors.background,
+             '--color-surface': this.currentBranding.colors.surface,
+             '--color-text-primary': this.currentBranding.colors.text?.primary,
+             '--color-text-secondary': this.currentBranding.colors.text?.secondary,
+             '--color-text-muted': this.currentBranding.colors.text?.muted,
+             // RGB versions
+             '--color-primary-rgb': this.hexToRgbString(this.currentBranding.colors.primary),
+             '--color-secondary-rgb': this.hexToRgbString(this.currentBranding.colors.secondary),
+             '--color-accent-rgb': this.hexToRgbString(this.currentBranding.colors.accent),
+             '--color-background-rgb': this.hexToRgbString(this.currentBranding.colors.background),
+             '--color-surface-rgb': this.hexToRgbString(this.currentBranding.colors.surface),
          });
     }
 

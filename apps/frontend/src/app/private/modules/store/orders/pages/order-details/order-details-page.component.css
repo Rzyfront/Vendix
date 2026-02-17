@@ -1,4 +1,4 @@
-/* Timeline styles - KEEP */
+/* Timeline styles - History section */
 :host {
   display: block;
 }
@@ -43,7 +43,91 @@
     0 0 0 1px var(--color-primary-600, #7ed7a5);
 }
 
-/* Print styles - KEEP */
+/* ── Vertical Stepper ──────────────────────────────── */
+
+.stepper-vertical {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.step-item {
+  display: flex;
+  gap: 12px;
+  padding-bottom: 4px;
+}
+
+.step-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 24px;
+  flex-shrink: 0;
+}
+
+.step-circle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid;
+  flex-shrink: 0;
+}
+
+.step-line {
+  width: 2px;
+  flex: 1;
+  min-height: 16px;
+  margin: 4px 0;
+}
+
+.step-content {
+  padding-top: 2px;
+  padding-bottom: 12px;
+}
+
+/* ── Tracking Timeline ─────────────────────────────── */
+
+.tracking-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.tracking-step {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding-bottom: 2px;
+}
+
+.tracking-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 16px;
+  flex-shrink: 0;
+}
+
+.tracking-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid;
+  flex-shrink: 0;
+}
+
+.tracking-line {
+  width: 2px;
+  flex: 1;
+  min-height: 14px;
+  margin: 3px 0;
+}
+
+/* ── Print styles ──────────────────────────────────── */
+
 @media print {
   .no-print {
     display: none !important;
@@ -58,7 +142,8 @@
   }
 }
 
-/* Font Smoothing - KEEP */
+/* ── Font Smoothing ────────────────────────────────── */
+
 h1,
 h2,
 h3,

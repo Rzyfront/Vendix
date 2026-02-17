@@ -112,6 +112,10 @@ export class CreateVariantWithStockDto {
   @IsOptional()
   @IsInt()
   image_id?: number;
+
+  @IsOptional()
+  @IsString()
+  variant_image_url?: string;
 }
 
 export class ProductImageDto {
@@ -849,6 +853,10 @@ export class UpdateVariantWithStockDto {
   @IsOptional()
   @IsInt()
   image_id?: number;
+
+  @IsOptional()
+  @IsString()
+  variant_image_url?: string;
 }
 
 // Bulk Upload DTOs

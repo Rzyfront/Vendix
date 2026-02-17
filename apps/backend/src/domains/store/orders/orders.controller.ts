@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Body,
   Patch,
   Param,
@@ -13,9 +14,11 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { OrdersService } from './orders.service';
-import { CreateOrderDto, UpdateOrderDto, OrderQueryDto } from './dto';
+import { CreateOrderDto, UpdateOrderDto, OrderQueryDto, UpdateOrderItemsDto } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { RolesGuard } from '../../auth/guards/roles.guard';
+import { Roles } from '../../auth/decorators/roles.decorator';
 import { Public } from '../../auth/decorators/public.decorator';
 import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
@@ -134,6 +137,29 @@ export class OrdersController {
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al actualizar la orden',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Put(':id/items')
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'admin', 'OWNER', 'ADMIN')
+  @Permissions('store:orders:update')
+  async updateOrderItems(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateOrderItemsDto,
+  ) {
+    try {
+      const result = await this.ordersService.updateOrderItems(id, dto);
+      return this.responseService.updated(
+        result,
+        'Items de la orden actualizados exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al actualizar los items de la orden',
         error.response?.message || error.message,
         error.status || 400,
       );

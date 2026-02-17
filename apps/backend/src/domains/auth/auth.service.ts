@@ -1328,9 +1328,22 @@ export class AuthService {
     }
 
     // 🆕 MULTI-ACCOUNT SUPPORT: Find ALL accounts for this email
+    // When store_slug is provided, resolve the org slug from the store first
+    // so multi-account disambiguation works correctly
+    let orgIdentifierForLookup = organization_slug;
+    if (store_slug && !organization_slug) {
+      const storeForLookup = await this.prismaService.stores.findFirst({
+        where: { slug: store_slug },
+        include: { organizations: { select: { slug: true } } },
+      });
+      if (storeForLookup) {
+        orgIdentifierForLookup = storeForLookup.organizations.slug;
+      }
+    }
+
     const accountLookup = await this.findUserAccountsByEmail(
       email,
-      organization_slug, // Pass org identifier for resolution
+      orgIdentifierForLookup, // Pass org identifier for resolution (from org_slug or resolved from store)
     );
 
     // Handle account lookup results

@@ -531,6 +531,7 @@ model orders {
   channel                                         order_channel_enum       @default(pos)
   delivery_type                                   order_delivery_type_enum @default(direct_delivery)
   shipping_method_id                              Int?
+  shipping_rate_id                                Int?
   internal_notes                                  String?
   created_at                                      DateTime?                @default(now()) @db.Timestamp(6)
   updated_at                                      DateTime?                @default(now()) @db.Timestamp(6)
@@ -544,6 +545,7 @@ model orders {
   payments                                        payments[]
   refunds                                         refunds[]
   shipping_method                                 shipping_methods?        @relation(fields: [shipping_method_id], references: [id], onDelete: SetNull)
+  shipping_rate                                   shipping_rates?          @relation(fields: [shipping_rate_id], references: [id], onDelete: SetNull)
 
   @@unique([store_id, order_number])
   @@index([store_id, order_number])
@@ -1348,6 +1350,7 @@ model shipping_rates {
   // Relaciones
   shipping_zone   shipping_zones   @relation(fields: [shipping_zone_id], references: [id], onDelete: Cascade)
   shipping_method shipping_methods @relation(fields: [shipping_method_id], references: [id], onDelete: Cascade)
+  orders          orders[]
 
   @@index([shipping_zone_id])
   @@index([shipping_method_id])
@@ -1560,6 +1563,7 @@ enum payments_state_enum {
   captured
   refunded
   partially_refunded
+  cancelled
 }
 
 enum product_state_enum {

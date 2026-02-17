@@ -150,6 +150,8 @@ export class CheckoutService {
     const store_id = RequestContextService.getStoreId();
     let shipping_cost = 0;
     let shipping_method_id: number | null = null;
+    let shipping_rate_id: number | null = null;
+    let delivery_type: 'pickup' | 'home_delivery' | 'direct_delivery' | 'other' = 'direct_delivery';
 
     if (dto.shipping_rate_id) {
       const rate = await this.store_prisma.shipping_rates.findFirst({
@@ -174,6 +176,17 @@ export class CheckoutService {
 
       shipping_cost = Number(rate.base_cost);
       shipping_method_id = rate.shipping_method_id;
+      shipping_rate_id = rate.id;
+
+      // Derive delivery_type from shipping method type
+      const methodType = rate.shipping_method.type;
+      if (methodType === 'pickup') {
+        delivery_type = 'pickup';
+      } else if (methodType === 'carrier' || methodType === 'third_party_provider') {
+        delivery_type = 'home_delivery';
+      } else {
+        delivery_type = 'direct_delivery';
+      }
     } else if (dto.shipping_method_id) {
       // Fallback: si solo viene shipping_method_id sin rate
       const method = await this.store_prisma.shipping_methods.findFirst({
@@ -253,6 +266,8 @@ export class CheckoutService {
         tax_amount: total_tax,
         shipping_cost: shipping_cost,
         shipping_method_id: shipping_method_id,
+        shipping_rate_id: shipping_rate_id,
+        delivery_type: delivery_type,
         grand_total: grand_total,
         shipping_address_id,
         shipping_address_snapshot,

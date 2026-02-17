@@ -63,6 +63,9 @@ interface GeneratedVariant {
   sale_price: number;
   stock: number;
   attributes: Record<string, string>;
+  image_url?: string;
+  image_file?: File;
+  image_id?: number;
 }
 
 @Component({
@@ -345,6 +348,8 @@ export class ProductCreatePageComponent implements OnInit {
         sale_price: Number(v.sale_price || 0),
         stock: v.stock_quantity,
         attributes: v.attributes || {},
+        image_url: v.product_images?.image_url || undefined,
+        image_id: v.image_id || undefined,
       }));
 
       // Try to reconstruct variantAttributes from variants if possible
@@ -540,6 +545,76 @@ export class ProductCreatePageComponent implements OnInit {
     }
     if (args.length > 0) helper([], 0);
     return r;
+  }
+
+  // --- Variant Pricing (bidirectional) ---
+  private variantIsCalculating = false;
+
+  onVariantCostOrMarginChange(variant: GeneratedVariant): void {
+    if (this.variantIsCalculating) return;
+    this.variantIsCalculating = true;
+    const cost = Number(variant.cost_price || 0);
+    const margin = Number(variant.profit_margin || 0);
+    variant.price = Number((cost * (1 + margin / 100)).toFixed(2));
+    this.variantIsCalculating = false;
+  }
+
+  onVariantPriceChange(variant: GeneratedVariant): void {
+    if (this.variantIsCalculating) return;
+    this.variantIsCalculating = true;
+    const cost = Number(variant.cost_price || 0);
+    const price = Number(variant.price || 0);
+    if (cost > 0) {
+      variant.profit_margin = Number((((price - cost) / cost) * 100).toFixed(2));
+    }
+    this.variantIsCalculating = false;
+  }
+
+  getVariantPriceWithTax(variant: GeneratedVariant): number {
+    const activePrice = variant.is_on_sale && variant.sale_price
+      ? Number(variant.sale_price)
+      : Number(variant.price || 0);
+
+    const selectedTaxIds = this.productForm.get('tax_category_ids')?.value || [];
+    let totalTaxRate = 0;
+    selectedTaxIds.forEach((id: number) => {
+      const taxCat = this.allTaxCategories.find((tc) => tc.id === id);
+      if (taxCat) {
+        const rawRate = taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0;
+        const rate = parseFloat(String(rawRate));
+        totalTaxRate += isNaN(rate) ? 0 : rate;
+      }
+    });
+
+    return activePrice * (1 + totalTaxRate);
+  }
+
+  // --- Variant Image Handling ---
+  triggerVariantImageUpload(idx: number): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (event: Event) => {
+      const file = (event.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) {
+        this.toastService.warning('La imagen no puede superar 2MB');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        this.generatedVariants[idx].image_url = e.target?.result as string;
+        this.generatedVariants[idx].image_file = file;
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  }
+
+  removeVariantImage(idx: number): void {
+    this.generatedVariants[idx].image_url = undefined;
+    this.generatedVariants[idx].image_file = undefined;
+    this.generatedVariants[idx].image_id = undefined;
   }
 
   // ... (Copy basic handlers from Modal: ImageUrl, FileSelect, etc.) ...
@@ -760,6 +835,7 @@ export class ProductCreatePageComponent implements OnInit {
         sale_price: Number(v.sale_price),
         stock_quantity: Number(v.stock),
         attributes: v.attributes,
+        variant_image_url: v.image_url?.startsWith('data:') ? v.image_url : undefined,
       }));
 
       // If variants exist, base product stock is sum of variants (usually handled by backend, but good to be explicit or 0)

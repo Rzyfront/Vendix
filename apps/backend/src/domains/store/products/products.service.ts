@@ -12,6 +12,7 @@ import {
   ProductQueryDto,
   CreateProductVariantDto,
   UpdateProductVariantDto,
+  CreateVariantWithStockDto,
   ProductImageDto,
   ProductState,
 } from './dto';
@@ -148,14 +149,38 @@ export class ProductsService {
           // Crear variantes si se proporcionan
           if (variants && variants.length > 0) {
             for (const variantData of variants) {
-              await this.productVariantService.createVariant(
+              const { variant_image_url, ...variantFields } = variantData as CreateVariantWithStockDto;
+              const createdVariant = await this.productVariantService.createVariant(
                 product.id,
                 {
-                  ...variantData,
-                  stock_quantity: variantData.stock_quantity || 0,
+                  ...variantFields,
+                  stock_quantity: variantFields.stock_quantity || 0,
                 },
                 prisma,
               );
+
+              // Process variant image if base64 provided
+              if (variant_image_url && variant_image_url.startsWith('data:image')) {
+                const { org, store: storeCtx } = await this.getStoreWithOrgContext(store_id);
+                const basePath = this.s3PathHelper.buildProductPath(org, storeCtx);
+                const uploadResult = await this.s3Service.uploadBase64(
+                  variant_image_url,
+                  `${basePath}/${slug}-variant-${createdVariant.id}-${Date.now()}`,
+                  undefined,
+                  { generateThumbnail: true },
+                );
+                const variantImage = await prisma.product_images.create({
+                  data: {
+                    product_id: product.id,
+                    image_url: uploadResult.key,
+                    is_main: false,
+                  },
+                });
+                await prisma.product_variants.update({
+                  where: { id: createdVariant.id },
+                  data: { image_id: variantImage.id },
+                });
+              }
             }
           }
 
@@ -511,22 +536,33 @@ export class ProductsService {
               },
             },
           }),
-          ...(include_variants && {
+          ...((include_variants || pos_optimized) && {
             product_variants: {
-              include: {
-                product_images: true,
+              select: {
+                id: true,
+                sku: true,
+                price_override: true,
+                cost_price: true,
+                stock_quantity: true,
+                attributes: true,
+                name: true,
                 stock_levels: {
                   select: {
                     quantity_available: true,
                     quantity_reserved: true,
-                    inventory_locations: {
-                      select: {
-                        id: true,
-                        name: true,
-                        type: true,
+                    ...((!pos_optimized) && {
+                      inventory_locations: {
+                        select: {
+                          id: true,
+                          name: true,
+                          type: true,
+                        },
                       },
-                    },
+                    }),
                   },
+                },
+                product_images: {
+                  select: { image_url: true },
                 },
               },
             },
@@ -551,6 +587,22 @@ export class ProductsService {
           const raw_image_url = product.product_images?.[0]?.image_url || null;
           const signed_image_url = await this.s3Service.signUrl(raw_image_url);
 
+          // Map variant data for POS
+          const product_variants = (product as any).product_variants?.map((variant: any) => {
+            const variantStock = variant.stock_levels?.[0]?.quantity_available ?? variant.stock_quantity ?? 0;
+            const variantImageUrl = variant.product_images?.image_url || null;
+
+            return {
+              id: variant.id,
+              sku: variant.sku,
+              price_override: variant.price_override ? Number(variant.price_override) : null,
+              cost_price: variant.cost_price ? Number(variant.cost_price) : null,
+              stock: variantStock,
+              image_url: variantImageUrl,
+              attributes: this.parseVariantAttributes(variant.attributes),
+            };
+          }) || [];
+
           return {
             id: product.id,
             name: product.name,
@@ -569,9 +621,22 @@ export class ProductsService {
             categories: product.product_categories?.map((pc: any) => pc.categories) || [],
             product_tax_assignments: product.product_tax_assignments,
             stock_levels: product.stock_levels,
+            has_variants: product_variants.length > 0,
+            product_variants,
           };
         }),
       );
+
+      // Sign variant images
+      for (const product of productsWithSignedImages) {
+        if (product.product_variants) {
+          for (const variant of product.product_variants) {
+            if (variant.image_url) {
+              variant.image_url = await this.s3Service.signUrl(variant.image_url);
+            }
+          }
+        }
+      }
 
       return {
         data: productsWithSignedImages,
@@ -987,6 +1052,8 @@ export class ProductsService {
           // Sincronizar variantes si se proporcionan
           if (variants !== undefined) {
             for (const variantData of variants) {
+              const { variant_image_url, ...variantFields } = variantData as CreateVariantWithStockDto;
+
               // Buscar si la variante ya existe por SKU
               const existingVariant = await prisma.product_variants.findFirst({
                 where: {
@@ -995,23 +1062,50 @@ export class ProductsService {
                 },
               });
 
+              let variantId: number;
+
               if (existingVariant) {
                 // Actualizar variante existente
                 await this.productVariantService.updateVariant(
                   existingVariant.id,
-                  variantData,
+                  variantFields,
                   prisma,
                 );
+                variantId = existingVariant.id;
               } else {
                 // Crear nueva variante
-                await this.productVariantService.createVariant(
+                const createdVariant = await this.productVariantService.createVariant(
                   id,
                   {
-                    ...variantData,
-                    stock_quantity: variantData.stock_quantity || 0,
+                    ...variantFields,
+                    stock_quantity: variantFields.stock_quantity || 0,
                   },
                   prisma,
                 );
+                variantId = createdVariant.id;
+              }
+
+              // Process variant image if new base64 provided
+              if (variant_image_url && variant_image_url.startsWith('data:image')) {
+                const { org, store: storeCtx } = await this.getStoreWithOrgContext(existingProduct.store_id);
+                const basePath = this.s3PathHelper.buildProductPath(org, storeCtx);
+                const uploadResult = await this.s3Service.uploadBase64(
+                  variant_image_url,
+                  `${basePath}/${product.slug}-variant-${variantId}-${Date.now()}`,
+                  undefined,
+                  { generateThumbnail: true },
+                );
+                const variantImage = await prisma.product_images.create({
+                  data: {
+                    product_id: id,
+                    image_url: uploadResult.key,
+                    is_main: false,
+                  },
+                });
+                await prisma.product_variants.update({
+                  where: { id: variantId },
+                  data: { image_id: variantImage.id },
+                });
               }
             }
           }
@@ -1405,6 +1499,14 @@ export class ProductsService {
       });
     }
     return processedImages;
+  }
+
+  private parseVariantAttributes(attributes: any): Array<{ attribute_name: string; attribute_value: string }> {
+    if (!attributes || typeof attributes !== 'object') return [];
+    return Object.entries(attributes).map(([key, value]) => ({
+      attribute_name: key,
+      attribute_value: String(value),
+    }));
   }
 
   private async signProductImage(

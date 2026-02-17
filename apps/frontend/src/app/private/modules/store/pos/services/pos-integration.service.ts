@@ -271,6 +271,8 @@ export class PosIntegrationService {
       isActive: apiProduct.isActive,
       createdAt: new Date(apiProduct.createdAt),
       updatedAt: new Date(apiProduct.updatedAt),
+      has_variants: apiProduct.has_variants ?? false,
+      product_variants: apiProduct.product_variants ?? [],
     };
   }
 

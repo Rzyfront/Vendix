@@ -64,6 +64,9 @@ export class AuditInterceptor implements NestInterceptor {
 
                     if (method === 'GET') {
                         await this.logGetOperation(userId, organizationId, storeId, url, query, ip_address, user_agent);
+                    } else if (method === 'POST' && this.isFlowOperation(url)) {
+                        // Flow operations (state transitions) are logged as UPDATE
+                        await this.logFlowOperation(userId, organizationId, storeId, url, body, data, ip_address, user_agent);
                     } else if (method === 'POST' && this.isCreateOperation(url)) {
                         await this.logCreateOperation(userId, organizationId, storeId, url, data, ip_address, user_agent);
                     } else if ((method === 'PUT' || method === 'PATCH') && this.isUpdateOperation(url, method)) {
@@ -275,6 +278,54 @@ export class AuditInterceptor implements NestInterceptor {
                 userAgent,
             });
         }
+    }
+
+    private isFlowOperation(url: string): boolean {
+        return url.includes('/flow/') && !url.includes('/transitions');
+    }
+
+    private async logFlowOperation(
+        userId: number,
+        organizationId: number | undefined,
+        storeId: number | undefined,
+        url: string,
+        requestBody: any,
+        responseData: any,
+        ipAddress: string,
+        userAgent: string
+    ) {
+        const resource = this.extractResourceFromUrl(url);
+        const resourceId = this.extractIdFromUrl(url);
+        const actualData = responseData?.data || responseData;
+
+        if (resource && resourceId) {
+            // Extract the flow action from URL (e.g., /flow/confirm-payment -> confirm-payment)
+            const flowAction = this.extractFlowAction(url);
+
+            await this.auditService.log({
+                userId,
+                organizationId,
+                storeId,
+                action: AuditAction.UPDATE,
+                resource,
+                resourceId,
+                oldValues: requestBody || {},
+                newValues: actualData || {},
+                metadata: { method: 'FLOW', flow_action: flowAction },
+                ipAddress,
+                userAgent,
+            });
+        }
+    }
+
+    private extractFlowAction(url: string): string {
+        const cleanUrl = url.split('?')[0];
+        const segments = cleanUrl.split('/').filter(s => s);
+        const flowIndex = segments.indexOf('flow');
+        if (flowIndex !== -1 && segments[flowIndex + 1]) {
+            return segments[flowIndex + 1];
+        }
+        return 'unknown';
     }
 
     private extractResourceFromUrl(url: string): AuditResource | string | null {
