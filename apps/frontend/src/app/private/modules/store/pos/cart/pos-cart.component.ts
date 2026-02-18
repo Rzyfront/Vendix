@@ -79,14 +79,15 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
           <!-- Checkout Actions -->
           <div
-            class="flex flex-col sm:flex-row items-center justify-between gap-4"
+            class="grid grid-cols-1 sm:grid-cols-2 gap-2.5"
           >
             <app-button
               variant="outline"
               size="md"
+              [fullWidth]="true"
               (clicked)="saveCart()"
               [disabled]="(isEmpty$ | async) ?? false"
-              class="!h-10 text-sm font-medium px-3"
+              customClasses="!w-full !h-10 sm:!h-11 !font-semibold !border-border !text-text-primary !bg-surface hover:!bg-muted/40 hover:!text-text-primary"
             >
               <app-icon name="save" [size]="16" slot="icon"></app-icon>
               Guardar
@@ -94,9 +95,10 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             <app-button
               variant="primary"
               size="md"
+              [fullWidth]="true"
               (clicked)="proceedToPayment()"
               [disabled]="(isEmpty$ | async) ?? false"
-              class="!h-10 text-sm font-bold px-6"
+              customClasses="!w-full !h-10 sm:!h-11 !font-semibold !shadow-sm"
             >
               <app-icon [name]="isEditMode ? 'check' : 'credit-card'" [size]="18" slot="icon"></app-icon>
               {{ isEditMode ? 'Actualizar Orden' : 'Cobrar' }}

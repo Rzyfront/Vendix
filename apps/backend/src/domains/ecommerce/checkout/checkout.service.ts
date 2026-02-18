@@ -4,6 +4,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { CartService } from '../cart/cart.service';
 import { TaxesService } from '../../store/taxes/taxes.service';
 import { CheckoutDto } from './dto/checkout.dto';
+import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { payment_processing_mode_enum } from '@prisma/client';
 
@@ -99,10 +100,20 @@ export class CheckoutService {
     }
 
     for (const item of cart.cart_items) {
-      const available =
-        item.product_variant?.stock_quantity ??
-        item.product.stock_quantity ??
-        0;
+      // Validate: if product has variants, a variant must be selected
+      const productVariantCount = await this.prisma.product_variants.count({
+        where: { product_id: item.product_id },
+      });
+
+      if (productVariantCount > 0 && !item.product_variant_id) {
+        throw new BadRequestException(
+          `El producto "${item.product.name}" requiere selección de variante`,
+        );
+      }
+
+      const available = item.product_variant
+        ? item.product_variant.stock_quantity ?? 0
+        : item.product.stock_quantity ?? 0;
       if (item.quantity > available) {
         throw new BadRequestException(
           `Insufficient stock for ${item.product.name}. Only ${available} available.`,
@@ -182,10 +193,8 @@ export class CheckoutService {
       const methodType = rate.shipping_method.type;
       if (methodType === 'pickup') {
         delivery_type = 'pickup';
-      } else if (methodType === 'carrier' || methodType === 'third_party_provider') {
-        delivery_type = 'home_delivery';
       } else {
-        delivery_type = 'direct_delivery';
+        delivery_type = 'home_delivery';
       }
     } else if (dto.shipping_method_id) {
       // Fallback: si solo viene shipping_method_id sin rate
@@ -209,14 +218,6 @@ export class CheckoutService {
 
     const itemsWithTaxes = await Promise.all(
       cart.cart_items.map(async (item) => {
-        const taxInfo = await this.taxes_service.calculateProductTaxes(
-          item.product_id,
-          Number(item.unit_price) / (1 + 0), // Base price logic needs refinement if stored unit_price already includes tax
-        );
-
-        // NOTE: In this codebase, calculateFinalPrice (CartService) seems to include tax in unit_price.
-        // We need to extract the base price (excluding tax) to calculate tax_amount correctly.
-        // For simplicity and correctness with calculateProductTaxes:
         const productWithTaxes = await this.prisma.products.findUnique({
           where: { id: item.product_id },
           include: {
@@ -232,22 +233,27 @@ export class CheckoutService {
           },
         });
 
-        // Sum rates to reverse engineer base price if needed, or better:
-        // Use product base_price (or sale_price) directly as the net price.
-        const netPrice = productWithTaxes.is_on_sale && productWithTaxes.sale_price
-          ? Number(productWithTaxes.sale_price)
-          : Number(productWithTaxes.base_price);
+        // Variant-aware net price: use variant.price_override if present,
+        // then product sale_price if on sale, otherwise product base_price
+        let netPrice: number;
+        if (item.product_variant?.price_override) {
+          netPrice = Number(item.product_variant.price_override);
+        } else {
+          netPrice = productWithTaxes.is_on_sale && productWithTaxes.sale_price
+            ? Number(productWithTaxes.sale_price)
+            : Number(productWithTaxes.base_price);
+        }
 
-        const realTaxInfo = await this.taxes_service.calculateProductTaxes(item.product_id, netPrice);
+        const taxInfo = await this.taxes_service.calculateProductTaxes(item.product_id, netPrice);
 
         return {
           ...item,
           net_price: netPrice,
-          tax_rate: realTaxInfo.total_rate,
-          tax_amount_item: realTaxInfo.total_tax_amount,
-          total_tax: realTaxInfo.total_tax_amount * item.quantity,
+          tax_rate: taxInfo.total_rate,
+          tax_amount_item: taxInfo.total_tax_amount,
+          total_tax: taxInfo.total_tax_amount * item.quantity,
           total_net: netPrice * item.quantity,
-          item_taxes: realTaxInfo.taxes,
+          item_taxes: taxInfo.taxes,
         };
       })
     );
@@ -342,6 +348,227 @@ export class CheckoutService {
       total: order.grand_total,
       state: order.state,
       message: 'Order placed successfully',
+    };
+  }
+
+  async whatsappCheckout(dto: WhatsappCheckoutDto) {
+    const user_id = RequestContextService.getUserId();
+    const is_guest = !user_id;
+
+    // Build cart_items from either backend cart (authenticated) or DTO items (guest)
+    let cart_items: Array<{
+      product_id: number;
+      product_variant_id: number | null;
+      quantity: number;
+      product: any;
+      product_variant: any;
+    }>;
+    let cart_currency = 'USD';
+
+    if (is_guest) {
+      // Guest checkout: items come from the DTO (frontend localStorage)
+      if (!dto.items || dto.items.length === 0) {
+        throw new BadRequestException('Cart is empty');
+      }
+
+      cart_items = await Promise.all(
+        dto.items.map(async (item) => {
+          const product = await this.prisma.products.findUnique({
+            where: { id: item.product_id },
+          });
+          if (!product) {
+            throw new BadRequestException(`Product with id ${item.product_id} not found`);
+          }
+
+          let product_variant = null;
+          if (item.product_variant_id) {
+            product_variant = await this.prisma.product_variants.findUnique({
+              where: { id: item.product_variant_id },
+            });
+            if (!product_variant) {
+              throw new BadRequestException(`Variant with id ${item.product_variant_id} not found`);
+            }
+          }
+
+          return {
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id || null,
+            quantity: item.quantity,
+            product,
+            product_variant,
+          };
+        })
+      );
+    } else {
+      // Authenticated checkout: read from backend cart
+      const cart = await this.prisma.carts.findFirst({
+        include: {
+          cart_items: {
+            include: {
+              product: true,
+              product_variant: true,
+            },
+          },
+        },
+      });
+
+      if (!cart || cart.cart_items.length === 0) {
+        throw new BadRequestException('Cart is empty');
+      }
+
+      cart_items = cart.cart_items;
+      cart_currency = cart.currency;
+    }
+
+    for (const item of cart_items) {
+      const productVariantCount = await this.prisma.product_variants.count({
+        where: { product_id: item.product_id },
+      });
+
+      if (productVariantCount > 0 && !item.product_variant_id) {
+        throw new BadRequestException(
+          `El producto "${item.product.name}" requiere selección de variante`,
+        );
+      }
+
+      const available = item.product_variant
+        ? item.product_variant.stock_quantity ?? 0
+        : item.product.stock_quantity ?? 0;
+      if (item.quantity > available) {
+        throw new BadRequestException(
+          `Insufficient stock for ${item.product.name}. Only ${available} available.`,
+        );
+      }
+    }
+
+    const order_number = await this.generateOrderNumber();
+
+    const itemsWithTaxes = await Promise.all(
+      cart_items.map(async (item) => {
+        const productWithTaxes = await this.prisma.products.findUnique({
+          where: { id: item.product_id },
+          include: {
+            product_tax_assignments: {
+              include: {
+                tax_categories: {
+                  include: {
+                    tax_rates: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        let netPrice: number;
+        if (item.product_variant?.price_override) {
+          netPrice = Number(item.product_variant.price_override);
+        } else {
+          netPrice = productWithTaxes.is_on_sale && productWithTaxes.sale_price
+            ? Number(productWithTaxes.sale_price)
+            : Number(productWithTaxes.base_price);
+        }
+
+        const taxInfo = await this.taxes_service.calculateProductTaxes(item.product_id, netPrice);
+
+        return {
+          ...item,
+          net_price: netPrice,
+          tax_rate: taxInfo.total_rate,
+          tax_amount_item: taxInfo.total_tax_amount,
+          total_tax: taxInfo.total_tax_amount * item.quantity,
+          total_net: netPrice * item.quantity,
+          item_taxes: taxInfo.taxes,
+        };
+      })
+    );
+
+    const subtotal = itemsWithTaxes.reduce((sum, item) => sum + item.total_net, 0);
+    const total_tax = itemsWithTaxes.reduce((sum, item) => sum + item.total_tax, 0);
+    const grand_total = subtotal + total_tax;
+
+    const order = await this.prisma.orders.create({
+      data: {
+        order_number,
+        channel: 'whatsapp',
+        currency: cart_currency,
+        subtotal_amount: subtotal,
+        tax_amount: total_tax,
+        shipping_cost: 0,
+        delivery_type: 'other',
+        grand_total: grand_total,
+        state: 'created',
+        internal_notes: dto.notes,
+        placed_at: new Date(),
+        order_items: {
+          create: itemsWithTaxes.map((item) => ({
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id,
+            product_name: item.product.name,
+            variant_sku: item.product_variant?.sku,
+            variant_attributes: item.product_variant?.attributes
+              ? JSON.stringify(item.product_variant.attributes)
+              : null,
+            quantity: item.quantity,
+            unit_price: item.net_price,
+            total_price: item.total_net,
+            tax_rate: item.tax_rate,
+            tax_amount_item: item.tax_amount_item,
+            order_item_taxes: {
+              create: item.item_taxes.map(t => ({
+                tax_rate_id: t.tax_rate_id,
+                tax_name: t.name,
+                tax_rate: t.rate,
+                tax_amount: t.amount * item.quantity,
+              }))
+            }
+          })),
+        },
+      },
+      include: {
+        order_items: true,
+      },
+    });
+
+    for (const item of cart_items) {
+      if (item.product_variant_id) {
+        await this.prisma.product_variants.update({
+          where: { id: item.product_variant_id },
+          data: {
+            stock_quantity: { decrement: item.quantity },
+          },
+        });
+      } else {
+        await this.prisma.products.update({
+          where: { id: item.product_id },
+          data: {
+            stock_quantity: { decrement: item.quantity },
+          },
+        });
+      }
+    }
+
+    // Only clear backend cart for authenticated users
+    if (!is_guest) {
+      await this.cart_service.clearCart();
+    }
+
+    return {
+      order_id: order.id,
+      order_number: order.order_number,
+      total: order.grand_total,
+      subtotal: subtotal,
+      tax: total_tax,
+      item_count: cart_items.reduce((sum, i) => sum + i.quantity, 0),
+      items: order.order_items.map(oi => ({
+        name: oi.product_name,
+        variant_sku: oi.variant_sku,
+        quantity: oi.quantity,
+        unit_price: Number(oi.unit_price),
+        total_price: Number(oi.total_price),
+      })),
+      state: order.state,
+      message: 'Order placed successfully via WhatsApp',
     };
   }
 

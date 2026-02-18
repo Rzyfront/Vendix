@@ -24,6 +24,7 @@ import {
 import { FooterSettingsFormComponent } from './components/footer-settings-form';
 import {
   ToastService,
+  DialogService,
   IconComponent,
   ButtonComponent,
   InputComponent,
@@ -57,6 +58,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   private fb = inject(FormBuilder);
   private ecommerceService = inject(EcommerceService);
   private toastService = inject(ToastService);
+  private dialogService = inject(DialogService);
   private currencyService = inject(CurrencyFormatService);
   private http = inject(HttpClient);
   private store = inject(Store);
@@ -214,6 +216,8 @@ export class EcommerceComponent implements OnInit, OnDestroy {
       // Checkout
       checkout: this.fb.group({
         whatsapp_checkout: [false],
+        whatsapp_number: [''],
+        confirm_whatsapp_number: [''],  // frontend-only, never sent to backend
         require_registration: [false],
       }),
     });
@@ -255,6 +259,8 @@ export class EcommerceComponent implements OnInit, OnDestroy {
 
   // Checkout
   get whatsappCheckoutControl() { return this.checkoutGroup.get('whatsapp_checkout') as any; }
+  get whatsappNumberControl() { return this.checkoutGroup.get('whatsapp_number') as any; }
+  get confirmWhatsappNumberControl() { return this.checkoutGroup.get('confirm_whatsapp_number') as any; }
   get requireRegistrationControl() { return this.checkoutGroup.get('require_registration') as any; }
 
   /**
@@ -272,6 +278,11 @@ export class EcommerceComponent implements OnInit, OnDestroy {
             this.isEditMode.set(true);
             this.isSetupMode.set(false);
             this.settingsForm.patchValue(response.config);
+
+            // Pre-fill confirm_whatsapp_number from saved number
+            if (response.config.checkout?.whatsapp_number) {
+              this.confirmWhatsappNumberControl.setValue(response.config.checkout.whatsapp_number);
+            }
 
             // Cargar logo si existe
             if (response.config.inicio?.logo_url) {
@@ -608,22 +619,57 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Validate WhatsApp checkout configuration before saving.
+   * If toggle is on but numbers are empty or don't match, shows a warning and deactivates the toggle.
+   */
+  private async validateWhatsappCheckout(): Promise<boolean> {
+    const isEnabled = this.whatsappCheckoutControl.value;
+    if (!isEnabled) return true;
+
+    const number = (this.whatsappNumberControl.value || '').trim();
+    const confirm = (this.confirmWhatsappNumberControl.value || '').trim();
+
+    if (!number || !confirm || number !== confirm) {
+      await this.dialogService.confirm({
+        title: 'WhatsApp Checkout',
+        message: !number || !confirm
+          ? 'Debes ingresar y confirmar tu numero de WhatsApp para activar esta opcion.'
+          : 'Los numeros de WhatsApp no coinciden. Verifica e intenta de nuevo.',
+        confirmText: 'Entendido',
+        cancelText: 'Cerrar',
+      });
+      this.whatsappCheckoutControl.setValue(false);
+      this.whatsappNumberControl.setValue('');
+      this.confirmWhatsappNumberControl.setValue('');
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
    * Submit the form
    */
-  onSubmit(): void {
+  async onSubmit(): Promise<void> {
     if (this.settingsForm.invalid) {
       this.toastService.warning('Por favor verifica los datos del formulario');
       return;
     }
+
+    // Validate WhatsApp checkout before proceeding
+    const whatsappValid = await this.validateWhatsappCheckout();
+    if (!whatsappValid) return;
 
     // Apply auto-fill before submitting
     this.applyAutoFill();
 
     this.isSaving.set(true);
 
-    // Preparar el objeto de configuración
+    // Preparar el objeto de configuración (strip confirm_whatsapp_number — frontend-only)
+    const { confirm_whatsapp_number, ...checkoutPayload } = this.settingsForm.value.checkout;
     const settings: EcommerceSettings = {
       ...this.settingsForm.value,
+      checkout: checkoutPayload,
       inicio: {
         ...this.settingsForm.value.inicio,
         logo_url: this.logoKey || this.settingsForm.value.inicio.logo_url,

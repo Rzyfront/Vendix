@@ -136,6 +136,7 @@ import {
   Instagram,
   // POP icons
   PackageCheck,
+  PackagePlus,
   FilePlus,
   // Analytics icons
   Trophy,
@@ -147,6 +148,7 @@ import {
   UserCog,
   Calculator,
   Camera,
+  MessageCircle,
 } from 'lucide-angular';
 
 /**
@@ -331,6 +333,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // POP icons
   'package-check': PackageCheck,
+  'package-plus': PackagePlus,
   'file-plus': FilePlus,
 
   // Analytics icons
@@ -343,6 +346,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'user-cog': UserCog,
   calculator: Calculator,
   camera: Camera,
+  'message-circle': MessageCircle,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

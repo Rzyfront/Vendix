@@ -121,6 +121,8 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
           create_account_after_order: true,
           terms_required: false,
           guest_newsletter_opt_in: false,
+          whatsapp_checkout: false,
+          whatsapp_number: '',
         },
         shipping: {
           free_shipping_threshold: null,

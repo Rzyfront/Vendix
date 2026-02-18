@@ -94,8 +94,9 @@ export interface MenuItem {
               position="right"
               color="primary"
               size="sm"
+              [visible]="showPromoTooltip"
             >
-              {{ vlink }} commerce
+              {{ showPromoTooltip ? 'Descubre tu propio entorno personalizado' : vlink + ' commerce' }}
             </app-tooltip>
           </div>
         </div>
@@ -184,10 +185,14 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
   @Input() collapsed: boolean = false;
   @Input() isOpen: boolean = false;
   @Input() showFooter: boolean = false;
+  @Input() isVendixDomain: boolean = false;
   @Output() expandSidebar = new EventEmitter<void>();
 
   isMobile = false;
   isMobileOpen = false;
+  showPromoTooltip = false;
+  private promoTooltipTimeout: any;
+  private promoTooltipHideTimeout: any;
   private openSubmenus: Set<string> = new Set();
   private resizeListener: () => void;
   private documentClickListener?: () => void;
@@ -221,6 +226,11 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
   ngAfterViewInit() {
     // Setup focusable elements for accessibility
     this.updateFocusableElements();
+
+    // Auto-show promotional tooltip for Vendix domains
+    if (this.isVendixDomain) {
+      this.showPromoTooltipOnMount();
+    }
   }
 
   ngOnChanges(changes: SimpleChanges) {
@@ -233,8 +243,26 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
     if (this.resizeListener) {
       this.resizeListener();
     }
+    if (this.promoTooltipTimeout) {
+      clearTimeout(this.promoTooltipTimeout);
+    }
+    if (this.promoTooltipHideTimeout) {
+      clearTimeout(this.promoTooltipHideTimeout);
+    }
     this.removeEventListeners();
     this.removeBodyScrollLock();
+  }
+
+  private showPromoTooltipOnMount(): void {
+    this.promoTooltipTimeout = setTimeout(() => {
+      this.showPromoTooltip = true;
+      this.cdr.detectChanges();
+
+      this.promoTooltipHideTimeout = setTimeout(() => {
+        this.showPromoTooltip = false;
+        this.cdr.detectChanges();
+      }, 5000);
+    }, 200);
   }
 
   private removeEventListeners() {

@@ -33,6 +33,13 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
           </div>
         }
 
+        <!-- Variant Badge -->
+        @if (product.variant_count && product.variant_count > 0) {
+          <div class="variant-badge">
+            {{ product.variant_count }} variantes
+          </div>
+        }
+
         <!-- Action buttons column -->
         <div class="card-actions">
           <app-button
@@ -74,7 +81,7 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
           Comprar
         </app-button>
         <app-button
-          variant="outline"
+          variant="secondary"
           size="sm"
           customClasses="add-to-cart-btn"
           [disabled]="product.stock_quantity === 0"
@@ -86,6 +93,11 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
     </article>
   `,
   styles: [`
+    :host {
+      display: block;
+      min-width: 0;
+    }
+
     /* iOS-style Product Card */
     .product-card {
       background: var(--color-surface);
@@ -166,6 +178,23 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
         color: white;
         border-color: rgba(239, 68, 68, 0.6);
       }
+    }
+
+    /* Variant Badge */
+    .variant-badge {
+      position: absolute;
+      bottom: 0.5rem;
+      left: 0.5rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: var(--radius-md);
+      font-size: var(--fs-xs);
+      font-weight: var(--fw-semibold);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.8);
+      color: white;
+      border: 1px solid rgba(var(--color-primary-rgb, 59, 130, 246), 0.6);
+      z-index: 1;
     }
 
     /* Card action buttons column */
@@ -284,6 +313,68 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
         height: 36px !important;
       }
     }
+
+    /* Mobile compact styles */
+    @media (max-width: 480px) {
+      .product-card {
+        border-radius: 0.75rem;
+      }
+
+      .stock-badge,
+      .variant-badge {
+        padding: 0.15rem 0.35rem;
+        font-size: 10px;
+      }
+
+      .card-actions {
+        top: 0.4rem;
+        right: 0.4rem;
+        gap: 0.3rem;
+      }
+
+      :host ::ng-deep .action-btn {
+        width: 28px !important;
+        height: 28px !important;
+        min-width: 28px !important;
+
+        app-icon {
+          font-size: 14px;
+        }
+      }
+
+      .product-info {
+        padding: 0.5rem 0.6rem;
+        gap: 0.15rem;
+      }
+
+      .product-brand {
+        font-size: 10px;
+      }
+
+      .product-name {
+        font-size: 12px;
+        -webkit-line-clamp: 1;
+      }
+
+      .product-price .price {
+        font-size: var(--fs-sm);
+      }
+
+      .actions-container {
+        margin: 0 0.5rem 0.5rem;
+        gap: 0.35rem;
+      }
+
+      :host ::ng-deep .buy-btn {
+        height: 28px !important;
+      }
+
+      :host ::ng-deep .add-to-cart-btn {
+        width: 28px !important;
+        min-width: 28px !important;
+        height: 28px !important;
+      }
+    }
   `],
 })
 export class ProductCardComponent implements OnInit {
@@ -296,6 +387,10 @@ export class ProductCardComponent implements OnInit {
 
   private router = inject(Router);
   private currencyService = inject(CurrencyFormatService);
+
+  private get hasVariants(): boolean {
+    return !!this.product.variant_count && this.product.variant_count > 0;
+  }
 
   ngOnInit(): void {
     // Asegurar que la moneda esté cargada para mostrar precios correctamente
@@ -315,6 +410,10 @@ export class ProductCardComponent implements OnInit {
   onBuyNow(event: Event): void {
     event.stopPropagation();
     event.preventDefault();
+    if (this.hasVariants) {
+      this.router.navigate(['/catalog', this.product.slug]);
+      return;
+    }
     this.add_to_cart.emit(this.product);
     this.router.navigate(['/cart']);
   }
@@ -322,6 +421,10 @@ export class ProductCardComponent implements OnInit {
   onAddToCart(event: Event): void {
     event.stopPropagation();
     event.preventDefault();
+    if (this.hasVariants) {
+      this.router.navigate(['/catalog', this.product.slug]);
+      return;
+    }
     this.add_to_cart.emit(this.product);
   }
 

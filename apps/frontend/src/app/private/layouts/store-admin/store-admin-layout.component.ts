@@ -1,6 +1,6 @@
 import { Component, OnInit, OnDestroy, ViewChild, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule, Router, NavigationEnd } from '@angular/router';
+import { RouterModule } from '@angular/router';
 import {
   SidebarComponent,
   MenuItem,
@@ -37,6 +37,7 @@ import { takeUntil, map } from 'rxjs/operators';
         subtitle="Administrador de Tienda"
         [vlink]="(organizationSlug$ | async) || 'slug'"
         [domainHostname]="storeDomainHostname"
+        [isVendixDomain]="isVendixDomain"
         [collapsed]="sidebarCollapsed"
         [showFooter]="true"
         (expandSidebar)="toggleSidebar()"
@@ -120,6 +121,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   storeDomainHostname: string | null = null;
   storeType$: Observable<string | null>;
   storeLogo$: Observable<string | null>;
+  isVendixDomain = false;
 
   // Onboarding
   showOnboardingModal = false; // Will be set in ngOnInit based on actual status
@@ -319,7 +321,6 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   constructor(
     private authFacade: AuthFacade,
     private onboardingWizardService: OnboardingWizardService,
-    private router: Router,
   ) {
     this.storeName$ = this.authFacade.userStoreName$;
     this.storeSlug$ = this.authFacade.userStoreSlug$;
@@ -360,27 +361,10 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
         this.storeDomainHostname = hostname;
       });
 
-    // Auto-colapsar sidebar en rutas específicas
-    this.router.events.pipe(takeUntil(this.destroy$)).subscribe((event) => {
-      if (event instanceof NavigationEnd) {
-        this.sidebarCollapsed = this.COLLAPSE_SIDEBAR_ROUTES.some((route) =>
-          event.urlAfterRedirects.startsWith(route),
-        );
-      }
-    });
+    // Resolve isVendixDomain for promotional tooltip
+    this.isVendixDomain = !!this.configFacade.getCurrentConfig()?.domainConfig?.isVendixDomain;
 
-    // Check initial state
-    const currentUrl = this.router.url;
-    if (this.COLLAPSE_SIDEBAR_ROUTES.some(route => currentUrl.startsWith(route))) {
-      this.sidebarCollapsed = true;
-    }
   }
-
-  // Rutas que deben colapsar la sidebar
-  private readonly COLLAPSE_SIDEBAR_ROUTES = [
-    '/admin/pos',
-    '/admin/inventory/pop',
-  ];
 
   private checkOnboardingWithRoleValidation(): void {
     // Only proceed with onboarding logic if user is owner

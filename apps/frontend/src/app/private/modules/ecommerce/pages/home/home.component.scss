@@ -78,6 +78,10 @@
   margin: 0 auto;
   padding: 2rem 1.5rem;
 
+  @media (max-width: 480px) {
+    padding: 1rem;
+  }
+
   .section-header {
     text-align: center;
     margin-bottom: 3rem;
@@ -99,12 +103,12 @@
 
 .products-grid {
   display: grid;
-  grid-template-columns: repeat(1, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 1.5rem;
   margin-bottom: 3rem;
 
-  @media (min-width: 576px) {
-    grid-template-columns: repeat(2, 1fr);
+  @media (max-width: 480px) {
+    gap: 0.75rem;
   }
 
   @media (min-width: 992px) {
@@ -115,12 +119,8 @@
 
 .loading-grid {
   display: grid;
-  grid-template-columns: repeat(1, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 1.5rem;
-
-  @media (min-width: 576px) {
-    grid-template-columns: repeat(2, 1fr);
-  }
 
   @media (min-width: 992px) {
     grid-template-columns: repeat(4, 1fr);

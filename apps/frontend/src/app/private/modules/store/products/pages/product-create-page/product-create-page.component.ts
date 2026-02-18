@@ -433,7 +433,39 @@ export class ProductCreatePageComponent implements OnInit {
     });
   }
 
+  get totalVariantStock(): number {
+    return this.generatedVariants.reduce(
+      (sum, v) => sum + (v.stock || 0),
+      0,
+    );
+  }
+
   toggleVariants(isChecked: boolean): void {
+    const currentStock = this.productForm.get('stock_quantity')?.value || 0;
+
+    // If enabling variants in edit mode with existing stock, show warning
+    if (isChecked && this.isEditMode() && currentStock > 0) {
+      this.dialogService
+        .confirm({
+          title: 'Activar variantes',
+          message: `Al activar variantes, el stock actual (${currentStock} unidades) será reiniciado a 0. Deberás asignar stock a cada variante individualmente.`,
+          confirmText: 'Activar variantes',
+          cancelText: 'Cancelar',
+          confirmVariant: 'danger',
+        })
+        .then((confirmed: boolean) => {
+          if (confirmed) {
+            this.applyVariantToggle(true);
+          }
+          // If not confirmed, don't change hasVariants
+        });
+      return;
+    }
+
+    this.applyVariantToggle(isChecked);
+  }
+
+  private applyVariantToggle(isChecked: boolean): void {
     this.hasVariants = isChecked;
 
     const priceControl = this.productForm.get('base_price');
@@ -442,7 +474,6 @@ export class ProductCreatePageComponent implements OnInit {
     if (this.hasVariants) {
       priceControl?.clearValidators();
       stockControl?.clearValidators();
-      // If switching to variants, maybe we should init with one empty attribute group?
       if (this.variantAttributes.length === 0) {
         this.variantAttributes.push({ name: '', values: [] });
       }
@@ -838,11 +869,9 @@ export class ProductCreatePageComponent implements OnInit {
         variant_image_url: v.image_url?.startsWith('data:') ? v.image_url : undefined,
       }));
 
-      // If variants exist, base product stock is sum of variants (usually handled by backend, but good to be explicit or 0)
-      // Backend ignores base stock if variants are present usually, or it's a separate concept.
-      // For now sending 0 for base stock if variants exist?
-      // The service logic we saw earlier didn't seem to sum it up automatically on creation,
-      // but `ProductVariantService` creates stock movements.
+      // Set base stock_quantity to the sum of variant stocks for immediate UI consistency
+      // Backend syncProductStock() handles the real sync
+      productData.stock_quantity = this.totalVariantStock;
     }
 
     const request$ =

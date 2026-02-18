@@ -52,17 +52,19 @@
     ></app-order-empty-state>
 
     <!-- Orders List -->
-    <div *ngIf="!loading && orders.length > 0" class="px-2 pb-2 pt-3 md:p-4">
-      <app-responsive-data-view
-        [data]="orders"
-        [columns]="columns"
-        [actions]="actions"
-        [cardConfig]="cardConfig"
-        [loading]="loading"
-        [sortable]="true"
-        (sort)="onSort($event)"
-        (rowClick)="handleViewOrder($event.id)"
-      ></app-responsive-data-view>
+    <div *ngIf="!loading && orders.length > 0" class="px-2 pb-2 pt-2 md:p-4">
+      <div class="rounded-xl border border-border/70 bg-surface/60 p-1.5 md:rounded-none md:border-0 md:bg-transparent md:p-0">
+        <app-responsive-data-view
+          [data]="orders"
+          [columns]="columns"
+          [actions]="actions"
+          [cardConfig]="cardConfig"
+          [loading]="loading"
+          [sortable]="true"
+          (sort)="onSort($event)"
+          (rowClick)="handleViewOrder($event.id)"
+        ></app-responsive-data-view>
+      </div>
     </div>
   </div>
 </div>

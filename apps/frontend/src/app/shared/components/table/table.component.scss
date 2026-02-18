@@ -58,7 +58,7 @@
       border-bottom: var(--border-width) solid var(--color-border);
       position: sticky;
       top: 0;
-      z-index: var(--z-sticky);
+      z-index: var(--z-base);
       transition: background-color var(--transition-fast) ease;
       padding: var(--control-padding);
 

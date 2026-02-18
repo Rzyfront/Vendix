@@ -19,6 +19,7 @@ import { Subject, Subscription } from 'rxjs';
 import { debounceTime } from 'rxjs/operators';
 
 import { IconComponent } from '../icon/icon.component';
+import { IconName } from '../icon/icons.registry';
 import { SelectorComponent } from '../selector/selector.component';
 import { MultiSelectorComponent } from '../multi-selector/multi-selector.component';
 
@@ -57,6 +58,9 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
 
   /** Label for the trigger button */
   @Input() triggerLabel: string = 'Opciones';
+
+  /** Icon for the trigger button */
+  @Input() triggerIcon: IconName = 'sliders-horizontal';
 
   /** Debounce time in milliseconds for filter changes */
   @Input() debounceMs: number = 350;

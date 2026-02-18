@@ -1,6 +1,5 @@
-import { Component, inject, OnInit, OnDestroy, computed, signal } from '@angular/core';
+import { Component, inject, OnInit, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Subject, filter, takeUntil } from 'rxjs';
 import { StoreSettingsService } from './services/store-settings.service';
 import { StoreSettings } from '../../../../../core/models/store-settings.interface';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
@@ -13,6 +12,10 @@ import { AppSettingsForm } from './components/app-settings-form/app-settings-for
 import { LucideAngularModule } from "lucide-angular";
 import { IconComponent } from '../../../../../shared/components/index';
 import { StickyHeaderComponent, StickyHeaderBadgeColor, StickyHeaderActionButton } from '../../../../../shared/components/sticky-header/sticky-header.component';
+import { ConfigFacade } from '../../../../../core/store/config';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { combineLatest } from 'rxjs';
+import { take } from 'rxjs/operators';
 
 
 @Component({
@@ -32,18 +35,20 @@ import { StickyHeaderComponent, StickyHeaderBadgeColor, StickyHeaderActionButton
   templateUrl: './general-settings.component.html',
   styleUrls: ['./general-settings.component.scss'],
 })
-export class GeneralSettingsComponent implements OnInit, OnDestroy {
+export class GeneralSettingsComponent implements OnInit {
   private settings_service = inject(StoreSettingsService);
   private toast_service = inject(ToastService);
-  private destroy$ = new Subject<void>();
+  private configFacade = inject(ConfigFacade);
+  private authFacade = inject(AuthFacade);
+
+  isVendixDomain = false;
+  storeAppUrl: string | null = null;
 
   settings: StoreSettings = {} as StoreSettings;
   isLoading = signal(true);
   isSaving = signal(false);
-  isAutoSaving = signal(false);
   hasUnsavedChanges = signal(false);
   lastSaved = signal<Date | null>(null);
-  saveError = signal<string | null>(null);
 
   showTemplates = false;
   templates: any[] = [];
@@ -76,35 +81,20 @@ export class GeneralSettingsComponent implements OnInit, OnDestroy {
 
   ngOnInit() {
     this.loadSettings();
-    this.subscribeToAutoSave();
+    this.isVendixDomain = !!this.configFacade.getCurrentConfig()?.domainConfig?.isVendixDomain;
+    this.resolveStoreAppUrl();
   }
 
-  private subscribeToAutoSave() {
-    // Suscribirse a actualizaciones exitosas del auto-save
-    this.settings_service.settings$.pipe(
-      filter((s): s is StoreSettings => s !== null),
-      takeUntil(this.destroy$),
-    ).subscribe({
-      next: (settings) => {
-        this.settings = settings;
-        this.hasUnsavedChanges.set(false);
-        this.lastSaved.set(new Date());
-        this.isAutoSaving.set(false);
-        this.saveError.set(null);
-        this.toast_service.success('Cambios guardados automáticamente');
-      },
-    });
-
-    // Suscribirse a errores del auto-save
-    this.settings_service.autoSaveError$.pipe(
-      takeUntil(this.destroy$),
-    ).subscribe({
-      next: (error) => {
-        this.hasUnsavedChanges.set(true);
-        this.saveError.set(error.message || 'Error al guardar cambios');
-        this.isAutoSaving.set(false);
-        this.toast_service.error('Error al guardar cambios');
-      },
+  private resolveStoreAppUrl(): void {
+    combineLatest([
+      this.authFacade.userDomainHostname$,
+      this.authFacade.userOrganizationSlug$,
+    ]).pipe(take(1)).subscribe(([hostname, slug]) => {
+      if (hostname) {
+        this.storeAppUrl = `${window.location.protocol}//${hostname}`;
+      } else if (slug) {
+        this.storeAppUrl = '/' + slug;
+      }
     });
   }
 
@@ -146,12 +136,6 @@ export class GeneralSettingsComponent implements OnInit, OnDestroy {
     };
     this.hasUnsavedChanges.set(true);
     this.lastSaved.set(null);
-    this.saveError.set(null);
-    this.isAutoSaving.set(true);
-
-    // Disparar auto-save (fire-and-forget)
-    // El feedback se recibe vía subscribeToAutoSave()
-    this.settings_service.triggerAutoSave({ [section]: new_settings });
   }
 
   onHeaderAction(actionId: string): void {
@@ -178,7 +162,6 @@ export class GeneralSettingsComponent implements OnInit, OnDestroy {
         this.isSaving.set(false);
         this.hasUnsavedChanges.set(false);
         this.lastSaved.set(new Date());
-        this.toast_service.success('Configuración guardada');
       },
       error: (error) => {
         this.isSaving.set(false);
@@ -229,8 +212,4 @@ export class GeneralSettingsComponent implements OnInit, OnDestroy {
     }
   }
 
-  ngOnDestroy() {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
 }

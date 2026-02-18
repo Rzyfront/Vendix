@@ -40,6 +40,19 @@ export interface CheckoutResponse {
     message: string;
 }
 
+export interface WhatsappCheckoutResponse extends CheckoutResponse {
+    subtotal: number;
+    tax: number;
+    item_count: number;
+    items: Array<{
+        name: string;
+        variant_sku: string | null;
+        quantity: number;
+        unit_price: number;
+        total_price: number;
+    }>;
+}
+
 @Injectable({
     providedIn: 'root',
 })
@@ -74,6 +87,17 @@ export class CheckoutService {
         return this.http.post<{ success: boolean; data: CheckoutResponse }>(
             this.api_url,
             request,
+            { headers: this.getHeaders() },
+        );
+    }
+
+    whatsappCheckout(
+        notes?: string,
+        items?: Array<{ product_id: number; product_variant_id?: number; quantity: number }>,
+    ): Observable<{ success: boolean; data: WhatsappCheckoutResponse }> {
+        return this.http.post<{ success: boolean; data: WhatsappCheckoutResponse }>(
+            `${this.api_url}/whatsapp`,
+            { notes, items },
             { headers: this.getHeaders() },
         );
     }

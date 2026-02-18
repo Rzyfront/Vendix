@@ -19,6 +19,7 @@ import {
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { TooltipComponent } from '../../../../../../shared/components/tooltip/tooltip.component';
 import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
 import { FormsModule } from '@angular/forms';
 
@@ -29,11 +30,11 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 @Component({
   selector: 'app-pop-cart',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, IconComponent, InputComponent, FormsModule, QuantityControlComponent],
+  imports: [CommonModule, ButtonComponent, IconComponent, TooltipComponent, InputComponent, FormsModule, QuantityControlComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
-      class="h-full flex flex-col bg-surface rounded-md shadow-card border border-border overflow-hidden"
+      class="h-full flex flex-col bg-surface rounded-md shadow-card border border-border"
     >
       <!-- Cart Header & Summary Section (Fixed at top) -->
       <div class="flex-none bg-surface border-b border-border shadow-sm">
@@ -78,47 +79,64 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
           </div>
 
           <!-- Checkout Actions -->
-          <!-- Checkout Actions -->
-          <!-- Checkout Actions -->
-          <div class="flex items-center gap-2 mt-4">
-            <!-- Draft (Text) -->
-            <app-button
-              variant="outline"
-              size="md"
-              (clicked)="onSaveDraft()"
-              [disabled]="((loading$ | async) ?? false) || ((isEmpty$ | async) ?? false)"
-              class="!h-10 text-sm font-medium px-3 shrink-0"
-              title="Guardar como borrador"
-            >
-              <app-icon name="save" [size]="16" slot="icon"></app-icon>
-              Borrador
-            </app-button>
+          <ng-container
+            *ngIf="{
+              loading: ((loading$ | async) ?? false),
+              isEmpty: ((isEmpty$ | async) ?? false)
+            } as actionState"
+          >
+            <div class="relative mt-4"
+                 (mouseenter)="(actionState.loading || actionState.isEmpty) && onDisabledActionsHover(actionState.loading, actionState.isEmpty)"
+                 (mouseleave)="hideDisabledActionsTooltip()">
+              <app-tooltip
+                position="top"
+                color="warning"
+                size="sm"
+                [visible]="disabledActionsTooltipVisible && (actionState.loading || actionState.isEmpty)"
+                class="!absolute left-1/2 -translate-x-1/2 top-0 z-10"
+              >{{ getDisabledActionsMessage(actionState.loading, actionState.isEmpty) }}</app-tooltip>
 
-            <!-- Create Order -->
-            <app-button
-              variant="primary"
-              size="md"
-              (clicked)="onSubmitOrder()"
-              [disabled]="((loading$ | async) ?? false) || ((isEmpty$ | async) ?? false)"
-              class="!h-10 text-sm font-bold flex-1 !px-2"
-            >
-              <app-icon name="file-text" [size]="18" slot="icon"></app-icon>
-              Crear
-            </app-button>
+              <div class="grid grid-cols-2 gap-2">
+                <!-- Primary CTA -->
+                <app-button
+                  class="col-span-2"
+                  variant="primary"
+                  size="md"
+                  [fullWidth]="true"
+                  (clicked)="onSubmitOrder()"
+                  [disabled]="actionState.loading || actionState.isEmpty"
+                  customClasses="!h-11 !font-semibold !shadow-sm"
+                >
+                  <app-icon name="file-text" [size]="18" slot="icon"></app-icon>
+                  Crear orden
+                </app-button>
 
-            <!-- Create & Receive -->
-            <app-button
-               variant="success"
-               size="md"
-               (clicked)="onCreateAndReceive()"
-               [disabled]="((loading$ | async) ?? false) || ((isEmpty$ | async) ?? false)"
-               class="!h-10 text-sm font-bold flex-1 !px-2 whitespace-nowrap"
-               title="Crear y recibir inventario automáticamente"
-            >
-               <app-icon name="check-circle" [size]="18" slot="icon"></app-icon>
-               Crear y Recibir
-            </app-button>
-          </div>
+                <!-- Secondary CTA: Draft -->
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  [fullWidth]="true"
+                  (clicked)="onSaveDraft()"
+                  [disabled]="actionState.loading || actionState.isEmpty"
+                  customClasses="!h-10 !font-semibold !border-border !text-text-primary !bg-surface hover:!bg-muted/30 hover:!text-text-primary"
+                >
+                  Borrador
+                </app-button>
+
+                <!-- Secondary CTA: Create and Receive -->
+                <app-button
+                  variant="success"
+                  size="sm"
+                  [fullWidth]="true"
+                  (clicked)="onCreateAndReceive()"
+                  [disabled]="actionState.loading || actionState.isEmpty"
+                  customClasses="!h-10 !font-semibold"
+                >
+                  Crear + Recibir
+                </app-button>
+              </div>
+            </div>
+          </ng-container>
         </div>
 
         <!-- Supplier Information (Compact) -->
@@ -143,7 +161,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
         <!-- Empty State -->
         <div
           *ngIf="isEmpty$ | async"
-          class="flex flex-col items-center justify-center h-full min-h-[200px] text-center opacity-60"
+          class="flex flex-col items-center pt-10 min-h-[200px] text-center opacity-60"
         >
           <div class="w-12 h-12 bg-muted/20 rounded-full flex items-center justify-center mb-3">
             <app-icon name="shopping-cart" [size]="24" class="text-muted"></app-icon>
@@ -176,13 +194,20 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                   >
                     {{ item.product.name }}
                   </h4>
-                  <button
-                    (click)="removeFromCart(item.id)"
-                    class="p-1 rounded-sm text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
-                    title="Eliminar"
-                  >
-                    <app-icon name="trash-2" [size]="14"></app-icon>
-                  </button>
+                  <div class="relative"
+                       (mouseenter)="hoveredRemoveTooltip = item.id"
+                       (mouseleave)="hoveredRemoveTooltip = null">
+                    <button
+                      (click)="removeFromCart(item.id)"
+                      class="p-1 rounded-sm text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
+                    >
+                      <app-icon name="trash-2" [size]="14"></app-icon>
+                    </button>
+                    <app-tooltip position="top" size="sm" [visible]="hoveredRemoveTooltip === item.id"
+                      class="!absolute left-1/2 -translate-x-1/2 bottom-full z-10">
+                      Eliminar
+                    </app-tooltip>
+                  </div>
                 </div>
                 <!-- SKU -->
                 <div class="text-[10px] text-text-secondary mb-2">SKU: {{ item.product.code }}</div>
@@ -266,11 +291,14 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 export class PopCartComponent implements OnInit, OnDestroy {
   private currencyService = inject(CurrencyFormatService);
   private destroy$ = new Subject<void>();
+  private disabledActionsTooltipTimeout: ReturnType<typeof setTimeout> | null = null;
 
   cartState$: Observable<PopCartState>;
   isEmpty$: Observable<boolean>;
   summary$: Observable<PopCartSummary>;
   loading$: Observable<boolean>;
+  hoveredRemoveTooltip: string | null = null;
+  disabledActionsTooltipVisible = false;
 
   @Output() saveDraft = new EventEmitter<void>();
   @Output() submitOrder = new EventEmitter<void>();
@@ -293,6 +321,10 @@ export class PopCartComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    if (this.disabledActionsTooltipTimeout) {
+      clearTimeout(this.disabledActionsTooltipTimeout);
+      this.disabledActionsTooltipTimeout = null;
+    }
     this.destroy$.next();
     this.destroy$.complete();
   }
@@ -385,6 +417,27 @@ export class PopCartComponent implements OnInit, OnDestroy {
 
   onCreateAndReceive(): void {
     this.createAndReceive.emit();
+  }
+
+  onDisabledActionsHover(isLoading: boolean, isEmpty: boolean): void {
+    if (!isLoading && !isEmpty) {
+      return;
+    }
+    this.disabledActionsTooltipVisible = true;
+  }
+
+  hideDisabledActionsTooltip(): void {
+    this.disabledActionsTooltipVisible = false;
+  }
+
+  getDisabledActionsMessage(isLoading: boolean, isEmpty: boolean): string {
+    if (isLoading) {
+      return 'Procesando cambios, espera un momento.';
+    }
+    if (isEmpty) {
+      return 'Agrega al menos un producto para habilitar esta acción.';
+    }
+    return '';
   }
 
   openLotModal(item: PopCartItem): void {

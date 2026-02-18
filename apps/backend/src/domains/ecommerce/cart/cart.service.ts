@@ -10,24 +10,28 @@ export class CartService {
         private readonly s3Service: S3Service,
     ) { }
 
+    private readonly cartInclude = {
+        cart_items: {
+            include: {
+                product: {
+                    include: {
+                        product_images: {
+                            where: { is_main: true },
+                            take: 1,
+                        },
+                    },
+                },
+                product_variant: {
+                    include: { product_images: true },
+                },
+            },
+        },
+    };
+
     async getCart() {
         // store_id y user_id se aplican automáticamente por EcommercePrismaService
         let cart = await this.prisma.carts.findFirst({
-            include: {
-                cart_items: {
-                    include: {
-                        product: {
-                            include: {
-                                product_images: {
-                                    where: { is_main: true },
-                                    take: 1,
-                                },
-                            },
-                        },
-                        product_variant: true,
-                    },
-                },
-            },
+            include: this.cartInclude,
         });
 
         if (!cart) {
@@ -36,21 +40,7 @@ export class CartService {
                     currency: 'USD',
                     // store_id y user_id se inyectan automáticamente
                 },
-                include: {
-                    cart_items: {
-                        include: {
-                            product: {
-                                include: {
-                                    product_images: {
-                                        where: { is_main: true },
-                                        take: 1,
-                                    },
-                                },
-                            },
-                            product_variant: true,
-                        },
-                    },
-                },
+                include: this.cartInclude,
             });
         }
 
@@ -72,10 +62,22 @@ export class CartService {
             throw new NotFoundException('Product not available');
         }
 
+        // Validate: if product has variants, a variant must be selected
+        const variantCount = await this.prisma.product_variants.count({
+            where: { product_id: dto.product_id },
+        });
+
+        if (variantCount > 0 && !dto.product_variant_id) {
+            throw new BadRequestException(
+                'Este producto requiere selección de variante',
+            );
+        }
+
         let available_stock = product.stock_quantity || 0;
+        let variant: any = null;
 
         if (dto.product_variant_id) {
-            const variant = await this.prisma.product_variants.findUnique({
+            variant = await this.prisma.product_variants.findUnique({
                 where: { id: dto.product_variant_id },
             });
             if (!variant || variant.product_id !== dto.product_id) {
@@ -104,7 +106,7 @@ export class CartService {
             },
         });
 
-        const unit_price = this.calculateFinalPrice(productWithTaxes);
+        const unit_price = this.calculateFinalPrice(productWithTaxes, variant);
 
         // Buscar o crear el cart del usuario (store_id y user_id se aplican automáticamente)
         let cart = await this.prisma.carts.findFirst({});
@@ -265,7 +267,10 @@ export class CartService {
     private async mapCartToResponse(cart: any) {
         const items = await Promise.all(
             cart.cart_items.map(async (item: any) => {
-                const raw_image_url = item.product.product_images?.[0]?.image_url || null;
+                // Use variant image if available, fallback to product main image
+                const variant_image_url = item.product_variant?.product_images?.image_url || null;
+                const product_image_url = item.product.product_images?.[0]?.image_url || null;
+                const raw_image_url = variant_image_url || product_image_url;
                 const signed_image_url = await this.s3Service.signUrl(raw_image_url);
 
                 return {
@@ -289,7 +294,7 @@ export class CartService {
                             attributes: item.product_variant.attributes,
                         }
                         : null,
-                    final_price: item.unit_price, // The stored unit_price is now the final price
+                    final_price: item.unit_price,
                 };
             }),
         );
@@ -304,15 +309,24 @@ export class CartService {
     }
 
     /**
-     * Calculates the final price of a product including taxes and active offers.
+     * Calculates the effective base price for a product, considering variant overrides.
+     * Pricing hierarchy: variant.price_override > product.sale_price (if on sale) > product.base_price
      */
-    private calculateFinalPrice(product: any): number {
-        const basePrice = product.is_on_sale && product.sale_price
+    private getEffectiveBasePrice(product: any, variant?: any): number {
+        if (variant?.price_override) {
+            return Number(variant.price_override);
+        }
+        return product.is_on_sale && product.sale_price
             ? Number(product.sale_price)
             : Number(product.base_price);
+    }
 
+    /**
+     * Calculates the sum of tax rates for a product.
+     * Tax rates are stored as decimals in DB (e.g., 0.19 for 19%).
+     */
+    private getTotalTaxRate(product: any): number {
         let totalTaxRate = 0;
-
         if (product.product_tax_assignments) {
             for (const assignment of product.product_tax_assignments) {
                 if (assignment.tax_categories?.tax_rates) {
@@ -322,7 +336,16 @@ export class CartService {
                 }
             }
         }
+        return totalTaxRate;
+    }
 
+    /**
+     * Calculates the final price of a product including taxes and active offers.
+     * Supports variant price overrides.
+     */
+    private calculateFinalPrice(product: any, variant?: any): number {
+        const basePrice = this.getEffectiveBasePrice(product, variant);
+        const totalTaxRate = this.getTotalTaxRate(product);
         const finalPrice = basePrice * (1 + totalTaxRate);
         return Math.round(finalPrice * 100) / 100;
     }

@@ -260,6 +260,14 @@ export class EcommerceCheckoutDto {
   @IsOptional()
   @IsBoolean()
   whatsapp_checkout?: boolean;
+
+  @ApiPropertyOptional({
+    example: '+57 300 123 4567',
+    description: 'WhatsApp number for checkout orders',
+  })
+  @IsOptional()
+  @IsString()
+  whatsapp_number?: string;
 }
 
 /**

@@ -390,6 +390,7 @@ export class AppConfigService {
         fonts: domainInfo.fonts,
         ecommerce: domainInfo.ecommerce,
         publication: domainInfo.publication,
+        currency: domainInfo.currency,
         security: domainInfo.config?.security,
       },
       isVendixDomain: domainInfo.organization_slug === 'vendix-corp',

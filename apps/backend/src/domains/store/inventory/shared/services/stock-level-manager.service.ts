@@ -465,11 +465,94 @@ export class StockLevelManager {
   }
 
   /**
+   * Limpia el stock base (product_variant_id IS NULL) cuando un producto transiciona a variantes.
+   * Retorna las location_ids donde existía stock base para heredarlas en las variantes.
+   */
+  async clearBaseStock(
+    product_id: number,
+    user_id: number,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number[]> {
+    const prisma: any = tx || this.prisma;
+    const basePrisma = prisma._baseClient || prisma;
+
+    // Find all base stock levels (no variant)
+    const baseStockLevels = await basePrisma.stock_levels.findMany({
+      where: {
+        product_id: product_id,
+        product_variant_id: null,
+      },
+    });
+
+    const locationIds: number[] = [];
+
+    for (const sl of baseStockLevels) {
+      locationIds.push(sl.location_id);
+
+      if (sl.quantity_on_hand > 0) {
+        // Zero out the stock level
+        await basePrisma.stock_levels.update({
+          where: { id: sl.id },
+          data: {
+            quantity_on_hand: 0,
+            quantity_available: 0,
+            last_updated: new Date(),
+            updated_at: new Date(),
+          },
+        });
+
+        // Create audit transaction
+        await this.transactionsService.createTransaction(
+          {
+            productId: product_id,
+            type: 'adjustment_damage',
+            quantityChange: -sl.quantity_on_hand,
+            reason:
+              'Stock base reiniciado: producto transicionó a inventario por variantes',
+            userId: user_id,
+          },
+          prisma,
+        );
+
+        // Create audit movement
+        const context = RequestContextService.getContext();
+        const organization_id =
+          context?.organization_id ||
+          (await this.getOrganizationId(product_id));
+
+        await basePrisma.inventory_movements.create({
+          data: {
+            organization_id,
+            product_id,
+            product_variant_id: null,
+            from_location_id: sl.location_id,
+            to_location_id: sl.location_id,
+            quantity: sl.quantity_on_hand,
+            movement_type: 'adjustment',
+            reason:
+              'Stock base reiniciado: producto transicionó a inventario por variantes',
+            notes:
+              'Stock base reiniciado: producto transicionó a inventario por variantes',
+            user_id,
+            created_at: new Date(),
+          },
+        });
+      }
+    }
+
+    // Sync product stock after clearing
+    await this.syncProductStock(prisma, product_id);
+
+    return [...new Set(locationIds)];
+  }
+
+  /**
    * Sincroniza el stock agregado con products.stock_quantity y product_variants.stock_quantity
    * - Si variant_id está presente, sincroniza esa variante específica
-   * - Siempre sincroniza el producto padre con el total de todo su stock (base + variantes)
+   * - Si el producto tiene variantes, solo suma stock de variantes (excluye stock base)
+   * - Si no tiene variantes, suma todo el stock (comportamiento legacy)
    */
-  private async syncProductStock(
+  async syncProductStock(
     prisma: any,
     product_id: number,
     variant_id?: number,
@@ -495,18 +578,25 @@ export class StockLevelManager {
       });
     }
 
-    // 2. Siempre sincronizar el producto padre (suma de TODO el stock: base + variantes)
+    // 2. Check if product has variants
+    const variantCount = await prisma.product_variants.count({
+      where: { product_id: product_id },
+    });
+
+    // 3. Build the aggregate filter: exclude base stock when variants exist
+    const stockFilter: any = { product_id: product_id };
+    if (variantCount > 0) {
+      stockFilter.product_variant_id = { not: null };
+    }
+
     const total_stock = await prisma.stock_levels.aggregate({
-      where: {
-        product_id: product_id,
-        // Incluir tanto stock base como variantes para el cálculo total
-      },
+      where: stockFilter,
       _sum: {
         quantity_available: true,
       },
     });
 
-    // Actualizar products.stock_quantity con el stock total consolidado
+    // Actualizar products.stock_quantity
     await prisma.products.update({
       where: { id: product_id },
       data: {
@@ -570,6 +660,45 @@ export class StockLevelManager {
         undefined,
         location.id,
       );
+    }
+  }
+
+  /**
+   * Initializes stock levels for a variant at the given locations with quantity 0.
+   */
+  async initializeVariantStockAtLocations(
+    product_id: number,
+    variant_id: number,
+    location_ids: number[],
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const prisma = tx || this.prisma;
+    const basePrisma = (prisma as any)._baseClient || prisma;
+
+    for (const location_id of location_ids) {
+      const existing = await basePrisma.stock_levels.findFirst({
+        where: {
+          product_id,
+          product_variant_id: variant_id,
+          location_id,
+        },
+      });
+
+      if (!existing) {
+        await basePrisma.stock_levels.create({
+          data: {
+            product_id,
+            product_variant_id: variant_id,
+            location_id,
+            quantity_on_hand: 0,
+            quantity_reserved: 0,
+            quantity_available: 0,
+            last_updated: new Date(),
+            created_at: new Date(),
+            updated_at: new Date(),
+          },
+        });
+      }
     }
   }
 

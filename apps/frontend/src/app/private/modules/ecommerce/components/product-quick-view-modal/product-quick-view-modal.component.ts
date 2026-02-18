@@ -17,7 +17,7 @@ import { ModalComponent } from '../../../../../shared/components/modal/modal.com
 import { SpinnerComponent } from '../../../../../shared/components/spinner/spinner.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
-import { CatalogService, ProductDetail, EcommerceProduct } from '../../services/catalog.service';
+import { CatalogService, ProductDetail, ProductVariantDetail, EcommerceProduct } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 import { ShareModalComponent } from '../share-modal/share-modal.component';
 
@@ -54,16 +54,22 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
       @if (!isLoading && product) {
         <div class="quick-view-content">
           <!-- Image Section -->
-          <div class="quick-view-image">
-            @if (mainImageUrl) {
-              <img [src]="mainImageUrl" [alt]="product.name" />
-            } @else {
-              <div class="no-image">
-                <app-icon name="image" [size]="48" />
-              </div>
-            }
-            @if (product.is_on_sale) {
-              <span class="sale-badge">Oferta</span>
+          <div class="quick-view-image-col">
+            <div class="quick-view-image">
+              @if (displayImageUrl) {
+                <img [src]="displayImageUrl" [alt]="product.name" />
+              } @else {
+                <div class="no-image">
+                  <app-icon name="image" [size]="48" />
+                </div>
+              }
+              @if (product.is_on_sale && !selectedVariant?.price_override) {
+                <span class="sale-badge">Oferta</span>
+              }
+            </div>
+            <!-- Description below image -->
+            @if (product.description) {
+              <p class="product-description">{{ truncatedDescription }}</p>
             }
           </div>
 
@@ -73,9 +79,6 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
             @if (product.brand) {
               <span class="product-brand">{{ product.brand.name }}</span>
             }
-
-            <!-- Name (Hidden if modal title shows it) -->
-            <!-- <h2 class="product-name">{{ product.name }}</h2> -->
 
             <!-- Rating -->
             @if (product.avg_rating) {
@@ -95,17 +98,37 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
 
             <!-- Price -->
             <div class="product-price">
-              <span class="current-price text-2xl font-bold">{{ product.final_price | currency }}</span>
-              @if (product.is_on_sale) {
-                <span class="original-price text-lg text-text-muted line-through ml-3" style="text-decoration: line-through;">
+              <span class="current-price">{{ displayPrice | currency }}</span>
+              @if (product.is_on_sale && !selectedVariant?.price_override) {
+                <span class="original-price">
                   {{ product.base_price | currency }}
                 </span>
               }
             </div>
 
-            <!-- Description (short) -->
-            @if (product.description) {
-              <p class="product-description">{{ truncatedDescription }}</p>
+            <!-- Variant Selector -->
+            @if (product.variants && product.variants.length > 0) {
+              <div class="variant-selector">
+                <div class="variant-header">
+                  <label class="variant-label">Variante:</label>
+                  <span class="variant-info-icon" title="Este producto tiene diferentes opciones. Selecciona la que prefieras.">
+                    <app-icon name="info" [size]="14" />
+                  </span>
+                </div>
+                <div class="variant-chips">
+                  @for (variant of product.variants; track variant.id) {
+                    <button
+                      class="variant-chip"
+                      [class.selected]="selectedVariant?.id === variant.id"
+                      [class.out-of-stock]="variant.stock_quantity === 0"
+                      [disabled]="variant.stock_quantity === 0"
+                      (click)="selectVariant(variant)"
+                    >
+                      {{ getVariantLabel(variant) }}
+                    </button>
+                  }
+                </div>
+              </div>
             }
 
             <!-- Categories Mini Badges -->
@@ -119,13 +142,13 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
 
             <!-- Stock Status -->
             <div class="stock-status">
-              @if (product.stock_quantity === 0) {
+              @if (displayStock === 0) {
                 <span class="out-of-stock">
                   <app-icon name="circle-x" [size]="14" /> Agotado
                 </span>
-              } @else if (product.stock_quantity !== null && product.stock_quantity <= 5) {
+              } @else if (displayStock !== null && displayStock <= 5) {
                 <span class="low-stock">
-                  <app-icon name="alert-triangle" [size]="14" /> ¡Solo quedan {{ product.stock_quantity }}!
+                  <app-icon name="alert-triangle" [size]="14" /> ¡Solo quedan {{ displayStock }}!
                 </span>
               } @else {
                 <span class="in-stock">
@@ -140,8 +163,8 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
               <app-quantity-control
                 [value]="quantity"
                 [min]="1"
-                [max]="product.stock_quantity || 99"
-                [size]="'md'"
+                [max]="displayStock || 99"
+                [size]="'sm'"
                 (valueChange)="quantity = $event"
               />
             </div>
@@ -149,10 +172,10 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
             <!-- Actions -->
             <div class="quick-view-actions">
               <app-button
-                variant="primary"
-                size="md"
+                variant="secondary"
+                size="sm"
                 [fullWidth]="true"
-                [disabled]="product.stock_quantity === 0"
+                [disabled]="displayStock === 0 || (hasVariants && !selectedVariant)"
                 (clicked)="onAddToCart()"
               >
                 <app-icon slot="icon" name="shopping-cart" [size]="18" />
@@ -160,7 +183,7 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
               </app-button>
               <app-button
                 variant="outline"
-                size="md"
+                size="sm"
                 customClasses="share-btn"
                 (clicked)="onShareClick()"
               >
@@ -170,10 +193,10 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
 
             <!-- Buy Now -->
             <app-button
-              variant="success"
-              size="lg"
+              variant="primary"
+              size="md"
               [fullWidth]="true"
-              [disabled]="product.stock_quantity === 0"
+              [disabled]="displayStock === 0 || (hasVariants && !selectedVariant)"
               (clicked)="onBuyNow()"
             >
               <app-icon slot="icon" name="shopping-bag" [size]="18" />
@@ -224,6 +247,19 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
       @media (max-width: 640px) {
         grid-template-columns: 1fr;
       }
+    }
+
+    .quick-view-image-col {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .product-description {
+      font-size: var(--fs-sm);
+      color: var(--color-text-secondary);
+      line-height: 1.5;
+      margin: 0;
     }
 
     .quick-view-image {
@@ -319,6 +355,67 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
       .original-price {
         font-size: var(--fs-lg);
         color: var(--color-text-muted);
+        text-decoration: line-through;
+      }
+    }
+
+    /* Variant Selector */
+    .variant-selector {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+
+      .variant-header {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+      }
+
+      .variant-label {
+        font-size: var(--fs-sm);
+        font-weight: var(--fw-medium);
+        color: var(--color-text-secondary);
+      }
+
+      .variant-info-icon {
+        display: inline-flex;
+        align-items: center;
+        color: var(--color-text-muted);
+        cursor: help;
+      }
+    }
+
+    .variant-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .variant-chip {
+      padding: 0.375rem 0.75rem;
+      border-radius: var(--radius-pill);
+      border: 1.5px solid var(--color-border);
+      background: var(--color-surface);
+      font-size: var(--fs-sm);
+      font-weight: var(--fw-medium);
+      color: var(--color-text-primary);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+
+      &:hover:not(:disabled) {
+        border-color: var(--color-primary);
+        color: var(--color-primary);
+      }
+
+      &.selected {
+        border-color: var(--color-primary);
+        background: var(--color-primary);
+        color: white;
+      }
+
+      &.out-of-stock {
+        opacity: 0.4;
+        cursor: not-allowed;
         text-decoration: line-through;
       }
     }
@@ -433,6 +530,26 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
     .text-error {
       color: var(--color-error);
     }
+
+    /* ─── Mobile Compact ─── */
+    @media (max-width: 640px) {
+      .quick-view-content { gap: 0.75rem; }
+      .quick-view-image { aspect-ratio: 3/2; max-height: 200px; }
+      .quick-view-image .sale-badge { padding: 0.15rem 0.5rem; font-size: 0.6rem; }
+      .quick-view-info { gap: 0.35rem; }
+      .product-brand { font-size: 0.6rem; }
+      .product-price .current-price { font-size: 1.25rem; }
+      .product-price .original-price { font-size: 0.8rem; }
+      .variant-chips { gap: 0.35rem; }
+      .variant-chip { padding: 0.2rem 0.5rem; font-size: 0.75rem; }
+      .category-badges { display: none; }
+      .stock-status span { font-size: 0.7rem; }
+      .quantity-selector { gap: 0.5rem; margin-bottom: 0.25rem; }
+      .quantity-selector label { font-size: 0.7rem; }
+      .quick-view-actions { gap: 0.5rem; margin-top: 0.25rem; }
+      .view-details-link { padding: 0.35rem; font-size: 0.75rem; }
+      .product-description { display: none; }
+    }
   `],
 })
 export class ProductQuickViewModalComponent implements OnChanges {
@@ -442,6 +559,7 @@ export class ProductQuickViewModalComponent implements OnChanges {
   @Output() addedToCart = new EventEmitter<ProductDetail>();
 
   product: ProductDetail | null = null;
+  selectedVariant: ProductVariantDetail | null = null;
   isLoading = false;
   hasError = false;
   quantity = 1;
@@ -461,7 +579,22 @@ export class ProductQuickViewModalComponent implements OnChanges {
     }
   }
 
-  get mainImageUrl(): string | null {
+  get hasVariants(): boolean {
+    return !!this.product?.variants && this.product.variants.length > 0;
+  }
+
+  get displayPrice(): number {
+    if (this.selectedVariant) return this.selectedVariant.final_price;
+    return this.product?.final_price || 0;
+  }
+
+  get displayStock(): number | null {
+    if (this.selectedVariant) return this.selectedVariant.stock_quantity;
+    return this.product?.stock_quantity ?? null;
+  }
+
+  get displayImageUrl(): string | null {
+    if (this.selectedVariant?.image_url) return this.selectedVariant.image_url;
     if (!this.product) return null;
     const mainImage = this.product.images?.find((img) => img.is_main);
     if (mainImage) return mainImage.image_url;
@@ -489,11 +622,24 @@ export class ProductQuickViewModalComponent implements OnChanges {
       base_price: this.product.base_price,
       final_price: this.product.final_price,
       is_on_sale: this.product.is_on_sale,
-      image_url: this.mainImageUrl,
+      image_url: this.displayImageUrl,
       stock_quantity: this.product.stock_quantity,
       brand: this.product.brand,
       categories: this.product.categories,
     } as EcommerceProduct;
+  }
+
+  selectVariant(variant: ProductVariantDetail): void {
+    this.selectedVariant = this.selectedVariant?.id === variant.id ? null : variant;
+    this.quantity = 1;
+  }
+
+  getVariantLabel(variant: ProductVariantDetail): string {
+    if (variant.attributes && typeof variant.attributes === 'object') {
+      const values = Object.values(variant.attributes);
+      if (values.length > 0) return values.join(' / ');
+    }
+    return variant.name || variant.sku;
   }
 
   loadProduct(): void {
@@ -502,6 +648,7 @@ export class ProductQuickViewModalComponent implements OnChanges {
     this.isLoading = true;
     this.hasError = false;
     this.product = null;
+    this.selectedVariant = null;
     this.quantity = 1;
 
     this.catalogService
@@ -511,6 +658,11 @@ export class ProductQuickViewModalComponent implements OnChanges {
         next: (response) => {
           if (response.success) {
             this.product = response.data;
+            // Auto-select first available variant
+            if (this.product.variants?.length > 0) {
+              const firstAvailable = this.product.variants.find(v => v.stock_quantity > 0);
+              this.selectedVariant = firstAvailable || this.product.variants[0];
+            }
           } else {
             this.hasError = true;
           }
@@ -525,18 +677,25 @@ export class ProductQuickViewModalComponent implements OnChanges {
 
   onAddToCart(): void {
     if (!this.product) return;
-    const result = this.cartService.addToCart(this.product.id, this.quantity);
+    const variantId = this.selectedVariant?.id;
+    const variantInfo = this.selectedVariant
+      ? { name: this.selectedVariant.name, sku: this.selectedVariant.sku, price: this.selectedVariant.final_price }
+      : undefined;
+    const result = this.cartService.addToCart(this.product.id, this.quantity, variantId, variantInfo);
     if (result) {
       result.subscribe();
     }
     this.addedToCart.emit(this.product);
-    // Optionally close modal after adding
-    // this.onClose();
+    this.onClose();
   }
 
   onBuyNow(): void {
     if (!this.product) return;
-    const result = this.cartService.addToCart(this.product.id, this.quantity);
+    const variantId = this.selectedVariant?.id;
+    const variantInfo = this.selectedVariant
+      ? { name: this.selectedVariant.name, sku: this.selectedVariant.sku, price: this.selectedVariant.final_price }
+      : undefined;
+    const result = this.cartService.addToCart(this.product.id, this.quantity, variantId, variantInfo);
     if (result) {
       result.subscribe({
         next: () => {
@@ -568,6 +727,7 @@ export class ProductQuickViewModalComponent implements OnChanges {
     this.closed.emit();
     // Reset state
     this.product = null;
+    this.selectedVariant = null;
     this.hasError = false;
     this.quantity = 1;
   }

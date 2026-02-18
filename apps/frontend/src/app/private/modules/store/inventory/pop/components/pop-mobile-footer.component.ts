@@ -48,7 +48,7 @@ import { PopCartSummary } from '../services/pop-cart.service';
           (click)="saveDraft.emit()"
           [disabled]="itemCount === 0"
         >
-          <app-icon name="save" [size]="14"></app-icon>
+          <app-icon name="save" [size]="18"></app-icon>
           <span>Borrador</span>
         </button>
         <button
@@ -56,7 +56,7 @@ import { PopCartSummary } from '../services/pop-cart.service';
           (click)="createOrder.emit()"
           [disabled]="itemCount === 0"
         >
-          <app-icon name="file-plus" [size]="14"></app-icon>
+          <app-icon name="file-plus" [size]="18"></app-icon>
           <span>Crear</span>
         </button>
         <button
@@ -64,7 +64,7 @@ import { PopCartSummary } from '../services/pop-cart.service';
           (click)="createAndReceive.emit()"
           [disabled]="itemCount === 0"
         >
-          <app-icon name="package-check" [size]="14"></app-icon>
+          <app-icon name="package-check" [size]="18"></app-icon>
           <span>C+R</span>
         </button>
       </div>
@@ -199,7 +199,7 @@ import { PopCartSummary } from '../services/pop-cart.service';
       /* Row 2: Actions */
       .actions-row {
         display: flex;
-        gap: 6px;
+        gap: 10px;
       }
 
       .action-btn {
@@ -207,11 +207,11 @@ import { PopCartSummary } from '../services/pop-cart.service';
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 4px;
-        height: 36px;
+        gap: 8px;
+        height: 44px;
         border: none;
-        border-radius: 8px;
-        font-size: 12px;
+        border-radius: 12px;
+        font-size: 14px;
         font-weight: 600;
         cursor: pointer;
         transition: all 0.2s ease;

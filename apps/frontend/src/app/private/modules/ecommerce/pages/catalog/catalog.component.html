@@ -1,17 +1,16 @@
 <div class="catalog-page">
     <!-- Header -->
     <div class="catalog-header">
-        <h2 class="catalog-title">
-            @if (search_term) {
-            {{ search_term }}: {{ total_products }} Resultados
-            } @else {
-            Todos: {{ total_products }} Resultados
-            }
-        </h2>
+        <div class="catalog-header-row">
+            <h2 class="catalog-title">
+                @if (search_term) {
+                {{ search_term }}: {{ total_products }} Resultados
+                } @else {
+                Productos ({{ total_products }})
+                }
+            </h2>
 
-        <div class="catalog-actions">
-            <!-- Sort dropdown moved here -->
-            <div class="catalog-toolbar">
+            <div class="catalog-controls">
                 <select [(ngModel)]="sort_by" (ngModelChange)="onSortChange()" class="sort-select">
                     <option value="newest">Más recientes</option>
                     <option value="oldest">Menos recientes</option>
@@ -19,11 +18,9 @@
                     <option value="price_asc">Precio: menor a mayor</option>
                     <option value="price_desc">Precio: mayor a menor</option>
                 </select>
-            </div>
 
-            <div class="catalog-meta">
                 <button class="filter-toggle" (click)="toggleFilters()">
-                    <i class="pi pi-filter"></i>
+                    <app-icon name="filter" [size]="14" />
                     Filtros
                 </button>
             </div>
@@ -36,7 +33,7 @@
             <div class="sidebar-header">
                 <h3>Filtros</h3>
                 <button class="close-filters" (click)="toggleFilters()">
-                    <i class="pi pi-times"></i>
+                    <app-icon name="x" [size]="18" />
                 </button>
             </div>
 
@@ -110,7 +107,7 @@
             </div>
             } @else {
             <div class="empty-state">
-                <i class="pi pi-search"></i>
+                <app-icon name="search" [size]="48" />
                 <h3>No se encontraron productos</h3>
                 <p>Intenta cambiar los filtros de búsqueda</p>
                 <button (click)="clearFilters()">Limpiar filtros</button>
@@ -120,16 +117,18 @@
             <!-- Pagination -->
             @if (total_pages > 1) {
             <div class="pagination">
-                <button [disabled]="current_page === 1" (click)="goToPage(current_page - 1)">
-                    <i class="pi pi-chevron-left"></i>
+                <button class="pagination-arrow" [disabled]="current_page === 1" (click)="goToPage(current_page - 1)">
+                    <app-icon name="chevron-left" [size]="16" />
                 </button>
+
                 @for (page of page_numbers; track page) {
-                <button [class.active]="current_page === page" (click)="goToPage(page)">
+                <button class="pagination-page" [class.active]="current_page === page" (click)="goToPage(page)">
                     {{ page }}
                 </button>
                 }
-                <button [disabled]="current_page === total_pages" (click)="goToPage(current_page + 1)">
-                    <i class="pi pi-chevron-right"></i>
+
+                <button class="pagination-arrow" [disabled]="current_page === total_pages" (click)="goToPage(current_page + 1)">
+                    <app-icon name="chevron-right" [size]="16" />
                 </button>
             </div>
             }

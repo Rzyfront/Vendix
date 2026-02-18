@@ -986,9 +986,10 @@ export class PosOrderService {
   private calculateItemTaxRate(item: any): number | undefined {
     const product = item.product;
     if (!product?.tax_assignments?.length) return undefined;
+    // Tax rates are stored as decimals in DB (e.g., 0.19 for 19%) — do NOT divide by 100
     const rateSum = product.tax_assignments.reduce((sum: number, assignment: any) => {
       const assignmentRate = assignment.tax_categories?.tax_rates?.reduce(
-        (rSum: number, tr: any) => rSum + (parseFloat(tr.rate || '0') / 100),
+        (rSum: number, tr: any) => rSum + parseFloat(tr.rate || '0'),
         0,
       ) || 0;
       return sum + assignmentRate;

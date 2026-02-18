@@ -32,6 +32,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Handling store context | `vendix-multi-tenant-context` |
 | Implementing authentication | `vendix-backend-auth` |
 | Implementing multi-tenant logic | `vendix-multi-tenant-context` |
+| Implementing stats cards or dashboard metrics with mobile scroll | `vendix-frontend-stats-cards` |
 | Installing dependencies | `vendix-monorepo-workspaces` |
 | Managing Routes | `vendix-frontend-routing` |
 | Managing State | `vendix-frontend-state` |
@@ -40,6 +41,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Styling and Theming | `vendix-frontend-theme` |
 | Troubleshoot why a skill is missing from AGENTS.md auto-invoke | `skill-sync` |
 | Understanding Public/Private Apps and Domains | `vendix-app-architecture` |
+| Uploading files, handling S3 URLs, or saving image URLs to database | `vendix-s3-storage` |
 | Verifying Build | `buildcheck-dev` |
 | Working on backend domains | `vendix-backend-domain` |
 | Working on frontend domains | `vendix-frontend-domain` |

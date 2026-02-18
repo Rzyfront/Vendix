@@ -5,7 +5,9 @@ import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
+import { CheckoutService, WhatsappCheckoutResponse } from '../../services/checkout.service';
 import { AuthFacade } from '../../../../../core/store';
+import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import { StoreUiService } from '../../services/store-ui.service';
 import { CatalogService, EcommerceProduct } from '../../services/catalog.service';
 
@@ -36,6 +38,8 @@ export class CartComponent implements OnInit, OnDestroy {
 
   private destroy$ = new Subject<void>();
   private catalogService = inject(CatalogService);
+  private checkoutService = inject(CheckoutService);
+  private tenantFacade = inject(TenantFacade);
   private destroyRef = inject(DestroyRef);
   private currencyService = inject(CurrencyFormatService);
 
@@ -162,6 +166,70 @@ export class CartComponent implements OnInit, OnDestroy {
 
   continueShopping(): void {
     this.router.navigate(['/catalog']);
+  }
+
+  // WhatsApp checkout
+  is_whatsapp_loading = false;
+
+  get whatsappEnabled(): boolean {
+    const config = this.tenantFacade.getCurrentDomainConfig();
+    return !!config?.customConfig?.ecommerce?.checkout?.whatsapp_checkout;
+  }
+
+  whatsappCheckout(): void {
+    const config = this.tenantFacade.getCurrentDomainConfig();
+    const requiresRegistration = !!config?.customConfig?.ecommerce?.checkout?.require_registration;
+
+    if (requiresRegistration && !this.is_authenticated) {
+      this.store_ui_service.openLoginModal();
+      return;
+    }
+
+    this.is_whatsapp_loading = true;
+
+    // For guests: send localStorage cart items in the request
+    const items = !this.is_authenticated
+      ? this.cart?.items.map(i => ({
+          product_id: i.product_id,
+          product_variant_id: i.product_variant_id ?? undefined,
+          quantity: i.quantity,
+        }))
+      : undefined;
+
+    this.checkoutService.whatsappCheckout(undefined, items).pipe(takeUntil(this.destroy$)).subscribe({
+      next: (response) => {
+        this.is_whatsapp_loading = false;
+        // Clear local cart for guests
+        if (!this.is_authenticated) {
+          this.cart_service.clearAllCart();
+        }
+        this.openWhatsApp(response.data);
+      },
+      error: () => {
+        this.is_whatsapp_loading = false;
+      },
+    });
+  }
+
+  private openWhatsApp(order: WhatsappCheckoutResponse): void {
+    const config = this.tenantFacade.getCurrentDomainConfig();
+    const phone = (config?.customConfig?.ecommerce?.checkout?.whatsapp_number || '').replace(/\D/g, '');
+    const storeName = config?.customConfig?.branding?.name || 'la tienda';
+    const fmt = (v: number) => this.currencyService.format(v);
+
+    const itemLines = order.items.map(i =>
+      `  - ${i.name}${i.variant_sku ? ' (' + i.variant_sku + ')' : ''} x${i.quantity} — ${fmt(i.total_price)}`
+    ).join('\n');
+
+    const message = encodeURIComponent(
+      `Hola! Quiero confirmar mi pedido en *${storeName}* 🛒\n\n` +
+      `*Pedido:* ${order.order_number}\n\n` +
+      `*Productos:*\n${itemLines}\n\n` +
+      `*Total:* ${fmt(Number(order.total))}\n\n` +
+      `Quedo atento para coordinar el pago y la entrega!`
+    );
+
+    window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
   }
 
   onQuickView(product: EcommerceProduct): void {

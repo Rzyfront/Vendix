@@ -61,7 +61,7 @@
 
 <!-- Product Quick View Modal -->
 <app-product-quick-view-modal [isOpen]="quickViewOpen" [productSlug]="selectedProductSlug"
-  (closed)="quickViewOpen = false" (addedToCart)="onAddToCart($event)" />
+  (closed)="quickViewOpen = false" (addedToCart)="onModalAddedToCart($event)" />
 
 <!-- Share Modal -->
 <app-share-modal [isOpen]="shareModalOpen" [product]="shareProduct" (closed)="onShareModalClosed()" />

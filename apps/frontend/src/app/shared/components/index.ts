@@ -1,4 +1,5 @@
 // Components
+export { AlertBannerComponent } from './alert-banner/alert-banner.component';
 export { ConfirmationModalComponent } from './confirmation-modal/confirmation-modal.component';
 export { ButtonComponent } from './button/button.component';
 export { CardComponent } from './card/card.component';
@@ -37,6 +38,7 @@ export { ResponsiveDataViewComponent } from './responsive-data-view/responsive-d
 export { OptionsDropdownComponent } from './options-dropdown';
 
 // Types
+export type { AlertBannerVariant } from './alert-banner/alert-banner.component';
 export type { FormStyleVariant } from '../types/form.types';
 export type { BadgeVariant } from './badge/badge.component';
 export type { ButtonVariant, ButtonSize } from './button/button.component';

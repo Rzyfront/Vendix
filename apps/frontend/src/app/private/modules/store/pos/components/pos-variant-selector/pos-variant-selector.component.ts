@@ -127,9 +127,10 @@ export class PosVariantSelectorComponent {
 
   getVariantFinalPrice(variant: PosProductVariant): number {
     const basePrice = variant.price_override ?? this.product.price;
+    // Tax rates are stored as decimals in DB (e.g., 0.19 for 19%) — do NOT divide by 100
     const taxRate = this.product.tax_assignments?.reduce((sum, ta) => {
       return sum + (ta.tax_categories?.tax_rates?.reduce(
-        (rateSum, tr) => rateSum + (parseFloat(tr.rate || '0') / 100),
+        (rateSum, tr) => rateSum + parseFloat(tr.rate || '0'),
         0,
       ) || 0);
     }, 0) || 0;

@@ -211,35 +211,53 @@
                                 </div>
                             </div>
 
-                            <!-- Stock (only if no variants) -->
-                            <div *ngIf="!hasVariants" class="animate-fadeIn">
-                                <!-- Create mode: editable initial stock -->
-                                <div *ngIf="!isEditMode()">
-                                    <app-input label="Stock Inicial" type="number"
-                                        formControlName="stock_quantity"
-                                        [error]="getErrorMessage('stock_quantity')" placeholder="0"
-                                        helperText="Cantidad inicial disponible" customWrapperClass="!mt-0"
-                                        [tooltipText]="'Define la cantidad inicial de unidades disponibles.'"></app-input>
+                            <!-- Stock: info panel when variants, editable input when no variants -->
+                            @if (hasVariants) {
+                                <div class="p-3 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800 animate-fadeIn">
+                                    <div class="flex items-center gap-2 font-medium mb-1">
+                                        <app-icon name="info" size="16"></app-icon>
+                                        Stock basado en variantes
+                                    </div>
+                                    <p class="text-blue-600 text-xs">
+                                        El stock se calcula como la suma de todas las variantes.
+                                        Asigna stock individualmente a cada variante.
+                                    </p>
+                                    @if (isEditMode()) {
+                                        <div class="mt-2 font-semibold text-blue-900">
+                                            Stock total: {{ totalVariantStock }} unidades
+                                        </div>
+                                    }
                                 </div>
+                            } @else {
+                                <div class="animate-fadeIn">
+                                    <!-- Create mode: editable initial stock -->
+                                    <div *ngIf="!isEditMode()">
+                                        <app-input label="Stock Inicial" type="number"
+                                            formControlName="stock_quantity"
+                                            [error]="getErrorMessage('stock_quantity')" placeholder="0"
+                                            helperText="Cantidad inicial disponible" customWrapperClass="!mt-0"
+                                            [tooltipText]="'Define la cantidad inicial de unidades disponibles.'"></app-input>
+                                    </div>
 
-                                <!-- Edit mode: read-only, click to adjust -->
-                                <div *ngIf="isEditMode()" class="relative">
-                                    <div (click)="openStockAdjustment()" class="cursor-pointer group"
-                                        title="Click para ajustar stock">
-                                        <app-input label="Stock Actual" type="number"
-                                            formControlName="stock_quantity" [disabled]="true"
-                                            placeholder="Click para ajustar stock"
-                                            class="opacity-75 cursor-pointer" [suffixIcon]="true"
-                                            customWrapperClass="!mt-0"
-                                            [tooltipText]="'El stock no se puede editar directamente. Haz clic para ajustar.'">
-                                            <ng-container slot="suffix-icon">
-                                                <app-icon name="plus" size="16"
-                                                    class="text-text-muted group-hover:text-primary-600"></app-icon>
-                                            </ng-container>
-                                        </app-input>
+                                    <!-- Edit mode: read-only, click to adjust -->
+                                    <div *ngIf="isEditMode()" class="relative">
+                                        <div (click)="openStockAdjustment()" class="cursor-pointer group"
+                                            title="Click para ajustar stock">
+                                            <app-input label="Stock Actual" type="number"
+                                                formControlName="stock_quantity" [disabled]="true"
+                                                placeholder="Click para ajustar stock"
+                                                class="opacity-75 cursor-pointer" [suffixIcon]="true"
+                                                customWrapperClass="!mt-0"
+                                                [tooltipText]="'El stock no se puede editar directamente. Haz clic para ajustar.'">
+                                                <ng-container slot="suffix-icon">
+                                                    <app-icon name="plus" size="16"
+                                                        class="text-text-muted group-hover:text-primary-600"></app-icon>
+                                                </ng-container>
+                                            </app-input>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
+                            }
                         </div>
 
                         <!-- Variants Toggle -->
@@ -452,6 +470,17 @@
                         <h2 class="text-base font-bold text-gray-900">Inventario / Stock</h2>
                     </div>
 
+                    <!-- Variant mode indicator -->
+                    @if (hasVariants) {
+                        <div class="mb-4 p-2.5 bg-blue-50 border border-blue-200 rounded-lg">
+                            <div class="flex items-center gap-2 text-xs font-bold text-blue-800">
+                                <app-icon name="layers" size="14"></app-icon>
+                                Inventario basado en variantes
+                            </div>
+                            <p class="text-[10px] text-blue-600 mt-1">Los totales representan la suma de todas las variantes.</p>
+                        </div>
+                    }
+
                     <div class="flex-1 space-y-4">
                         <!-- Action Section -->
                         <div class="p-3 bg-bg rounded-xl border border-border space-y-2">
@@ -518,6 +547,17 @@
                 <app-icon name="archive" size="18" class="text-primary-600"></app-icon>
                 <h2 class="text-base font-bold text-gray-900">Inventario / Stock</h2>
             </div>
+
+            <!-- Variant mode indicator (mobile) -->
+            @if (hasVariants) {
+                <div class="p-2.5 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div class="flex items-center gap-2 text-xs font-bold text-blue-800">
+                        <app-icon name="layers" size="14"></app-icon>
+                        Inventario basado en variantes
+                    </div>
+                    <p class="text-[10px] text-blue-600 mt-1">Los totales representan la suma de todas las variantes.</p>
+                </div>
+            }
 
             <!-- Quick Stats Grid -->
             <div class="grid grid-cols-2 gap-2">

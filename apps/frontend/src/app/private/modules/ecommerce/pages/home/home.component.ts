@@ -154,10 +154,20 @@ export class HomeComponent implements OnInit {
   }
 
   onAddToCart(product: EcommerceProduct): void {
+    // Guard: variant products must go through detail page for variant selection
+    if (product.variant_count && product.variant_count > 0) {
+      this.router.navigate(['/catalog', product.slug]);
+      return;
+    }
     const result = this.cart_service.addToCart(product.id, 1);
     if (result) {
       result.subscribe();
     }
+  }
+
+  onModalAddedToCart(_product: EcommerceProduct): void {
+    // Modal already added the product to cart and closed itself
+    this.quickViewOpen = false;
   }
 
   onToggleWishlist(product: EcommerceProduct): void {

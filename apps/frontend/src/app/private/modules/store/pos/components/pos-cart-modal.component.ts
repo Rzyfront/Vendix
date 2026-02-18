@@ -10,7 +10,6 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
-import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 import { CartState, CartItem } from '../models/cart.model';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
@@ -21,7 +20,6 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   imports: [
     CommonModule,
     IconComponent,
-    ButtonComponent,
     QuantityControlComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -171,26 +169,22 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
         <!-- Action Buttons -->
         <div class="modal-actions">
-          <app-button
-            variant="outline"
-            size="md"
-            (clicked)="saveDraft.emit()"
+          <button
+            class="action-btn save-btn"
+            (click)="saveDraft.emit()"
             [disabled]="!cartState?.items?.length"
-            class="action-btn"
           >
-            <app-icon name="save" [size]="18" slot="icon"></app-icon>
-            Guardar
-          </app-button>
-          <app-button
-            variant="primary"
-            size="md"
-            (clicked)="checkout.emit()"
+            <app-icon name="save" [size]="18"></app-icon>
+            <span>Guardar</span>
+          </button>
+          <button
+            class="action-btn checkout-btn"
+            (click)="checkout.emit()"
             [disabled]="!cartState?.items?.length"
-            class="action-btn checkout"
           >
-            <app-icon name="credit-card" [size]="18" slot="icon"></app-icon>
-            Finalizar Venta
-          </app-button>
+            <app-icon name="credit-card" [size]="18"></app-icon>
+            <span>Finalizar Venta</span>
+          </button>
         </div>
       </div>
     </div>
@@ -593,7 +587,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       /* Action Buttons */
       .modal-actions {
         display: flex;
-        gap: 12px;
+        gap: 10px;
         padding: 16px 20px;
         padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
         border-top: 1px solid var(--color-border);
@@ -603,14 +597,47 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
       .action-btn {
         flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
         height: 48px;
+        border: none;
         border-radius: 12px;
-        font-weight: 600;
         font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
       }
 
-      .action-btn.checkout {
-        flex: 2;
+      .action-btn:active:not(:disabled) {
+        transform: scale(0.97);
+      }
+
+      .action-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      .save-btn {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        color: var(--color-text-primary);
+      }
+
+      .save-btn:hover:not(:disabled) {
+        background: var(--color-muted);
+        border-color: var(--color-text-secondary);
+      }
+
+      .checkout-btn {
+        background: var(--color-primary);
+        color: white;
+        flex: 1.5;
+      }
+
+      .checkout-btn:hover:not(:disabled) {
+        filter: brightness(1.1);
       }
 
       /* Hide on desktop */

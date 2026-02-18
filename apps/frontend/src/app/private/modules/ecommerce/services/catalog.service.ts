@@ -19,18 +19,26 @@ export interface EcommerceProduct {
   weight?: number | null;
   brand: { id: number; name: string } | null;
   categories: { id: number; name: string; slug: string }[];
+  variant_count?: number;
+}
+
+export interface ProductVariantDetail {
+  id: number;
+  name: string;
+  sku: string;
+  price_override: number | null;
+  effective_base_price: number;
+  final_price: number;
+  stock_quantity: number;
+  attributes: any;
+  image_url: string | null;
+  is_on_sale: boolean;
+  sale_price: number | null;
 }
 
 export interface ProductDetail extends EcommerceProduct {
   images: { id: number; image_url: string; is_main: boolean }[];
-  variants: {
-    id: number;
-    name: string;
-    sku: string;
-    price_override: number | null;
-    stock_quantity: number;
-    attributes: any;
-  }[];
+  variants: ProductVariantDetail[];
   reviews: {
     id: number;
     rating: number;

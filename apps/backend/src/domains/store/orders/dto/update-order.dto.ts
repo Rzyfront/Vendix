@@ -1,6 +1,7 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateOrderDto } from './create-order.dto';
-import { IsOptional, IsDateString, IsString, MaxLength } from 'class-validator';
+import { IsOptional, IsDateString, IsString, MaxLength, IsInt, IsEnum } from 'class-validator';
+import { order_delivery_type_enum } from '@prisma/client';
 
 /**
  * DTO for updating order metadata.
@@ -21,4 +22,16 @@ export class UpdateOrderDto extends PartialType(CreateOrderDto) {
   @IsString()
   @MaxLength(1000)
   internal_notes?: string;
+
+  @IsOptional()
+  @IsInt()
+  shipping_method_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  shipping_rate_id?: number;
+
+  @IsOptional()
+  @IsEnum(order_delivery_type_enum)
+  delivery_type?: order_delivery_type_enum;
 }

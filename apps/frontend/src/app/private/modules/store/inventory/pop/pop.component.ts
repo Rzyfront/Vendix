@@ -488,6 +488,8 @@ export class PopComponent implements OnInit, OnDestroy {
     this.showCartModal = false;
     if (this.header) {
       this.header.showMobileSettings = true;
+      // Delay flash so the DOM renders the expanded settings first
+      setTimeout(() => this.header.flashConfigWarning(), 50);
     }
   }
 
@@ -553,6 +555,9 @@ export class PopComponent implements OnInit, OnDestroy {
     const state = this.popCartService.currentState;
 
     if (!state.supplierId || !state.locationId || state.items.length === 0) {
+      if ((!state.supplierId || !state.locationId) && this.header) {
+        this.header.flashConfigWarning();
+      }
       this.toastService.warning(
         'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',
       );
@@ -614,12 +619,22 @@ export class PopComponent implements OnInit, OnDestroy {
   // ============================================================
 
   onSaveAsDraft(): void {
-    if (this.popCartService.currentState.items.length === 0) {
+    const state = this.popCartService.currentState;
+
+    if (state.items.length === 0) {
       this.toastService.warning('El carrito está vacío');
       return;
     }
 
-    const state = this.popCartService.currentState;
+    if (!state.supplierId || !state.locationId) {
+      if (this.header) {
+        this.header.flashConfigWarning();
+      }
+      this.toastService.warning(
+        'Por favor selecciona proveedor y bodega antes de guardar.',
+      );
+      return;
+    }
     const draftState = { ...state, status: 'draft' as const };
     const userId = 0; // TODO: Get from AuthService
 
@@ -646,6 +661,10 @@ export class PopComponent implements OnInit, OnDestroy {
       // On mobile, open the cart modal to show the config alert
       if (this.isMobile()) {
         this.showCartModal = true;
+      }
+      // Flash the supplier+warehouse section
+      if ((!state.supplierId || !state.locationId) && this.header) {
+        this.header.flashConfigWarning();
       }
       this.toastService.warning(
         'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',
@@ -681,6 +700,10 @@ export class PopComponent implements OnInit, OnDestroy {
       // On mobile, open the cart modal to show the config alert
       if (this.isMobile()) {
         this.showCartModal = true;
+      }
+      // Flash the supplier+warehouse section
+      if ((!state.supplierId || !state.locationId) && this.header) {
+        this.header.flashConfigWarning();
       }
       this.toastService.warning(
         'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',

@@ -78,6 +78,11 @@ export const storeAdminRoutes: Routes = [
         children: [
           {
             path: '',
+            pathMatch: 'full',
+            redirectTo: 'pop',
+          },
+          {
+            path: 'dashboard',
             loadComponent: () =>
               import(
                 '../../private/modules/store/inventory/inventory-dashboard.component'
@@ -182,18 +187,18 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.CustomersComponent),
           },
           {
-            path: ':id',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/customers/details/customer-details.component'
-              ).then((c) => c.CustomerDetailsComponent),
-          },
-          {
             path: 'reviews',
             loadComponent: () =>
               import(
                 '../../private/modules/store/customers/reviews/reviews.component'
               ).then((c) => c.ReviewsComponent),
+          },
+          {
+            path: ':id',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/customers/details/customer-details.component'
+              ).then((c) => c.CustomerDetailsComponent),
           },
         ],
       },

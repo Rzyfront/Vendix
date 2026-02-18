@@ -433,6 +433,16 @@ export class StoreOrdersService {
     );
   }
 
+  assignShippingMethod(orderId: string, dto: { shipping_method_id: number; shipping_cost?: number }): Observable<Order> {
+    const url = `${this.apiUrl}/store/orders/${orderId}`;
+    return this.http.patch<Order>(url, dto).pipe(
+      catchError((error) => {
+        console.error('Error assigning shipping method:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
   updateOrderItems(orderId: string, dto: any): Observable<Order> {
     const url = `${this.apiUrl}/store/orders/${orderId}/items`;
     return this.http.put<any>(url, dto).pipe(
