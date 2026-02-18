@@ -1,9 +1,10 @@
 import { IsOptional, IsString, ValidateNested, MinLength, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional, ApiSchema } from '@nestjs/swagger';
 import { CreateAddressDto } from '../../organization/addresses/dto';
 
-export class UpdateProfileDto {
+@ApiSchema({ name: 'AuthUpdateProfileDto' })
+export class AuthUpdateProfileDto {
     @ApiPropertyOptional({ example: 'Juan', description: 'Nombre del usuario' })
     @IsOptional()
     @IsString()
@@ -44,3 +45,5 @@ export class UpdateProfileDto {
     @Type(() => CreateAddressDto)
     address?: CreateAddressDto;
 }
+
+export { AuthUpdateProfileDto as UpdateProfileDto };

@@ -20,7 +20,7 @@ import {
 type OrderState = order_state_enum;
 
 const VALID_TRANSITIONS: Record<OrderState, OrderState[]> = {
-  created: ['pending_payment', 'finished', 'cancelled'],
+  created: ['pending_payment', 'processing', 'finished', 'cancelled'],
   pending_payment: ['processing', 'cancelled'],
   processing: ['shipped', 'cancelled'],
   shipped: ['delivered'],
@@ -139,9 +139,10 @@ export class OrderFlowService {
   async payOrder(orderId: number, dto: PayOrderDto) {
     const order = await this.getOrder(orderId);
 
-    if (order.state !== 'created') {
+    const allowedPayStates: OrderState[] = ['created', 'shipped'];
+    if (!allowedPayStates.includes(order.state as OrderState)) {
       throw new BadRequestException(
-        `Cannot pay order in state '${order.state}'. Order must be in 'created' state.`
+        `Cannot pay order in state '${order.state}'. Order must be in 'created' or 'shipped' state.`
       );
     }
 
@@ -152,6 +153,51 @@ export class OrderFlowService {
 
     if (!paymentMethod) {
       throw new NotFoundException('Payment method not found');
+    }
+
+    // Shipped orders: register payment without changing state
+    if (order.state === 'shipped') {
+      const transactionId = await this.generateTransactionId();
+
+      let change = 0;
+      if (paymentMethod.system_payment_method.type === 'cash' && dto.amount_received) {
+        change = dto.amount_received - Number(order.grand_total);
+        if (change < 0) {
+          throw new BadRequestException('Amount received is less than the order total');
+        }
+      }
+
+      await this.prisma.payments.create({
+        data: {
+          order_id: orderId,
+          store_payment_method_id: dto.store_payment_method_id,
+          amount: order.grand_total,
+          currency: order.currency,
+          state: 'succeeded',
+          transaction_id: transactionId,
+          paid_at: new Date(),
+          gateway_response: {
+            payment_type: 'direct',
+            amount_received: dto.amount_received,
+            change: change,
+          },
+        },
+      });
+
+      const updatedOrder = await this.prisma.orders.findFirst({
+        where: { id: orderId },
+        include: {
+          stores: { select: { id: true, name: true, store_code: true } },
+          order_items: { include: { products: true, product_variants: true } },
+          payments: true,
+        },
+      });
+
+      this.logger.log(`Order #${orderId} payment registered while shipped`);
+      return {
+        order: updatedOrder,
+        payment: { transaction_id: transactionId, change },
+      };
     }
 
     if (dto.payment_type === PaymentType.DIRECT) {
@@ -183,6 +229,25 @@ export class OrderFlowService {
           },
         },
       });
+
+      // Only auto-finish for direct_delivery (POS) or other (no shipping method).
+      // Orders with home_delivery or pickup need fulfillment stages.
+      const requiresFulfillment =
+        order.delivery_type !== 'direct_delivery' &&
+        order.delivery_type !== 'other';
+
+      if (requiresFulfillment) {
+        this.validateTransition(order.state as OrderState, 'processing');
+        const updatedOrder = await this.updateOrderState(orderId, 'processing', {
+          paid_at: new Date(),
+        });
+
+        this.logger.log(`Order #${orderId} paid directly, moved to processing (requires fulfillment)`);
+        return {
+          order: updatedOrder,
+          payment: { transaction_id: transactionId, change },
+        };
+      }
 
       this.validateTransition(order.state as OrderState, 'finished');
       const updatedOrder = await this.updateOrderState(orderId, 'finished', {
@@ -225,13 +290,16 @@ export class OrderFlowService {
   }
 
   /**
-   * Confirm payment (pending_payment -> processing)
+   * Confirm payment for an order in pending_payment or shipped state.
+   * - pending_payment → processing (standard flow)
+   * - shipped → shipped (payment confirmed, no state change — logistics already advanced)
    * Called from webhook handlers or manually by admin
    */
   async confirmPayment(orderId: number) {
     const order = await this.getOrder(orderId);
 
-    if (order.state !== 'pending_payment') {
+    const allowedStates: OrderState[] = ['pending_payment', 'shipped'];
+    if (!allowedStates.includes(order.state as OrderState)) {
       this.logger.warn(
         `Attempted to confirm payment for order #${orderId} in state '${order.state}'`
       );
@@ -251,13 +319,28 @@ export class OrderFlowService {
       });
     }
 
-    this.validateTransition(order.state as OrderState, 'processing');
-    const updatedOrder = await this.updateOrderState(orderId, 'processing', {
-      paid_at: new Date(),
-    });
+    // Only transition state if coming from pending_payment
+    if (order.state === 'pending_payment') {
+      this.validateTransition(order.state as OrderState, 'processing');
+      const updatedOrder = await this.updateOrderState(orderId, 'processing', {
+        paid_at: new Date(),
+      });
+      this.logger.log(`Order #${orderId} payment confirmed, moved to processing`);
+      return updatedOrder;
+    }
 
-    this.logger.log(`Order #${orderId} payment confirmed, moved to processing`);
-    return updatedOrder;
+    // For shipped state: payment confirmed but state stays as shipped
+    this.logger.log(`Order #${orderId} payment confirmed while in '${order.state}' state`);
+
+    // Return refreshed order with updated payment data
+    return this.prisma.orders.findFirst({
+      where: { id: orderId },
+      include: {
+        stores: { select: { id: true, name: true, store_code: true } },
+        order_items: { include: { products: true, product_variants: true } },
+        payments: true,
+      },
+    });
   }
 
   /**

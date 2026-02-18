@@ -1051,6 +1051,25 @@ export class ProductsService {
 
           // Sincronizar variantes si se proporcionan
           if (variants !== undefined) {
+            // Detect simple → variant transition
+            const existingVariantCount = await prisma.product_variants.count({
+              where: { product_id: id },
+            });
+
+            const isTransitionToVariants =
+              existingVariantCount === 0 && variants.length > 0;
+
+            // If transitioning, clear base stock and get location_ids for inheritance
+            let inheritedLocationIds: number[] = [];
+            if (isTransitionToVariants) {
+              inheritedLocationIds =
+                await this.stockLevelManager.clearBaseStock(
+                  id,
+                  user_id!,
+                  prisma,
+                );
+            }
+
             for (const variantData of variants) {
               const { variant_image_url, ...variantFields } = variantData as CreateVariantWithStockDto;
 
@@ -1083,6 +1102,19 @@ export class ProductsService {
                   prisma,
                 );
                 variantId = createdVariant.id;
+
+                // If transitioning, inherit locations from base stock
+                if (
+                  isTransitionToVariants &&
+                  inheritedLocationIds.length > 0
+                ) {
+                  await this.stockLevelManager.initializeVariantStockAtLocations(
+                    id,
+                    variantId,
+                    inheritedLocationIds,
+                    prisma,
+                  );
+                }
               }
 
               // Process variant image if new base64 provided
@@ -1110,33 +1142,65 @@ export class ProductsService {
             }
           }
 
-          // Actualizar stock levels para múltiples ubicaciones
-          if (stock_by_location !== undefined && stock_by_location.length > 0) {
-            // Actualizar stock en las ubicaciones especificadas
-            for (const stockLocation of stock_by_location) {
-              // Obtener stock actual en esta ubicación
-              const currentStockLevel = await prisma.stock_levels.findUnique({
-                where: {
-                  product_id_location_id_product_variant_id: {
-                    product_id: id,
-                    location_id: stockLocation.location_id,
-                    product_variant_id: null,
+          // Guard: skip base stock updates when product has variants
+          const currentVariantCount = await prisma.product_variants.count({
+            where: { product_id: id },
+          });
+
+          if (currentVariantCount === 0) {
+            // Actualizar stock levels para múltiples ubicaciones
+            if (stock_by_location !== undefined && stock_by_location.length > 0) {
+              // Actualizar stock en las ubicaciones especificadas
+              for (const stockLocation of stock_by_location) {
+                // Obtener stock actual en esta ubicación
+                const currentStockLevel = await prisma.stock_levels.findUnique({
+                  where: {
+                    product_id_location_id_product_variant_id: {
+                      product_id: id,
+                      location_id: stockLocation.location_id,
+                      product_variant_id: null,
+                    },
                   },
-                },
-              });
+                });
 
-              const currentQuantity =
-                currentStockLevel?.quantity_available || 0;
-              const quantityChange = stockLocation.quantity - currentQuantity;
+                const currentQuantity =
+                  currentStockLevel?.quantity_available || 0;
+                const quantityChange = stockLocation.quantity - currentQuantity;
 
-              if (quantityChange !== 0) {
+                if (quantityChange !== 0) {
+                  await this.stockLevelManager.updateStock(
+                    {
+                      product_id: id,
+                      location_id: stockLocation.location_id,
+                      quantity_change: quantityChange,
+                      movement_type: 'adjustment',
+                      reason: `Stock adjusted from product edit${stockLocation.notes ? ': ' + stockLocation.notes : ''}`,
+                      user_id: user_id!, // Non-null assertion safe because we checked above
+                      create_movement: true,
+                      validate_availability: false,
+                    },
+                    prisma,
+                  );
+                }
+              }
+            } else if (stock_quantity !== undefined) {
+              // Mantener compatibilidad con el campo stock_quantity (usa ubicación default)
+              const stockDifference =
+                stock_quantity - existingProduct.stock_quantity;
+
+              if (stockDifference !== 0) {
+                const defaultLocation =
+                  await this.inventoryLocationsService.getDefaultLocation(
+                    product.store_id,
+                  );
+
                 await this.stockLevelManager.updateStock(
                   {
                     product_id: id,
-                    location_id: stockLocation.location_id,
-                    quantity_change: quantityChange,
+                    location_id: defaultLocation.id,
+                    quantity_change: stockDifference,
                     movement_type: 'adjustment',
-                    reason: `Stock adjusted from product edit${stockLocation.notes ? ': ' + stockLocation.notes : ''}`,
+                    reason: 'Stock quantity updated from product edit (legacy)',
                     user_id: user_id!, // Non-null assertion safe because we checked above
                     create_movement: true,
                     validate_availability: false,
@@ -1144,31 +1208,6 @@ export class ProductsService {
                   prisma,
                 );
               }
-            }
-          } else if (stock_quantity !== undefined) {
-            // Mantener compatibilidad con el campo stock_quantity (usa ubicación default)
-            const stockDifference =
-              stock_quantity - existingProduct.stock_quantity;
-
-            if (stockDifference !== 0) {
-              const defaultLocation =
-                await this.inventoryLocationsService.getDefaultLocation(
-                  product.store_id,
-                );
-
-              await this.stockLevelManager.updateStock(
-                {
-                  product_id: id,
-                  location_id: defaultLocation.id,
-                  quantity_change: stockDifference,
-                  movement_type: 'adjustment',
-                  reason: 'Stock quantity updated from product edit (legacy)',
-                  user_id: user_id!, // Non-null assertion safe because we checked above
-                  create_movement: true,
-                  validate_availability: false,
-                },
-                prisma,
-              );
             }
           }
 

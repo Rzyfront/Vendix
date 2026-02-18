@@ -10,7 +10,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { TooltipComponent } from '../../../../../../shared/components/tooltip/tooltip.component';
 import { QuantityControlComponent } from '../../../../../../shared/components/quantity-control/quantity-control.component';
 import { PopCartState, PopCartItem } from '../services/pop-cart.service';
 
@@ -21,7 +21,7 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
     CommonModule,
     FormsModule,
     IconComponent,
-    ButtonComponent,
+    TooltipComponent,
     QuantityControlComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -137,13 +137,20 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
               </div>
 
               <!-- Remove Button -->
-              <button
-                class="remove-btn"
-                (click)="onRemoveItem(item.id)"
-                title="Eliminar"
-              >
-                <app-icon name="x" [size]="16"></app-icon>
-              </button>
+              <div class="remove-btn-wrapper"
+                   (mouseenter)="hoveredRemoveTooltip = item.id"
+                   (mouseleave)="hoveredRemoveTooltip = null">
+                <button
+                  class="remove-btn"
+                  (click)="onRemoveItem(item.id)"
+                >
+                  <app-icon name="x" [size]="16"></app-icon>
+                </button>
+                <app-tooltip position="top" size="sm" [visible]="hoveredRemoveTooltip === item.id"
+                  class="remove-tooltip">
+                  Eliminar
+                </app-tooltip>
+              </div>
 
               <!-- Actions Row: Quantity + Total -->
               <div class="item-actions">
@@ -192,36 +199,30 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
 
         <!-- Action Buttons -->
         <div class="modal-actions">
-          <app-button
-            variant="outline"
-            size="sm"
-            (clicked)="saveDraft.emit()"
+          <button
+            class="action-btn create-btn"
+            (click)="createOrder.emit()"
             [disabled]="!cartState?.items?.length"
-            class="action-btn"
           >
-            <app-icon name="save" [size]="16" slot="icon"></app-icon>
-            Borrador
-          </app-button>
-          <app-button
-            variant="primary"
-            size="sm"
-            (clicked)="createOrder.emit()"
+            <app-icon name="file-plus" [size]="18"></app-icon>
+            <span>Crear orden</span>
+          </button>
+          <button
+            class="action-btn draft-btn"
+            (click)="saveDraft.emit()"
             [disabled]="!cartState?.items?.length"
-            class="action-btn"
           >
-            Crear
-          </app-button>
-          <app-button
-            variant="success"
-            size="sm"
-            (clicked)="createAndReceive.emit()"
+            <app-icon name="save" [size]="18"></app-icon>
+            <span>Borrador</span>
+          </button>
+          <button
+            class="action-btn receive-btn"
+            (click)="createAndReceive.emit()"
             [disabled]="!cartState?.items?.length || isProcessing"
-            [loading]="isProcessing"
-            class="action-btn checkout"
           >
-            <app-icon *ngIf="!isProcessing" name="package-check" [size]="16" slot="icon"></app-icon>
-            Crear y Recibir
-          </app-button>
+            <app-icon *ngIf="!isProcessing" name="package-check" [size]="18"></app-icon>
+            <span>{{ isProcessing ? 'Procesando...' : 'Crear + Recibir' }}</span>
+          </button>
         </div>
       </div>
     </div>
@@ -556,9 +557,21 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
         margin: 0;
       }
 
-      .remove-btn {
+      .remove-btn-wrapper {
         grid-row: 1;
         grid-column: 3;
+        position: relative;
+      }
+
+      .remove-tooltip {
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        bottom: 100%;
+        z-index: 10;
+      }
+
+      .remove-btn {
         width: 28px;
         height: 28px;
         border: none;
@@ -662,6 +675,7 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
       /* Action Buttons */
       .modal-actions {
         display: flex;
+        flex-direction: column;
         gap: 10px;
         padding: 16px 20px;
         padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
@@ -670,16 +684,57 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
         flex-shrink: 0;
       }
 
-      .action-btn {
-        flex: 1;
-        height: 44px;
-        border-radius: 10px;
+      .modal-actions .action-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        height: 48px;
+        border: none;
+        border-radius: 12px;
+        font-size: 15px;
         font-weight: 600;
-        font-size: 14px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        width: 100%;
       }
 
-      .action-btn.checkout {
-        flex: 1.5;
+      .modal-actions .action-btn:active:not(:disabled) {
+        transform: scale(0.97);
+      }
+
+      .modal-actions .action-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      .modal-actions .create-btn {
+        background: var(--color-primary);
+        color: white;
+      }
+
+      .modal-actions .create-btn:hover:not(:disabled) {
+        filter: brightness(1.1);
+      }
+
+      .modal-actions .draft-btn {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        color: var(--color-text-primary);
+      }
+
+      .modal-actions .draft-btn:hover:not(:disabled) {
+        background: var(--color-muted);
+        border-color: var(--color-text-secondary);
+      }
+
+      .modal-actions .receive-btn {
+        background: var(--color-success, #22c55e);
+        color: white;
+      }
+
+      .modal-actions .receive-btn:hover:not(:disabled) {
+        filter: brightness(1.1);
       }
 
       /* Hide on desktop */
@@ -697,6 +752,8 @@ export class PopCartModalComponent implements OnChanges {
   @Input() supplierName: string = '';
   @Input() locationName: string = '';
   @Input() isProcessing: boolean = false;
+
+  hoveredRemoveTooltip: string | null = null;
 
   @Output() closed = new EventEmitter<void>();
   @Output() itemQuantityChanged = new EventEmitter<{

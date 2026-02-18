@@ -8,7 +8,9 @@ import {
 } from '@nestjs/common';
 import { CheckoutService } from './checkout.service';
 import { CheckoutDto } from './dto/checkout.dto';
+import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { Public } from '@common/decorators/public.decorator';
 
 @Controller('ecommerce/checkout')
 @UseGuards(JwtAuthGuard)
@@ -29,6 +31,13 @@ export class CheckoutController {
     async checkout(@Body() dto: CheckoutDto) {
         // store_id y user_id se resuelven automáticamente
         const data = await this.checkout_service.checkout(dto);
+        return { success: true, data };
+    }
+
+    @Public()
+    @Post('whatsapp')
+    async whatsappCheckout(@Body() dto: WhatsappCheckoutDto) {
+        const data = await this.checkout_service.whatsappCheckout(dto);
         return { success: true, data };
     }
 }

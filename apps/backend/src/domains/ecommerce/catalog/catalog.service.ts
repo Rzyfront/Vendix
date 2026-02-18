@@ -166,6 +166,7 @@ export class CatalogService {
                 },
               },
             },
+            _count: { select: { product_variants: true } },
           },
         }),
         this.prisma.products.count({ where: whereBestSelling }),
@@ -204,6 +205,7 @@ export class CatalogService {
                 },
               },
             },
+            _count: { select: { product_variants: true } },
           },
         });
 
@@ -267,6 +269,7 @@ export class CatalogService {
               },
             },
           },
+          _count: { select: { product_variants: true } },
         },
       }),
       this.prisma.products.count({ where }),
@@ -307,6 +310,7 @@ export class CatalogService {
         },
         product_variants: {
           where: { stock_quantity: { gt: 0 } },
+          include: { product_images: true },
         },
         product_tax_assignments: {
           include: {
@@ -468,6 +472,7 @@ export class CatalogService {
       brand: product.brands,
       categories:
         product.product_categories?.map((pc: any) => pc.categories) || [],
+      variant_count: product._count?.product_variants || 0,
     };
   }
 
@@ -503,7 +508,7 @@ export class CatalogService {
       brand: product.brands,
       categories:
         product.product_categories?.map((pc: any) => pc.categories) || [],
-      variants: product.product_variants || [],
+      variants: await this.mapVariantsToResponse(product),
       reviews: reviews.map((r: any) => ({
         id: r.id,
         rating: r.rating,
@@ -518,12 +523,54 @@ export class CatalogService {
   }
 
   /**
-   * Calculates the final price of a product including taxes and active offers.
+   * Maps product variants to enriched response with pricing and signed image URLs.
    */
-  private calculateFinalPrice(product: any): number {
-    const basePrice = product.is_on_sale && product.sale_price
+  private async mapVariantsToResponse(product: any): Promise<any[]> {
+    const variants = product.product_variants || [];
+    if (variants.length === 0) return [];
+
+    return Promise.all(
+      variants.map(async (variant: any) => {
+        const effectiveBasePrice = this.getEffectiveBasePrice(product, variant);
+        const signedImageUrl = variant.product_images?.image_url
+          ? await this.s3Service.signUrl(variant.product_images.image_url)
+          : null;
+
+        return {
+          id: variant.id,
+          sku: variant.sku,
+          name: variant.name,
+          attributes: variant.attributes,
+          price_override: variant.price_override ? Number(variant.price_override) : null,
+          effective_base_price: effectiveBasePrice,
+          final_price: this.calculateFinalPrice(product, variant),
+          stock_quantity: variant.stock_quantity,
+          image_url: signedImageUrl,
+          is_on_sale: variant.is_on_sale,
+          sale_price: variant.sale_price ? Number(variant.sale_price) : null,
+        };
+      }),
+    );
+  }
+
+  /**
+   * Calculates the effective base price, considering variant overrides.
+   */
+  private getEffectiveBasePrice(product: any, variant?: any): number {
+    if (variant?.price_override) {
+      return Number(variant.price_override);
+    }
+    return product.is_on_sale && product.sale_price
       ? Number(product.sale_price)
       : Number(product.base_price);
+  }
+
+  /**
+   * Calculates the final price of a product including taxes and active offers.
+   * Supports variant price overrides.
+   */
+  private calculateFinalPrice(product: any, variant?: any): number {
+    const basePrice = this.getEffectiveBasePrice(product, variant);
 
     let totalTaxRate = 0;
 

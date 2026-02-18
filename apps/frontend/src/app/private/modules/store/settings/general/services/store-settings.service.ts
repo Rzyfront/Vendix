@@ -1,15 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, Subject, BehaviorSubject, throwError } from 'rxjs';
-import {
-  debounceTime,
-  distinctUntilChanged,
-  switchMap,
-  takeUntil,
-  map,
-  catchError,
-  tap,
-} from 'rxjs/operators';
+import { Observable, throwError } from 'rxjs';
+import { map, catchError, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
 import { Store } from '@ngrx/store';
 import {
@@ -28,53 +20,6 @@ export class StoreSettingsService {
   private currencyFormatService = inject(CurrencyFormatService);
   private readonly api_base_url = `${environment.apiUrl}/store`;
 
-  private save_settings$$ = new Subject<Partial<StoreSettings>>();
-  private destroy$$ = new Subject<void>();
-
-  private settings$$ = new BehaviorSubject<StoreSettings | null>(null);
-  settings$ = this.settings$$.asObservable();
-
-  private auto_save_error$$ = new Subject<Error>();
-  autoSaveError$ = this.auto_save_error$$.asObservable();
-
-  constructor() {
-    this.setupAutoSave();
-  }
-
-  private setupAutoSave() {
-    this.save_settings$$
-      .pipe(
-        debounceTime(2500),
-        distinctUntilChanged(
-          (prev, curr) => JSON.stringify(prev) === JSON.stringify(curr),
-        ),
-        switchMap((settings) =>
-          this.update_settings_api(settings).pipe(
-            catchError((error) => {
-              console.error('Error saving settings:', error);
-              this.auto_save_error$$.next(error);
-              return throwError(() => error);
-            }),
-          ),
-        ),
-        takeUntil(this.destroy$$),
-      )
-      .subscribe({
-        next: (response: ApiResponse<StoreSettings>) => {
-          console.log('Settings saved successfully:', response);
-          // Update local BehaviorSubject
-          this.settings$$.next(response.data);
-          // Dispatch success action directly to update NgRx store
-          this.store.dispatch(AuthActions.updateStoreSettingsSuccess({ store_settings: response.data }));
-
-          // Refrescar moneda si cambió la configuración de moneda
-          if (response.data?.general?.currency) {
-            this.currencyFormatService.refresh();
-          }
-        },
-      });
-  }
-
   getSettings(): Observable<ApiResponse<StoreSettings>> {
     return this.http
       .get<ApiResponse<StoreSettings>>(
@@ -84,15 +29,6 @@ export class StoreSettingsService {
         map((response) => response || { success: true, data: null }),
         catchError(this.handleError)
       );
-  }
-
-  /**
-   * Dispara el auto-guardado con debounce.
-   * El flujo de auto-save ya está configurado en setupAutoSave().
-   * Suscríbete a settings$ para recibir notificaciones cuando el guardado se complete.
-   */
-  triggerAutoSave(settings: Partial<StoreSettings>): void {
-    this.save_settings$$.next(settings);
   }
 
   saveSettingsNow(
@@ -158,6 +94,15 @@ export class StoreSettingsService {
         settings,
       )
       .pipe(
+        tap((response) => {
+          const store_settings = response?.data;
+          if (!store_settings) return;
+
+          this.store.dispatch(AuthActions.updateStoreSettingsSuccess({ store_settings }));
+          if (store_settings.general?.currency) {
+            this.currencyFormatService.refresh();
+          }
+        }),
         map((response) => response || { success: true, data: null }),
         catchError(this.handleError)
       );
@@ -176,10 +121,5 @@ export class StoreSettingsService {
 
     console.error('StoreSettingsService error:', error);
     return throwError(() => new Error(error_message));
-  }
-
-  ngOnDestroy() {
-    this.destroy$$.next();
-    this.destroy$$.complete();
   }
 }

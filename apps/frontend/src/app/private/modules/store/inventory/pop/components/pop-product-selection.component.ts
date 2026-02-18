@@ -47,6 +47,7 @@ import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
 
             <app-options-dropdown
               [actions]="dropdownActions"
+              triggerIcon="package-plus"
               triggerLabel="Opciones"
               title="Opciones"
               (actionClick)="onDropdownAction($event)"
@@ -66,6 +67,7 @@ import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
 
           <app-options-dropdown
             [actions]="dropdownActions"
+            triggerIcon="package-plus"
             triggerLabel="Opciones"
             title="Opciones"
             (actionClick)="onDropdownAction($event)"

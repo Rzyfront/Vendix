@@ -8,7 +8,7 @@
     [attr.aria-expanded]="isOpen"
     [attr.aria-haspopup]="true"
   >
-    <app-icon name="sliders-horizontal" [size]="18"></app-icon>
+    <app-icon [name]="triggerIcon" [size]="18"></app-icon>
     <span class="trigger-label-text">{{ triggerLabel }}</span>
     <span
       *ngIf="activeFiltersCount > 0"

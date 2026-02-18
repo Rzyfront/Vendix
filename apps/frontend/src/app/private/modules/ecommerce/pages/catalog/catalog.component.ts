@@ -20,12 +20,13 @@ import { ProductQuickViewModalComponent } from '../../components/product-quick-v
 import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
+import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 
 @Component({
   selector: 'app-catalog-page',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, ProductCardComponent, ProductQuickViewModalComponent, ShareModalComponent, ButtonComponent, InputComponent],
+  imports: [CommonModule, RouterModule, FormsModule, ProductCardComponent, ProductQuickViewModalComponent, ShareModalComponent, ButtonComponent, InputComponent, IconComponent],
   templateUrl: './catalog.component.html',
   styleUrls: ['./catalog.component.scss'],
 })
@@ -255,12 +256,15 @@ export class CatalogComponent implements OnInit, OnDestroy {
   }
 
   onAddToCart(product: EcommerceProduct): void {
-    // Handler para ProductCard - agrega 1 unidad al carrito
+    // Guard: variant products must go through detail page for variant selection
+    if (product.variant_count && product.variant_count > 0) {
+      this.router.navigate(['/catalog', product.slug]);
+      return;
+    }
     const result = this.cart_service.addToCart(product.id, 1);
     if (result) {
       result.subscribe();
     }
-    // TODO: Show toast notification
   }
 
   onModalAddedToCart(_product: EcommerceProduct): void {

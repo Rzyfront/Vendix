@@ -160,10 +160,22 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
           </app-button>
         </div>
 
-        <app-button variant="primary" size="md" (clicked)="startNewSale()" class="shadow-sm">
-          <app-icon name="plus" [size]="18" slot="icon"></app-icon>
-          Nueva Venta
-        </app-button>
+        <div class="flex gap-3">
+          <app-button
+            variant="outline"
+            size="md"
+            (clicked)="goToOrderDetail()"
+            [disabled]="!orderId"
+          >
+            <app-icon name="file-text" [size]="18" slot="icon"></app-icon>
+            Ver detalle
+          </app-button>
+
+          <app-button variant="primary" size="md" (clicked)="startNewSale()" class="shadow-sm">
+            <app-icon name="plus" [size]="18" slot="icon"></app-icon>
+            Nueva compra
+          </app-button>
+        </div>
       </div>
     </app-modal>
   `,
@@ -249,11 +261,13 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
   @Input() orderData: any = null;
   @Output() closed = new EventEmitter<void>();
   @Output() newSale = new EventEmitter<void>();
+  @Output() viewDetail = new EventEmitter<string>();
 
   printing = false;
   emailing = false;
 
   orderNumber = '';
+  orderId: string | null = null;
   currentDate = '';
   cashierName = '';
   customerName = '';
@@ -292,6 +306,7 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
   }
 
   private loadOrderData(): void {
+    this.orderId = this.orderData?.id?.toString?.() || null;
     this.orderNumber = this.orderData.order_number || this.orderData.number || 'N/A';
     this.currentDate = this.orderData.created_at
       ? new Date(this.orderData.created_at).toLocaleString('es-AR')
@@ -420,6 +435,11 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
 
   startNewSale(): void {
     this.newSale.emit();
+  }
+
+  goToOrderDetail(): void {
+    if (!this.orderId) return;
+    this.viewDetail.emit(this.orderId);
   }
 
   hasDiscount(): boolean {

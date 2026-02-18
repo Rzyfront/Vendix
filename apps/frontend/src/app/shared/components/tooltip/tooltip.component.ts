@@ -14,7 +14,8 @@ export type TooltipColor =
   | 'primary'
   | 'secondary'
   | 'accent'
-  | 'destructive';
+  | 'destructive'
+  | 'warning';
 
 @Component({
   selector: 'app-tooltip',
@@ -184,6 +185,12 @@ export type TooltipColor =
         --tooltip-arrow-color: #ef4444;
       }
 
+      .tooltip-container[data-color='warning'] {
+        --tooltip-bg: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        --tooltip-text: #ffffff;
+        --tooltip-arrow-color: #f59e0b;
+      }
+
       .tooltip-container[data-color='primary'] .tooltip-content {
         background: var(--color-primary);
         color: var(--color-text-on-primary);
@@ -206,6 +213,12 @@ export type TooltipColor =
         background: var(--color-destructive);
         color: white;
         border-color: var(--color-destructive);
+      }
+
+      .tooltip-container[data-color='warning'] .tooltip-content {
+        background: #f59e0b;
+        color: white;
+        border-color: #f59e0b;
       }
 
       /* Arrow */
@@ -292,6 +305,10 @@ export type TooltipColor =
 
       .tooltip-container[data-color='destructive'] {
         --tooltip-arrow-color: var(--color-destructive);
+      }
+
+      .tooltip-container[data-color='warning'] {
+        --tooltip-arrow-color: #f59e0b;
       }
 
       /* Dark theme adjustments */

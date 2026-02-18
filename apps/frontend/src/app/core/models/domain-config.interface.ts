@@ -1,6 +1,7 @@
 // Re-export from environment.enum.ts for compatibility
 export { DomainType, AppType, AppEnvironment } from './environment.enum';
 import { AppType as AppTypeImport } from './environment.enum';
+import { Currency } from '../../shared/pipes/currency/currency.pipe';
 
 // ============================================================================
 // Domain Config (Frontend internal state)
@@ -26,6 +27,7 @@ export interface DomainCustomConfig {
   fonts?: FontsConfig;
   ecommerce?: EcommerceConfig;
   publication?: PublicationConfig;
+  currency?: Currency;
 
   // Legacy: Security y routing metadata
   security?: {
@@ -122,6 +124,8 @@ export interface EcommerceConfig {
     create_account_after_order: boolean;
     terms_required: boolean;
     guest_newsletter_opt_in: boolean;
+    whatsapp_checkout?: boolean;
+    whatsapp_number?: string;
   };
   shipping?: {
     free_shipping_threshold?: number;
@@ -160,6 +164,9 @@ export interface DomainResolution {
 
   // NUEVO: Publication settings desde store_settings
   publication?: PublicationConfig;
+
+  // Currency details from store settings
+  currency?: Currency;
 
   // Config (sin app - app_type es campo directo)
   config?: {

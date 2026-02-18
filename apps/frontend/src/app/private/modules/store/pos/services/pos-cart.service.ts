@@ -538,14 +538,15 @@ export class PosCartService {
   }
 
   /**
-   * Helper to calculate sum of tax rates
+   * Helper to calculate sum of tax rates.
+   * Tax rates are stored as decimals in DB (e.g., 0.19 for 19%) — do NOT divide by 100.
    */
   private calculateRateSum(product: any): number {
     return (
       product.tax_assignments?.reduce((rateSum: number, assignment: any) => {
         const assignmentRate =
           assignment.tax_categories?.tax_rates?.reduce(
-            (sum: number, tr: any) => sum + (parseFloat(tr.rate || '0') / 100),
+            (sum: number, tr: any) => sum + parseFloat(tr.rate || '0'),
             0,
           ) || 0;
         return rateSum + assignmentRate;

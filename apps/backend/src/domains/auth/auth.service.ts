@@ -942,18 +942,6 @@ export class AuthService {
       },
     );
 
-    // Generar token de verificación de email
-    const verificationToken = this.generateRandomToken();
-
-    // Guardar token de verificación en la base de datos
-    await this.prismaService.email_verification_tokens.create({
-      data: {
-        user_id: userWithRoles.id,
-        token: verificationToken,
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 horas
-      },
-    });
-
     // Obtener el slug de la organización para el vLink
     let organizationSlug: string | undefined;
     try {
@@ -968,7 +956,7 @@ export class AuthService {
       // Continuar sin organization slug si hay error
     }
 
-    // Enviar email de bienvenida y verificación
+    // Enviar solo email de bienvenida de tienda para customers
     try {
       // Obtener branding de la tienda para el email de bienvenida
       let branding;
@@ -993,12 +981,6 @@ export class AuthService {
         // Continuar sin branding si hay error
       }
 
-      await this.emailService.sendVerificationEmail(
-        userWithRoles.email,
-        verificationToken,
-        `${userWithRoles.first_name} ${userWithRoles.last_name}`,
-        organizationSlug,
-      );
       // Customers reciben email con branding de la tienda
       await this.emailService.sendWelcomeEmail(
         userWithRoles.email,

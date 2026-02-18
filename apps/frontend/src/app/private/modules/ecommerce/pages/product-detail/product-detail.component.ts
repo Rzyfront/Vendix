@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { RouterModule, ActivatedRoute, Router } from '@angular/router';
 import { FormsModule, ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { CatalogService, ProductDetail, EcommerceProduct, CatalogQuery } from '../../services/catalog.service';
+import { CatalogService, ProductDetail, ProductVariantDetail, EcommerceProduct, CatalogQuery } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 import { ProductCarouselComponent } from '../../components/product-carousel';
 import { SpinnerComponent } from '../../../../../shared/components/spinner/spinner.component';
@@ -92,8 +92,8 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
               </div>
 
               <div class="price-line">
-                <span class="current-price">{{ p.final_price | currency }}</span>
-                @if (p.is_on_sale) {
+                <span class="current-price">{{ displayPrice() | currency }}</span>
+                @if (p.is_on_sale || selectedVariant()?.price_override) {
                   <span class="original-price" style="text-decoration: line-through; opacity: 0.6; margin-left: 10px;">{{ p.base_price | currency }}</span>
                 }
               </div>
@@ -121,8 +121,8 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                 <app-quantity-control
                   [value]="quantity()"
                   [min]="1"
-                  [max]="p.stock_quantity || 99"
-                  [size]="'md'"
+                  [max]="displayStock() || 99"
+                  [size]="'sm'"
                   (valueChange)="quantity.set($event)"
                 />
 
@@ -130,11 +130,11 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                   variant="primary"
                   size="sm"
                   customClasses="btn-cart"
-                  [disabled]="p.stock_quantity === 0"
+                  [disabled]="displayStock() === 0"
                   (clicked)="onAddToCart(p)"
                 >
                   <app-icon slot="icon" name="shopping-cart" [size]="18" />
-                  {{ p.stock_quantity === 0 ? 'Agotado' : 'Añadir' }}
+                  {{ displayStock() === 0 ? 'Agotado' : 'Añadir' }}
                 </app-button>
 
                 <app-button
@@ -153,18 +153,18 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                 size="md"
                 [fullWidth]="true"
                 customClasses="btn-buy-now"
-                [disabled]="p.stock_quantity === 0"
+                [disabled]="displayStock() === 0"
                 (clicked)="onBuyNow(p)"
               >
-                {{ p.stock_quantity === 0 ? 'Agotado' : 'Comprar ahora' }}
+                {{ displayStock() === 0 ? 'Agotado' : 'Comprar ahora' }}
               </app-button>
 
               <!-- Stock Minimal -->
               <div class="stock-minimal">
-                @if (p.stock_quantity !== null && p.stock_quantity > 0) {
-                  <span [class.warn]="p.stock_quantity <= 5" class="s-dot"></span>
-                  <span class="s-text">{{ p.stock_quantity <= 5 ? 'Pocas unidades' : 'En stock' }}</span>
-                } @else if (p.stock_quantity === 0) {
+                @if (displayStock() > 0) {
+                  <span [class.warn]="displayStock() <= 5" class="s-dot"></span>
+                  <span class="s-text">{{ displayStock() <= 5 ? 'Pocas unidades' : 'En stock' }}</span>
+                } @else {
                   <span class="s-dot err"></span>
                   <span class="s-text">Sin stock</span>
                 }
@@ -407,6 +407,35 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
         textarea { width: 100%; height: 80px; padding: 0.75rem; border-radius: var(--radius-md); border: 1px solid var(--color-border); margin-bottom: 1rem; font-size: 0.875rem; resize: none; background: var(--color-background); }
       }
     }
+
+    /* ─── Mobile Compact ─── */
+    @media (max-width: 640px) {
+      .product-detail-page { padding: 0.75rem; }
+      .breadcrumbs { margin-bottom: 0.75rem; font-size: 0.65rem; }
+      .product-main-grid { gap: 1rem; margin-bottom: 1.5rem; }
+      .main-image-wrapper { aspect-ratio: 3/2; border-radius: var(--radius-lg); }
+      .main-image-wrapper img { padding: 0.75rem; }
+      .thumbnail-list { gap: 0.4rem; margin-top: 0.5rem; }
+      .thumbnail-list .thumbnail { width: 50px; height: 50px; }
+      .product-info-panel { gap: 0.4rem; }
+      .brand-name { font-size: 0.65rem; }
+      .product-title { font-size: 1.25rem; font-weight: 700; }
+      .price-line { margin: 0.25rem 0; }
+      .price-line .current-price { font-size: 1.35rem; font-weight: 700; }
+      .price-line .original-price { font-size: 0.85rem; }
+      .variants-btns { gap: 0.35rem; }
+      .purchase-box { gap: 0.5rem; margin-top: 0.25rem; }
+      .stock-minimal { font-size: 0.65rem; }
+      .product-content-flow { margin-top: 1rem; gap: 1rem; }
+      .product-content-flow .info-label { font-size: 0.65rem; }
+      .product-content-flow .cat-tag { font-size: 0.6rem; padding: 0.15rem 0.4rem; }
+      .product-content-flow .desc-text { font-size: 0.8rem; line-height: 1.5; }
+      .reviews-minimal { margin-top: 2rem; padding-top: 1rem; }
+      .reviews-minimal .rv-title { font-size: 1rem; margin-bottom: 0.75rem; }
+      .reviews-minimal .rv-grid { gap: 1.5rem; }
+      .reviews-minimal .rv-form-mini { padding: 1rem; }
+      .reviews-minimal .rv-form-mini textarea { height: 60px; padding: 0.5rem; font-size: 0.8rem; }
+    }
   `],
 })
 export class ProductDetailComponent implements OnInit {
@@ -425,6 +454,32 @@ export class ProductDetailComponent implements OnInit {
   selectedVariantId = signal<number | null>(null);
   isDescriptionExpanded = signal(false);
   quantity = signal(1);
+
+  // Variant-aware computed signals
+  selectedVariant = computed((): ProductVariantDetail | null => {
+    const p = this.product();
+    const vid = this.selectedVariantId();
+    if (!p || !vid || !p.variants?.length) return null;
+    return p.variants.find(v => v.id === vid) || null;
+  });
+
+  displayPrice = computed((): number => {
+    const variant = this.selectedVariant();
+    const p = this.product();
+    if (variant) return variant.final_price;
+    return p?.final_price || 0;
+  });
+
+  displayStock = computed((): number => {
+    const variant = this.selectedVariant();
+    const p = this.product();
+    if (variant) return variant.stock_quantity;
+    // If product has variants but none selected, sum all variant stock (defense in depth)
+    if (p?.variants?.length) {
+      return p.variants.reduce((sum, v) => sum + (v.stock_quantity || 0), 0);
+    }
+    return p?.stock_quantity || 0;
+  });
 
   // Quick View Modal
   quickViewOpen = false;
@@ -512,13 +567,41 @@ export class ProductDetailComponent implements OnInit {
   }
 
   setActiveImage(url: string): void { this.activeImageUrl.set(url); }
-  selectVariant(variant: any): void { this.selectedVariantId.set(variant.id); }
+
+  selectVariant(variant: ProductVariantDetail): void {
+    this.selectedVariantId.set(variant.id);
+    // Update main image if variant has its own image
+    if (variant.image_url) {
+      this.activeImageUrl.set(variant.image_url);
+    }
+    // Reset quantity if it exceeds variant stock
+    if (this.quantity() > variant.stock_quantity) {
+      this.quantity.set(Math.max(1, variant.stock_quantity));
+    }
+  }
+
   toggleDescription(): void { this.isDescriptionExpanded.update(v => !v); }
-  onAddToCart(product: EcommerceProduct | ProductDetail): void { const result = this.cartService.addToCart(product.id, this.quantity()); if (result) { result.subscribe(); } }
+
+  onAddToCart(product: EcommerceProduct | ProductDetail): void {
+    const variantId = this.selectedVariantId() ?? undefined;
+    const variant = this.selectedVariant();
+    const variantInfo = variant
+      ? { name: variant.name, sku: variant.sku, price: variant.final_price }
+      : undefined;
+    const result = this.cartService.addToCart(product.id, this.quantity(), variantId, variantInfo);
+    if (result) { result.subscribe(); }
+  }
+
   onQuickView(product: EcommerceProduct): void { this.selectedProductSlug = product.slug; this.quickViewOpen = true; }
   onShareClick(): void { this.shareModalOpen = true; }
+
   onBuyNow(product: ProductDetail): void {
-    const result = this.cartService.addToCart(product.id, this.quantity());
+    const variantId = this.selectedVariantId() ?? undefined;
+    const variant = this.selectedVariant();
+    const variantInfo = variant
+      ? { name: variant.name, sku: variant.sku, price: variant.final_price }
+      : undefined;
+    const result = this.cartService.addToCart(product.id, this.quantity(), variantId, variantInfo);
     if (result) {
       result.subscribe(() => this.router.navigate(['/cart']));
     } else {

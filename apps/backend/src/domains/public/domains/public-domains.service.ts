@@ -65,6 +65,7 @@ export class PublicDomainsService {
     let ecommerceSettings: any = null;
     let publicationSettings: any = null;
     let fontsSettings: any = null;
+    let generalSettings: any = null;
 
     // 1. If it's a STORE domain → read from store_settings
     if (domain.store_id) {
@@ -78,6 +79,7 @@ export class PublicDomainsService {
         ecommerceSettings = settingsData?.ecommerce;
         publicationSettings = settingsData?.publication;
         fontsSettings = settingsData?.fonts;
+        generalSettings = settingsData?.general;
 
         // CLAVE: Para dominios STORE_ECOMMERCE, usar ecommerce.inicio como fuente de verdad
         if (domain.app_type === 'STORE_ECOMMERCE' && ecommerceSettings?.inicio) {
@@ -170,6 +172,15 @@ export class PublicDomainsService {
       await this.signEcommerceImages(config);
     }
 
+    // Lookup currency details from the currencies table
+    let currencyDetails: any = null;
+    if (generalSettings?.currency) {
+      currencyDetails = await this.globalPrisma.currencies.findUnique({
+        where: { code: generalSettings.currency },
+        select: { code: true, name: true, symbol: true, decimal_places: true, position: true, state: true },
+      });
+    }
+
     // Firmar logo de la tienda
     const signedStoreLogo = domain.store?.logo_url
       ? await this.s3Service.signUrl(domain.store.logo_url)
@@ -193,6 +204,9 @@ export class PublicDomainsService {
 
       // NUEVO: Publication settings desde store_settings
       publication: publicationSettings,
+
+      // Currency details from the currencies table
+      currency: currencyDetails,
 
       // Config sin app (app_type es campo directo)
       config: config || {},

@@ -17,6 +17,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
+import { TooltipComponent } from '../../../../../../shared/components/tooltip/tooltip.component';
 
 import { PopCartService, ShippingMethod } from '../services/pop-cart.service';
 import { PopSupplier, PopLocation } from '../interfaces/pop-cart.interface';
@@ -48,6 +49,7 @@ import { InventoryService } from '../../services/inventory.service';
     ButtonComponent,
     InputComponent,
     BadgeComponent,
+    TooltipComponent,
   ],
   template: `
     <div class="px-4 lg:px-6 py-4 lg:py-5 bg-surface rounded-t-xl">
@@ -141,59 +143,85 @@ import { InventoryService } from '../../services/inventory.service';
 
         <!-- Desktop: Full Filters Grid (always visible) -->
         <div class="hidden lg:grid lg:grid-cols-5 gap-4">
-          <!-- 1. Supplier Selector -->
-          <div class="flex flex-col gap-1.5 min-w-0">
-            <label
-              class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1"
-            >
-              Proveedor <span class="text-destructive">*</span>
-            </label>
-            <div class="flex gap-2">
-              <app-selector
-                class="flex-1 min-w-0"
-                size="sm"
-                [options]="supplierOptions"
-                [(ngModel)]="selectedSupplierId"
-                (ngModelChange)="onSupplierChange($event)"
-                placeholder="Seleccionar..."
-              ></app-selector>
-              <app-button
-                variant="outline"
-                size="sm"
-                customClasses="!px-2 flex items-center justify-center"
-                (clicked)="openSupplierModal.emit()"
-                title="Nuevo Proveedor"
-              >
-                <app-icon name="plus" [size]="18" slot="icon"></app-icon>
-              </app-button>
-            </div>
-          </div>
+          <!-- 1+2. Supplier + Warehouse (wrapped for flash warning) -->
+          <div class="col-span-2 grid grid-cols-2 gap-4 relative rounded-lg"
+               [class.config-flash-warning]="showConfigWarning">
+            <app-tooltip
+              position="top"
+              color="warning"
+              size="sm"
+              [visible]="showConfigWarning"
+              class="!absolute left-1/2 -translate-x-1/2 top-0 z-10"
+            >Selecciona proveedor y bodega</app-tooltip>
 
-          <!-- 2. Warehouse Selector -->
-          <div class="flex flex-col gap-1.5 min-w-0">
-            <label
-              class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1"
-            >
-              Bodega <span class="text-destructive">*</span>
-            </label>
-            <div class="flex gap-2">
-              <app-selector
-                class="flex-1 min-w-0"
-                size="sm"
-                [options]="locationOptions"
-                [(ngModel)]="selectedLocationId"
-                (ngModelChange)="onLocationChange($event)"
-                placeholder="Seleccionar..."
-              ></app-selector>
-              <app-button
-                variant="outline"
-                size="sm"
-                customClasses="!px-2 flex items-center justify-center"
-                (clicked)="openWarehouseModal.emit()"
-                title="Nueva Bodega"
+            <!-- 1. Supplier Selector -->
+            <div class="flex flex-col gap-1.5 min-w-0">
+              <label
+                class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1"
               >
-                <app-icon name="plus" [size]="18" slot="icon"></app-icon>
-              </app-button>
+                Proveedor <span class="text-destructive">*</span>
+              </label>
+              <div class="flex gap-2">
+                <app-selector
+                  class="flex-1 min-w-0"
+                  size="sm"
+                  [options]="supplierOptions"
+                  [(ngModel)]="selectedSupplierId"
+                  (ngModelChange)="onSupplierChange($event)"
+                  placeholder="Seleccionar..."
+                ></app-selector>
+                <div class="relative"
+                     (mouseenter)="hoveredTooltip = 'supplier'"
+                     (mouseleave)="hoveredTooltip = null">
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    customClasses="!px-2 flex items-center justify-center"
+                    (clicked)="openSupplierModal.emit()"
+                  >
+                    <app-icon name="plus" [size]="18" slot="icon"></app-icon>
+                  </app-button>
+                  <app-tooltip position="top" size="sm" [visible]="hoveredTooltip === 'supplier'"
+                    class="!absolute left-1/2 -translate-x-1/2 bottom-full z-10">
+                    Nuevo Proveedor
+                  </app-tooltip>
+                </div>
+              </div>
+            </div>
+
+            <!-- 2. Warehouse Selector -->
+            <div class="flex flex-col gap-1.5 min-w-0">
+              <label
+                class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1"
+              >
+                Bodega <span class="text-destructive">*</span>
+              </label>
+              <div class="flex gap-2">
+                <app-selector
+                  class="flex-1 min-w-0"
+                  size="sm"
+                  [options]="locationOptions"
+                  [(ngModel)]="selectedLocationId"
+                  (ngModelChange)="onLocationChange($event)"
+                  placeholder="Seleccionar..."
+                ></app-selector>
+                <div class="relative"
+                     (mouseenter)="hoveredTooltip = 'warehouse'"
+                     (mouseleave)="hoveredTooltip = null">
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    customClasses="!px-2 flex items-center justify-center"
+                    (clicked)="openWarehouseModal.emit()"
+                  >
+                    <app-icon name="plus" [size]="18" slot="icon"></app-icon>
+                  </app-button>
+                  <app-tooltip position="top" size="sm" [visible]="hoveredTooltip === 'warehouse'"
+                    class="!absolute left-1/2 -translate-x-1/2 bottom-full z-10">
+                    Nueva Bodega
+                  </app-tooltip>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -247,7 +275,15 @@ import { InventoryService } from '../../services/inventory.service';
         <!-- Mobile: Collapsible Settings -->
         <div class="lg:hidden" *ngIf="showMobileSettings">
           <!-- Row 1: Supplier + Warehouse -->
-          <div class="grid grid-cols-2 gap-3 mb-3">
+          <div class="grid grid-cols-2 gap-3 mb-3 relative rounded-lg"
+               [class.config-flash-warning]="showConfigWarning">
+            <app-tooltip
+              position="top"
+              color="warning"
+              size="sm"
+              [visible]="showConfigWarning"
+              class="!absolute left-1/2 -translate-x-1/2 top-0 z-10"
+            >Selecciona proveedor y bodega</app-tooltip>
             <div class="flex flex-col gap-1.5 min-w-0">
               <label class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1">
                 Proveedor <span class="text-destructive">*</span>
@@ -342,6 +378,20 @@ import { InventoryService } from '../../services/inventory.service';
       :host {
         display: block;
       }
+
+      @keyframes configFlashWarning {
+        0%   { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);   border-color: transparent; }
+        15%  { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.4); border-color: #f59e0b; }
+        30%  { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);   border-color: transparent; }
+        55%  { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.4); border-color: #f59e0b; }
+        70%  { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);   border-color: transparent; }
+        100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);   border-color: transparent; }
+      }
+
+      .config-flash-warning {
+        animation: configFlashWarning 1.2s ease-out;
+        border: 2px solid transparent;
+      }
     `,
   ],
 })
@@ -369,6 +419,13 @@ export class PopHeaderComponent implements OnInit, OnDestroy {
 
   // Mobile state
   showMobileSettings = false;
+
+  // Tooltip hover state
+  hoveredTooltip: string | null = null;
+
+  // Config warning flash
+  showConfigWarning = false;
+  private configWarningTimeout: any;
 
   @Output() openSupplierModal = new EventEmitter<void>();
   @Output() openWarehouseModal = new EventEmitter<void>();
@@ -411,6 +468,27 @@ export class PopHeaderComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
+    if (this.configWarningTimeout) {
+      clearTimeout(this.configWarningTimeout);
+    }
+  }
+
+  /**
+   * Flash the supplier+warehouse section with an amber warning animation.
+   * Uses setTimeout(0) to force animation restart on rapid re-triggers.
+   */
+  flashConfigWarning(): void {
+    // Turn off first to allow re-trigger
+    this.showConfigWarning = false;
+    if (this.configWarningTimeout) {
+      clearTimeout(this.configWarningTimeout);
+    }
+    setTimeout(() => {
+      this.showConfigWarning = true;
+      this.configWarningTimeout = setTimeout(() => {
+        this.showConfigWarning = false;
+      }, 3000);
+    }, 0);
   }
 
   // ============================================================

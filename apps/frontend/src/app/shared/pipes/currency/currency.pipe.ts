@@ -2,6 +2,7 @@ import { Injectable, Pipe, PipeTransform, signal, computed, inject } from '@angu
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../environments/environment';
+import { TenantFacade } from '../../../core/store/tenant/tenant.facade';
 
 // ============================================================================
 // INTERFACES
@@ -44,6 +45,7 @@ export interface ApiResponse<T> {
 })
 export class CurrencyFormatService {
   private readonly http = inject(HttpClient);
+  private readonly tenantFacade = inject(TenantFacade);
   private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutos
 
   // Signals para estado reactivo
@@ -82,13 +84,26 @@ export class CurrencyFormatService {
     this.loadingSignal.set(true);
 
     try {
-      // 1. Obtener settings de la tienda
-      console.log('[CurrencyFormat] Fetching store settings...');
+      // 1. Try to get currency from domain config (injected at boot, no HTTP needed)
+      const domainCurrency = this.tenantFacade.getCurrentDomainConfig()?.customConfig?.currency;
+      if (domainCurrency) {
+        console.log('[CurrencyFormat] Using currency from domain config:', domainCurrency.code);
+        this.currentCurrencySignal.set(domainCurrency);
+        this.lastFetchTime = Date.now();
+        return domainCurrency;
+      }
+
+      // 2. Fallback: fetch via HTTP (for store-admin context where domain config may lack currency)
+      // Only attempt /store/settings if the user is authenticated
+      if (!this.hasValidAuthState()) {
+        console.warn('[CurrencyFormat] No domain currency and no auth state, skipping HTTP fetch');
+        return null;
+      }
+
+      console.log('[CurrencyFormat] Fetching store settings (admin fallback)...');
       const settingsResponse = await firstValueFrom(
         this.http.get<ApiResponse<StoreSettings>>(`${environment.apiUrl}/store/settings`)
       );
-
-      console.log('[CurrencyFormat] Settings response:', settingsResponse);
 
       if (!settingsResponse.success || !settingsResponse.data?.general?.currency) {
         console.warn('[CurrencyFormat] No currency in settings');
@@ -96,17 +111,12 @@ export class CurrencyFormatService {
       }
 
       const currencyCode = settingsResponse.data.general.currency;
-      console.log('[CurrencyFormat] Currency code from settings:', currencyCode);
 
-      // 2. Obtener detalles de la moneda activa
-      console.log('[CurrencyFormat] Fetching active currencies...');
       const currencyResponse = await firstValueFrom(
         this.http.get<{ success: boolean; data: Currency[]; message?: string }>(
           `${environment.apiUrl}/public/currencies/active`
         )
       );
-
-      console.log('[CurrencyFormat] Active currencies response:', currencyResponse);
 
       if (!currencyResponse.success || !currencyResponse.data) {
         console.warn('[CurrencyFormat] No active currencies found');
@@ -117,13 +127,10 @@ export class CurrencyFormatService {
 
       if (!currency) {
         console.warn(`[CurrencyFormat] Currency ${currencyCode} not found in active currencies`);
-        console.log('[CurrencyFormat] Available currencies:', currencyResponse.data?.map(c => c.code));
         return null;
       }
 
-      console.log('[CurrencyFormat] Found currency:', currency);
-
-      // Actualizar signal
+      console.log('[CurrencyFormat] Found currency via HTTP:', currency.code);
       this.currentCurrencySignal.set(currency);
       this.lastFetchTime = Date.now();
 
@@ -133,6 +140,21 @@ export class CurrencyFormatService {
       return null;
     } finally {
       this.loadingSignal.set(false);
+    }
+  }
+
+  /**
+   * Check if user has valid auth state in localStorage
+   */
+  private hasValidAuthState(): boolean {
+    try {
+      if (typeof localStorage === 'undefined') return false;
+      const authState = localStorage.getItem('vendix_auth_state');
+      if (!authState) return false;
+      const parsed = JSON.parse(authState);
+      return !!(parsed?.user && parsed?.tokens?.access_token);
+    } catch {
+      return false;
     }
   }
 

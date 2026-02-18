@@ -187,12 +187,12 @@
             </div>
           </app-card>
 
-          <!-- 3. HISTORIAL DE LA ORDEN -->
+          <!-- 3. HISTORIAL DE LA ORDEN (cronológico ascendente) -->
           <app-card title="Historial de la Orden" shadow="sm" [responsivePadding]="true">
             <div class="space-y-0">
-              @for (log of timeline; track $index) {
+              @for (log of sortedTimeline(); track $index; let last = $last) {
                 <div class="timeline-item">
-                  <div class="timeline-marker"></div>
+                  <div class="timeline-marker" [ngClass]="{ 'bg-primary': last }"></div>
                   <div class="flex flex-col sm:flex-row sm:justify-between gap-2">
                     <div>
                       <p class="text-sm font-bold text-gray-900">{{ getTimelineLabel(log) }}</p>
@@ -214,15 +214,17 @@
                 </div>
               }
 
-              <div class="timeline-item">
-                <div class="timeline-marker bg-primary"></div>
-                <div>
-                  <p class="text-sm font-bold text-gray-900">Orden Creada</p>
-                  <span class="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">
-                    {{ formatDate(orderData.created_at) }}
-                  </span>
+              @if (sortedTimeline().length === 0) {
+                <div class="timeline-item">
+                  <div class="timeline-marker bg-primary"></div>
+                  <div>
+                    <p class="text-sm font-bold text-gray-900">Orden Creada</p>
+                    <span class="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">
+                      {{ formatDate(orderData.created_at) }}
+                    </span>
+                  </div>
                 </div>
-              </div>
+              }
             </div>
           </app-card>
         </div>
@@ -230,58 +232,111 @@
         <!-- ═══ COLUMNA DERECHA (SIDEBAR) ═══ -->
         <div class="flex flex-col gap-2">
 
-          <!-- 4. PROGRESO DE LA ORDEN (Stepper Vertical) -->
+          <!-- SHIPPING METHOD ASSIGNMENT (only for delivery_type 'other') -->
+          @if (showShippingAssignment()) {
+            <div class="bg-amber-50 rounded-xl border border-amber-200 p-4 shadow-sm">
+              <h3 class="text-xs font-bold text-amber-800 uppercase tracking-wider mb-2 flex items-center gap-2">
+                <app-icon name="truck" size="14" class="text-amber-600"></app-icon>
+                Asignar Metodo de Envio
+              </h3>
+
+              @if (!showShippingMethodCard()) {
+                <p class="text-xs text-amber-700 mb-3">
+                  Esta orden no tiene un metodo de envio asignado. Puedes asignar uno para definir el tipo de entrega.
+                </p>
+                <app-button variant="primary" [fullWidth]="true" (clicked)="openShippingAssignCard()" customClasses="!bg-amber-600 hover:!bg-amber-700">
+                  <app-icon slot="icon" name="package" size="16"></app-icon>
+                  Seleccionar
+                </app-button>
+              } @else {
+                <!-- Expanded: method list -->
+                @if (isLoadingShippingMethods()) {
+                  <div class="flex justify-center py-4">
+                    <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-amber-600"></div>
+                  </div>
+                } @else if (shippingMethods().length === 0) {
+                  <p class="text-xs text-amber-600 italic py-2">No hay metodos de envio activos configurados.</p>
+                } @else {
+                  <div class="space-y-1.5 mb-3 max-h-48 overflow-y-auto">
+                    @for (method of shippingMethods(); track method.id) {
+                      <button
+                        (click)="onShippingMethodSelect(method.id)"
+                        class="w-full text-left p-2.5 rounded-lg border transition-all text-sm flex items-center gap-2.5"
+                        [ngClass]="{
+                          'border-amber-400 bg-amber-100 ring-1 ring-amber-400': selectedShippingMethodId() === method.id,
+                          'border-amber-200 bg-white hover:bg-amber-50': selectedShippingMethodId() !== method.id
+                        }"
+                      >
+                        <app-icon [name]="shippingMethodsService.getShippingMethodIcon(method.type)" size="16" class="text-amber-700 flex-shrink-0"></app-icon>
+                        <div class="min-w-0 flex-1">
+                          <p class="font-semibold text-gray-900 truncate text-xs">{{ method.name }}</p>
+                          <p class="text-[10px] text-gray-500">{{ shippingMethodsService.getShippingMethodTypeLabel(method.type) }}</p>
+                        </div>
+                      </button>
+                    }
+                  </div>
+                }
+
+                <!-- Shipping cost field (shown when a method is selected) -->
+                @if (selectedShippingMethod()) {
+                  <div class="mb-3" [formGroup]="shippingAssignForm">
+                    <label class="block text-xs font-bold text-amber-800 mb-1">Costo de envio</label>
+                    <input
+                      type="number"
+                      formControlName="shipping_cost"
+                      min="0"
+                      step="0.01"
+                      class="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-400 focus:border-amber-400 bg-white"
+                      placeholder="0.00"
+                    />
+                  </div>
+                }
+
+                <!-- Action buttons -->
+                <div class="flex items-center gap-2">
+                  <app-button variant="outline" size="sm" [fullWidth]="true" (clicked)="skipShippingAssignment()">
+                    Continuar sin metodo
+                  </app-button>
+                  @if (selectedShippingMethodId()) {
+                    <app-button variant="primary" size="sm" [fullWidth]="true" (clicked)="submitShippingAssignment()" [disabled]="isProcessingAction()" customClasses="!bg-amber-600 hover:!bg-amber-700">
+                      {{ isProcessingAction() ? 'Asignando...' : 'Confirmar' }}
+                    </app-button>
+                  }
+                </div>
+              }
+            </div>
+          }
+
+          <!-- 4. PROGRESO DE LA ORDEN -->
           <app-card shadow="sm" [responsivePadding]="true">
             <h2 class="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4">
               Progreso de la Orden
             </h2>
 
-            <!-- Vertical Stepper -->
-            <div class="stepper-vertical">
-              @for (step of lifecycleSteps(); track step.key; let last = $last) {
-                <div class="step-item">
-                  <div class="step-indicator">
-                    <div class="step-circle"
-                      [ngClass]="{
-                        'bg-green-500 border-green-500 text-white': step.status === 'completed',
-                        'bg-primary-600 border-primary-600 text-white shadow-md shadow-primary-200': step.status === 'current',
-                        'bg-white border-gray-300 text-gray-400': step.status === 'upcoming',
-                        'bg-red-500 border-red-500 text-white': step.status === 'terminal' && step.key === 'cancelled',
-                        'bg-orange-500 border-orange-500 text-white': step.status === 'terminal' && step.key === 'refunded'
-                      }"
-                    >
-                      @if (step.status === 'completed') {
-                        <app-icon name="check" size="14"></app-icon>
-                      } @else if (step.status === 'terminal' && step.key === 'cancelled') {
-                        <app-icon name="x" size="14"></app-icon>
-                      } @else if (step.status === 'terminal' && step.key === 'refunded') {
-                        <app-icon name="rotate-ccw" size="14"></app-icon>
-                      } @else if (step.status === 'current') {
-                        <div class="w-2 h-2 bg-white rounded-full"></div>
-                      }
-                    </div>
-                    @if (!last) {
-                      <div class="step-line"
-                        [ngClass]="{
-                          'bg-green-400': step.status === 'completed',
-                          'bg-gray-200': step.status !== 'completed'
-                        }"
-                      ></div>
-                    }
-                  </div>
-                  <div class="step-content">
-                    <span class="text-sm font-semibold"
-                      [ngClass]="{
-                        'text-green-600': step.status === 'completed',
-                        'text-primary-600': step.status === 'current',
-                        'text-gray-400': step.status === 'upcoming',
-                        'text-red-600': step.status === 'terminal' && step.key === 'cancelled',
-                        'text-orange-600': step.status === 'terminal' && step.key === 'refunded'
-                      }"
-                    >
-                      {{ step.label }}
-                    </span>
-                  </div>
+            <div class="space-y-0">
+              @for (step of lifecycleSteps(); track step.key) {
+                <div class="progress-item"
+                  [class.line-completed]="step.status === 'completed'">
+                  <div class="progress-marker"
+                    [ngClass]="{
+                      'completed': step.status === 'completed',
+                      'current': step.status === 'current',
+                      'upcoming': step.status === 'upcoming',
+                      'terminal-cancelled': step.status === 'terminal' && step.key === 'cancelled',
+                      'terminal-refunded': step.status === 'terminal' && step.key === 'refunded'
+                    }"
+                  ></div>
+                  <span class="text-sm font-semibold"
+                    [ngClass]="{
+                      'text-green-600': step.status === 'completed',
+                      'text-green-800': step.status === 'current',
+                      'text-gray-400': step.status === 'upcoming',
+                      'text-red-600': step.status === 'terminal' && step.key === 'cancelled',
+                      'text-orange-600': step.status === 'terminal' && step.key === 'refunded'
+                    }"
+                  >
+                    {{ step.label }}
+                  </span>
                 </div>
               }
             </div>
@@ -437,35 +492,15 @@
               <div class="space-y-2">
                 @for (action of availableActions(); track action.id) {
                   @if (action.type === 'alert') {
-                    <div class="rounded-xl p-3 flex items-center gap-3"
-                      [ngClass]="{
-                        'bg-yellow-50 border border-yellow-200': action.color === 'warning',
-                        'bg-blue-50 border border-blue-200': action.color === 'info',
-                        'bg-red-50 border border-red-200': action.color === 'danger'
-                      }"
-                    >
-                      <app-icon [name]="action.icon" size="18"
-                        [ngClass]="{
-                          'text-yellow-600': action.color === 'warning',
-                          'text-blue-600': action.color === 'info',
-                          'text-red-600': action.color === 'danger'
-                        }"
-                      ></app-icon>
-                      <span class="text-sm font-medium"
-                        [ngClass]="{
-                          'text-yellow-800': action.color === 'warning',
-                          'text-blue-800': action.color === 'info',
-                          'text-red-800': action.color === 'danger'
-                        }"
-                      >{{ action.label }}</span>
-                    </div>
+                    <app-alert-banner [variant]="$any(action.color)" [icon]="action.icon">
+                      {{ action.label }}
+                    </app-alert-banner>
                   } @else {
                     <app-button
-                      [variant]="action.variant === 'danger' ? 'outline-danger' : action.variant === 'success' ? 'success' : 'primary'"
+                      [variant]="action.variant === 'danger' ? 'outline-danger' : action.variant === 'warning' ? 'outline-warning' : action.variant === 'success' ? 'success' : 'primary'"
                       [fullWidth]="true"
                       [disabled]="isProcessingAction()"
                       (clicked)="executeAction(action.id)"
-                      [customClasses]="action.variant === 'warning' ? '!bg-white !text-orange-600 !border-2 !border-orange-200 hover:!bg-orange-50' : ''"
                     >
                       <app-icon slot="icon" [name]="action.icon" size="16"></app-icon>
                       {{ action.label }}
@@ -570,11 +605,20 @@
     <!-- SHIP MODAL (delivery-type aware) -->
     <app-modal
       [isOpen]="showShipModal()"
-      (closed)="showShipModal.set(false)"
-      [title]="shipModalConfig().title"
+      (closed)="showShipModal.set(false); isManualShipMode.set(false)"
+      [title]="isManualShipMode() ? 'Despachar sin confirmar pago' : shipModalConfig().title"
       size="md"
     >
       <div class="p-4 space-y-4" [formGroup]="shipForm">
+        @if (isManualShipMode()) {
+          <div class="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-start gap-3">
+            <app-icon name="alert-triangle" size="18" class="text-orange-600 mt-0.5"></app-icon>
+            <div>
+              <p class="text-sm font-bold text-orange-800">Despacho sin pago confirmado</p>
+              <p class="text-xs text-orange-600 mt-0.5">La orden se despachara sin que el pago haya sido confirmado. Deberas confirmar el pago antes de marcar la entrega.</p>
+            </div>
+          </div>
+        }
         @if (shipModalConfig().showShippingInfo) {
           <div class="bg-gray-50 rounded-lg p-4 space-y-3">
             <h4 class="text-sm font-bold text-gray-700">Información de Envío</h4>
@@ -650,13 +694,13 @@
       </div>
 
       <div slot="footer" class="flex items-center justify-end gap-2 p-4 border-t border-border">
-        <app-button variant="outline" (clicked)="showShipModal.set(false)">Cancelar</app-button>
+        <app-button variant="outline" (clicked)="showShipModal.set(false); isManualShipMode.set(false)">Cancelar</app-button>
         <app-button
-          variant="primary"
+          [variant]="isManualShipMode() ? 'outline-warning' : 'primary'"
           (clicked)="submitShipment()"
           [disabled]="isProcessingAction()"
         >
-          {{ isProcessingAction() ? 'Procesando...' : shipModalConfig().confirmLabel }}
+          {{ isProcessingAction() ? 'Procesando...' : (isManualShipMode() ? 'Despachar sin pago' : shipModalConfig().confirmLabel) }}
         </app-button>
       </div>
     </app-modal>
@@ -664,11 +708,25 @@
     <!-- DELIVER MODAL -->
     <app-modal
       [isOpen]="showDeliverModal()"
-      (closed)="showDeliverModal.set(false)"
-      title="Marcar como Entregado"
+      (closed)="showDeliverModal.set(false); isManualDeliverMode.set(false)"
+      [title]="isManualDeliverMode() ? (orderData.delivery_type === 'pickup' ? 'Entregar directamente al cliente' : 'Entregar sin confirmar pago') : 'Marcar como Entregado'"
       size="md"
     >
       <div class="p-4 space-y-4" [formGroup]="deliverForm">
+        @if (isManualDeliverMode()) {
+          <div class="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-start gap-3">
+            <app-icon name="alert-triangle" size="18" class="text-orange-600 mt-0.5"></app-icon>
+            <div>
+              @if (orderData.delivery_type === 'pickup') {
+                <p class="text-sm font-bold text-orange-800">Entrega directa al cliente</p>
+                <p class="text-xs text-orange-600 mt-0.5">Se omitira el paso "Lista para recoger" y la orden se marcara como entregada directamente. Si el pago esta confirmado, la orden se finalizara automaticamente.</p>
+              } @else {
+                <p class="text-sm font-bold text-orange-800">Entrega sin pago confirmado</p>
+                <p class="text-xs text-orange-600 mt-0.5">La orden se marcara como entregada sin que el pago haya sido confirmado.</p>
+              }
+            </div>
+          </div>
+        }
         <div>
           <label class="block text-sm font-bold text-gray-700 mb-1.5">Recibido por</label>
           <input
@@ -690,13 +748,13 @@
       </div>
 
       <div slot="footer" class="flex items-center justify-end gap-2 p-4 border-t border-border">
-        <app-button variant="outline" (clicked)="showDeliverModal.set(false)">Cancelar</app-button>
+        <app-button variant="outline" (clicked)="showDeliverModal.set(false); isManualDeliverMode.set(false)">Cancelar</app-button>
         <app-button
-          variant="primary"
+          [variant]="isManualDeliverMode() ? 'outline-warning' : 'primary'"
           (clicked)="submitDelivery()"
           [disabled]="isProcessingAction()"
         >
-          {{ isProcessingAction() ? 'Procesando...' : 'Confirmar Entrega' }}
+          {{ isProcessingAction() ? 'Procesando...' : (isManualDeliverMode() ? 'Confirmar Entrega Directa' : 'Confirmar Entrega') }}
         </app-button>
       </div>
     </app-modal>

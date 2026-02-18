@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { CreateOrderDto, UpdateOrderDto, OrderQueryDto, UpdateOrderItemsDto } from './dto';
-import { Prisma, order_state_enum } from '@prisma/client';
+import { Prisma, order_state_enum, order_delivery_type_enum } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { OrderStatsDto } from './dto/order-stats.dto';
 
@@ -207,7 +207,30 @@ export class OrdersService {
   }
 
   async update(id: number, updateOrderDto: UpdateOrderDto) {
-    await this.findOne(id);
+    const order = await this.findOne(id);
+
+    // Derive delivery_type from shipping method if not explicitly provided
+    if (updateOrderDto.shipping_method_id && !updateOrderDto.delivery_type) {
+      const method = await this.prisma.shipping_methods.findUnique({
+        where: { id: updateOrderDto.shipping_method_id },
+        select: { type: true },
+      });
+      if (!method) {
+        throw new NotFoundException('Shipping method not found');
+      }
+      updateOrderDto.delivery_type = method.type === 'pickup'
+        ? order_delivery_type_enum.pickup
+        : order_delivery_type_enum.home_delivery;
+    }
+
+    // Recalculate grand_total if shipping_cost changes
+    if (updateOrderDto.shipping_cost !== undefined) {
+      const subtotal = Number(order.subtotal_amount);
+      const tax = Number(order.tax_amount);
+      const discount = Number(order.discount_amount);
+      const shipping = Number(updateOrderDto.shipping_cost);
+      (updateOrderDto as any).grand_total = subtotal + tax - discount + shipping;
+    }
 
     return this.prisma.orders.update({
       where: { id },

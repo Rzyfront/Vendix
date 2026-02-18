@@ -1,20 +1,19 @@
 <div class="order-detail-page">
-    <div class="page-header">
-        <a routerLink="/account/orders" class="back-link">
-            <i class="pi pi-arrow-left"></i>
-            Mis pedidos
-        </a>
-        @if (order) {
-        <h1>Pedido #{{ order.order_number }}</h1>
-        }
-    </div>
+    <!-- Back link -->
+    <a routerLink="/account/orders" class="back-link">
+        <app-icon name="arrow-left" [size]="16"></app-icon>
+        Mis pedidos
+    </a>
 
-    @if (is_new_order) {
+    <!-- Success Banner -->
+    @if (is_new_order && order) {
     <div class="success-banner">
-        <i class="pi pi-check-circle"></i>
-        <div>
-            <h3>¡Pedido realizado con éxito!</h3>
-            <p>Recibirás un correo con los detalles de tu compra</p>
+        <div class="success-icon-wrap">
+            <app-icon name="check" [size]="28"></app-icon>
+        </div>
+        <div class="success-text">
+            <h2>¡Pedido confirmado!</h2>
+            <p>Tu pedido <strong>#{{ order.order_number }}</strong> fue registrado. Te notificaremos cuando esté en camino.</p>
         </div>
     </div>
     }
@@ -24,77 +23,112 @@
         <div class="spinner"></div>
     </div>
     } @else if (order) {
-    <div class="order-content">
-        <div class="order-main">
-            <!-- Status -->
-            <div class="order-status">
-                <span class="status-badge" [class]="getStateClass(order.state)">
-                    {{ getStateLabel(order.state) }}
-                </span>
-                <span class="order-date">
-                    Realizado el {{ order.created_at | date:'dd MMM yyyy, HH:mm' }}
-                </span>
+
+    <!-- Order Header Card -->
+    @if (!is_new_order) {
+    <div class="order-header-card">
+        <div class="order-header-top">
+            <h1>Pedido #{{ order.order_number }}</h1>
+            <span class="status-badge" [class]="getStateClass(order.state)">
+                <app-icon [name]="getStateIcon(order.state)" [size]="14"></app-icon>
+                {{ getStateLabel(order.state) }}
+            </span>
+        </div>
+        <div class="order-meta">
+            <span class="meta-item">
+                <app-icon name="calendar" [size]="14"></app-icon>
+                {{ order.created_at | date:'dd MMM yyyy, HH:mm' }}
+            </span>
+            <span class="meta-item">
+                <app-icon name="package" [size]="14"></app-icon>
+                {{ totalItems }} {{ totalItems === 1 ? 'producto' : 'productos' }}
+            </span>
+            <span class="meta-item total-highlight">
+                <app-icon name="receipt" [size]="14"></app-icon>
+                {{ order.grand_total | currency }}
+            </span>
+        </div>
+    </div>
+    }
+
+    <!-- Main Content -->
+    <div class="order-body">
+        <!-- Items -->
+        <section class="card-section">
+            <div class="section-header">
+                <app-icon name="shopping-bag" [size]="18"></app-icon>
+                <h3>Productos ({{ totalItems }})</h3>
             </div>
-
-            <!-- Items -->
-            <section class="order-section">
-                <h2>Productos</h2>
-                <div class="order-items">
-                    @for (item of order.items; track item.id) {
-                    <div class="order-item">
-                        <div class="item-image">
-                            @if (item.image_url) {
-                            <img [src]="item.image_url" [alt]="item.product_name">
-                            } @else {
-                            <div class="no-image">
-                                <i class="pi pi-image"></i>
-                            </div>
-                            }
+            <div class="items-list">
+                @for (item of order.items; track item.id) {
+                <div class="item-row">
+                    <div class="item-thumb">
+                        @if (item.image_url) {
+                        <img [src]="item.image_url" [alt]="item.product_name">
+                        } @else {
+                        <div class="thumb-placeholder">
+                            <app-icon name="image" [size]="18"></app-icon>
                         </div>
-                        <div class="item-info">
-                            <h4>{{ item.product_name }}</h4>
-                            @if (item.variant_sku) {
-                            <span class="item-variant">{{ item.variant_sku }}</span>
-                            }
-                            <span class="item-qty">Cantidad: {{ item.quantity }}</span>
-                        </div>
-                        <div class="item-price">
-                            {{ item.total_price | currency }}
-                        </div>
+                        }
                     </div>
-                    }
+                    <div class="item-details">
+                        <span class="item-name">{{ item.product_name }}</span>
+                        @if (getVariantLabel(item)) {
+                        <span class="item-variant">{{ getVariantLabel(item) }}</span>
+                        }
+                        <span class="item-meta">{{ item.quantity }} × {{ item.unit_price | currency }}</span>
+                    </div>
+                    <span class="item-total">{{ item.total_price | currency }}</span>
                 </div>
-            </section>
+                }
+            </div>
+        </section>
 
+        <!-- Info Grid: Shipping + Payment side by side on desktop -->
+        <div class="info-grid">
             <!-- Shipping -->
             @if (order.shipping_address) {
-            <section class="order-section">
-                <h2>Dirección de envío</h2>
-                <div class="shipping-info">
+            <section class="card-section compact">
+                <div class="section-header">
+                    <app-icon name="map-pin" [size]="18"></app-icon>
+                    <h3>Envío</h3>
+                </div>
+                <div class="info-content">
                     <p>{{ order.shipping_address.address_line1 }}</p>
                     @if (order.shipping_address.address_line2) {
                     <p>{{ order.shipping_address.address_line2 }}</p>
                     }
                     <p>{{ order.shipping_address.city }}, {{ order.shipping_address.state_province }}</p>
                     @if (order.shipping_address.phone_number) {
-                    <p>Tel: {{ order.shipping_address.phone_number }}</p>
+                    <p class="info-muted">
+                        <app-icon name="phone" [size]="13"></app-icon>
+                        {{ order.shipping_address.phone_number }}
+                    </p>
                     }
                 </div>
             </section>
             }
 
-            <!-- Payments -->
+            <!-- Payment -->
             @if (order.payments.length > 0) {
-            <section class="order-section">
-                <h2>Pagos</h2>
+            <section class="card-section compact">
+                <div class="section-header">
+                    <app-icon name="credit-card" [size]="18"></app-icon>
+                    <h3>Pago</h3>
+                </div>
                 <div class="payments-list">
                     @for (payment of order.payments; track payment.id) {
-                    <div class="payment-item">
-                        <span class="payment-method">{{ payment.method || 'Método de pago' }}</span>
-                        <span class="payment-amount">{{ payment.amount | currency }}</span>
-                        <span class="payment-state" [class]="payment.state === 'completed' ? 'success' : 'pending'">
-                            {{ payment.state === 'completed' ? 'Pagado' : 'Pendiente' }}
-                        </span>
+                    <div class="payment-row">
+                        <div class="payment-info">
+                            <app-icon [name]="getPaymentIcon(payment.method)" [size]="16"></app-icon>
+                            <span>{{ getPaymentMethodLabel(payment.method) }}</span>
+                        </div>
+                        <div class="payment-right">
+                            <span class="payment-amount">{{ payment.amount | currency }}</span>
+                            <span class="payment-badge" [class]="payment.state === 'completed' ? 'paid' : 'pending'">
+                                {{ payment.state === 'completed' ? 'Pagado' : 'Pendiente' }}
+                            </span>
+                        </div>
                     </div>
                     }
                 </div>
@@ -103,10 +137,12 @@
         </div>
 
         <!-- Summary -->
-        <div class="order-summary">
-            <div class="summary-card">
-                <h3>Resumen</h3>
-
+        <section class="card-section summary-section">
+            <div class="section-header">
+                <app-icon name="receipt" [size]="18"></app-icon>
+                <h3>Resumen del pedido</h3>
+            </div>
+            <div class="summary-rows">
                 <div class="summary-row">
                     <span>Subtotal</span>
                     <span>{{ order.subtotal_amount | currency }}</span>
@@ -125,15 +161,14 @@
                     <span>Impuestos</span>
                     <span>{{ order.tax_amount | currency }}</span>
                 </div>
-
-                <hr>
-
+                <div class="summary-divider"></div>
                 <div class="summary-row total">
                     <span>Total</span>
                     <span>{{ order.grand_total | currency }}</span>
                 </div>
             </div>
-        </div>
+        </section>
     </div>
+
     }
 </div>

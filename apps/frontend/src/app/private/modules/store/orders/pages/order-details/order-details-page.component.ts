@@ -13,7 +13,7 @@ import {
   OrderActionConfig,
   PayOrderDto,
 } from '../../interfaces/order.interface';
-import { DialogService, ModalComponent, ToastService } from '../../../../../../shared/components';
+import { AlertBannerComponent, DialogService, ModalComponent, ToastService } from '../../../../../../shared/components';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -24,6 +24,8 @@ import {
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { PaymentMethodsService } from '../../../settings/payments/services/payment-methods.service';
 import { StorePaymentMethod, PaymentMethodState } from '../../../settings/payments/interfaces/payment-methods.interface';
+import { ShippingMethodsService } from '../../../settings/shipping/services/shipping-methods.service';
+import { StoreShippingMethod } from '../../../settings/shipping/interfaces/shipping-methods.interface';
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { OrderPaymentModalComponent } from '../../components/order-payment-modal/order-payment-modal.component';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
@@ -41,6 +43,7 @@ export interface LifecycleStep {
     CommonModule,
     RouterModule,
     ReactiveFormsModule,
+    AlertBannerComponent,
     ButtonComponent,
     CardComponent,
     IconComponent,
@@ -55,7 +58,7 @@ export interface LifecycleStep {
 export class OrderDetailsPageComponent implements OnInit, OnDestroy {
   orderId: string | null = null;
   order = signal<Order | null>(null);
-  timeline: any[] = [];
+  private rawTimeline = signal<any[]>([]);
   isLoading = signal(false);
   error: string | null = null;
 
@@ -72,8 +75,19 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
   // Processing state
   isProcessingAction = signal(false);
 
+  // Manual mode flags (use modals but call updateOrderStatus instead of flow endpoints)
+  isManualShipMode = signal(false);
+  isManualDeliverMode = signal(false);
+
   // Payment methods for pay modal
   paymentMethods = signal<StorePaymentMethod[]>([]);
+
+  // Shipping method assignment
+  shippingMethods = signal<StoreShippingMethod[]>([]);
+  isLoadingShippingMethods = signal(false);
+  showShippingMethodCard = signal(false);
+  selectedShippingMethodId = signal<number | null>(null);
+  shippingAssignForm!: FormGroup;
 
   // Reactive forms (ship, deliver, cancel, refund — pay is now in its own component)
   shipForm!: FormGroup;
@@ -208,7 +222,54 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     return configs[delivery] || configs['direct_delivery'];
   });
 
-  // ── Available Actions (state + delivery_type + channel aware) ──
+  readonly showShippingAssignment = computed(() => {
+    const order = this.order();
+    if (!order) return false;
+    const terminalStates: OrderState[] = ['cancelled', 'refunded', 'finished'];
+    return order.delivery_type === 'other' && !terminalStates.includes(order.state);
+  });
+
+  readonly selectedShippingMethod = computed(() => {
+    const id = this.selectedShippingMethodId();
+    if (!id) return null;
+    return this.shippingMethods().find(m => m.id === id) || null;
+  });
+
+  // ── Sorted Timeline (chronological ascending, deduplicated) ──
+
+  readonly sortedTimeline = computed(() => {
+    const logs = this.rawTimeline();
+    if (!logs || logs.length === 0) return [];
+
+    // Sort ascending by created_at (oldest first)
+    const sorted = [...logs].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    );
+
+    // Deduplicate: keep only the first CREATE event
+    let seenCreate = false;
+    return sorted.filter((log) => {
+      const isCreate = log.action?.toUpperCase() === 'CREATE';
+      if (isCreate) {
+        if (seenCreate) return false;
+        seenCreate = true;
+      }
+      return true;
+    });
+  });
+
+  // ── Available Actions (state + delivery_type + payment aware) ──
+  //
+  // Matrix:
+  // | State           | Delivery    | Payment | Actions                                            |
+  // |-----------------|-------------|---------|----------------------------------------------------|
+  // | pending_payment | shipping    | -       | Confirm Pay, Manual-Ship (modal), Cancel            |
+  // | pending_payment | pickup      | -       | Confirm Pay, Manual-Ready-Pickup (dialog), Cancel   |
+  // | processing      | shipping    | paid    | Ship (standard), Cancel                             |
+  // | processing      | pickup      | paid    | Ship (standard), Direct-Deliver (modal), Cancel     |
+  // | shipped         | any         | unpaid  | Confirm Payment only (no deliver)                   |
+  // | shipped         | any         | paid    | Deliver (standard modal)                            |
+  // | delivered       | any         | paid    | Finish (safety net), Refund                         |
 
   readonly availableActions = computed<OrderActionConfig[]>(() => {
     const order = this.order();
@@ -217,11 +278,14 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     const state = order.state;
     const delivery = order.delivery_type || 'direct_delivery';
     const channel = order.channel || 'pos';
+    const isShipping = delivery === 'home_delivery' || delivery === 'direct_delivery' || delivery === 'other';
+    const isPickup = delivery === 'pickup';
+    const hasPaid = this.hasSuccessfulPayment();
     const actions: OrderActionConfig[] = [];
 
     switch (state) {
       case 'created':
-        if (channel !== 'pos' || !this.hasSuccessfulPayment()) {
+        if (channel !== 'pos' || !hasPaid) {
           actions.push({ id: 'pay', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' });
         }
         if (this.isPrivilegedUser()) {
@@ -233,14 +297,40 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
       case 'pending_payment':
         actions.push({ id: 'confirm-payment', label: 'Confirmar Pago', icon: 'check-circle', variant: 'primary' });
         actions.push({ id: 'info', label: 'Esperando confirmacion de pago', icon: 'clock', type: 'alert', color: 'warning' });
+
+        if (isShipping) {
+          // Shipping: can dispatch without payment (opens ship modal)
+          actions.push({
+            id: 'manual-ship',
+            label: 'Despachar sin confirmar pago',
+            icon: 'truck',
+            variant: 'warning',
+          });
+        } else if (isPickup) {
+          // Pickup: can mark "ready to pick up" without payment (confirm dialog)
+          actions.push({
+            id: 'manual-ready-pickup',
+            label: 'Listo para Recoger',
+            icon: 'package',
+            variant: 'primary',
+          });
+        }
+
         actions.push({ id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' });
         break;
 
       case 'processing':
         if (delivery === 'home_delivery') {
           actions.push({ id: 'ship', label: 'Marcar como Enviado', icon: 'truck', variant: 'primary' });
-        } else if (delivery === 'pickup') {
+        } else if (isPickup) {
           actions.push({ id: 'ship', label: 'Listo para Recoger', icon: 'package', variant: 'primary' });
+          // Pickup + paid: offer direct deliver (skip shipped → delivered → auto-finalize)
+          actions.push({
+            id: 'direct-deliver',
+            label: 'Entregar directamente',
+            icon: 'package-check',
+            variant: 'warning',
+          });
         } else {
           actions.push({ id: 'ship', label: 'Despachar Orden', icon: 'package', variant: 'primary' });
         }
@@ -251,12 +341,23 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
         break;
 
       case 'shipped':
-        if (delivery === 'home_delivery') {
-          actions.push({ id: 'deliver', label: 'Marcar como Entregado', icon: 'package-check', variant: 'primary' });
-        } else if (delivery === 'pickup') {
-          actions.push({ id: 'deliver', label: 'Confirmar Recogida', icon: 'user-check', variant: 'primary' });
+        if (!hasPaid) {
+          // Unpaid in shipped: open payment modal to register payment
+          actions.push({
+            id: 'pay',
+            label: 'Registrar Pago',
+            icon: 'credit-card',
+            variant: 'primary',
+          });
         } else {
-          actions.push({ id: 'deliver', label: 'Confirmar Entrega', icon: 'check-circle', variant: 'primary' });
+          // Paid: standard deliver
+          if (delivery === 'home_delivery') {
+            actions.push({ id: 'deliver', label: 'Marcar como Entregado', icon: 'package-check', variant: 'primary' });
+          } else if (isPickup) {
+            actions.push({ id: 'deliver', label: 'Confirmar Recogida', icon: 'user-check', variant: 'primary' });
+          } else {
+            actions.push({ id: 'deliver', label: 'Confirmar Entrega', icon: 'check-circle', variant: 'primary' });
+          }
         }
         break;
 
@@ -271,7 +372,6 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
 
       case 'cancelled':
       case 'refunded':
-        // No actions
         break;
     }
 
@@ -414,11 +514,17 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     private dialogService: DialogService,
     private toastService: ToastService,
     private paymentMethodsService: PaymentMethodsService,
+    public shippingMethodsService: ShippingMethodsService,
     private currencyService: CurrencyFormatService,
     private authFacade: AuthFacade,
   ) {
     this.currencySymbol = this.currencyService.currencySymbol;
     this.isPrivilegedUser.set(this.authFacade.isAdmin() || this.authFacade.isOwner());
+
+    this.shippingAssignForm = this.fb.group({
+      shipping_method_id: [null],
+      shipping_cost: [0],
+    });
 
     this.shipForm = this.fb.group({
       tracking_number: [''],
@@ -484,11 +590,13 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
             })),
           });
 
-          this.timeline = (timeline as any).data || timeline || [];
+          this.rawTimeline.set((timeline as any).data || timeline || []);
           this.isLoading.set(false);
 
           // Load payment methods if order can accept payment
-          if (orderData.state === 'created') {
+          const needsPayment = orderData.state === 'created' ||
+            (orderData.state === 'shipped' && !(orderData.payments || []).some((p: any) => p.state === 'succeeded'));
+          if (needsPayment) {
             this.loadPaymentMethods();
           }
         },
@@ -523,6 +631,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
         this.openPayModal();
         break;
       case 'confirm-payment':
+      case 'confirm-payment-shipped':
         this.confirmPayment();
         break;
       case 'cancel-payment':
@@ -545,6 +654,15 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
         break;
       case 'refund':
         this.openRefundModal();
+        break;
+      case 'manual-ship':
+        this.handleManualShip();
+        break;
+      case 'manual-ready-pickup':
+        this.submitManualStateTransition('shipped');
+        break;
+      case 'direct-deliver':
+        this.handleDirectDeliver();
         break;
     }
   }
@@ -587,6 +705,11 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     this.showShipModal.set(true);
   }
 
+  handleManualShip(): void {
+    this.isManualShipMode.set(true);
+    this.openShipModal();
+  }
+
   submitShipment(): void {
     if (!this.orderId) return;
 
@@ -596,26 +719,37 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
       if (dto[key] === '' || dto[key] === null) delete dto[key];
     });
 
-    this.ordersService
-      .flowShipOrder(this.orderId, dto)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: () => {
-          this.showShipModal.set(false);
-          this.isProcessingAction.set(false);
-          this.toastService.success('Orden marcada como enviada');
-          this.loadData();
-        },
-        error: (err) => {
-          this.isProcessingAction.set(false);
-          this.toastService.error(err.message || 'Error al enviar la orden');
-        },
-      });
+    const isManual = this.isManualShipMode();
+    const request$ = isManual
+      ? this.ordersService.updateOrderStatus(this.orderId, 'shipped')
+      : this.ordersService.flowShipOrder(this.orderId, dto);
+
+    request$.pipe(takeUntil(this.destroy$)).subscribe({
+      next: () => {
+        this.showShipModal.set(false);
+        this.isProcessingAction.set(false);
+        this.isManualShipMode.set(false);
+        this.toastService.success(
+          isManual ? 'Orden despachada sin confirmar pago' : 'Orden marcada como enviada',
+        );
+        this.loadData();
+      },
+      error: (err) => {
+        this.isProcessingAction.set(false);
+        this.isManualShipMode.set(false);
+        this.toastService.error(err.message || 'Error al enviar la orden');
+      },
+    });
   }
 
   openDeliverModal(): void {
     this.deliverForm.reset();
     this.showDeliverModal.set(true);
+  }
+
+  handleDirectDeliver(): void {
+    this.isManualDeliverMode.set(true);
+    this.openDeliverModal();
   }
 
   submitDelivery(): void {
@@ -627,21 +761,55 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
       if (dto[key] === '' || dto[key] === null) delete dto[key];
     });
 
-    this.ordersService
-      .flowDeliverOrder(this.orderId, dto)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: () => {
-          this.showDeliverModal.set(false);
-          this.isProcessingAction.set(false);
+    const isManual = this.isManualDeliverMode();
+    const request$ = isManual
+      ? this.ordersService.updateOrderStatus(this.orderId, 'delivered')
+      : this.ordersService.flowDeliverOrder(this.orderId, dto);
+
+    request$.pipe(takeUntil(this.destroy$)).subscribe({
+      next: () => {
+        this.showDeliverModal.set(false);
+        this.isProcessingAction.set(false);
+
+        if (isManual) {
+          this.isManualDeliverMode.set(false);
+          const order = this.order();
+          const isPickup = order?.delivery_type === 'pickup';
+          const hasPaid = this.hasSuccessfulPayment();
+
+          // Auto-finalize for pickup + paid orders
+          if (isPickup && hasPaid && this.orderId) {
+            this.toastService.success('Orden entregada. Finalizando...');
+            this.ordersService
+              .flowConfirmDelivery(this.orderId)
+              .pipe(takeUntil(this.destroy$))
+              .subscribe({
+                next: () => {
+                  this.toastService.success('Orden finalizada exitosamente');
+                  this.loadData();
+                },
+                error: () => {
+                  this.toastService.warning(
+                    'La entrega fue exitosa, pero no se pudo finalizar automaticamente. Usa el boton "Finalizar" como respaldo.',
+                  );
+                  this.loadData();
+                },
+              });
+          } else {
+            this.toastService.success('Orden marcada como entregada');
+            this.loadData();
+          }
+        } else {
           this.toastService.success('Orden marcada como entregada');
           this.loadData();
-        },
-        error: (err) => {
-          this.isProcessingAction.set(false);
-          this.toastService.error(err.message || 'Error al marcar la entrega');
-        },
-      });
+        }
+      },
+      error: (err) => {
+        this.isProcessingAction.set(false);
+        this.isManualDeliverMode.set(false);
+        this.toastService.error(err.message || 'Error al marcar la entrega');
+      },
+    });
   }
 
   confirmPayment(): void {
@@ -703,6 +871,38 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
             error: (err) => {
               this.isProcessingAction.set(false);
               this.toastService.error(err.message || 'Error al finalizar la orden');
+            },
+          });
+      });
+  }
+
+  submitManualStateTransition(target: OrderState): void {
+    if (!this.orderId) return;
+
+    this.dialogService
+      .confirm({
+        title: 'Listo para recoger sin pago',
+        message: '¿Marcar esta orden como lista para recoger sin confirmar el pago? El pago deberá confirmarse antes de entregar al cliente.',
+        confirmText: 'Marcar como lista',
+        cancelText: 'Cancelar',
+        confirmVariant: 'primary',
+      })
+      .then((confirmed: boolean) => {
+        if (!confirmed || !this.orderId) return;
+
+        this.isProcessingAction.set(true);
+        this.ordersService
+          .updateOrderStatus(this.orderId, target)
+          .pipe(takeUntil(this.destroy$))
+          .subscribe({
+            next: () => {
+              this.isProcessingAction.set(false);
+              this.toastService.success('Orden marcada como lista para recoger');
+              this.loadData();
+            },
+            error: (err) => {
+              this.isProcessingAction.set(false);
+              this.toastService.error(err.message || 'Error al actualizar el estado de la orden');
             },
           });
       });
@@ -794,6 +994,69 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
 
   goBack(): void {
     this.router.navigate(['/admin/orders']);
+  }
+
+  // ── Shipping Assignment ──────────────────────────────────
+
+  openShippingAssignCard(): void {
+    this.showShippingMethodCard.set(true);
+    if (this.shippingMethods().length === 0) {
+      this.isLoadingShippingMethods.set(true);
+      this.shippingMethodsService
+        .getStoreShippingMethods()
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: (methods) => {
+            this.shippingMethods.set(methods.filter(m => m.is_active));
+            this.isLoadingShippingMethods.set(false);
+          },
+          error: () => {
+            this.shippingMethods.set([]);
+            this.isLoadingShippingMethods.set(false);
+          },
+        });
+    }
+  }
+
+  onShippingMethodSelect(methodId: number): void {
+    this.selectedShippingMethodId.set(methodId);
+    this.shippingAssignForm.patchValue({ shipping_method_id: methodId });
+  }
+
+  submitShippingAssignment(): void {
+    const methodId = this.selectedShippingMethodId();
+    if (!this.orderId || !methodId) return;
+
+    this.isProcessingAction.set(true);
+    const dto: { shipping_method_id: number; shipping_cost?: number } = {
+      shipping_method_id: methodId,
+    };
+    const cost = this.shippingAssignForm.get('shipping_cost')?.value;
+    if (cost !== null && cost !== undefined && cost !== '') {
+      dto.shipping_cost = Number(cost);
+    }
+
+    this.ordersService
+      .assignShippingMethod(this.orderId, dto)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.isProcessingAction.set(false);
+          this.showShippingMethodCard.set(false);
+          this.selectedShippingMethodId.set(null);
+          this.toastService.success('Metodo de envio asignado exitosamente');
+          this.loadData();
+        },
+        error: (err) => {
+          this.isProcessingAction.set(false);
+          this.toastService.error(err.message || 'Error al asignar metodo de envio');
+        },
+      });
+  }
+
+  skipShippingAssignment(): void {
+    this.showShippingMethodCard.set(false);
+    this.selectedShippingMethodId.set(null);
   }
 
   // ── Helpers ────────────────────────────────────────────────
@@ -905,9 +1168,19 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
   }
 
   getTimelineLabel(log: any): string {
-    // Flow-specific labels based on the new state in the audit log
     const newState = log.new_values?.state;
+    const oldState = log.old_values?.state;
+
     if (newState) {
+      // Detect manual transitions (skip payment flow)
+      if (oldState === 'pending_payment' && newState === 'shipped') {
+        return 'Despachada sin confirmar pago';
+      }
+      if (oldState === 'pending_payment' && newState === 'delivered') {
+        return 'Entregada sin confirmar pago';
+      }
+
+      // Standard flow labels
       const stateLabels: Record<string, string> = {
         pending_payment: 'Pago Iniciado',
         processing: 'Pago Confirmado',

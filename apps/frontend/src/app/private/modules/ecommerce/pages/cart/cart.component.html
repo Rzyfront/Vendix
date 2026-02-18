@@ -89,6 +89,19 @@
                     }
                 </app-button>
 
+                @if (whatsappEnabled) {
+                <app-button variant="primary" [fullWidth]="true"
+                    [loading]="is_whatsapp_loading"
+                    [disabled]="is_whatsapp_loading"
+                    customClasses="!bg-[#25D366] hover:!bg-[#1da851] !border-[#25D366]"
+                    (clicked)="whatsappCheckout()">
+                    <div class="flex items-center justify-center gap-2">
+                        <app-icon name="message-circle" [size]="18"></app-icon>
+                        Comprar por WhatsApp
+                    </div>
+                </app-button>
+                }
+
                 <app-button variant="outline" [fullWidth]="true" (clicked)="continueShopping()">
                     Seguir comprando
                 </app-button>

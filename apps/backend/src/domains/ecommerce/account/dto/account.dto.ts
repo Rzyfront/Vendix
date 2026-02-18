@@ -1,6 +1,8 @@
 import { IsString, IsEmail, IsOptional, MinLength } from 'class-validator';
+import { ApiSchema } from '@nestjs/swagger';
 
-export class UpdateProfileDto {
+@ApiSchema({ name: 'EcommerceAccountUpdateProfileDto' })
+export class EcommerceAccountUpdateProfileDto {
     @IsOptional()
     @IsString()
     first_name?: string;
@@ -30,7 +32,8 @@ export class UpdateProfileDto {
     username?: string;
 }
 
-export class ChangePasswordDto {
+@ApiSchema({ name: 'EcommerceAccountChangePasswordDto' })
+export class EcommerceAccountChangePasswordDto {
     @IsString()
     @MinLength(1)
     current_password: string;
@@ -40,7 +43,8 @@ export class ChangePasswordDto {
     new_password: string;
 }
 
-export class CreateAddressDto {
+@ApiSchema({ name: 'EcommerceAccountCreateAddressDto' })
+export class EcommerceAccountCreateAddressDto {
     @IsString()
     address_line1: string;
 
@@ -107,3 +111,9 @@ export class UpdateAddressDto {
     @IsString()
     type?: string;
 }
+
+export {
+    EcommerceAccountUpdateProfileDto as UpdateProfileDto,
+    EcommerceAccountChangePasswordDto as ChangePasswordDto,
+    EcommerceAccountCreateAddressDto as CreateAddressDto,
+};

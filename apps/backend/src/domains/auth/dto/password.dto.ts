@@ -1,5 +1,5 @@
 import { IsEmail, IsString, IsNotEmpty, MinLength } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiSchema } from '@nestjs/swagger';
 
 export class ForgotPasswordDto {
   @ApiProperty({
@@ -39,7 +39,8 @@ export class ResetPasswordDto {
   new_password: string;
 }
 
-export class ChangePasswordDto {
+@ApiSchema({ name: 'AuthChangePasswordDto' })
+export class AuthChangePasswordDto {
   @ApiProperty({
     example: 'contraseñaActual',
     description: 'Contraseña actual del usuario',
@@ -57,3 +58,5 @@ export class ChangePasswordDto {
   @MinLength(8)
   new_password: string;
 }
+
+export { AuthChangePasswordDto as ChangePasswordDto };

@@ -41,6 +41,10 @@ interface LocalCartItem {
     product_id: number;
     product_variant_id?: number;
     quantity: number;
+    // Cached variant info for display
+    variant_name?: string;
+    variant_sku?: string;
+    variant_price?: number;
 }
 
 @Injectable({
@@ -116,7 +120,9 @@ export class CartService {
                                     );
                                     if (!product) return null;
 
-                                    const price = Number(product.final_price || product.base_price);
+                                    const price = localItem.variant_price
+                                        ? Number(localItem.variant_price)
+                                        : Number(product.final_price || product.base_price);
 
                                     return {
                                         id: localItem.product_id,
@@ -131,8 +137,15 @@ export class CartService {
                                             slug: product.slug,
                                             sku: product.sku || '',
                                             image_url: product.image_url,
+                                            weight: product.weight || 0,
                                         },
-                                        variant: null,
+                                        variant: localItem.product_variant_id
+                                            ? {
+                                                name: localItem.variant_name || null,
+                                                sku: localItem.variant_sku || null,
+                                                attributes: null,
+                                              }
+                                            : null,
                                     };
                                 })
                                 .filter((i) => i !== null) as CartItem[];
@@ -194,7 +207,12 @@ export class CartService {
     /**
      * @deprecated Use addToCart() instead which automatically handles authentication state
      */
-    addToLocalCart(product_id: number, quantity: number, product_variant_id?: number): void {
+    addToLocalCart(
+        product_id: number,
+        quantity: number,
+        product_variant_id?: number,
+        variantInfo?: { name: string; sku: string; price: number },
+    ): void {
         const items = this.getLocalCart();
         const existing = items.find(
             (i) => i.product_id === product_id && i.product_variant_id === product_variant_id,
@@ -203,7 +221,14 @@ export class CartService {
         if (existing) {
             existing.quantity += quantity;
         } else {
-            items.push({ product_id, product_variant_id, quantity });
+            items.push({
+                product_id,
+                product_variant_id,
+                quantity,
+                variant_name: variantInfo?.name,
+                variant_sku: variantInfo?.sku,
+                variant_price: variantInfo?.price,
+            });
         }
 
         this.saveLocalCart(items);
@@ -320,11 +345,16 @@ export class CartService {
      * Agrega un producto al carrito.
      * Detecta automáticamente si usar API (autenticado) o localStorage (guest).
      */
-    addToCart(product_id: number, quantity: number, product_variant_id?: number): Observable<any> | void {
+    addToCart(
+        product_id: number,
+        quantity: number,
+        product_variant_id?: number,
+        variantInfo?: { name: string; sku: string; price: number },
+    ): Observable<any> | void {
         if (this.is_authenticated) {
             return this.addItem(product_id, quantity, product_variant_id);
         } else {
-            this.addToLocalCart(product_id, quantity, product_variant_id);
+            this.addToLocalCart(product_id, quantity, product_variant_id, variantInfo);
         }
     }
 

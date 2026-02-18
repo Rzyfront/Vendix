@@ -500,6 +500,8 @@ export interface OrderActionConfig {
   variant?: 'primary' | 'success' | 'danger' | 'warning';
   type?: 'button' | 'alert';
   color?: string;
+  manualStateTarget?: OrderState;
+  requiresConfirmation?: boolean;
 }
 
 export interface OrderPaymentMethod {

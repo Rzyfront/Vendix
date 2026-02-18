@@ -1,6 +1,6 @@
 import { IsOptional, ValidateNested, IsObject } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiSchema } from '@nestjs/swagger';
 import {
   GeneralSettingsDto,
   InventorySettingsDto,
@@ -16,6 +16,7 @@ import {
 } from './settings-schemas.dto';
 import { EcommerceSettingsDto } from '../../ecommerce/dto/ecommerce-settings.dto';
 
+@ApiSchema({ name: 'StoreUpdateSettingsDto' })
 export class UpdateSettingsDto {
   @ApiProperty({ type: GeneralSettingsDto, required: false })
   @IsOptional()

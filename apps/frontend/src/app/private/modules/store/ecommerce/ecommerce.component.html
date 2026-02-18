@@ -338,6 +338,20 @@
               <app-setting-toggle [formControl]="whatsappCheckoutControl" label="Whatsapp Checkout"
                 description="Permitir terminar compra en whatsapp"></app-setting-toggle>
 
+              @if (whatsappCheckoutControl.value) {
+                <div class="col-span-1 md:col-span-2">
+                  <div class="space-y-3 pl-3 border-l-2 border-green-200 ml-1 mt-1">
+                    <app-input [formControl]="whatsappNumberControl" type="tel"
+                      label="Numero de WhatsApp" placeholder="+57 300 123 4567"
+                      size="sm"></app-input>
+                    <app-input [formControl]="confirmWhatsappNumberControl" type="tel"
+                      label="Confirmar Numero de WhatsApp" placeholder="+57 300 123 4567"
+                      [error]="confirmWhatsappNumberControl.value && whatsappNumberControl.value !== confirmWhatsappNumberControl.value ? 'Los numeros no coinciden' : undefined"
+                      size="sm"></app-input>
+                  </div>
+                </div>
+              }
+
               <app-setting-toggle [formControl]="requireRegistrationControl" label="Requerir registro"
                 description="Obligar a crear cuenta"></app-setting-toggle>
             </div>

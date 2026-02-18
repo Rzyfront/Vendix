@@ -2,11 +2,13 @@ import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, ActivatedRoute } from '@angular/router';
 import { AccountService, OrderDetail } from '../../../services/account.service';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-order-detail',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [CommonModule, RouterModule, IconComponent, CurrencyPipe],
   templateUrl: './order-detail.component.html',
   styleUrls: ['./order-detail.component.scss'],
 })
@@ -41,6 +43,19 @@ export class OrderDetailComponent implements OnInit {
     });
   }
 
+  get totalItems(): number {
+    if (!this.order) return 0;
+    return this.order.items.reduce((sum, item) => sum + item.quantity, 0);
+  }
+
+  getVariantLabel(item: any): string {
+    if (item.variant_attributes && typeof item.variant_attributes === 'object') {
+      const values = Object.values(item.variant_attributes);
+      if (values.length > 0) return values.join(' · ');
+    }
+    return item.variant_sku || '';
+  }
+
   getStateLabel(state: string): string {
     const labels: Record<string, string> = {
       pending: 'Pendiente',
@@ -65,5 +80,40 @@ export class OrderDetailComponent implements OnInit {
       cancelled: 'error',
     };
     return classes[state] || 'default';
+  }
+
+  getStateIcon(state: string): string {
+    const icons: Record<string, string> = {
+      pending: 'clock',
+      confirmed: 'check-circle',
+      processing: 'loader-2',
+      shipped: 'truck',
+      delivered: 'package-check',
+      completed: 'check-circle',
+      cancelled: 'circle-x',
+    };
+    return icons[state] || 'circle';
+  }
+
+  getPaymentMethodLabel(method: string | null): string {
+    if (!method) return 'Método de pago';
+    const labels: Record<string, string> = {
+      cash: 'Efectivo',
+      card: 'Tarjeta',
+      transfer: 'Transferencia',
+      cash_on_delivery: 'Contra entrega',
+    };
+    return labels[method] || method;
+  }
+
+  getPaymentIcon(method: string | null): string {
+    if (!method) return 'credit-card';
+    const icons: Record<string, string> = {
+      cash: 'banknote',
+      card: 'credit-card',
+      transfer: 'send',
+      cash_on_delivery: 'coins',
+    };
+    return icons[method] || 'credit-card';
   }
 }

@@ -6,6 +6,7 @@ export type ButtonVariant =
   | 'secondary'
   | 'outline'
   | 'outline-danger'
+  | 'outline-warning'
   | 'ghost'
   | 'danger'
   | 'success';
@@ -198,6 +199,14 @@ export class ButtonComponent {
         'hover:bg-[var(--color-destructive)]',
         'hover:text-[var(--color-text-on-primary)]',
         'focus:ring-[var(--color-destructive)]/50',
+      ],
+      'outline-warning': [
+        'border',
+        'border-orange-300',
+        'bg-white',
+        'text-orange-600',
+        'hover:bg-orange-50',
+        'focus:ring-orange-500/50',
       ],
       ghost: [
         'text-[var(--color-text-primary)]',

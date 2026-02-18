@@ -278,6 +278,7 @@ import { PosCartModalComponent } from './components/pos-cart-modal.component';
         [orderData]="completedOrder"
         (closed)="onOrderConfirmationClosed()"
         (newSale)="onStartNewSale()"
+        (viewDetail)="onViewOrderDetail($event)"
       ></app-pos-order-confirmation>
 
       <app-pos-register-config-modal
@@ -640,6 +641,18 @@ export class PosComponent implements OnInit, OnDestroy {
     this.showOrderConfirmation = false;
     this.completedOrder = null;
     this.onClearCart();
+  }
+
+  onViewOrderDetail(orderId: string): void {
+    const targetOrderId = orderId || this.currentOrderId;
+    if (!targetOrderId) {
+      this.toastService.error('No se pudo determinar la orden para mostrar el detalle');
+      return;
+    }
+
+    this.showOrderConfirmation = false;
+    this.completedOrder = null;
+    this.router.navigate(['/admin/orders', targetOrderId]);
   }
 
   // Mobile Cart Modal Methods
