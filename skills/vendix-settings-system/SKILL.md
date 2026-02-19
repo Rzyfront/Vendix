@@ -468,7 +468,7 @@ model default_templates {
 ## Related Skills
 
 - `vendix-prisma-schema` - Prisma schema editing
-- `vendix-backend-prisma` - PrismaService patterns
+- `vendix-prisma-scopes` - Prisma scoping system and model registration
 - `vendix-multi-tenant-context` - RequestContextService
 - `vendix-s3-storage` - S3 URL handling
 - `vendix-validation` - DTO validation patterns

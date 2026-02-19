@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import {
@@ -297,12 +298,17 @@ export class StoresService {
     });
   }
 
-  async getDashboardStats(storeId: number) {
+  async getDashboardStats() {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      throw new ForbiddenException('Store context required for dashboard stats');
+    }
+
     const [recentOrders, dispatchPendingOrders, refundPendingOrders] =
       await Promise.all([
-        // Recent orders (last 10)
+        // Recent orders (last 10) — store_id filter handled by scope
         this.prisma.orders.findMany({
-          where: { store_id: storeId, state: { not: 'cancelled' } },
+          where: { state: { not: 'cancelled' } },
           include: {
             addresses_orders_billing_address_idToaddresses: {
               select: { city: true, country_code: true },
@@ -321,7 +327,6 @@ export class StoresService {
         // Órdenes listas para despachar (processing + home_delivery + paid + has shipping)
         this.prisma.orders.findMany({
           where: {
-            store_id: storeId,
             state: 'processing',
             delivery_type: 'home_delivery',
             shipping_method_id: { not: null },
@@ -338,7 +343,6 @@ export class StoresService {
         // Refunds pendientes (no completados ni cancelados ni fallidos)
         this.prisma.refunds.findMany({
           where: {
-            orders: { store_id: storeId },
             state: {
               in: ['requested', 'pending_approval', 'approved', 'processing'],
             },

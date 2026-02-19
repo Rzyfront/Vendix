@@ -359,7 +359,7 @@ Handling image URLs from frontend?
 ## 📚 Related Skills
 
 - `vendix-backend` - NestJS patterns
-- `vendix-backend-prisma` - Prisma services
+- `vendix-prisma-scopes` - Prisma scoping system and model registration
 - `vendix-backend-api` - API endpoint patterns
 - `vendix-validation` - Validation patterns
 - `vendix-store-settings` - Settings with favicon generation

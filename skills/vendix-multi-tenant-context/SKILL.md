@@ -98,20 +98,26 @@ export class RequestContextService {
 
 ### 5. Scoped Prisma Usage
 
-Prisma services use the `RequestContextService` to automatically filter queries by the current tenant.
+The context flows into **4 domain-scoped Prisma services** that use Prisma Client Extensions to automatically intercept ALL queries and inject tenant filters:
+
+| Service | Scope Applied | Domain |
+|---|---|---|
+| `GlobalPrismaService` | None | Superadmin |
+| `OrganizationPrismaService` | `organization_id` | Org admin |
+| `StorePrismaService` | `store_id` + `organization_id` | Store admin |
+| `EcommercePrismaService` | `store_id` + `user_id` | E-commerce |
 
 ```typescript
-// apps/backend/src/prisma/services/ecommerce-prisma.service.ts
-async findMany(args: any) {
-  const store_id = RequestContextService.getStoreId();
-  if (!store_id) throw new ForbiddenException('No store context found');
+// Scoping is transparent - no manual filtering needed
+constructor(private readonly prisma: StorePrismaService) {}
 
-  return this.prisma.product.findMany({
-    ...args,
-    where: { ...args.where, store_id }
-  });
+async findProducts() {
+  // Extensions auto-inject WHERE store_id = ctx.store_id
+  return this.prisma.products.findMany();
 }
 ```
+
+> **Scoped services are mandatory.** `withoutScope()` requires explicit user approval. See `vendix-prisma-scopes` skill for model registration rules and complete documentation.
 
 ## Troubleshooting 403 Forbidden
 
@@ -121,3 +127,4 @@ If you encounter a `403 Forbidden` error in a scoped service:
 2. **Check Interceptor:** Ensure `RequestContextInterceptor` is active (usually global).
 3. **Verify Header:** If testing via API, ensure `x-store-id` is sent or the `Host` header matches a registered domain.
 4. **Context Presence:** Use `RequestContextService.getContext()` to debug if the store is being resolved correctly.
+5. **Model Registration:** Ensure the model is registered in the scoped service's model arrays (see `vendix-prisma-scopes`).

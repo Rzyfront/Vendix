@@ -470,7 +470,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
     // 4. Dashboard stats → dispatch/refund alerts
     this.dashboardService
-      .getDashboardStats(storeId)
+      .getDashboardStats()
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (stats) => {

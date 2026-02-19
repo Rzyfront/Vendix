@@ -32,7 +32,7 @@ Patrones específicos del backend con NestJS:
 | Skill | Descripción | Trigger |
 |-------|-------------|---------|
 | `vendix-backend-domain` | Arquitectura de dominios hexagonal, estructura de carpetas | Editando en `apps/backend/src/domains/` |
-| `vendix-backend-prisma` | Servicios Prisma dedicados por dominio, contexto multi-tenant | Creando/editando servicios Prisma |
+| `vendix-prisma-scopes` | Sistema de scoping multi-tenant, registro de modelos, withoutScope() | Trabajando con servicios Prisma scoped o agregando modelos a scopes |
 | `vendix-backend-auth` | JWT, decoradores @Public, @Roles, @Permissions | Trabajando con autenticación/autorización |
 | `vendix-backend-middleware` | Domain resolver, contexto de solicitud, middlewares | Creando/editando middlewares |
 | `vendix-backend-api` | Patrones de respuesta, DTOs, controladores, ResponseService | Creando endpoints o controladores |
