@@ -100,6 +100,23 @@ export class StoresController {
     }
   }
 
+  @Get('dashboard/stats')
+  @Permissions('store:stores:read')
+  async getStoreStats() {
+    try {
+      const result = await this.storesService.getDashboardStats();
+      return this.responseService.success(
+        result,
+        'Estadísticas de tienda obtenidas exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener las estadísticas de tienda',
+        error.message,
+      );
+    }
+  }
+
   @Get(':id')
   @Permissions('store:stores:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
@@ -192,22 +209,4 @@ export class StoresController {
     }
   }
 
-  @Get(':id/stats')
-  @Permissions('store:stores:read')
-  async getStoreStats(
-    @Param('id', ParseIntPipe) id: number,
-  ) {
-    try {
-      const result = await this.storesService.getDashboardStats(id);
-      return this.responseService.success(
-        result,
-        'Estadísticas de tienda obtenidas exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener las estadísticas de tienda',
-        error.message,
-      );
-    }
-  }
 }

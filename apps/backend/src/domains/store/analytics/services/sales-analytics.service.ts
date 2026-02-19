@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -325,14 +325,19 @@ export class SalesAnalyticsService {
     const { startDate, endDate } = this.parseDateRange(query);
     const granularity = query.granularity || Granularity.DAY;
     const context = RequestContextService.getContext();
-    const storeId = context?.store_id;
+
+    if (!context?.store_id) {
+      throw new ForbiddenException('Store context required for sales trends');
+    }
+    const storeId = context.store_id;
 
     // Map granularity to PostgreSQL DATE_TRUNC interval
     // Use Prisma.raw() so the interval is inlined as a SQL literal
     // instead of parameterized (avoids GROUP BY mismatch with SELECT)
     const truncSql = Prisma.raw(`'${this.getDateTruncInterval(granularity)}'`);
 
-    // Use raw SQL to aggregate at DB level, bypassing in-memory processing
+    // withoutScope() needed: $queryRaw is not available on the scoped client.
+    // storeId is validated above and used in the WHERE clause.
     const results = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
         period: Date;

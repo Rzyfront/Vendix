@@ -537,5 +537,5 @@ async updateStoreDomain(store_id: number, new_domain: string) {
 
 - `vendix-backend-auth` - JWT authentication setup
 - `vendix-backend-domain` - Domain architecture patterns
-- `vendix-backend-prisma` - Prisma service patterns
+- `vendix-prisma-scopes` - Prisma scoping system and model registration
 - `vendix-naming-conventions` - Naming conventions (CRITICAL)

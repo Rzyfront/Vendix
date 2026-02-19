@@ -218,26 +218,28 @@ export class {Domain}Controller {
 
 **File:** `{domain}.service.ts`
 
+Each domain injects its **corresponding scoped Prisma service** (see `vendix-prisma-scopes` skill):
+
+| Domain | Prisma Service |
+|---|---|
+| `domains/organization/` | `OrganizationPrismaService` |
+| `domains/store/` | `StorePrismaService` |
+| `domains/ecommerce/` | `EcommercePrismaService` |
+| `domains/superadmin/` | `GlobalPrismaService` |
+
 ```typescript
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '@/prisma/services/prisma.service';
-import { RequestContextService } from '@/common/context/request-context.service';
+import { StorePrismaService } from '@/prisma/services/store-prisma.service';
 
 @Injectable()
 export class {Domain}Service {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly context: RequestContextService,
+    private readonly prisma: StorePrismaService, // ← Scoped service for store domain
   ) {}
 
   async findAll() {
-    // Context is automatically applied (organization_id, store_id)
-    return this.prisma.{model}.findMany({
-      where: {
-        organization_id: this.context.organization_id,
-        store_id: this.context.store_id,
-      },
-    });
+    // Scope auto-applied: store_id injected automatically by Prisma Extensions
+    return this.prisma.{model}.findMany();
   }
 
   async findOne(id: number) {
@@ -253,13 +255,9 @@ export class {Domain}Service {
   }
 
   async create(dto: {CreateDto}) {
-    // Multi-tenant context is automatic
+    // store_id/organization_id auto-injected by scope on create
     return this.prisma.{model}.create({
-      data: {
-        ...dto,
-        organization_id: this.context.organization_id,
-        store_id: this.context.store_id,
-      },
+      data: { ...dto },
     });
   }
 
@@ -279,9 +277,9 @@ export class {Domain}Service {
 ```
 
 **Rules:**
-- Use `RequestContextService` for multi-tenant context
-- Never hardcode `organization_id` or `store_id`
-- Use dependency injection for PrismaService
+- Inject the **scoped Prisma service** matching your domain (never raw `PrismaService`)
+- **Trust the scope** - don't manually add `organization_id`/`store_id` in where clauses
+- If a new model is needed, **register it in the scoped service first** (see `vendix-prisma-scopes`)
 - Throw proper exceptions (`NotFoundException`, etc.)
 - Return early for validation (early return pattern)
 
@@ -342,39 +340,33 @@ async createProduct() {
 
 ## 🌐 Multi-Tenancy
 
-### Automatic Context Injection
+### Automatic Scoping via Prisma Services
 
-**From:** `app.module.ts`
-
-```typescript
-providers: [
-  {
-    provide: APP_GUARD,
-    useClass: AuthGuard,
-  },
-  RequestContextService,  // Automatic multi-tenant context
-],
-```
-
-### Usage in Services
+Multi-tenant isolation is **handled automatically** by scoped Prisma services using Prisma Client Extensions. You do **NOT** need to manually inject `RequestContextService` or add `organization_id`/`store_id` to queries.
 
 ```typescript
-constructor(
-  private readonly context: RequestContextService,
-) {}
+// ✅ CORRECT: Scope auto-applied by StorePrismaService
+constructor(private readonly prisma: StorePrismaService) {}
 
 async createProduct(dto: CreateProductDto) {
-  return this.prisma.product.create({
+  return this.prisma.products.create({
+    data: { ...dto },  // store_id auto-injected by scope
+  });
+}
+
+// ❌ WRONG: Manual context injection (legacy pattern)
+constructor(private readonly context: RequestContextService) {}
+async createProduct(dto: CreateProductDto) {
+  return this.prisma.products.create({
     data: {
       ...dto,
-      organization_id: this.context.organization_id,  // Auto-injected
-      store_id: this.context.store_id,                // Auto-injected
+      store_id: this.context.store_id,  // Redundant! Scope handles this
     },
   });
 }
 ```
 
-**Never bypass the context!** Always use `this.context` for tenant IDs.
+See `vendix-prisma-scopes` for complete scoping documentation and model registration rules.
 
 ---
 
@@ -589,7 +581,7 @@ branding: {
 
 ## Related Skills
 
-- `vendix-backend-prisma` - Prisma service patterns
+- `vendix-prisma-scopes` - Prisma scoping system and model registration
 - `vendix-backend-auth` - JWT and authorization patterns
 - `vendix-backend-middleware` - Middleware and domain resolution
 - `vendix-naming-conventions` - Naming conventions (CRITICAL)
