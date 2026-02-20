@@ -581,10 +581,23 @@ export class PosCartService {
     }
 
     const availableStock = request.variant ? request.variant.stock : request.product.stock;
-    if (request.product && request.quantity > availableStock) {
+
+    // Check current cart quantity for this product+variant combo
+    const currentState = this.cartState$.value;
+    const existingItem = currentState.items.find(
+      (item) =>
+        item.product.id === request.product.id &&
+        (item.variant_id || null) === (request.variant?.id || null),
+    );
+    const currentCartQuantity = existingItem ? existingItem.quantity : 0;
+    const totalRequestedQuantity = currentCartQuantity + request.quantity;
+
+    if (request.product && totalRequestedQuantity > availableStock) {
       errors.push({
         field: 'quantity',
-        message: `Stock insuficiente. Disponible: ${availableStock}`,
+        message: currentCartQuantity > 0
+          ? `Stock insuficiente. Ya tienes ${currentCartQuantity} en el carrito. Disponible: ${availableStock}`
+          : `Stock insuficiente. Disponible: ${availableStock}`,
       });
     }
 

@@ -13,6 +13,7 @@ import { StockLevelManager } from '../../inventory/shared/services/stock-level-m
 import { LocationsService } from '../../inventory/locations/locations.service';
 import { InventoryIntegrationService } from '../../inventory/shared/services/inventory-integration.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { resolveCostPrice } from '../utils/resolve-cost-price';
 
 @Injectable()
 export class SalesOrdersService {
@@ -70,6 +71,8 @@ export class SalesOrdersService {
 
       // Create order items and reserve stock immediately
       for (const item of createSalesOrderDto.items) {
+        const cost_price = await resolveCostPrice(tx, item.product_id, item.product_variant_id);
+
         const orderItem = await tx.sales_order_items.create({
           data: {
             sales_order_id: salesOrder.id,
@@ -79,6 +82,7 @@ export class SalesOrdersService {
             quantity: item.quantity,
             unit_price: item.unit_price,
             total_price: item.quantity * item.unit_price,
+            cost_price,
             created_at: new Date(),
           },
         });

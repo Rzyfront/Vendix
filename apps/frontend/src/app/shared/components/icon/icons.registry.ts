@@ -149,6 +149,7 @@ import {
   Calculator,
   Camera,
   MessageCircle,
+  ImagePlus,
 } from 'lucide-angular';
 
 /**
@@ -347,6 +348,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   calculator: Calculator,
   camera: Camera,
   'message-circle': MessageCircle,
+  'image-plus': ImagePlus,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

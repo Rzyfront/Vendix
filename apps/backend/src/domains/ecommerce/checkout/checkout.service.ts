@@ -246,9 +246,17 @@ export class CheckoutService {
 
         const taxInfo = await this.taxes_service.calculateProductTaxes(item.product_id, netPrice);
 
+        // Resolve cost_price: variant takes priority over product
+        const cost_price = item.product_variant?.cost_price != null
+          ? Number(item.product_variant.cost_price)
+          : productWithTaxes.cost_price != null
+            ? Number(productWithTaxes.cost_price)
+            : null;
+
         return {
           ...item,
           net_price: netPrice,
+          cost_price,
           tax_rate: taxInfo.total_rate,
           tax_amount_item: taxInfo.total_tax_amount,
           total_tax: taxInfo.total_tax_amount * item.quantity,
@@ -294,6 +302,7 @@ export class CheckoutService {
             total_price: item.total_net,
             tax_rate: item.tax_rate,
             tax_amount_item: item.tax_amount_item,
+            cost_price: item.cost_price,
             order_item_taxes: {
               create: item.item_taxes.map(t => ({
                 tax_rate_id: t.tax_rate_id,
@@ -355,6 +364,58 @@ export class CheckoutService {
     const user_id = RequestContextService.getUserId();
     const is_guest = !user_id;
 
+    // Fetch customer profile and primary address for authenticated users
+    let customer_data: {
+      first_name: string;
+      last_name: string;
+      phone: string | null;
+      address: {
+        address_line1: string;
+        address_line2: string | null;
+        city: string;
+        state_province: string | null;
+        country_code: string;
+        postal_code: string | null;
+        phone_number: string | null;
+      } | null;
+    } | null = null;
+    let shipping_address_id: number | null = null;
+    let shipping_address_snapshot: any = null;
+
+    if (!is_guest) {
+      const user = await this.prisma.users.findUnique({
+        where: { id: user_id },
+        select: { first_name: true, last_name: true, phone: true },
+      });
+
+      // addresses is scoped by store_id + user_id automatically
+      const primary_address = await this.prisma.addresses.findFirst({
+        where: { is_primary: true, type: 'shipping' },
+      });
+
+      if (primary_address) {
+        shipping_address_id = primary_address.id;
+        shipping_address_snapshot = {
+          address_line1: primary_address.address_line1,
+          address_line2: primary_address.address_line2,
+          city: primary_address.city,
+          state_province: primary_address.state_province,
+          country_code: primary_address.country_code,
+          postal_code: primary_address.postal_code,
+          phone_number: primary_address.phone_number,
+        };
+      }
+
+      if (user) {
+        customer_data = {
+          first_name: user.first_name || '',
+          last_name: user.last_name || '',
+          phone: user.phone || null,
+          address: shipping_address_snapshot,
+        };
+      }
+    }
+
     // Build cart_items from either backend cart (authenticated) or DTO items (guest)
     let cart_items: Array<{
       product_id: number;
@@ -365,13 +426,12 @@ export class CheckoutService {
     }>;
     let cart_currency = 'USD';
 
-    if (is_guest) {
-      // Guest checkout: items come from the DTO (frontend localStorage)
+    // Helper: build cart_items from DTO items (localStorage)
+    const buildItemsFromDto = async () => {
       if (!dto.items || dto.items.length === 0) {
         throw new BadRequestException('Cart is empty');
       }
-
-      cart_items = await Promise.all(
+      return Promise.all(
         dto.items.map(async (item) => {
           const product = await this.prisma.products.findUnique({
             where: { id: item.product_id },
@@ -399,8 +459,13 @@ export class CheckoutService {
           };
         })
       );
+    };
+
+    if (is_guest) {
+      // Guest checkout: items come from the DTO (frontend localStorage)
+      cart_items = await buildItemsFromDto();
     } else {
-      // Authenticated checkout: read from backend cart
+      // Authenticated checkout: try backend cart first, fallback to DTO items
       const cart = await this.prisma.carts.findFirst({
         include: {
           cart_items: {
@@ -412,12 +477,15 @@ export class CheckoutService {
         },
       });
 
-      if (!cart || cart.cart_items.length === 0) {
+      if (cart && cart.cart_items.length > 0) {
+        cart_items = cart.cart_items;
+        cart_currency = cart.currency;
+      } else if (dto.items && dto.items.length > 0) {
+        // Fallback: user has items in localStorage but backend cart is empty
+        cart_items = await buildItemsFromDto();
+      } else {
         throw new BadRequestException('Cart is empty');
       }
-
-      cart_items = cart.cart_items;
-      cart_currency = cart.currency;
     }
 
     for (const item of cart_items) {
@@ -471,9 +539,17 @@ export class CheckoutService {
 
         const taxInfo = await this.taxes_service.calculateProductTaxes(item.product_id, netPrice);
 
+        // Resolve cost_price: variant takes priority over product
+        const cost_price = item.product_variant?.cost_price != null
+          ? Number(item.product_variant.cost_price)
+          : productWithTaxes.cost_price != null
+            ? Number(productWithTaxes.cost_price)
+            : null;
+
         return {
           ...item,
           net_price: netPrice,
+          cost_price,
           tax_rate: taxInfo.total_rate,
           tax_amount_item: taxInfo.total_tax_amount,
           total_tax: taxInfo.total_tax_amount * item.quantity,
@@ -497,6 +573,8 @@ export class CheckoutService {
         shipping_cost: 0,
         delivery_type: 'other',
         grand_total: grand_total,
+        shipping_address_id,
+        shipping_address_snapshot,
         state: 'created',
         internal_notes: dto.notes,
         placed_at: new Date(),
@@ -514,6 +592,7 @@ export class CheckoutService {
             total_price: item.total_net,
             tax_rate: item.tax_rate,
             tax_amount_item: item.tax_amount_item,
+            cost_price: item.cost_price,
             order_item_taxes: {
               create: item.item_taxes.map(t => ({
                 tax_rate_id: t.tax_rate_id,
@@ -568,6 +647,7 @@ export class CheckoutService {
         total_price: Number(oi.total_price),
       })),
       state: order.state,
+      customer: customer_data,
       message: 'Order placed successfully via WhatsApp',
     };
   }

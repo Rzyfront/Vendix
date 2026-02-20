@@ -4,16 +4,18 @@
     <div>
       <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Información Básica</h4>
       <div class="space-y-4">
-        <app-input [formControl]="nameControl" type="text" label="Nombre de la Tienda" placeholder="Mi Tienda"
-          size="sm" (inputChange)="onFieldChange()"></app-input>
+        <app-input [formControl]="nameControl" type="text" label="Nombre de la Tienda" placeholder="Mi Tienda" size="sm"
+          (inputChange)="onFieldChange()"></app-input>
         <app-selector [formControl]="storeTypeControl" label="Tipo de Tienda" [options]="storeTypes"
           (valueChange)="onFieldChange()" size="sm"></app-selector>
         <!-- Logo Upload Section -->
         <div class="space-y-1.5">
           <label class="block text-xs font-medium text-gray-700">Logo de la Tienda</label>
           <div class="flex items-center gap-4">
-            <div class="w-16 h-16 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden relative group">
-              <img *ngIf="logoPreview" [src]="logoPreview" alt="Logo preview" class="w-full h-full object-contain p-1" />
+            <div
+              class="w-16 h-16 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden relative group">
+              <img *ngIf="logoPreview" [src]="logoPreview" alt="Logo preview"
+                class="w-full h-full object-contain p-1" />
               <div *ngIf="!logoPreview && !isUploadingLogo" class="text-gray-400 flex flex-col items-center">
                 <app-icon name="image" size="20"></app-icon>
               </div>

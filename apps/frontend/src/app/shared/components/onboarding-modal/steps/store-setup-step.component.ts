@@ -17,6 +17,7 @@ import {
   Department,
   City,
 } from '../../../../services/country.service';
+import { CurrencyService } from '../../../../services/currency.service';
 
 @Component({
   selector: 'app-store-setup-step',
@@ -470,6 +471,18 @@ import {
                   [options]="timezoneOptions"
                 ></app-selector>
               </div>
+
+              <div class="form-field">
+                <app-selector
+                  formControlName="currency"
+                  [label]="'Moneda'"
+                  styleVariant="modern"
+                  placeholder="Selecciona una moneda"
+                  tooltipText="Moneda principal para precios y ventas"
+                  [options]="currencyOptions"
+                  [required]="true"
+                ></app-selector>
+              </div>
             </div>
           </div>
 
@@ -656,15 +669,18 @@ export class StoreSetupStepComponent implements OnInit {
   timezones: Timezone[] = [];
   departments: Department[] = [];
   cities: City[] = [];
+  currencies: { value: string; label: string }[] = [];
 
   constructor(
     private countryService: CountryService,
+    private currencyService: CurrencyService,
     private cdr: ChangeDetectorRef,
   ) { }
 
   ngOnInit(): void {
     this.countries = this.countryService.getCountries();
     this.timezones = this.countryService.getTimezones();
+    this.loadCurrencies();
 
     if (!this.formGroup) return;
 
@@ -737,6 +753,24 @@ export class StoreSetupStepComponent implements OnInit {
   async loadCities(depId: number): Promise<void> {
     this.cities = await this.countryService.getCitiesByDepartment(depId);
     this.cdr.markForCheck();
+  }
+
+  private async loadCurrencies(): Promise<void> {
+    try {
+      const active = await this.currencyService.getActiveCurrencies();
+      this.currencies = active.map(c => ({ value: c.code, label: `${c.name} (${c.code})` }));
+    } catch {
+      this.currencies = [
+        { value: 'COP', label: 'Peso Colombiano (COP)' },
+        { value: 'USD', label: 'Dólar Americano (USD)' },
+        { value: 'EUR', label: 'Euro (EUR)' },
+      ];
+    }
+    this.cdr.markForCheck();
+  }
+
+  get currencyOptions() {
+    return this.currencies;
   }
 
   get timezoneOptions() {

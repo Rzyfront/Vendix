@@ -69,6 +69,7 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
         <app-input
           formControlName="phone"
           label="Teléfono"
+          type="tel"
           placeholder="+57 300 567 8900"
           [error]="getFieldError('phone')"
           (blur)="onFieldBlur('phone')"

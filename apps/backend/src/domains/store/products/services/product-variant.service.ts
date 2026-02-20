@@ -15,6 +15,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { Prisma } from '@prisma/client';
 import { LocationsService } from '../../inventory/locations/locations.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
+import { S3Service } from '@common/services/s3.service';
 
 @Injectable()
 export class ProductVariantService {
@@ -22,6 +23,7 @@ export class ProductVariantService {
     private readonly prisma: StorePrismaService,
     private readonly inventoryLocationsService: LocationsService,
     private readonly stockLevelManager: StockLevelManager,
+    private readonly s3Service: S3Service,
   ) {}
 
   async findUniqueVariantBySlug(storeId: number, slug: string) {
@@ -88,15 +90,18 @@ export class ProductVariantService {
         throw new BadRequestException('Producto no encontrado o inactivo');
       }
 
-      // Verificar que el SKU sea único dentro de la tienda (auto-scoped por StorePrismaService)
-      const existingSku = await prisma.product_variants.findFirst({
-        where: {
-          sku: createVariantDto.sku,
-        },
-      });
+      // Verificar que el SKU sea único dentro del producto (skip para SKU vacío)
+      if (createVariantDto.sku && createVariantDto.sku.trim() !== '') {
+        const existingSku = await prisma.product_variants.findFirst({
+          where: {
+            sku: createVariantDto.sku,
+            product_id: product_id,
+          },
+        });
 
-      if (existingSku) {
-        throw new ConflictException('El SKU de la variante ya está en uso');
+        if (existingSku) {
+          throw new ConflictException('El SKU de la variante ya está en uso');
+        }
       }
 
       if (tx) {
@@ -201,10 +206,11 @@ export class ProductVariantService {
         throw new NotFoundException('Variante no encontrada');
       }
 
-      if (updateVariantDto.sku) {
+      if (updateVariantDto.sku && updateVariantDto.sku.trim() !== '') {
         const existingSku = await prisma.product_variants.findFirst({
           where: {
             sku: updateVariantDto.sku,
+            product_id: existingVariant.product_id,
             NOT: { id: variantId },
           },
         });
@@ -296,33 +302,55 @@ export class ProductVariantService {
   async removeVariant(variantId: number) {
     const existingVariant = await this.prisma.product_variants.findUnique({
       where: { id: variantId },
+      include: { product_images: { select: { image_url: true } } },
     });
 
     if (!existingVariant) {
       throw new NotFoundException('Variante no encontrada');
     }
 
-    return await this.prisma.$transaction(async (prisma) => {
-      // Verificar que no haya stock en ninguna ubicación
-      const stockLevels = await prisma.stock_levels.findMany({
-        where: {
-          product_id: existingVariant.product_id,
-          product_variant_id: variantId,
-        },
+    // Use withoutScope() to bypass tenant scoping — FK cleanup needs
+    // unrestricted access to cross-domain tables like inventory_transactions.
+    const unscopedPrisma = this.prisma.withoutScope() as any;
+
+    return await unscopedPrisma.$transaction(async (prisma: any) => {
+      // Limpiar FK constraints que bloquean la eliminación
+      await prisma.order_items.updateMany({
+        where: { product_variant_id: variantId },
+        data: { product_variant_id: null },
+      });
+      await prisma.inventory_adjustments.updateMany({
+        where: { product_variant_id: variantId },
+        data: { product_variant_id: null },
+      });
+      await prisma.inventory_transactions.updateMany({
+        where: { product_variant_id: variantId },
+        data: { product_variant_id: null },
+      });
+      await prisma.stock_levels.deleteMany({
+        where: { product_variant_id: variantId },
       });
 
-      const hasStock = stockLevels.some(
-        (sl) => sl.quantity_on_hand > 0 || sl.quantity_reserved > 0,
-      );
+      // Limpiar imagen de variante (DB + S3)
+      if (existingVariant.image_id) {
+        if (existingVariant.product_images?.image_url) {
+          const key = existingVariant.product_images.image_url;
+          const parts = key.split('/');
+          const fileName = parts.pop();
+          const thumbKey = [...parts, `thumb_${fileName}`].join('/');
+          this.s3Service.deleteFile(key).catch(() => {});
+          this.s3Service.deleteFile(thumbKey).catch(() => {});
+        }
 
-      if (hasStock) {
-        throw new BadRequestException(
-          'Cannot delete variant with existing stock',
-        );
+        await prisma.product_variants.update({
+          where: { id: variantId },
+          data: { image_id: null },
+        });
+        await prisma.product_images.delete({
+          where: { id: existingVariant.image_id },
+        }).catch(() => {});
       }
 
-      // Eliminación lógica: archivar variante (si tuviera estado)
-      // Por ahora, eliminamos físicamente las variantes ya que no tienen estado
       return await prisma.product_variants.delete({
         where: { id: variantId },
       });

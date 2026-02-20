@@ -12,7 +12,11 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 
 | Action | Skill |
 |--------|-------|
+| "revisar PR", "review PR", "analizar PR", "code review", "revisar pull request" | `pr-code-review` |
+| -- | `git-workflow` |
 | -- | `vendix-monorepo-workspaces` |
+| -- | `vendix-prisma-scopes` |
+| Adding new models to domain scopes | `vendix-prisma-scopes` |
 | Adding/removing workspaces | `vendix-monorepo-workspaces` |
 | After creating/modifying a skill | `skill-sync` |
 | Configuring CI/CD | `vendix-monorepo-workspaces` |
@@ -25,6 +29,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Creating Seeds | `vendix-prisma-seed` |
 | Creating or modifying modals in frontend | `vendix-frontend-modal` |
 | Creating or refactoring standard admin modules (stats + table) | `vendix-frontend-standard-module` |
+| Debugging Forbidden errors in Prisma queries | `vendix-prisma-scopes` |
+| Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns | `vendix-ui-ux` |
 | Editing Schema | `vendix-prisma-schema` |
 | Fixing Forbidden/403 errors in scoped services | `vendix-multi-tenant-context` |
 | General Development | `vendix-development-rules` |
@@ -45,9 +51,12 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Verifying Build | `buildcheck-dev` |
 | Working on backend domains | `vendix-backend-domain` |
 | Working on frontend domains | `vendix-frontend-domain` |
-| Working with Prisma services | `vendix-backend-prisma` |
+| Working with Prisma scoped services | `vendix-prisma-scopes` |
 | Writing Code (Naming) | `vendix-naming-conventions` |
 | Writing Validation Logic | `vendix-validation` |
+| cambios con migraciones de base de datos | `git-workflow` |
+| git commit, git push, crear PR, crear rama | `git-workflow` |
+| resolver conflictos de merge | `git-workflow` |
 
 ---
 
@@ -75,7 +84,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Skill                 | Trigger             | Priority     | Description                           |
 | --------------------- | ------------------- | ------------ | ------------------------------------- |
 | **`Vendix-core`**     | **ALWAYS**          | **CRITICAL** | Core patterns and conventions         |
-| **`git-conventions`** | **ALWAYS**          | **CRITICAL** | Git commit message style and workflow |
+| **`git-workflow`**    | **ALWAYS**          | **CRITICAL** | Git commit, PR, branching and conflict rules |
 | **`knowledge-gap`**   | **UNKNOWN PATTERN** | **HIGH**     | Protocol for new/undefined patterns   |
 
 **⚠️ IMPORTANT:** NEVER compromise these rules. They are the foundation of the project.

@@ -7,7 +7,7 @@ import {
   OnChanges,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
+import { ReactiveFormsModule, FormGroup, FormControl, Validators } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
 
@@ -41,8 +41,8 @@ export class NotificationsSettingsForm implements OnInit, OnChanges {
     new_order_alerts: new FormControl(true),
     low_stock_alerts_email: new FormControl(null),
     new_order_alerts_email: new FormControl(null),
-    low_stock_alerts_phone: new FormControl(null),
-    new_order_alerts_phone: new FormControl(null),
+    low_stock_alerts_phone: new FormControl(null, [Validators.pattern(/^[\d+#*\s()-]*$/)]),
+    new_order_alerts_phone: new FormControl(null, [Validators.pattern(/^[\d+#*\s()-]*$/)]),
   });
 
   // Typed getters for FormControls

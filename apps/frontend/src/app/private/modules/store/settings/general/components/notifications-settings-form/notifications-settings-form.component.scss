@@ -1,20 +1,19 @@
-.notifications-settings-form {
-  padding: 0;
+:host {
+  display: block;
+}
 
-  .space-y-6 > * + * {
-    margin-top: 1.5rem;
+// Progressive disclosure animation for sub-fields
+.animate-slideDown {
+  animation: slideDown 200ms ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
   }
-
-  .space-y-4 > * + * {
-    margin-top: 1rem;
-  }
-
-  .grid {
-    display: grid;
-    gap: 1rem;
-
-    @media (min-width: 768px) {
-      grid-template-columns: repeat(2, 1fr);
-    }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

@@ -5,54 +5,73 @@
     [actions]="headerActions()" (actionClicked)="onHeaderAction($event)">
   </app-sticky-header>
 
+  <!-- Section Navigation (mobile: compact horizontal scroll, desktop: hidden) -->
+  <div class="sticky top-[41px] z-10 bg-background py-1.5 md:static md:bg-transparent md:py-0 lg:hidden">
+    <nav class="flex items-center gap-1 xs:gap-1.5 overflow-x-auto scrollbar-hide" aria-label="Secciones de configuración">
+      @for (section of sections; track section.id) {
+        <button type="button"
+          class="flex items-center gap-1 px-2.5 py-1.5 text-[10px] xs:text-xs font-medium rounded-lg whitespace-nowrap transition-all duration-150 shadow-[0_1px_4px_rgba(0,0,0,0.06)]"
+          [class.active-tab]="activeSection() === section.id"
+          [class.inactive-tab]="activeSection() !== section.id"
+          (click)="scrollToSection(section.id)">
+          <app-icon [name]="section.icon" [size]="12"></app-icon>
+          <span>{{ section.label }}</span>
+        </button>
+      }
+    </nav>
+  </div>
+
   <!-- Main Content Area -->
-  <div class="max-w-[1600px] mx-auto pb-20">
+  <div class="settings-content">
     @if (isLoading()) {
-    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-12">
-      <div class="text-center">
-        <div class="inline-block animate-spin rounded-full h-10 w-10 border-4 border-blue-100 border-t-blue-600 mb-4">
-        </div>
-        <p class="text-gray-500 font-medium">Cargando configuraciones...</p>
+      <div class="loading-card">
+        <div class="loading-spinner"></div>
+        <p class="loading-text">Cargando configuraciones...</p>
       </div>
-    </div>
     } @else {
-    <div class="h-full">
-      <div class="columns-1 lg:columns-2 gap-6 space-y-6">
-        <!-- Identity & General (Merged Section) -->
-        <div class="break-inside-avoid mb-6 bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
-          <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <div class="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
-              <app-icon name="user" size="18" class="text-blue-600"></app-icon>
+      <div class="settings-grid">
+        <!-- Identity & General -->
+        <section id="section-identity" class="settings-section">
+          <div class="section-header">
+            <div class="section-icon section-icon--blue">
+              <app-icon name="user" size="18"></app-icon>
             </div>
-            Identidad y General
-          </h2>
-          <div class="space-y-8">
+            <h2 class="section-title">Identidad y General</h2>
+          </div>
+          <div class="section-body">
             <app-general-settings-form [settings]="settings.general"
               (settingsChange)="onSectionChange('general', $event)" />
-            <hr class="border-gray-100">
+          </div>
+        </section>
+
+        <!-- Branding & Customization -->
+        <section id="section-branding" class="settings-section">
+          <div class="section-header">
+            <div class="section-icon section-icon--pink">
+              <app-icon name="palette" size="18"></app-icon>
+            </div>
+            <h2 class="section-title">Personalización</h2>
+          </div>
+          <div class="section-body">
             <app-app-settings-form [settings]="settings.app" (settingsChange)="onSectionChange('app', $event)" />
 
             <!-- Vendix Domain Info Box -->
             @if (isVendixDomain) {
-              <div class="mt-6 rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 p-4">
-                <div class="flex items-start gap-3">
-                  <div class="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <app-icon name="help-circle" size="18" class="text-blue-600"></app-icon>
+              <div class="vendix-info-box">
+                <div class="vendix-info-content">
+                  <div class="vendix-info-icon">
+                    <app-icon name="help-circle" size="18"></app-icon>
                   </div>
-                  <div class="flex-1 min-w-0">
-                    <p class="text-sm font-semibold text-blue-900 mb-1">
+                  <div class="vendix-info-text">
+                    <p class="vendix-info-title">
                       ¿No ves los cambios de personalización en tu tienda?
                     </p>
-                    <p class="text-xs text-blue-700 leading-relaxed mb-3">
-                      Estás navegando desde el dominio de Vendix. Los cambios de marca, colores y logotipo se aplican en el entorno personalizado de tu tienda. Visita tu app para ver cómo se ve tu marca.
+                    <p class="vendix-info-description">
+                      Estás navegando desde el dominio de Vendix. Los cambios de marca, colores y logotipo se aplican en
+                      el entorno personalizado de tu tienda. Visita tu app para ver cómo se ve tu marca.
                     </p>
                     @if (storeAppUrl) {
-                      <a
-                        [href]="storeAppUrl"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg px-3 py-1.5 transition-colors"
-                      >
+                      <a [href]="storeAppUrl" target="_blank" rel="noopener noreferrer" class="vendix-info-link">
                         <app-icon name="external-link" size="14"></app-icon>
                         Ir a mi app
                       </a>
@@ -62,57 +81,63 @@
               </div>
             }
           </div>
-        </div>
+        </section>
 
         <!-- Inventory Section -->
-        <div class="break-inside-avoid mb-6 bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
-          <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <div class="w-8 h-8 rounded-lg bg-green-50 flex items-center justify-center">
-              <app-icon name="package" size="18" class="text-green-600"></app-icon>
+        <section id="section-inventory" class="settings-section">
+          <div class="section-header">
+            <div class="section-icon section-icon--green">
+              <app-icon name="package" size="18"></app-icon>
             </div>
-            Inventario
-          </h2>
-          <app-inventory-settings-form [settings]="settings.inventory"
-            (settingsChange)="onSectionChange('inventory', $event)" />
-        </div>
+            <h2 class="section-title">Inventario</h2>
+          </div>
+          <div class="section-body">
+            <app-inventory-settings-form [settings]="settings.inventory"
+              (settingsChange)="onSectionChange('inventory', $event)" />
+          </div>
+        </section>
 
         <!-- Notifications Section -->
-        <div class="break-inside-avoid mb-6 bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
-          <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <div class="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center">
-              <app-icon name="bell" size="18" class="text-purple-600"></app-icon>
+        <section id="section-notifications" class="settings-section">
+          <div class="section-header">
+            <div class="section-icon section-icon--purple">
+              <app-icon name="bell" size="18"></app-icon>
             </div>
-            Notificaciones
-          </h2>
-          <app-notifications-settings-form [settings]="settings.notifications"
-            (settingsChange)="onSectionChange('notifications', $event)" />
-        </div>
+            <h2 class="section-title">Notificaciones</h2>
+          </div>
+          <div class="section-body">
+            <app-notifications-settings-form [settings]="settings.notifications"
+              (settingsChange)="onSectionChange('notifications', $event)" />
+          </div>
+        </section>
 
         <!-- POS Section -->
-        <div class="break-inside-avoid mb-6 bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
-          <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <div class="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center">
-              <app-icon name="monitor" size="18" class="text-orange-600"></app-icon>
+        <section id="section-pos" class="settings-section">
+          <div class="section-header">
+            <div class="section-icon section-icon--orange">
+              <app-icon name="monitor" size="18"></app-icon>
             </div>
-            Punto de Venta (POS)
-          </h2>
-          <app-pos-settings-form [settings]="settings.pos" (settingsChange)="onSectionChange('pos', $event)" />
-        </div>
+            <h2 class="section-title">Punto de Venta (POS)</h2>
+          </div>
+          <div class="section-body">
+            <app-pos-settings-form [settings]="settings.pos" (settingsChange)="onSectionChange('pos', $event)" />
+          </div>
+        </section>
 
         <!-- Receipts Section -->
-        <div class="break-inside-avoid mb-6 bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
-          <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <div class="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center">
-              <app-icon name="file-text" size="18" class="text-indigo-600"></app-icon>
+        <section id="section-receipts" class="settings-section">
+          <div class="section-header">
+            <div class="section-icon section-icon--indigo">
+              <app-icon name="file-text" size="18"></app-icon>
             </div>
-            Recibos y Facturación
-          </h2>
-          <app-receipts-settings-form [settings]="settings.receipts"
-            (settingsChange)="onSectionChange('receipts', $event)" />
-        </div>
-
+            <h2 class="section-title">Recibos y Facturación</h2>
+          </div>
+          <div class="section-body">
+            <app-receipts-settings-form [settings]="settings.receipts"
+              (settingsChange)="onSectionChange('receipts', $event)" />
+          </div>
+        </section>
       </div>
-    </div>
     }
   </div>
 </div>

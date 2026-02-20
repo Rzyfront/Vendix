@@ -502,6 +502,7 @@ model order_items {
   total_price            Decimal                  @db.Decimal(12, 2)
   tax_rate               Decimal?                 @db.Decimal(6, 5)
   tax_amount_item        Decimal?                 @db.Decimal(12, 2)
+  cost_price             Decimal?                 @db.Decimal(12, 2)
   created_at             DateTime?                @default(now()) @db.Timestamp(6)
   updated_at             DateTime?                @default(now()) @db.Timestamp(6)
   inventory_transactions inventory_transactions[]
@@ -1178,6 +1179,7 @@ model sales_order_items {
   unit_price         Decimal?          @db.Decimal(12, 2)
   discount           Decimal?          @db.Decimal(12, 2)
   total_price        Decimal?          @db.Decimal(12, 2)
+  cost_price         Decimal?          @db.Decimal(12, 2)
   created_at         DateTime?         @default(now()) @db.Timestamp(6)
   products           products          @relation(fields: [product_id], references: [id], onDelete: Cascade)
   product_variants   product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)

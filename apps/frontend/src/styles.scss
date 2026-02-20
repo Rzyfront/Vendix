@@ -136,6 +136,10 @@
   --z-tooltip: 80;
   --z-toast: 70;
   --z-maximum: 100;
+  /* NOTE: app-modal uses z-[9999] (Tailwind). Tokens above are the ideal scale.
+     The following token handles modals stacked above app-modal until z-index
+     normalization is done across the codebase. */
+  --z-modal-overlay: 10000;
 
   /* Sidebar Variables */
   --sidebar-width: 15rem;

@@ -54,6 +54,7 @@ interface VariantAttribute {
 }
 
 interface GeneratedVariant {
+  id?: number;
   sku: string;
   name: string;
   price: number;
@@ -113,6 +114,7 @@ export class ProductCreatePageComponent implements OnInit {
   product: Product | null = null;
 
   imageUrls: string[] = [];
+  imageIds: (number | null)[] = []; // Parallel array: DB image ID (null for new/unsaved images)
   activeImageIndex = 0;
   isStockDetailsOpen = false;
   categoryOptions: MultiSelectorOption[] = [];
@@ -128,6 +130,7 @@ export class ProductCreatePageComponent implements OnInit {
   hasVariants = false;
   variantAttributes: VariantAttribute[] = [];
   generatedVariants: GeneratedVariant[] = [];
+  removedVariantKeys = new Set<string>();
 
   // New Attribute Input
   newAttributeName = '';
@@ -330,12 +333,14 @@ export class ProductCreatePageComponent implements OnInit {
     // Load images
     if (product.product_images && product.product_images.length > 0) {
       this.imageUrls = product.product_images.map((img: any) => img.image_url);
+      this.imageIds = product.product_images.map((img: any) => img.id ?? null);
     }
 
     // Load variants if present
     if (product.product_variants && product.product_variants.length > 0) {
       this.hasVariants = true;
       this.generatedVariants = product.product_variants.map((v: any) => ({
+        id: v.id,
         sku: v.sku,
         name: v.name || `${product.name} - ${v.sku}`,
         price:
@@ -352,9 +357,21 @@ export class ProductCreatePageComponent implements OnInit {
         image_id: v.image_id || undefined,
       }));
 
-      // Try to reconstruct variantAttributes from variants if possible
-      // This is a bit complex without stored attribute definitions
-      // For now, we just show the generated variants list
+      // Reconstruct variantAttributes from loaded variants
+      const attributeMap = new Map<string, Set<string>>();
+      for (const v of this.generatedVariants) {
+        if (v.attributes) {
+          for (const [key, value] of Object.entries(v.attributes)) {
+            if (!attributeMap.has(key)) attributeMap.set(key, new Set());
+            attributeMap.get(key)!.add(String(value));
+          }
+        }
+      }
+      this.variantAttributes = Array.from(attributeMap.entries()).map(
+        ([name, values]) => ({ name, values: Array.from(values) })
+      );
+
+      this.removedVariantKeys.clear();
     }
   }
 
@@ -492,6 +509,7 @@ export class ProductCreatePageComponent implements OnInit {
 
   removeAttribute(index: number): void {
     this.variantAttributes.splice(index, 1);
+    this.removedVariantKeys.clear();
     this.generateVariants();
   }
 
@@ -500,6 +518,7 @@ export class ProductCreatePageComponent implements OnInit {
     if (value) {
       if (!this.variantAttributes[attrIndex].values.includes(value)) {
         this.variantAttributes[attrIndex].values.push(value);
+        this.removedVariantKeys.clear();
         this.generateVariants();
       }
       event.target.value = '';
@@ -508,6 +527,7 @@ export class ProductCreatePageComponent implements OnInit {
 
   removeAttributeValue(attrIndex: number, valueIndex: number): void {
     this.variantAttributes[attrIndex].values.splice(valueIndex, 1);
+    this.removedVariantKeys.clear();
     this.generateVariants();
   }
 
@@ -542,6 +562,12 @@ export class ProductCreatePageComponent implements OnInit {
         skuSuffix += `-${value.toUpperCase().substring(0, 3)}`; // e.g. "-RED-L"
       });
 
+      // Skip variants that were manually removed by the user
+      const key = JSON.stringify(attributes);
+      if (this.removedVariantKeys.has(key)) {
+        return null;
+      }
+
       // Check if this variant already exists to preserve custom values
       const existing = this.generatedVariants.find(
         (v) => JSON.stringify(v.attributes) === JSON.stringify(attributes),
@@ -560,7 +586,7 @@ export class ProductCreatePageComponent implements OnInit {
         stock: 0,
         attributes,
       };
-    });
+    }).filter(Boolean) as GeneratedVariant[];
   }
 
   private cartesian(args: any[][]): any[] {
@@ -642,7 +668,79 @@ export class ProductCreatePageComponent implements OnInit {
     input.click();
   }
 
-  removeVariantImage(idx: number): void {
+  trackByIndex(index: number): number {
+    return index;
+  }
+
+  async removeVariant(idx: number): Promise<void> {
+    const confirmed = await this.dialogService.confirm({
+      title: 'Eliminar Variante',
+      message: `¿Estás seguro de eliminar la variante "${this.generatedVariants[idx]?.name}"?`,
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+      confirmVariant: 'danger',
+    });
+    if (!confirmed) return;
+
+    const variant = this.generatedVariants[idx];
+
+    // If the variant exists in DB, delete it via API first
+    if (variant.id) {
+      try {
+        await this.productsService.deleteProductVariant(variant.id).toPromise();
+        this.toastService.success('Variante eliminada correctamente');
+      } catch (err: any) {
+        console.error('Error deleting variant:', err);
+        this.toastService.error('Error al eliminar la variante');
+        return; // Don't remove from UI if backend failed
+      }
+    }
+
+    // Track removed key so generateVariants() won't recreate it on blur
+    if (variant.attributes && Object.keys(variant.attributes).length > 0) {
+      this.removedVariantKeys.add(JSON.stringify(variant.attributes));
+    }
+    this.generatedVariants.splice(idx, 1);
+
+    // Rebuild variantAttributes from remaining variants so the UI
+    // removes attribute values that no longer have any variant.
+    this.rebuildAttributesFromVariants();
+  }
+
+  private rebuildAttributesFromVariants(): void {
+    if (this.generatedVariants.length === 0) {
+      this.variantAttributes = [];
+      return;
+    }
+
+    const attributeMap = new Map<string, Set<string>>();
+    for (const v of this.generatedVariants) {
+      if (v.attributes) {
+        for (const [key, value] of Object.entries(v.attributes)) {
+          if (!attributeMap.has(key)) attributeMap.set(key, new Set());
+          attributeMap.get(key)!.add(String(value));
+        }
+      }
+    }
+    this.variantAttributes = Array.from(attributeMap.entries()).map(
+      ([name, values]) => ({ name, values: Array.from(values) }),
+    );
+  }
+
+  async removeVariantImage(idx: number): Promise<void> {
+    const variant = this.generatedVariants[idx];
+
+    // If the image exists in DB, delete it via API (also removes from S3)
+    if (variant.image_id) {
+      try {
+        await this.productsService.deleteProductImage(variant.image_id).toPromise();
+      } catch (err: any) {
+        console.error('Error deleting variant image:', err);
+        this.toastService.error('Error al eliminar la imagen de variante');
+        return;
+      }
+    }
+
     this.generatedVariants[idx].image_url = undefined;
     this.generatedVariants[idx].image_file = undefined;
     this.generatedVariants[idx].image_id = undefined;
@@ -745,6 +843,7 @@ export class ProductCreatePageComponent implements OnInit {
           reader.onload = (e) => {
             const result = e.target?.result as string;
             this.imageUrls.push(result);
+            this.imageIds.push(null); // New image, no DB ID yet
             if (this.imageUrls.length === 1) {
               this.activeImageIndex = 0;
             }
@@ -756,8 +855,22 @@ export class ProductCreatePageComponent implements OnInit {
     }
   }
 
-  removeImage(index: number): void {
+  async removeImage(index: number): Promise<void> {
+    const imageId = this.imageIds[index];
+
+    // If the image exists in DB, delete it via API (also removes from S3)
+    if (imageId) {
+      try {
+        await this.productsService.deleteProductImage(imageId).toPromise();
+      } catch (err: any) {
+        console.error('Error deleting image:', err);
+        this.toastService.error('Error al eliminar la imagen');
+        return;
+      }
+    }
+
     this.imageUrls.splice(index, 1);
+    this.imageIds.splice(index, 1);
     if (this.activeImageIndex >= this.imageUrls.length) {
       this.activeImageIndex = Math.max(0, this.imageUrls.length - 1);
     }
@@ -854,9 +967,11 @@ export class ProductCreatePageComponent implements OnInit {
       } : undefined,
     };
 
-    // Add Variants if enabled
-    if (this.hasVariants && this.generatedVariants.length > 0) {
+    // Add Variants if enabled — always send the array (even empty) so the
+    // backend can delete variants that were removed by the user.
+    if (this.hasVariants) {
       productData.variants = this.generatedVariants.map((v) => ({
+        id: v.id,
         sku: v.sku,
         name: v.name,
         price_override: Number(v.price),

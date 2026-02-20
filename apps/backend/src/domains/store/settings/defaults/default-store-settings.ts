@@ -45,7 +45,7 @@ export function getDefaultStoreSettings(): StoreSettings {
 
     general: {
       timezone: 'America/Bogota',
-      currency: 'USD',
+      currency: 'COP',
       language: 'es',
       tax_included: false,
     },

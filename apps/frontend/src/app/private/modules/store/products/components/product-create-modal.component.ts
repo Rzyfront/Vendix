@@ -118,8 +118,8 @@ export class ProductCreateModalComponent implements OnChanges {
       base_price: [null, [Validators.required, Validators.min(0)]],
       stock_quantity: [0, [Validators.required, Validators.min(0)]],
       sku: [''],
-      category_id: [null, Validators.required],
-      brand_id: [null, Validators.required],
+      category_id: [null],
+      brand_id: [null],
       state: [ProductState.ACTIVE],
     });
   }
@@ -195,13 +195,21 @@ export class ProductCreateModalComponent implements OnChanges {
   }
 
   onCategoryCreated(category: ProductCategory): void {
-    this.loadCategories();
+    // Add new option optimistically (triggers OnPush change detection)
+    this.categoryOptions = [
+      ...this.categoryOptions,
+      { value: category.id, label: category.name, description: category.description },
+    ];
     this.productForm.patchValue({ category_id: category.id });
     this.isCategoryCreateOpen = false;
   }
 
   onBrandCreated(brand: Brand): void {
-    this.loadBrands();
+    // Add new option optimistically (triggers OnPush change detection)
+    this.brandOptions = [
+      ...this.brandOptions,
+      { value: brand.id, label: brand.name, description: brand.description },
+    ];
     this.productForm.patchValue({ brand_id: brand.id });
     this.isBrandCreateOpen = false;
   }

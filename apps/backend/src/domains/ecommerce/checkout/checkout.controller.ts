@@ -10,7 +10,7 @@ import { CheckoutService } from './checkout.service';
 import { CheckoutDto } from './dto/checkout.dto';
 import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-import { Public } from '@common/decorators/public.decorator';
+import { OptionalAuth } from '@common/decorators/optional-auth.decorator';
 
 @Controller('ecommerce/checkout')
 @UseGuards(JwtAuthGuard)
@@ -34,7 +34,7 @@ export class CheckoutController {
         return { success: true, data };
     }
 
-    @Public()
+    @OptionalAuth()
     @Post('whatsapp')
     async whatsappCheckout(@Body() dto: WhatsappCheckoutDto) {
         const data = await this.checkout_service.whatsappCheckout(dto);

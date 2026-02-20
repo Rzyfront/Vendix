@@ -606,7 +606,7 @@
             <div class="space-y-4 md:space-y-5">
                 <!-- Attribute Manager -->
                 <div class="space-y-3 md:space-y-4">
-                    <div *ngFor="let attr of variantAttributes; let i = index"
+                    <div *ngFor="let attr of variantAttributes; let i = index; trackBy: trackByIndex"
                         class="p-3 md:p-4 bg-bg rounded-xl border border-border">
                         <div class="flex flex-col md:flex-row md:items-start gap-3 md:gap-4">
                             <div class="w-full md:w-1/3">
@@ -654,20 +654,25 @@
                         <!-- Header: Image + Name -->
                         <div class="flex items-center gap-3">
                             <div (click)="triggerVariantImageUpload(idx)"
-                                class="relative flex-shrink-0 w-12 h-12 rounded-lg border border-gray-200 bg-white overflow-hidden cursor-pointer group">
+                                class="relative flex-shrink-0 w-12 h-12 rounded-lg border border-gray-200 bg-white cursor-pointer group">
                                 <img *ngIf="variant.image_url" [src]="variant.image_url"
-                                    class="w-full h-full object-cover" (error)="onImageError($event)">
+                                    class="w-full h-full object-cover rounded-lg" (error)="onImageError($event)">
                                 <div *ngIf="!variant.image_url"
-                                    class="w-full h-full flex items-center justify-center">
-                                    <app-icon name="camera" size="16" class="text-gray-300"></app-icon>
+                                    class="w-full h-full flex flex-col items-center justify-center rounded-lg
+                                      border-2 border-dashed border-gray-300 bg-gray-50/80
+                                      group-hover:border-primary/40 group-hover:bg-primary/5 transition-colors">
+                                    <app-icon name="image-plus" size="16" class="text-gray-400 group-hover:text-primary/60 transition-colors"></app-icon>
                                 </div>
-                                <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity
+                                    flex items-center justify-center rounded-lg overflow-hidden">
                                     <app-icon name="camera" size="14" class="text-white"></app-icon>
                                 </div>
                                 <button *ngIf="variant.image_url" type="button"
                                     (click)="$event.stopPropagation(); removeVariantImage(idx)"
-                                    class="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center text-[8px] font-bold shadow">
-                                    ×
+                                    aria-label="Eliminar imagen"
+                                    class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full
+                                      flex items-center justify-center text-[10px] font-bold shadow-md z-10">
+                                    &times;
                                 </button>
                             </div>
                             <div class="flex-1 min-w-0">
@@ -707,6 +712,14 @@
                                 [ngModelOptions]="{standalone: true}" placeholder="SKU"
                                 customWrapperClass="!mt-0"></app-input>
                         </div>
+                        <!-- Delete variant action -->
+                        <div class="flex justify-end pt-2 border-t border-gray-100">
+                            <button type="button" (click)="removeVariant(idx)"
+                                class="flex items-center gap-1 text-xs text-destructive hover:text-destructive/80 font-medium py-1">
+                                <app-icon name="trash-2" size="14"></app-icon>
+                                Eliminar variante
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -731,6 +744,7 @@
                                     Stock</th>
                                 <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     SKU</th>
+                                <th class="px-3 py-3 w-10"></th>
                             </tr>
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
@@ -738,20 +752,25 @@
                                 <!-- Image -->
                                 <td class="px-3 py-2">
                                     <div (click)="triggerVariantImageUpload(idx)"
-                                        class="relative w-12 h-12 rounded-lg border border-gray-200 bg-white overflow-hidden cursor-pointer group">
+                                        class="relative w-12 h-12 rounded-lg border border-gray-200 bg-white cursor-pointer group">
                                         <img *ngIf="variant.image_url" [src]="variant.image_url"
-                                            class="w-full h-full object-cover" (error)="onImageError($event)">
+                                            class="w-full h-full object-cover rounded-lg" (error)="onImageError($event)">
                                         <div *ngIf="!variant.image_url"
-                                            class="w-full h-full flex items-center justify-center">
-                                            <app-icon name="camera" size="16" class="text-gray-300"></app-icon>
+                                            class="w-full h-full flex flex-col items-center justify-center rounded-lg
+                                              border-2 border-dashed border-gray-300 bg-gray-50/80
+                                              group-hover:border-primary/40 group-hover:bg-primary/5 transition-colors">
+                                            <app-icon name="image-plus" size="16" class="text-gray-400 group-hover:text-primary/60 transition-colors"></app-icon>
                                         </div>
-                                        <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                        <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity
+                                            flex items-center justify-center rounded-lg overflow-hidden">
                                             <app-icon name="camera" size="14" class="text-white"></app-icon>
                                         </div>
                                         <button *ngIf="variant.image_url" type="button"
                                             (click)="$event.stopPropagation(); removeVariantImage(idx)"
-                                            class="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center text-[8px] font-bold shadow">
-                                            ×
+                                            aria-label="Eliminar imagen"
+                                            class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full
+                                              flex items-center justify-center text-[10px] font-bold shadow-md z-10">
+                                            &times;
                                         </button>
                                     </div>
                                 </td>
@@ -803,6 +822,14 @@
                                     <app-input type="text" size="sm" [(ngModel)]="variant.sku"
                                         [ngModelOptions]="{standalone: true}" placeholder="SKU"
                                         customWrapperClass="!mt-0"></app-input>
+                                </td>
+                                <!-- Delete -->
+                                <td class="px-2 py-2">
+                                    <button type="button" (click)="removeVariant(idx)"
+                                        aria-label="Eliminar variante"
+                                        class="p-1.5 text-gray-400 hover:text-destructive hover:bg-red-50 rounded-lg transition-colors">
+                                        <app-icon name="trash-2" size="16"></app-icon>
+                                    </button>
                                 </td>
                             </tr>
                         </tbody>

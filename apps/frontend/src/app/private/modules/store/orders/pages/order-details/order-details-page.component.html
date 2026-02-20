@@ -570,18 +570,12 @@
               </div>
             }
 
-            <!-- Invoice Download -->
+            <!-- Print Ticket -->
             <div class="pt-4">
-              @if (orderData.state === 'finished' || orderData.state === 'delivered') {
-                <app-button variant="secondary" [fullWidth]="true" customClasses="!bg-gray-900 hover:!bg-black !shadow-md">
-                  <app-icon slot="icon" name="file-text" size="16"></app-icon>
-                  Descargar Factura
-                </app-button>
-              } @else {
-                <div class="text-[10px] text-center text-text-secondary font-bold uppercase tracking-widest bg-[var(--color-surface)] py-3 rounded-xl border border-dashed border-border">
-                  Factura no disponible
-                </div>
-              }
+              <app-button variant="secondary" [fullWidth]="true" (clicked)="printOrder()" customClasses="!bg-gray-900 hover:!bg-black !shadow-md">
+                <app-icon slot="icon" name="printer" size="16"></app-icon>
+                Imprimir Ticket
+              </app-button>
             </div>
           </app-card>
         </div>

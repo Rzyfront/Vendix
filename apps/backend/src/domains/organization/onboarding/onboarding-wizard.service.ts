@@ -506,6 +506,23 @@ export class OnboardingWizardService {
           updated_at: new Date(),
         },
       });
+
+      // Update currency in store_settings if provided
+      if (setupStoreDto.currency) {
+        const storeSettings = await this.prismaService.store_settings.findUnique({
+          where: { store_id: existingStore.id },
+        });
+        if (storeSettings) {
+          const settings = storeSettings.settings as any;
+          settings.general = settings.general || {};
+          settings.general.currency = setupStoreDto.currency;
+          await this.prismaService.store_settings.update({
+            where: { store_id: existingStore.id },
+            data: { settings, updated_at: new Date() },
+          });
+        }
+      }
+
       return { ...updatedStore, updated: true };
     }
 
@@ -530,6 +547,20 @@ export class OnboardingWizardService {
 
     // NOTE: Store domain is NOT created here because we need branding info (colors, app_type)
     // which is provided later in setupAppConfig. The domain will be created there.
+
+    // Create initial store_settings with currency and timezone from wizard
+    const defaultSettings = getDefaultStoreSettings();
+    if (setupStoreDto.currency) {
+      defaultSettings.general.currency = setupStoreDto.currency;
+    }
+    if (setupStoreDto.timezone) {
+      defaultSettings.general.timezone = setupStoreDto.timezone;
+    }
+    await this.prismaService.store_settings.upsert({
+      where: { store_id: store.id },
+      create: { store_id: store.id, settings: defaultSettings as any },
+      update: { settings: defaultSettings as any, updated_at: new Date() },
+    });
 
     // Create store address if provided
     let address = null;
@@ -817,10 +848,21 @@ export class OnboardingWizardService {
         theme: 'light',
       });
 
+      // Read existing store_settings to preserve currency/timezone set during setupStore
+      const existingStoreSettings = await this.prismaService.store_settings.findUnique({
+        where: { store_id: store.id },
+      });
+      const existing = (existingStoreSettings?.settings as any) || {};
+
       // Create/Update store_settings with branding and default settings
       const defaultSettings = getDefaultStoreSettings();
       const storeSettingsData = {
         ...defaultSettings,
+        general: {
+          ...defaultSettings.general,
+          currency: existing?.general?.currency || defaultSettings.general.currency,
+          timezone: existing?.general?.timezone || defaultSettings.general.timezone,
+        },
         branding: {
           name: store.name,
           primary_color: setupAppConfigDto.primary_color || storeBranding.primary_color,

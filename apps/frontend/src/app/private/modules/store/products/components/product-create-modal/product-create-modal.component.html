@@ -23,9 +23,9 @@
 
         <!-- Stock Field: Different behavior for create vs edit mode -->
         <div *ngIf="!isEditMode">
-          <app-input label="Stock Inicial" type="number" formControlName="stock_quantity"
+          <app-input label="Cantidad/Stock" type="number" formControlName="stock_quantity"
             [error]="getErrorMessage('stock_quantity')" placeholder="0"
-            helperText="Se registrará como movimiento inicial" [required]="true"></app-input>
+            tooltipText="Stock inicial del producto" [required]="true"></app-input>
         </div>
 
         <div *ngIf="isEditMode" class="relative">
@@ -42,8 +42,11 @@
           </div>
         </div>
 
-        <app-input label="SKU" formControlName="sku" placeholder="Ej. CAM-001"
-          [error]="getErrorMessage('sku')"></app-input>
+        <div>
+          <app-input label="SKU" formControlName="sku" placeholder="Ej. CAM-001"
+            [error]="getErrorMessage('sku')"></app-input>
+          <small class="text-xs text-gray-400 mt-0.5 block">Opcional</small>
+        </div>
       </div>
 
       <!-- Category & Brand Row -->
@@ -51,25 +54,27 @@
         <div>
           <div class="flex gap-2 items-end">
             <app-selector class="flex-1" label="Categoría" [options]="categoryOptions" formControlName="category_id"
-              placeholder="Seleccionar" [required]="true"></app-selector>
+              placeholder="Seleccionar"></app-selector>
             <button type="button" (click)="isCategoryCreateOpen = true"
               class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
               style="border-radius: var(--radius-sm);">
               <app-icon name="plus" size="20"></app-icon>
             </button>
           </div>
+          <small class="text-xs text-gray-400 mt-0.5 block">Opcional</small>
         </div>
 
         <div>
           <div class="flex gap-2 items-end">
             <app-selector class="flex-1" label="Marca" [options]="brandOptions"
-              formControlName="brand_id" placeholder="Seleccionar" [required]="true"></app-selector>
+              formControlName="brand_id" placeholder="Seleccionar"></app-selector>
             <button type="button" (click)="isBrandCreateOpen = true"
               class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
               style="border-radius: var(--radius-sm);">
               <app-icon name="plus" size="20"></app-icon>
             </button>
           </div>
+          <small class="text-xs text-gray-400 mt-0.5 block">Opcional</small>
         </div>
       </div>
 
@@ -93,7 +98,7 @@
         Cancelar
       </app-button>
 
-      <app-button variant="primary" (clicked)="onSubmit()" [loading]="isSubmitting" [disabled]="productForm.invalid"
+      <app-button variant="primary" (clicked)="onSubmit()" [loading]="isSubmitting" [disabled]="isSubmitting"
         customClasses="!rounded-xl flex-1 sm:flex-none font-bold shadow-md shadow-primary-200 active:scale-95 transition-all">
         {{ isEditMode ? 'Guardar Cambios' : 'Crear Producto' }}
       </app-button>

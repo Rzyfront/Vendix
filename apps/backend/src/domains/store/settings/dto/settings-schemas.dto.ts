@@ -149,11 +149,13 @@ export class NotificationsSettingsDto {
   @ApiProperty({ example: '+573001234567', required: false })
   @IsOptional()
   @IsString()
+  @Matches(/^[\d+#*\s()-]*$/, { message: 'El teléfono solo puede contener números y los símbolos + # * ( ) -' })
   low_stock_alerts_phone?: string;
 
   @ApiProperty({ example: '+573001234567', required: false })
   @IsOptional()
   @IsString()
+  @Matches(/^[\d+#*\s()-]*$/, { message: 'El teléfono solo puede contener números y los símbolos + # * ( ) -' })
   new_order_alerts_phone?: string;
 }
 

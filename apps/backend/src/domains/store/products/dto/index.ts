@@ -44,6 +44,11 @@ export class StockByLocationDto {
 }
 
 export class CreateVariantWithStockDto {
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  id?: number;
+
   @IsString()
   @MaxLength(100)
   sku: string;
