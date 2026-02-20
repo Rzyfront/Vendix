@@ -62,67 +62,54 @@ model OrderItem {
 }
 ```
 
-### Pattern 2: Prisma Service
+### Pattern 2: Prisma Service Architecture
 
-**apps/backend/src/prisma/prisma.service.ts**:
+Vendix uses **domain-scoped Prisma services** built on an abstract `BasePrismaService`. Each domain injects the appropriate scoped service:
 
-```typescript
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+| Service | Scope | Use Case |
+|---|---|---|
+| `GlobalPrismaService` | None | Superadmin, background jobs |
+| `OrganizationPrismaService` | `organization_id` | Org admin |
+| `StorePrismaService` | `store_id` | Store admin, POS |
+| `EcommercePrismaService` | `store_id` + `user_id` | Customer e-commerce |
 
-@Injectable()
-export class PrismaService
-  extends PrismaClient
-  implements OnModuleInit, OnModuleDestroy
-{
-  async onModuleInit() {
-    await this.$connect();
-  }
-
-  async onModuleDestroy() {
-    await this.$disconnect();
-  }
-}
-```
+> **For complete scoping documentation, model registration rules, and `withoutScope()` guidelines, see `vendix-prisma-scopes` skill.**
 
 ### Pattern 3: Using Prisma in Services
 
 ```typescript
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { StorePrismaService } from '@/prisma/services/store-prisma.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: StorePrismaService) {}
 
   async findAll() {
-    return this.prisma.user.findMany({
-      include: { orders: true },
-    });
+    // store_id auto-applied by scope
+    return this.prisma.store_users.findMany();
   }
 
-  async findOne(id: string) {
-    return this.prisma.user.findUnique({
+  async findOne(id: number) {
+    return this.prisma.store_users.findUnique({
       where: { id },
-      include: { orders: { include: { items: true } } },
     });
   }
 
-  async create(data: { email: string; name: string }) {
-    return this.prisma.user.create({
-      data,
-    });
+  async create(data: { user_name: string; email: string }) {
+    // store_id auto-injected on create
+    return this.prisma.store_users.create({ data });
   }
 
-  async update(id: string, data: { email?: string; name?: string }) {
-    return this.prisma.user.update({
+  async update(id: number, data: { user_name?: string }) {
+    return this.prisma.store_users.update({
       where: { id },
       data,
     });
   }
 
-  async remove(id: string) {
-    return this.prisma.user.delete({
+  async remove(id: number) {
+    return this.prisma.store_users.delete({
       where: { id },
     });
   }
@@ -340,5 +327,6 @@ DATABASE_URL="postgresql://postgres:password@db:5432/vendix_db?schema=public"
 ## Resources
 
 - **Prisma Schema**: [apps/backend/prisma/schema.prisma](../../../apps/backend/prisma/schema.prisma)
+- **Prisma Scopes**: See [skills/vendix-prisma-scopes/SKILL.md](../vendix-prisma-scopes/SKILL.md) for scoping system
 - **Prisma Docs**: https://www.prisma.io/docs
 - **Reference**: See [skills/vendix-backend/SKILL.md](../vendix-backend/SKILL.md) for NestJS integration

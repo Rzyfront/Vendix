@@ -66,43 +66,54 @@ export class MyFeatureController {
 }
 ```
 
-### Pattern 3: Service with Prisma
+### Pattern 3: Service with Scoped Prisma
 
-Services use Prisma for database operations:
+Services use the **domain-appropriate scoped Prisma service** (see `vendix-prisma-scopes`):
+
+| Domain | Inject |
+|---|---|
+| `domains/store/` | `StorePrismaService` |
+| `domains/organization/` | `OrganizationPrismaService` |
+| `domains/ecommerce/` | `EcommercePrismaService` |
+| `domains/superadmin/` | `GlobalPrismaService` |
 
 ```typescript
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
+import { StorePrismaService } from '@/prisma/services/store-prisma.service';
 import { CreateMyFeatureDto } from './dto/create-my-feature.dto';
 
 @Injectable()
 export class MyFeatureService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: StorePrismaService) {}
 
   async findAll() {
-    return this.prisma.myFeature.findMany();
+    // store_id/organization_id auto-injected by scope
+    return this.prisma.my_feature.findMany();
   }
 
-  async findOne(id: string) {
-    return this.prisma.myFeature.findUnique({ where: { id } });
+  async findOne(id: number) {
+    return this.prisma.my_feature.findUnique({ where: { id } });
   }
 
   async create(createDto: CreateMyFeatureDto) {
-    return this.prisma.myFeature.create({ data: createDto });
+    // store_id auto-injected on create by scope
+    return this.prisma.my_feature.create({ data: createDto });
   }
 
-  async update(id: string, updateDto: UpdateMyFeatureDto) {
-    return this.prisma.myFeature.update({
+  async update(id: number, updateDto: UpdateMyFeatureDto) {
+    return this.prisma.my_feature.update({
       where: { id },
       data: updateDto,
     });
   }
 
-  async remove(id: string) {
-    return this.prisma.myFeature.delete({ where: { id } });
+  async remove(id: number) {
+    return this.prisma.my_feature.delete({ where: { id } });
   }
 }
 ```
+
+**Important:** If the model is new, register it in the scoped service first (see `vendix-prisma-scopes` Model Registration Plan).
 
 ### Pattern 4: DTO Validation with class-validator
 
@@ -209,22 +220,22 @@ export class ItemsController {
 
 // items.service.ts
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { StorePrismaService } from '@/prisma/services/store-prisma.service';
 
 @Injectable()
 export class ItemsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: StorePrismaService) {}
 
   findAll() {
-    return this.prisma.item.findMany();
+    return this.prisma.items.findMany(); // store_id auto-applied
   }
 
-  findOne(id: string) {
-    return this.prisma.item.findUnique({ where: { id } });
+  findOne(id: number) {
+    return this.prisma.items.findUnique({ where: { id } });
   }
 
   create(createItemDto: CreateItemDto) {
-    return this.prisma.item.create({ data: createItemDto });
+    return this.prisma.items.create({ data: createItemDto }); // store_id auto-injected
   }
 }
 ```
@@ -305,5 +316,6 @@ npm run prisma studio -w apps/backend
 ## Resources
 
 - **Backend**: See [apps/backend/doc/](../../../apps/backend/doc/) for detailed docs
-- **Prisma**: See [skills/vendix-prisma/SKILL.md](../vendix-prisma/SKILL.md)
+- **Prisma ORM**: See [skills/vendix-prisma/SKILL.md](../vendix-prisma/SKILL.md)
+- **Prisma Scopes**: See [skills/vendix-prisma-scopes/SKILL.md](../vendix-prisma-scopes/SKILL.md)
 - **NestJS Docs**: https://docs.nestjs.com

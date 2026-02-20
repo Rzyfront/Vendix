@@ -385,6 +385,6 @@ model products {
 
 ## Related Skills
 
-- `vendix-backend-prisma` - Prisma service patterns
+- `vendix-prisma-scopes` - Prisma scoping system and model registration
 - `vendix-prisma-seed` - Seed data patterns
 - `vendix-naming-conventions` - Naming conventions (CRITICAL)

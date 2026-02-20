@@ -474,5 +474,5 @@ npx prisma db seed -- --production
 ## Related Skills
 
 - `vendix-prisma-schema` - Schema editing patterns
-- `vendix-backend-prisma` - Prisma service patterns
+- `vendix-prisma-scopes` - Prisma scoping system and model registration
 - `vendix-naming-conventions` - Naming conventions (CRITICAL)

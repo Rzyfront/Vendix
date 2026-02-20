@@ -57,6 +57,8 @@ export class StorePrismaService extends BasePrismaService {
       'findFirst',
       'findMany',
       'count',
+      'aggregate',
+      'groupBy',
       'update',
       'updateMany',
       'delete',

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -11,14 +11,11 @@ export class InventoryAnalyticsService {
 
   async getInventorySummary(query: InventoryAnalyticsQueryDto) {
     // Get all products with stock info (store scoping is automatic)
-    // Include products where track_inventory is true OR null (null = trackable by default)
+    // track_inventory is Boolean @default(false), not nullable
     const products = await this.prisma.products.findMany({
       where: {
         state: 'active',
-        OR: [
-          { track_inventory: true },
-          { track_inventory: null },
-        ],
+        track_inventory: true,
       },
       select: {
         id: true,
@@ -63,14 +60,11 @@ export class InventoryAnalyticsService {
   }
 
   async getStockLevels(query: InventoryAnalyticsQueryDto) {
-    // Include products where track_inventory is true OR null (null = trackable by default)
+    // track_inventory is Boolean @default(false), not nullable
     const products = await this.prisma.products.findMany({
       where: {
         state: 'active',
-        OR: [
-          { track_inventory: true },
-          { track_inventory: null },
-        ],
+        track_inventory: true,
         ...(query.category_id && {
           product_categories: {
             some: {
@@ -137,27 +131,11 @@ export class InventoryAnalyticsService {
   }
 
   async getLowStockAlerts(query: InventoryAnalyticsQueryDto) {
-    // Include products where track_inventory is true OR null (null = trackable by default)
+    // track_inventory is Boolean @default(false), not nullable
     const products = await this.prisma.products.findMany({
       where: {
         state: 'active',
-        AND: [
-          {
-            OR: [
-              { track_inventory: true },
-              { track_inventory: null },
-            ],
-          },
-        ],
-        OR: [
-          { stock_quantity: 0 },
-          {
-            AND: [
-              { reorder_point: { not: null } },
-              // Use raw query or calculate in application
-            ],
-          },
-        ],
+        track_inventory: true,
       },
       select: {
         id: true,
@@ -301,8 +279,14 @@ export class InventoryAnalyticsService {
   async getMovementSummary(query: InventoryAnalyticsQueryDto) {
     const { startDate, endDate } = this.parseDateRange(query);
     const context = RequestContextService.getContext();
-    const storeId = context?.store_id;
 
+    if (!context?.store_id) {
+      throw new ForbiddenException('Store context required for movement summary');
+    }
+    const storeId = context.store_id;
+
+    // withoutScope() needed: $queryRaw is not available on the scoped client.
+    // storeId is validated above and used in the WHERE clause.
     const results = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
         movement_type: string;
@@ -338,10 +322,16 @@ export class InventoryAnalyticsService {
     const { startDate, endDate } = this.parseDateRange(query);
     const granularity = query.granularity || Granularity.DAY;
     const context = RequestContextService.getContext();
-    const storeId = context?.store_id;
+
+    if (!context?.store_id) {
+      throw new ForbiddenException('Store context required for movement trends');
+    }
+    const storeId = context.store_id;
 
     const truncSql = Prisma.raw(`'${this.getDateTruncInterval(granularity)}'`);
 
+    // withoutScope() needed: $queryRaw is not available on the scoped client.
+    // storeId is validated above and used in the WHERE clause.
     const results = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
         period: Date;

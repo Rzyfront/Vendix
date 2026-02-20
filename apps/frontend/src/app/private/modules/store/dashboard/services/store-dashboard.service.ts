@@ -63,21 +63,22 @@ export class StoreDashboardService {
 
   constructor(private http: HttpClient) {}
 
-  getDashboardStats(storeId: string): Observable<StoreDashboardStats> {
+  getDashboardStats(): Observable<StoreDashboardStats> {
+    const cacheKey = 'dashboard';
     const now = Date.now();
-    const cached = storeDashboardCache.get(storeId);
+    const cached = storeDashboardCache.get(cacheKey);
 
     if (cached && (now - cached.lastFetch) < this.CACHE_TTL) {
       return cached.observable;
     }
 
     const observable$ = this.http
-      .get<any>(`${this.apiUrl}/store/stores/${storeId}/stats`)
+      .get<any>(`${this.apiUrl}/store/stores/dashboard/stats`)
       .pipe(
         shareReplay({ bufferSize: 1, refCount: false }),
         map((response: any) => response.data || response),
         tap(() => {
-          const entry = storeDashboardCache.get(storeId);
+          const entry = storeDashboardCache.get(cacheKey);
           if (entry) {
             entry.lastFetch = Date.now();
           }
@@ -90,7 +91,7 @@ export class StoreDashboardService {
         }),
       );
 
-    storeDashboardCache.set(storeId, {
+    storeDashboardCache.set(cacheKey, {
       observable: observable$,
       lastFetch: now,
     });

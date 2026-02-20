@@ -606,7 +606,7 @@ docker logs --tail 40 vendix_backend | grep -i "error"
 
 - `vendix-frontend-state` - Patrón BehaviorSubject + ToastService
 - `vendix-backend-domain` - Arquitectura hexagonal
-- `vendix-backend-prisma` - PrismaService multi-tenant
+- `vendix-prisma-scopes` - Prisma scoping system and model registration
 - `vendix-multi-tenant-context` - RequestContextService
 - `buildcheck-dev` - Verificación OBLIGATORIA de build
 - `vendix-validation` - Validación con class-validator
