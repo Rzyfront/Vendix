@@ -21,6 +21,7 @@ import {
   UpdateOrderWithPaymentDto,
 } from './dto';
 import { PaymentError, PaymentErrorCodes } from './utils';
+import { resolveCostPrice } from '../orders/utils/resolve-cost-price';
 
 @Injectable()
 export class PaymentsService {
@@ -490,6 +491,8 @@ export class PaymentsService {
             item_tax_amount = taxInfo.total_tax_amount;
           }
 
+          const cost_price = await resolveCostPrice(tx, item.product_id, item.product_variant_id);
+
           const orderItem: any = {
             product_name: item.product_name,
             variant_sku: item.product_sku,
@@ -501,6 +504,7 @@ export class PaymentsService {
             total_price: item.total_price,
             tax_rate: item_tax_rate,
             tax_amount_item: item_tax_amount,
+            cost_price,
           };
 
           if (item.product_id) {

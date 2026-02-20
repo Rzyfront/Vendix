@@ -1,4 +1,4 @@
-import { IsString, IsEmail, IsOptional, MinLength } from 'class-validator';
+import { IsString, IsEmail, IsOptional, MinLength, Matches } from 'class-validator';
 import { ApiSchema } from '@nestjs/swagger';
 
 @ApiSchema({ name: 'EcommerceAccountUpdateProfileDto' })
@@ -13,6 +13,7 @@ export class EcommerceAccountUpdateProfileDto {
 
     @IsOptional()
     @IsString()
+    @Matches(/^[\d+#*\s()-]*$/, { message: 'El teléfono solo puede contener números y los símbolos + # * ( ) -' })
     phone?: string;
 
     @IsOptional()
@@ -68,6 +69,7 @@ export class EcommerceAccountCreateAddressDto {
 
     @IsOptional()
     @IsString()
+    @Matches(/^[\d+#*\s()-]*$/, { message: 'El teléfono solo puede contener números y los símbolos + # * ( ) -' })
     phone_number?: string;
 
     @IsOptional()
@@ -102,6 +104,7 @@ export class UpdateAddressDto {
 
     @IsOptional()
     @IsString()
+    @Matches(/^[\d+#*\s()-]*$/, { message: 'El teléfono solo puede contener números y los símbolos + # * ( ) -' })
     phone_number?: string;
 
     @IsOptional()

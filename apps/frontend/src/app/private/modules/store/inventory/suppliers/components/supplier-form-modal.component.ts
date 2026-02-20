@@ -84,6 +84,7 @@ import { Supplier, CreateSupplierDto, UpdateSupplierDto } from '../../interfaces
               <label class="block text-sm font-medium text-text-secondary mb-1">Teléfono</label>
               <app-input
                 formControlName="phone"
+                type="tel"
                 placeholder="+1 234 567 890"
               ></app-input>
             </div>
@@ -91,6 +92,7 @@ import { Supplier, CreateSupplierDto, UpdateSupplierDto } from '../../interfaces
               <label class="block text-sm font-medium text-text-secondary mb-1">Móvil</label>
               <app-input
                 formControlName="mobile"
+                type="tel"
                 placeholder="+1 234 567 890"
               ></app-input>
             </div>

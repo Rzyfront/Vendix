@@ -13,6 +13,8 @@ import {
   Min,
   IsEmail,
   IsUrl,
+  Matches,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
@@ -267,6 +269,7 @@ export class EcommerceCheckoutDto {
   })
   @IsOptional()
   @IsString()
+  @Matches(/^[\d+#*\s()-]*$/, { message: 'El número de WhatsApp solo puede contener números y los símbolos + # * ( ) -' })
   whatsapp_number?: string;
 }
 
@@ -338,6 +341,7 @@ export class FooterStoreInfoDto {
     description: 'Email de soporte para customers',
   })
   @IsOptional()
+  @ValidateIf((o) => !!o.support_email)
   @IsEmail()
   support_email?: string;
 

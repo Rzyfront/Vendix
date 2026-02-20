@@ -601,6 +601,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       description: [''],
       store_type: ['hybrid', Validators.required],
       timezone: ['America/Bogota', Validators.required],
+      currency: ['COP', Validators.required],
       // Address fields are now optional as requested
       address_line1: [''],
       city: [''],

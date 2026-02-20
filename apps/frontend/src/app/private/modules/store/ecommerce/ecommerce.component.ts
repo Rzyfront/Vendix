@@ -10,9 +10,11 @@ import { Subject, takeUntil, map, startWith, take } from 'rxjs';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
+import { Router } from '@angular/router';
 import { environment } from '../../../../../environments/environment';
 import { Store } from '@ngrx/store';
 import { selectStoreSettings } from '../../../../core/store/auth/auth.selectors';
+import { ShippingMethodsService } from '../settings/shipping/services/shipping-methods.service';
 import { EcommerceService } from './services/ecommerce.service';
 import {
   EcommerceSettings,
@@ -62,6 +64,8 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   private currencyService = inject(CurrencyFormatService);
   private http = inject(HttpClient);
   private store = inject(Store);
+  private router = inject(Router);
+  private shippingMethodsService = inject(ShippingMethodsService);
 
   private destroy$ = new Subject<void>();
 
@@ -76,6 +80,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   settingsForm: FormGroup = this.createForm();
   isLoading = false;
   isSaving = signal(false);
+  hasShippingMethods = signal<boolean | null>(null);
 
   // Trigger for computed units to react to non-signal form state changes
   private formUpdateTrigger = signal(0);
@@ -152,11 +157,16 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    // Configurar prefijo +57 para WhatsApp ANTES de cargar datos
+    this.setupWhatsappPrefixEnforcement();
+
     this.loadSettings();
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
     // Cargar monedas activas para el selector
     this.loadCurrencies();
+    // Verificar estado de métodos de envío
+    this.checkShippingStatus();
   }
 
   ngOnDestroy(): void {
@@ -216,8 +226,8 @@ export class EcommerceComponent implements OnInit, OnDestroy {
       // Checkout
       checkout: this.fb.group({
         whatsapp_checkout: [false],
-        whatsapp_number: [''],
-        confirm_whatsapp_number: [''],  // frontend-only, never sent to backend
+        whatsapp_number: ['', [Validators.pattern(/^\+57[\d+#*\s()-]*$/)]],
+        confirm_whatsapp_number: ['', [Validators.pattern(/^\+57[\d+#*\s()-]*$/)]],  // frontend-only, never sent to backend
         require_registration: [false],
       }),
     });
@@ -264,6 +274,44 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   get requireRegistrationControl() { return this.checkoutGroup.get('require_registration') as any; }
 
   /**
+   * Enforces that WhatsApp number inputs always start with +57
+   */
+  private setupWhatsappPrefixEnforcement(): void {
+    const controls = [this.whatsappNumberControl, this.confirmWhatsappNumberControl];
+
+    controls.forEach(control => {
+      control.valueChanges
+        .pipe(takeUntil(this.destroy$))
+        .subscribe((value: string) => {
+          if (!value || value.length < 3) {
+            control.setValue('+57', { emitEvent: false });
+            return;
+          }
+
+          if (!value.startsWith('+57')) {
+            // Keep content but ensure prefix
+            let cleanValue = value.replace(/^\+?5?7?/, '');
+            control.setValue('+57' + cleanValue, { emitEvent: false });
+          }
+        });
+    });
+
+    // Handle the toggle: when enabled, initialize with +57 if empty
+    this.whatsappCheckoutControl.valueChanges
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((enabled: boolean) => {
+        if (enabled) {
+          if (!this.whatsappNumberControl.value) {
+            this.whatsappNumberControl.setValue('+57', { emitEvent: false });
+          }
+          if (!this.confirmWhatsappNumberControl.value) {
+            this.confirmWhatsappNumberControl.setValue('+57', { emitEvent: false });
+          }
+        }
+      });
+  }
+
+  /**
    * Load settings and determine mode (setup vs edit)
    */
   private loadSettings(): void {
@@ -281,7 +329,10 @@ export class EcommerceComponent implements OnInit, OnDestroy {
 
             // Pre-fill confirm_whatsapp_number from saved number
             if (response.config.checkout?.whatsapp_number) {
-              this.confirmWhatsappNumberControl.setValue(response.config.checkout.whatsapp_number);
+              let num = response.config.checkout.whatsapp_number;
+              if (!num.startsWith('+57')) num = '+57' + num.replace(/^\+?5?7?/, '');
+              this.whatsappNumberControl.setValue(num, { emitEvent: false });
+              this.confirmWhatsappNumberControl.setValue(num, { emitEvent: false });
             }
 
             // Cargar logo si existe
@@ -385,6 +436,34 @@ export class EcommerceComponent implements OnInit, OnDestroy {
         { value: 'USD', label: 'Dólar Americano (USD)' },
         { value: 'EUR', label: 'Euro (EUR)' },
       ];
+    }
+  }
+
+  /**
+   * Check if the store has active shipping methods configured
+   */
+  private checkShippingStatus(): void {
+    this.shippingMethodsService.getShippingMethodStats()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (stats) => this.hasShippingMethods.set(stats.enabled_methods > 0),
+        error: () => this.hasShippingMethods.set(false),
+      });
+  }
+
+  navigateToShipping(): void {
+    this.router.navigate(['/admin/settings/shipping']);
+  }
+
+  private async showShippingRedirectModal(): Promise<void> {
+    const confirmed = await this.dialogService.confirm({
+      title: 'Configurar Métodos de Envío',
+      message: 'Tu tienda necesita al menos un método de envío activo para que los clientes puedan completar sus compras. Te redirigiremos a la configuración de envíos.',
+      confirmText: 'Ir a Configuración de Envíos',
+      cancelText: 'Configurar después',
+    });
+    if (confirmed) {
+      this.router.navigate(['/admin/settings/shipping']);
     }
   }
 
@@ -708,6 +787,11 @@ export class EcommerceComponent implements OnInit, OnDestroy {
           }
 
           this.isSaving.set(false);
+
+          // Si no hay métodos de envío, mostrar modal de redirección
+          if (this.hasShippingMethods() === false) {
+            this.showShippingRedirectModal();
+          }
         },
         error: (error) => {
           this.toastService.error('Error al guardar: ' + error.message);

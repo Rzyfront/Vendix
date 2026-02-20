@@ -93,7 +93,7 @@ export class AddressModalComponent implements OnInit {
             state_province: [''],
             country_code: ['CO', Validators.required], // Default to Colombia
             postal_code: [''],
-            phone_number: ['', [Validators.pattern(/^[0-9+\-\s()]*$/)]],
+            phone_number: ['', [Validators.pattern(/^[\d+#*\s()-]*$/)]],
             is_primary: [false],
             type: ['shipping', Validators.required],
         });

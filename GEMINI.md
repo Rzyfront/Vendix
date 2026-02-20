@@ -35,6 +35,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Creating or modifying modals in frontend | `vendix-frontend-modal` |
 | Creating or refactoring standard admin modules (stats + table) | `vendix-frontend-standard-module` |
 | Debugging Forbidden errors in Prisma queries | `vendix-prisma-scopes` |
+| Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns | `vendix-ui-ux` |
 | Editing Schema | `vendix-prisma-schema` |
 | Fixing Forbidden/403 errors in scoped services | `vendix-multi-tenant-context` |
 | General Development | `vendix-development-rules` |

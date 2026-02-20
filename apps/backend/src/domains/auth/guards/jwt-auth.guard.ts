@@ -2,6 +2,7 @@ import { ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 import { IS_PUBLIC_KEY } from '@common/decorators/public.decorator';
+import { IS_OPTIONAL_AUTH_KEY } from '@common/decorators/optional-auth.decorator';
 
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
@@ -31,8 +32,25 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       return true;
     }
 
-
+    const isOptionalAuth = this.reflector.getAllAndOverride<boolean>(
+      IS_OPTIONAL_AUTH_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    if (isOptionalAuth) {
+      return super.canActivate(context);
+    }
 
     return super.canActivate(context);
+  }
+
+  handleRequest(err: any, user: any, info: any, context: ExecutionContext) {
+    const isOptionalAuth = this.reflector.getAllAndOverride<boolean>(
+      IS_OPTIONAL_AUTH_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    if (isOptionalAuth && (err || !user)) {
+      return null;
+    }
+    return super.handleRequest(err, user, info, context);
   }
 }

@@ -228,7 +228,7 @@ export class PosTicketService {
           ticketData.cashReceived
             ? `
         <p style="margin: 2px 0; font-size: 12px;"><strong>Efectivo recibido:</strong> ${this.currencyService.format(ticketData.cashReceived)}</p>
-        <p style="margin: 2px 0; font-size: 12px;"><strong>Cambio:</strong> ${this.currencyService.format(ticketData.change!)}</p>
+        <p style="margin: 2px 0; font-size: 12px;"><strong>Cambio:</strong> ${this.currencyService.format(ticketData.change ?? 0)}</p>
         `
             : ''
         }
@@ -264,9 +264,18 @@ export class PosTicketService {
   }
 
   private printHTML(html: string): void {
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(`
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = 'none';
+    iframe.style.opacity = '0';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (doc) {
+      doc.open();
+      doc.write(`
         <html>
           <head>
             <title>Ticket</title>
@@ -280,9 +289,13 @@ export class PosTicketService {
           </body>
         </html>
       `);
-      printWindow.document.close();
-      printWindow.print();
+      doc.close();
+
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
     }
+
+    setTimeout(() => iframe.remove(), 1000);
   }
 
   private openCashDrawer(): void {

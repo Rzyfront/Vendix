@@ -1,4 +1,5 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
+import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { EcommerceProduct } from '../../services/catalog.service';
@@ -80,7 +81,7 @@ import { EcommerceProduct } from '../../services/catalog.service';
       display: flex;
       align-items: center;
       justify-content: center;
-      z-index: 1000;
+      z-index: var(--z-modal-overlay);
       padding: 1rem;
       animation: fadeIn 0.15s ease-out;
     }
@@ -262,6 +263,7 @@ export class ShareModalComponent {
   @Input() product: EcommerceProduct | null = null;
   @Output() closed = new EventEmitter<void>();
 
+  private toast = inject(ToastService);
   showCopied = false;
 
   get productUrl(): string {
@@ -297,9 +299,30 @@ export class ShareModalComponent {
     window.open(url, '_blank');
   }
 
-  shareEmail(): void {
-    const subject = encodeURIComponent(`¡Mira este producto! ${this.product?.name}`);
-    const body = encodeURIComponent(this.shareText);
-    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+  async shareEmail(): Promise<void> {
+    const subject = `¡Mira este producto! ${this.product?.name}`;
+    const text = this.shareText;
+    const url = this.productUrl;
+
+    // 1) Web Share API — native share sheet (mobile + modern desktop)
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: subject, text, url });
+        return;
+      } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+      }
+    }
+
+    // 2) mailto: via window.open — doesn't navigate the SPA
+    const mailto = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`;
+    const opened = window.open(mailto, '_self');
+
+    // 3) Feedback if it failed
+    if (!opened) {
+      this.toast.warning(
+        'No se pudo abrir el cliente de correo. Puedes copiar el enlace y compartirlo manualmente.'
+      );
+    }
   }
 }

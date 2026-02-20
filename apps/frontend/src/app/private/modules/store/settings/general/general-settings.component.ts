@@ -49,9 +49,19 @@ export class GeneralSettingsComponent implements OnInit {
   isSaving = signal(false);
   hasUnsavedChanges = signal(false);
   lastSaved = signal<Date | null>(null);
+  activeSection = signal('identity');
 
   showTemplates = false;
   templates: any[] = [];
+
+  readonly sections = [
+    { id: 'identity', label: 'Identidad', icon: 'user' },
+    { id: 'branding', label: 'Marca', icon: 'palette' },
+    { id: 'inventory', label: 'Inventario', icon: 'package' },
+    { id: 'notifications', label: 'Alertas', icon: 'bell' },
+    { id: 'pos', label: 'POS', icon: 'monitor' },
+    { id: 'receipts', label: 'Recibos', icon: 'file-text' },
+  ];
 
   readonly badgeText = computed(() =>
     this.hasUnsavedChanges() ? 'Pendiente de Guardar' : 'Sincronizado'
@@ -141,6 +151,14 @@ export class GeneralSettingsComponent implements OnInit {
   onHeaderAction(actionId: string): void {
     if (actionId === 'reset') this.resetToDefaults();
     else if (actionId === 'save') this.saveAllSettings();
+  }
+
+  scrollToSection(sectionId: string): void {
+    this.activeSection.set(sectionId);
+    const el = document.getElementById(`section-${sectionId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   }
 
   private formatLastSaved(): string {

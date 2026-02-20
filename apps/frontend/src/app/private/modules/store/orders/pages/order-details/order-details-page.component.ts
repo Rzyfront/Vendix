@@ -29,6 +29,8 @@ import { StoreShippingMethod } from '../../../settings/shipping/interfaces/shipp
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { OrderPaymentModalComponent } from '../../components/order-payment-modal/order-payment-modal.component';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { PosTicketService } from '../../../pos/services/pos-ticket.service';
+import { TicketData, TicketItem } from '../../../pos/models/ticket.model';
 
 export interface LifecycleStep {
   key: string;
@@ -517,6 +519,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     public shippingMethodsService: ShippingMethodsService,
     private currencyService: CurrencyFormatService,
     private authFacade: AuthFacade,
+    private ticketService: PosTicketService,
   ) {
     this.currencySymbol = this.currencyService.currencySymbol;
     this.isPrivilegedUser.set(this.authFacade.isAdmin() || this.authFacade.isOwner());
@@ -989,7 +992,117 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
   }
 
   printOrder(): void {
-    window.print();
+    const orderData = this.order();
+    if (!orderData) return;
+
+    try {
+      const ticketData = this.buildTicketData(orderData);
+      const html = this.ticketService.generateTicketHTML(ticketData);
+
+      // Use iframe-based printing to avoid popup blockers
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = 'none';
+      document.body.appendChild(iframe);
+
+      const iframeDoc = iframe.contentWindow?.document;
+      if (!iframeDoc) {
+        document.body.removeChild(iframe);
+        this.toastService.error('No se pudo preparar la impresion');
+        return;
+      }
+
+      iframeDoc.open();
+      iframeDoc.write(`
+        <html>
+          <head>
+            <title>Ticket #${orderData.order_number}</title>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #fff; }
+              .ticket { background: white; border: 1px solid #ccc; border-radius: 8px; }
+              @media print {
+                body { padding: 0; margin: 0; }
+                .ticket { border: none; border-radius: 0; }
+              }
+            </style>
+          </head>
+          <body>${html}</body>
+        </html>
+      `);
+      iframeDoc.close();
+
+      // Wait for content to render, then print
+      iframe.onload = () => {
+        iframe.contentWindow?.print();
+        // Clean up after print dialog closes
+        setTimeout(() => {
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
+          }
+        }, 1000);
+      };
+    } catch (err) {
+      console.error('Error generating ticket:', err);
+      this.toastService.error('Error al generar el ticket');
+    }
+  }
+
+  private buildTicketData(orderData: Order): TicketData {
+    const items: TicketItem[] = (orderData.order_items || []).map((item) => ({
+      id: String(item.id || '0'),
+      name: item.product_name || 'Producto',
+      sku: item.variant_sku || 'N/A',
+      quantity: Number(item.quantity) || 0,
+      unitPrice: Number(item.unit_price) || 0,
+      totalPrice: Number(item.total_price) || 0,
+      tax: Number(item.tax_amount_item) || 0,
+    }));
+
+    // Determine payment method from the latest succeeded payment
+    const succeededPayment = (orderData.payments || []).find((p) => p.state === 'succeeded');
+    const paymentMethod = succeededPayment?.gateway_response?.metadata?.payment_method || 'N/A';
+    const cashReceived = succeededPayment?.gateway_response?.metadata?.amount_received;
+    const change = succeededPayment?.gateway_response?.change;
+
+    // Get cashier name from current user
+    const user = this.authFacade.getCurrentUser();
+    const cashierName = user ? `${user.first_name} ${user.last_name}` : 'Administrador';
+
+    return {
+      id: orderData.order_number || 'N/A',
+      date: new Date(orderData.created_at || Date.now()),
+      items,
+      subtotal: Number(orderData.subtotal_amount) || 0,
+      tax: Number(orderData.tax_amount) || 0,
+      discount: Number(orderData.discount_amount) || 0,
+      total: Number(orderData.grand_total) || 0,
+      paymentMethod,
+      cashReceived: cashReceived ? Number(cashReceived) : undefined,
+      change: cashReceived ? Number(change || 0) : undefined,
+      cashier: cashierName,
+      transactionId: orderData.order_number,
+      customer: orderData.users
+        ? {
+            name: `${orderData.users.first_name || ''} ${orderData.users.last_name || ''}`.trim() || 'Consumidor Final',
+            email: orderData.users.email,
+            phone: orderData.users.phone,
+          }
+        : { name: 'Consumidor Final' },
+      store: orderData.stores
+        ? {
+            name: orderData.stores.name,
+            address: '',
+            phone: '',
+            email: '',
+            taxId: '',
+            id: orderData.stores.id,
+          }
+        : undefined,
+    };
   }
 
   goBack(): void {

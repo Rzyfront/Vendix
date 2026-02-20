@@ -469,6 +469,9 @@ export class InputComponent implements ControlValueAccessor {
       return 'La contraseña debe contener al menos un carácter especial.';
     }
     if (errors['pattern']) {
+      if (this.type === 'tel') {
+        return 'Solo se permiten números y los símbolos + # * ( ) -';
+      }
       return 'El formato es inválido.';
     }
 
@@ -479,7 +482,7 @@ export class InputComponent implements ControlValueAccessor {
   onInput(event: Event): void {
     const target = event.target as HTMLInputElement;
     if (this.type === 'tel') {
-      target.value = target.value.replace(/[^0-9+ ]/g, '');
+      target.value = target.value.replace(/[^\d+#*\s()-]/g, '');
     }
     this.value = target.value;
     this.onChange(this.value);

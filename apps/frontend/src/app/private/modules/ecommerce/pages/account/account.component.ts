@@ -68,7 +68,7 @@ export class AccountComponent implements OnInit {
     this.profile_form = this.fb.group({
       first_name: ['', Validators.required],
       last_name: ['', Validators.required],
-      phone: ['', [Validators.pattern(/^[0-9]+$/)]],
+      phone: ['', [Validators.pattern(/^[\d+#*\s()-]*$/)]],
       document_type: [''],
       document_number: ['', [Validators.pattern(/^[0-9]+$/)]],
     });
@@ -245,19 +245,6 @@ export class AccountComponent implements OnInit {
   clearMessages(): void {
     this.success_message = '';
     this.error_message = '';
-  }
-
-  // Filter non-numeric characters from input
-  onNumericInput(event: Event, fieldName: string): void {
-    const input = event.target as HTMLInputElement;
-    const value = input.value;
-    const numericValue = value.replace(/[^0-9]/g, '');
-
-    if (value !== numericValue) {
-      this.profile_form.patchValue({
-        [fieldName]: numericValue,
-      });
-    }
   }
 
   private markFormGroupTouched(formGroup: FormGroup): void {

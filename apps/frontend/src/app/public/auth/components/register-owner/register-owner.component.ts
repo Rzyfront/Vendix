@@ -253,7 +253,7 @@ export class RegisterOwnerComponent implements OnInit {
     phone: [
       '',
       [
-        Validators.pattern(/^[0-9+ ]+$/),
+        Validators.pattern(/^[\d+#*\s()-]*$/),
         Validators.minLength(8),
         Validators.maxLength(15),
       ],

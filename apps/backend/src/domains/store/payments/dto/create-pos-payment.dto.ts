@@ -9,6 +9,7 @@ import {
   MaxLength,
   ValidateNested,
   IsInt,
+  Matches,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -114,6 +115,7 @@ export class CreatePosPaymentDto {
   @IsOptional()
   @IsString()
   @MaxLength(20)
+  @Matches(/^[\d+#*\s()-]*$/, { message: 'El teléfono solo puede contener números y los símbolos + # * ( ) -' })
   customer_phone?: string;
 
   // Datos de la venta

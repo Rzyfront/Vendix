@@ -10,10 +10,15 @@ import { CreateOrderDto, UpdateOrderDto, OrderQueryDto, UpdateOrderItemsDto } fr
 import { Prisma, order_state_enum, order_delivery_type_enum } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { OrderStatsDto } from './dto/order-stats.dto';
+import { S3Service } from '@common/services/s3.service';
+import { resolveCostPrice } from './utils/resolve-cost-price';
 
 @Injectable()
 export class OrdersService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    private s3Service: S3Service,
+  ) {}
 
   async create(createOrderDto: CreateOrderDto, creatingUser: any) {
     // Enforce store context
@@ -57,7 +62,7 @@ export class OrdersService {
             internal_notes: createOrderDto.internal_notes,
             updated_at: new Date(),
             order_items: {
-              create: createOrderDto.items.map((item) => ({
+              create: await Promise.all(createOrderDto.items.map(async (item) => ({
                 product_id: item.product_id,
                 product_variant_id: item.product_variant_id,
                 product_name: item.product_name,
@@ -68,8 +73,9 @@ export class OrdersService {
                 total_price: item.total_price,
                 tax_rate: item.tax_rate,
                 tax_amount_item: item.tax_amount_item,
+                cost_price: await resolveCostPrice(this.prisma, item.product_id, item.product_variant_id),
                 updated_at: new Date(),
-              })),
+              }))),
             },
           },
           include: {
@@ -203,7 +209,27 @@ export class OrdersService {
     if (!order) {
       throw new NotFoundException('Order not found');
     }
+
+    // Sign S3 image URLs for order items products
+    await this.signOrderItemImages(order);
+
     return order;
+  }
+
+  /**
+   * Signs S3 image URLs for all products in order items.
+   * Mutates the order object in-place for performance.
+   */
+  private async signOrderItemImages(order: any): Promise<void> {
+    if (!order.order_items?.length) return;
+
+    await Promise.all(
+      order.order_items.map(async (item: any) => {
+        if (item.products?.image_url) {
+          item.products.image_url = await this.s3Service.signUrl(item.products.image_url);
+        }
+      }),
+    );
   }
 
   async update(id: number, updateOrderDto: UpdateOrderDto) {

@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsEnum,
   IsNumber,
+  Matches,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -37,11 +38,13 @@ export class CreateSupplierDto {
   @ApiProperty({ description: 'Phone number' })
   @IsString()
   @IsOptional()
+  @Matches(/^[\d+#*\s()-]*$/, { message: 'El teléfono solo puede contener números y los símbolos + # * ( ) -' })
   phone?: string;
 
   @ApiProperty({ description: 'Mobile phone number' })
   @IsString()
   @IsOptional()
+  @Matches(/^[\d+#*\s()-]*$/, { message: 'El celular solo puede contener números y los símbolos + # * ( ) -' })
   mobile?: string;
 
   @ApiProperty({ description: 'Website URL' })

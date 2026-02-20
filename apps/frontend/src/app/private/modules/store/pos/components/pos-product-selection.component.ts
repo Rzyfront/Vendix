@@ -185,12 +185,8 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
               <!-- Stock Badge -->
               <div
                 *ngIf="product.stock <= 5"
-                class="absolute top-2 right-2 px-2 py-1 rounded-md text-xs font-semibold backdrop-blur-sm border"
-                [class]="
-                  product.stock === 0
-                    ? 'bg-error/80 text-white border-error/60'
-                    : 'bg-warning/80 text-white border-warning/60'
-                "
+                class="absolute top-2 right-2 px-2 py-1 rounded-md text-xs font-semibold backdrop-blur-md text-white"
+                style="background: rgba(var(--color-secondary-rgb), 0.85)"
               >
                 {{
                   product.stock === 0 ? 'AGOTADO' : 'Últimas ' + product.stock
@@ -200,10 +196,10 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
               <!-- Variant Indicator -->
               <div
                 *ngIf="product.has_variants"
-                class="absolute top-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold backdrop-blur-sm bg-surface/80 border border-border/60 flex items-center gap-1"
+                class="absolute top-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold backdrop-blur-md bg-black/60 border border-white/10 flex items-center gap-1"
               >
-                <app-icon name="layers" [size]="12" class="text-primary"></app-icon>
-                <span class="text-text-secondary">{{ product.product_variants?.length }}</span>
+                <app-icon name="layers" [size]="12" [color]="'#ffffff'"></app-icon>
+                <span class="text-white">{{ product.product_variants?.length }}</span>
               </div>
             </div>
 
@@ -226,11 +222,11 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
                 {{ product.description }}
               </p>
 
-              <!-- Bottom Section: Price and Quick Add -->
+              <!-- Bottom Section: Price and Stock -->
               <div class="flex items-center justify-between">
                 <!-- Price -->
                 <div class="flex flex-col">
-                  <span class="text-text-primary font-bold text-sm sm:text-lg">
+                  <span class="text-text-primary font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate">
                     {{ product.final_price | currency }}
                   </span>
                   <!-- Stock indicator for non-variant products -->
@@ -246,45 +242,36 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
                     {{ product.stock === 0 ? 'Sin stock' : product.stock + ' en stock' }}
                   </span>
                 </div>
-
-                <!-- Quick Add Button -->
-                <button
-                  class="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-primary/10 hover:bg-primary/20 border border-primary/20 hover:border-primary/30 flex items-center justify-center transition-all duration-200 group/btn"
-                  [class]="
-                    product.stock === 0
-                      ? 'opacity-50 cursor-not-allowed'
-                      : 'hover:bg-primary/30 hover:scale-110'
-                  "
-                  [disabled]="product.stock === 0"
-                >
-                  <app-icon
-                    name="plus"
-                    [size]="12"
-                    class="text-primary/70 group-hover/btn:text-primary transition-colors sm:hidden"
-                  ></app-icon>
-                  <app-icon
-                    name="plus"
-                    [size]="14"
-                    class="text-primary/70 group-hover/btn:text-primary transition-colors hidden sm:block"
-                  ></app-icon>
-                </button>
               </div>
 
-              <!-- Additional Product Details (hidden on small mobile) -->
+              <!-- Additional Product Details + Add Button -->
               <div
-                *ngIf="product.sku || product.category_name"
-                class="hidden sm:block mt-2 pt-2 border-t border-border/60"
+                class="hidden sm:flex items-center justify-between mt-2 pt-2 border-t border-border/60 gap-2"
               >
-                <div
-                  class="flex items-center justify-between text-xs text-text-muted"
-                >
-                  <span *ngIf="product.sku" class="font-mono">{{
+                <div class="flex-1 min-w-0 flex items-center gap-2 text-xs text-text-muted">
+                  <span *ngIf="product.sku" class="font-mono truncate max-w-[80px]" [title]="product.sku">{{
                     product.sku
                   }}</span>
-                  <span *ngIf="product.category_name">{{
+                  <span *ngIf="product.category_name" class="truncate">{{
                     product.category_name
                   }}</span>
                 </div>
+                <button
+                  class="shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 shadow-sm text-[var(--color-text-on-primary)]"
+                  [ngClass]="
+                    product.stock === 0
+                      ? 'opacity-50 cursor-not-allowed bg-muted'
+                      : 'bg-[var(--color-primary)] hover:opacity-90 hover:scale-110 active:scale-95'
+                  "
+                  [disabled]="product.stock === 0"
+                  (click)="$event.stopPropagation(); onAddToCart(product)"
+                  aria-label="Agregar al carrito"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                  </svg>
+                </button>
               </div>
             </div>
           </div>
@@ -736,9 +723,9 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
           this.toastService.success(`${product.name} (${variantLabel}) agregado al carrito`);
           this.productAddedToCart.emit({ product, quantity: 1 });
         },
-        error: () => {
+        error: (error) => {
           this.addingToCart.delete(product.id);
-          this.toastService.error('Error al agregar variante al carrito');
+          this.toastService.warning(error.message || 'Error al agregar variante al carrito');
         },
       });
   }
@@ -776,7 +763,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
         },
         error: (error) => {
           this.addingToCart.delete(product.id);
-          this.toastService.error('Error al agregar producto al carrito');
+          this.toastService.warning(error.message || 'Error al agregar producto al carrito');
         },
       });
   }

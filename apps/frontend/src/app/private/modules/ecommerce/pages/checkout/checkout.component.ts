@@ -96,7 +96,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       state_province: [''],
       country_code: ['CO', Validators.required],
       postal_code: [''],
-      phone_number: ['', Validators.required],
+      phone_number: ['', [Validators.required, Validators.pattern(/^[\d+#*\s()-]*$/)]],
     });
   }
 
@@ -185,6 +185,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       error: () => {
         this.is_loading = false;
         this.use_new_address = true;
+        this.toast.warning('No pudimos cargar tus direcciones guardadas. Puedes ingresar una nueva.', 'Aviso');
       },
     });
   }
@@ -286,7 +287,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       },
       error: () => {
         this.is_loading = false;
-        // Handle error
+        this.toast.error('No pudimos cargar las opciones de envío. Intenta de nuevo.', 'Error de envío');
       }
     });
   }
@@ -324,6 +325,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       },
       error: () => {
         this.loading_payment_methods = false;
+        this.toast.error('No pudimos cargar los métodos de pago. Intenta de nuevo.', 'Error');
       },
     });
   }
@@ -508,13 +510,19 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       },
       error: (err) => {
         this.is_submitting = false;
-        this.error_message = err.error?.message || 'Error al procesar el pedido';
+        const msg = this.extractErrorMessage(err);
+        this.error_message = msg;
+        this.toast.error(msg, 'Error al procesar el pedido');
       },
     });
   }
 
-  // ... (previous helper methods)
-
+  private extractErrorMessage(err: any): string {
+    const msg = err?.error?.message;
+    if (typeof msg === 'string') return msg;
+    if (msg?.message) return msg.message;
+    return 'Ocurrió un error inesperado';
+  }
 
   goToCart(): void {
     this.router.navigate(['/cart']);

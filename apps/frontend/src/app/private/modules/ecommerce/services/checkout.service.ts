@@ -51,6 +51,20 @@ export interface WhatsappCheckoutResponse extends CheckoutResponse {
         unit_price: number;
         total_price: number;
     }>;
+    customer?: {
+        first_name: string;
+        last_name: string;
+        phone: string | null;
+        address: {
+            address_line1: string;
+            address_line2: string | null;
+            city: string;
+            state_province: string | null;
+            country_code: string;
+            postal_code: string | null;
+            phone_number: string | null;
+        } | null;
+    } | null;
 }
 
 @Injectable({

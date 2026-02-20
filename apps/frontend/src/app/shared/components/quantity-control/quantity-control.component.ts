@@ -22,7 +22,7 @@ export type QuantityControlSize = 'sm' | 'md' | 'lg';
         [class.px-2.5]="size === 'sm'"
         [class.px-3]="size === 'md'"
         [class.px-4]="size === 'lg'"
-        class="hover:bg-muted h-full flex items-center text-text-secondary transition-colors"
+        class="hover:bg-muted h-full flex items-center justify-center shrink-0 text-text-secondary transition-colors"
         (click)="decrease()"
         type="button"
         [disabled]="disabled || loading || displayValue <= min"
@@ -35,7 +35,7 @@ export type QuantityControlSize = 'sm' | 'md' | 'lg';
           [class.w-12]="size === 'sm'"
           [class.w-16]="size === 'md'"
           [class.w-20]="size === 'lg'"
-          class="text-center text-xs font-bold text-text-primary bg-transparent border-0 outline-none p-0 h-full focus:ring-0"
+          class="shrink min-w-[24px] text-center text-xs font-bold text-text-primary bg-transparent border-0 outline-none p-0 h-full focus:ring-0"
           type="text"
           inputmode="numeric"
           pattern="[0-9]*"
@@ -54,7 +54,7 @@ export type QuantityControlSize = 'sm' | 'md' | 'lg';
           [class.min-w-[28px]]="size === 'sm'"
           [class.min-w-[36px]]="size === 'md'"
           [class.min-w-[44px]]="size === 'lg'"
-          class="text-center text-xs font-bold text-text-primary"
+          class="shrink text-center text-xs font-bold text-text-primary"
         >
           {{ displayValue }}
         </span>
@@ -64,7 +64,7 @@ export type QuantityControlSize = 'sm' | 'md' | 'lg';
         [class.px-2.5]="size === 'sm'"
         [class.px-3]="size === 'md'"
         [class.px-4]="size === 'lg'"
-        class="hover:bg-muted h-full flex items-center text-text-secondary transition-colors"
+        class="hover:bg-muted h-full flex items-center justify-center shrink-0 text-text-secondary transition-colors"
         (click)="increase()"
         type="button"
         [disabled]="disabled || loading || (max !== null && displayValue >= max)"
@@ -76,7 +76,9 @@ export type QuantityControlSize = 'sm' | 'md' | 'lg';
   styles: [
     `
     :host {
-      display: inline-block;
+      display: inline-flex;
+      min-width: 0;
+      max-width: 100%;
     }
 
     /* Remove number input spin buttons */

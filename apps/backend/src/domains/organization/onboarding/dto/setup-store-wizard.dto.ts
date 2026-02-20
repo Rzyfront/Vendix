@@ -50,6 +50,12 @@ export class SetupStoreWizardDto {
   @MaxLength(100)
   timezone?: string;
 
+  @ApiPropertyOptional({ example: 'COP', description: 'ISO 4217 currency code' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(3)
+  currency?: string;
+
   // Address fields (pre-populated from organization)
   @ApiPropertyOptional({
     example: 'Calle Principal 123',

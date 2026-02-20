@@ -68,6 +68,7 @@ export interface SetupStoreData {
   description?: string;
   store_type?: 'physical' | 'online' | 'hybrid';
   timezone?: string;
+  currency?: string;
   address_line1?: string;
   address_line2?: string;
   city?: string;

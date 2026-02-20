@@ -1004,13 +1004,26 @@ export class ProductsService {
 
           // Actualizar imágenes si se proporcionan
           if (image_urls !== undefined || images !== undefined) {
+            // 0. Recolectar URLs viejas para limpiar S3 después
+            const oldImages = await prisma.product_images.findMany({
+              where: { product_id: id },
+              select: { image_url: true },
+            });
+            const oldS3Keys = oldImages.map((img) => img.image_url).filter(Boolean);
+
+            // 1. Limpiar image_id en variantes para evitar FK Restrict
+            await prisma.product_variants.updateMany({
+              where: { product_id: id, image_id: { not: null } },
+              data: { image_id: null },
+            });
+
             await prisma.product_images.deleteMany({
               where: { product_id: id },
             });
 
             const finalImages: any[] = [];
 
-            // 1. Procesar image_urls (legacy) - sanitize to prevent storing signed URLs
+            // 2. Procesar image_urls (legacy) - sanitize to prevent storing signed URLs
             if (image_urls && image_urls.length > 0) {
               finalImages.push(
                 ...image_urls.map((url, index) => ({
@@ -1021,7 +1034,7 @@ export class ProductsService {
               );
             }
 
-            // 2. Procesar images (structured with possible base64)
+            // 3. Procesar images (structured with possible base64)
             if (images && images.length > 0) {
               const { org, store: storeContext } = await this.getStoreWithOrgContext(existingProduct.store_id);
               const uploadedImages = await this.handleImageUploads(
@@ -1047,17 +1060,41 @@ export class ProductsService {
                 data: finalImages,
               });
             }
+
+            // 4. Determinar qué keys de S3 ya no se usan y eliminarlas
+            const newS3Keys = new Set(finalImages.map((img) => img.image_url));
+            const keysToDelete = oldS3Keys.filter((key) => !newS3Keys.has(key));
+
+            // Eliminar de S3 fuera del camino crítico (no bloquea la transacción)
+            if (keysToDelete.length > 0) {
+              Promise.allSettled(
+                keysToDelete.flatMap((key) => {
+                  const parts = key.split('/');
+                  const fileName = parts.pop();
+                  const thumbKey = [...parts, `thumb_${fileName}`].join('/');
+                  return [
+                    this.s3Service.deleteFile(key),
+                    this.s3Service.deleteFile(thumbKey).catch(() => {}),
+                  ];
+                }),
+              ).catch((err) => console.warn('S3 cleanup error during product update:', err));
+            }
           }
 
           // Sincronizar variantes si se proporcionan
           if (variants !== undefined) {
-            // Detect simple → variant transition
-            const existingVariantCount = await prisma.product_variants.count({
+            // Recolectar IDs de variantes existentes en DB ANTES del upsert
+            const allExistingVariants = await prisma.product_variants.findMany({
               where: { product_id: id },
+              include: { product_images: { select: { image_url: true } } },
             });
+            const existingVariantMap = new Map(
+              allExistingVariants.map((v) => [v.id, v]),
+            );
 
+            // Detect simple → variant transition
             const isTransitionToVariants =
-              existingVariantCount === 0 && variants.length > 0;
+              allExistingVariants.length === 0 && variants.length > 0;
 
             // If transitioning, clear base stock and get location_ids for inheritance
             let inheritedLocationIds: number[] = [];
@@ -1070,16 +1107,24 @@ export class ProductsService {
                 );
             }
 
-            for (const variantData of variants) {
-              const { variant_image_url, ...variantFields } = variantData as CreateVariantWithStockDto;
+            // IDs de variantes que se mantienen (enviadas desde el frontend)
+            const keptVariantIds = new Set<number>();
 
-              // Buscar si la variante ya existe por SKU
-              const existingVariant = await prisma.product_variants.findFirst({
-                where: {
-                  product_id: id,
-                  sku: variantData.sku,
-                },
-              });
+            for (const variantData of variants) {
+              const { variant_image_url, id: variantDbId, ...variantFields } = variantData as CreateVariantWithStockDto & { id?: number };
+
+              // Buscar variante existente: primero por ID, luego por SKU como fallback
+              let existingVariant = variantDbId
+                ? await prisma.product_variants.findFirst({
+                    where: { id: variantDbId, product_id: id },
+                  })
+                : null;
+
+              if (!existingVariant) {
+                existingVariant = await prisma.product_variants.findFirst({
+                  where: { product_id: id, sku: variantData.sku },
+                });
+              }
 
               let variantId: number;
 
@@ -1117,6 +1162,8 @@ export class ProductsService {
                 }
               }
 
+              keptVariantIds.add(variantId);
+
               // Process variant image if new base64 provided
               if (variant_image_url && variant_image_url.startsWith('data:image')) {
                 const { org, store: storeCtx } = await this.getStoreWithOrgContext(existingProduct.store_id);
@@ -1137,6 +1184,44 @@ export class ProductsService {
                 await prisma.product_variants.update({
                   where: { id: variantId },
                   data: { image_id: variantImage.id },
+                });
+              }
+            }
+
+            // Eliminar variantes que NO están en la lista enviada (por ID)
+            for (const ev of allExistingVariants) {
+              if (!keptVariantIds.has(ev.id)) {
+                // Limpiar FK Restrict antes de borrar (order_items, inventory_adjustments)
+                await prisma.order_items.updateMany({
+                  where: { product_variant_id: ev.id },
+                  data: { product_variant_id: null },
+                });
+                await prisma.inventory_adjustments.updateMany({
+                  where: { product_variant_id: ev.id },
+                  data: { product_variant_id: null },
+                });
+
+                // Limpiar imagen de variante de S3
+                if (ev.image_id && ev.product_images?.image_url) {
+                  const key = ev.product_images.image_url;
+                  const parts = key.split('/');
+                  const fileName = parts.pop();
+                  const thumbKey = [...parts, `thumb_${fileName}`].join('/');
+                  this.s3Service.deleteFile(key).catch(() => {});
+                  this.s3Service.deleteFile(thumbKey).catch(() => {});
+
+                  // Limpiar image_id para poder borrar product_images
+                  await prisma.product_variants.update({
+                    where: { id: ev.id },
+                    data: { image_id: null },
+                  });
+                  await prisma.product_images.delete({
+                    where: { id: ev.image_id },
+                  }).catch(() => {});
+                }
+
+                await prisma.product_variants.delete({
+                  where: { id: ev.id },
                 });
               }
             }
@@ -1385,8 +1470,27 @@ export class ProductsService {
       throw new NotFoundException('Imagen no encontrada');
     }
 
-    // Las imágenes no tienen estado, pero podríamos agregar un campo deleted_at
-    // Por ahora, eliminamos físicamente
+    // Limpiar referencia en variantes que usen esta imagen
+    await this.prisma.product_variants.updateMany({
+      where: { image_id: imageId },
+      data: { image_id: null },
+    });
+
+    // Eliminar de S3 (archivo + thumbnail)
+    if (existingImage.image_url) {
+      try {
+        await this.s3Service.deleteFile(existingImage.image_url);
+        // Intentar eliminar thumbnail (formato: thumb_{fileName})
+        const parts = existingImage.image_url.split('/');
+        const fileName = parts.pop();
+        const thumbKey = [...parts, `thumb_${fileName}`].join('/');
+        await this.s3Service.deleteFile(thumbKey).catch(() => {});
+      } catch (error) {
+        // Log pero no bloquear — la imagen DB se elimina igual
+        console.warn(`Failed to delete S3 file for image ${imageId}:`, error);
+      }
+    }
+
     return await this.prisma.product_images.delete({
       where: { id: imageId },
     });

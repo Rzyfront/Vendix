@@ -49,6 +49,7 @@ export class RegisterCustomerDto {
   })
   @IsString({ message: 'El teléfono debe ser un string' })
   @IsOptional()
+  @Matches(/^[\d+#*\s()-]*$/, { message: 'El teléfono solo puede contener números y los símbolos + # * ( ) -' })
   phone?: string;
 
   @ApiProperty({

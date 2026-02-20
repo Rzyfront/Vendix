@@ -17,6 +17,7 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
 import { ProductCarouselComponent } from '../../components/product-carousel/product-carousel.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal/product-quick-view-modal.component';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
+import { ToastService } from '../../../../../shared/components/toast/toast.service';
 
 @Component({
   selector: 'app-cart',
@@ -42,6 +43,7 @@ export class CartComponent implements OnInit, OnDestroy {
   private tenantFacade = inject(TenantFacade);
   private destroyRef = inject(DestroyRef);
   private currencyService = inject(CurrencyFormatService);
+  private toast = inject(ToastService);
 
   constructor(
     private cart_service: CartService,
@@ -71,14 +73,22 @@ export class CartComponent implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
+  private extractErrorMessage(err: any): string {
+    const msg = err?.error?.message;
+    if (typeof msg === 'string') return msg;
+    if (msg?.message) return msg.message;
+    return 'Ocurrió un error inesperado';
+  }
+
   loadCart(): void {
     this.is_loading = true;
     this.cart_service.getCart().subscribe({
       next: () => {
         this.is_loading = false;
       },
-      error: () => {
+      error: (err) => {
         this.is_loading = false;
+        this.toast.error('No pudimos cargar tu carrito. Intenta de nuevo.', 'Error');
       },
     });
 
@@ -131,7 +141,10 @@ export class CartComponent implements OnInit, OnDestroy {
     if (result) {
       result.subscribe({
         next: () => { this.updating_item_id = null; },
-        error: () => { this.updating_item_id = null; },
+        error: (err: any) => {
+          this.updating_item_id = null;
+          this.toast.error(this.extractErrorMessage(err), 'Error al actualizar');
+        },
       });
     } else {
       this.updating_item_id = null;
@@ -187,14 +200,14 @@ export class CartComponent implements OnInit, OnDestroy {
 
     this.is_whatsapp_loading = true;
 
-    // For guests: send localStorage cart items in the request
-    const items = !this.is_authenticated
-      ? this.cart?.items.map(i => ({
-          product_id: i.product_id,
-          product_variant_id: i.product_variant_id ?? undefined,
-          quantity: i.quantity,
-        }))
-      : undefined;
+    // Always send items from frontend cart (localStorage) so the backend
+    // can fallback to them if the backend cart is empty (e.g. user logged
+    // in after adding items as guest and cart wasn't synced)
+    const items = this.cart?.items.map(i => ({
+      product_id: i.product_id,
+      product_variant_id: i.product_variant_id ?? undefined,
+      quantity: i.quantity,
+    }));
 
     this.checkoutService.whatsappCheckout(undefined, items).pipe(takeUntil(this.destroy$)).subscribe({
       next: (response) => {
@@ -205,8 +218,10 @@ export class CartComponent implements OnInit, OnDestroy {
         }
         this.openWhatsApp(response.data);
       },
-      error: () => {
+      error: (err: any) => {
         this.is_whatsapp_loading = false;
+        const msg = this.extractErrorMessage(err);
+        this.toast.error(msg, 'No se pudo procesar tu pedido');
       },
     });
   }
@@ -221,13 +236,41 @@ export class CartComponent implements OnInit, OnDestroy {
       `  - ${i.name}${i.variant_sku ? ' (' + i.variant_sku + ')' : ''} x${i.quantity} — ${fmt(i.total_price)}`
     ).join('\n');
 
-    const message = encodeURIComponent(
-      `Hola! Quiero confirmar mi pedido en *${storeName}* 🛒\n\n` +
-      `*Pedido:* ${order.order_number}\n\n` +
-      `*Productos:*\n${itemLines}\n\n` +
-      `*Total:* ${fmt(Number(order.total))}\n\n` +
-      `Quedo atento para coordinar el pago y la entrega!`
-    );
+    const customer = order.customer;
+    const customerName = customer ? `${customer.first_name} ${customer.last_name}`.trim() : '';
+
+    let message: string;
+
+    if (customerName) {
+      // Authenticated user with profile data
+      let contactLines = '';
+      if (customer!.phone) {
+        contactLines += `\n*Teléfono:* ${customer!.phone}`;
+      }
+      if (customer!.address) {
+        const addr = customer!.address;
+        const parts = [addr.address_line1, addr.address_line2, addr.city, addr.state_province].filter(Boolean);
+        contactLines += `\n*Dirección de envío:* ${parts.join(', ')}`;
+      }
+
+      message = encodeURIComponent(
+        `Hola, soy *${customerName}*! Quiero confirmar mi pedido en *${storeName}* 🛒\n\n` +
+        `*Pedido:* ${order.order_number}\n\n` +
+        `*Productos:*\n${itemLines}\n\n` +
+        `*Total:* ${fmt(Number(order.total))}` +
+        (contactLines ? `\n${contactLines}` : '') +
+        `\n\nQuedo atento para coordinar!`
+      );
+    } else {
+      // Guest or user without name — generic message
+      message = encodeURIComponent(
+        `Hola! Quiero confirmar mi pedido en *${storeName}* 🛒\n\n` +
+        `*Pedido:* ${order.order_number}\n\n` +
+        `*Productos:*\n${itemLines}\n\n` +
+        `*Total:* ${fmt(Number(order.total))}\n\n` +
+        `Quedo atento para coordinar el pago y la entrega!`
+      );
+    }
 
     window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
   }
