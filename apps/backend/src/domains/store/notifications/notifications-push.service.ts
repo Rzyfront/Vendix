@@ -1,20 +1,29 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const webpush = require('web-push');
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 
 @Injectable()
-export class NotificationsPushService {
+export class NotificationsPushService implements OnModuleInit {
   private readonly logger = new Logger(NotificationsPushService.name);
-  private readonly vapid_public_key: string;
+  private vapid_public_key = '';
+  private vapid_configured = false;
 
-  constructor(private readonly global_prisma: GlobalPrismaService) {
+  constructor(private readonly global_prisma: GlobalPrismaService) {}
+
+  /**
+   * Read VAPID keys AFTER SecretsManagerService has loaded them into process.env.
+   * Constructor runs before onModuleInit, so env vars from Secrets Manager
+   * are not yet available at constructor time.
+   */
+  onModuleInit() {
     this.vapid_public_key = process.env.VAPID_PUBLIC_KEY || '';
     const vapid_private_key = process.env.VAPID_PRIVATE_KEY || '';
     const vapid_subject = process.env.VAPID_SUBJECT || 'mailto:support@vendix.online';
 
     if (this.vapid_public_key && vapid_private_key) {
       webpush.setVapidDetails(vapid_subject, this.vapid_public_key, vapid_private_key);
+      this.vapid_configured = true;
       this.logger.log('VAPID credentials configured');
     } else {
       this.logger.warn('VAPID keys not configured — web push disabled');
@@ -38,7 +47,7 @@ export class NotificationsPushService {
     body: string,
     data?: any,
   ): Promise<void> {
-    if (!this.vapid_public_key) return;
+    if (!this.vapid_configured) return;
 
     try {
       // Find users who have in_app enabled for this notification type
