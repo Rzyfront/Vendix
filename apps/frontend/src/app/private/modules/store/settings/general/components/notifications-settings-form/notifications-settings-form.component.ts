@@ -38,7 +38,9 @@ export class NotificationsSettingsForm implements OnInit, OnChanges {
   @Output() settingsChange = new EventEmitter<NotificationsSettings>();
 
   private notificationsApi = inject(NotificationsApiService);
-  private pushService = inject(PushSubscriptionService);
+  pushService = inject(PushSubscriptionService);
+
+  devicePushEnabled = false;
 
   subscriptions: Record<string, boolean> = {
     new_order: true,
@@ -111,6 +113,16 @@ export class NotificationsSettingsForm implements OnInit, OnChanges {
   ngOnInit() {
     this.patchForm();
     this.loadSubscriptions();
+    this.initDevicePushState();
+  }
+
+  private async initDevicePushState() {
+    if (!this.pushService.isSupported) return;
+    if (this.pushService.permissionState === 'granted') {
+      const reg = await navigator.serviceWorker.getRegistration('/');
+      const sub = await reg?.pushManager?.getSubscription();
+      this.devicePushEnabled = !!sub;
+    }
   }
 
   ngOnChanges() {
@@ -157,22 +169,31 @@ export class NotificationsSettingsForm implements OnInit, OnChanges {
     });
   }
 
+  get devicePushDescription(): string {
+    if (this.pushService.permissionState === 'denied') {
+      return 'Bloqueado por el navegador — revisa los permisos del sitio';
+    }
+    return this.devicePushEnabled
+      ? 'Recibirás alertas aunque la app esté cerrada'
+      : 'Activa para recibir alertas en tu dispositivo';
+  }
+
   onSubscriptionToggle(type: string) {
     this.subscriptions[type] = !this.subscriptions[type];
     this.notificationsApi
       .updateSubscription({ type, in_app: this.subscriptions[type] })
-      .subscribe({
-        next: () => this.handlePushPermission(),
-      });
+      .subscribe();
   }
 
-  private async handlePushPermission() {
-    const any_active = Object.values(this.subscriptions).some((v) => v);
-
-    if (any_active && this.pushService.isSupported && this.pushService.permissionState === 'default') {
-      await this.pushService.requestPermissionAndSubscribe();
-    } else if (!any_active) {
+  async onDevicePushToggle() {
+    if (!this.devicePushEnabled) {
+      // Turning ON — request permission and subscribe
+      const success = await this.pushService.requestPermissionAndSubscribe();
+      this.devicePushEnabled = success;
+    } else {
+      // Turning OFF — unsubscribe
       await this.pushService.unsubscribe();
+      this.devicePushEnabled = false;
     }
   }
 }
