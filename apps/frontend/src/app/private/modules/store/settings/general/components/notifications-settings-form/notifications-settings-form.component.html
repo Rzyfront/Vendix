@@ -14,6 +14,20 @@
     <!-- In-App Notification Subscriptions -->
     <div>
       <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Notificaciones en la App</h4>
+
+      <!-- Device push toggle -->
+      @if (pushService.isSupported) {
+        <div class="mb-4">
+          <app-setting-toggle
+            [ngModel]="devicePushEnabled"
+            [ngModelOptions]="{ standalone: true }"
+            label="Notificaciones en dispositivo"
+            [description]="devicePushDescription"
+            (changed)="onDevicePushToggle()"
+          ></app-setting-toggle>
+        </div>
+      }
+
       <p class="text-xs text-gray-500 mb-3">Elige qué notificaciones deseas recibir en tiempo real dentro de la aplicación.</p>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         @for (type of subscriptionTypes; track type) {
