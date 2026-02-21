@@ -131,8 +131,9 @@ export class PushSubscriptionService {
    * Convert a URL-safe base64 VAPID key to Uint8Array for pushManager.subscribe().
    */
   private urlBase64ToUint8Array(base64_string: string): Uint8Array {
-    const padding = '='.repeat((4 - (base64_string.length % 4)) % 4);
-    const base64 = (base64_string + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const clean = base64_string.trim().replace(/=+$/, '');
+    const padding = '='.repeat((4 - (clean.length % 4)) % 4);
+    const base64 = (clean + padding).replace(/-/g, '+').replace(/_/g, '/');
     const raw = atob(base64);
     const output = new Uint8Array(raw.length);
     for (let i = 0; i < raw.length; i++) {
