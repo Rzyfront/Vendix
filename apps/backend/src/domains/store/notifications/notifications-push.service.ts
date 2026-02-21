@@ -21,10 +21,18 @@ export class NotificationsPushService implements OnModuleInit {
     const vapid_private_key = process.env.VAPID_PRIVATE_KEY || '';
     const vapid_subject = process.env.VAPID_SUBJECT || 'mailto:support@vendix.online';
 
-    if (this.vapid_public_key && vapid_private_key) {
-      webpush.setVapidDetails(vapid_subject, this.vapid_public_key, vapid_private_key);
-      this.vapid_configured = true;
-      this.logger.log('VAPID credentials configured');
+    // Strip any Base64 padding — web-push requires URL-safe Base64 without "="
+    this.vapid_public_key = this.vapid_public_key.replace(/=+$/, '');
+    const clean_private_key = vapid_private_key.replace(/=+$/, '');
+
+    if (this.vapid_public_key && clean_private_key) {
+      try {
+        webpush.setVapidDetails(vapid_subject, this.vapid_public_key, clean_private_key);
+        this.vapid_configured = true;
+        this.logger.log('VAPID credentials configured');
+      } catch (error: any) {
+        this.logger.error(`Failed to configure VAPID: ${error.message}`);
+      }
     } else {
       this.logger.warn('VAPID keys not configured — web push disabled');
     }
