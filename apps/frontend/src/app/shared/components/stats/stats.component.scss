@@ -105,3 +105,81 @@
     @apply text-[10px] mt-0.5 text-emerald-500;
   }
 }
+
+// ============================================
+// SKELETON LOADER (Shimmer Effect)
+// ============================================
+
+@keyframes skeleton-loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@mixin shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-background) 25%,
+    var(--color-border) 50%,
+    var(--color-background) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite;
+  border-radius: var(--radius-sm);
+}
+
+.stat-skeleton {
+  // Desktop: horizontal layout matching real card
+  .skeleton-icon {
+    @apply w-8 h-8 rounded-xl flex-shrink-0 ml-1.5 order-2;
+    @include shimmer;
+
+    @media (max-width: 639px) {
+      @apply absolute top-3 right-3 w-5 h-5 ml-0 order-none;
+    }
+  }
+
+  .skeleton-content {
+    @apply flex-1 flex flex-col gap-1.5 order-1;
+    min-width: 0;
+
+    @media (max-width: 639px) {
+      @apply order-none;
+    }
+  }
+
+  .skeleton-title {
+    width: 60%;
+    height: 12px;
+    @include shimmer;
+
+    @media (max-width: 639px) {
+      width: 50%;
+      height: 10px;
+    }
+  }
+
+  .skeleton-value {
+    width: 45%;
+    height: 24px;
+    @include shimmer;
+
+    @media (max-width: 639px) {
+      width: 55%;
+      height: 22px;
+    }
+  }
+
+  .skeleton-small {
+    width: 35%;
+    height: 10px;
+    @include shimmer;
+
+    @media (max-width: 639px) {
+      width: 40%;
+    }
+  }
+}

@@ -287,4 +287,17 @@ export class GlobalPrismaService extends BasePrismaService {
   get expense_categories() {
     return this.baseClient.expense_categories;
   }
+
+  // Notifications models
+  get notifications() {
+    return this.baseClient.notifications;
+  }
+
+  get notification_subscriptions() {
+    return this.baseClient.notification_subscriptions;
+  }
+
+  get push_subscriptions() {
+    return this.baseClient.push_subscriptions;
+  }
 }

@@ -185,6 +185,27 @@ export class StockLevelManager {
       user_id: params.user_id,
     } as StockUpdatedEvent);
 
+    // 9. Emitir alerta de stock bajo si aplica
+    const low_threshold = (existing_stock_level as any).reorder_point ?? 5;
+    if (
+      updated_stock.quantity_available <= low_threshold &&
+      updated_stock.quantity_available >= 0
+    ) {
+      const product = await prisma.products.findUnique({
+        where: { id: params.product_id },
+        select: { name: true, store_id: true },
+      });
+      if (product?.store_id) {
+        this.eventEmitter.emit('stock.low', {
+          store_id: product.store_id,
+          product_id: params.product_id,
+          product_name: product.name || 'Producto',
+          quantity: updated_stock.quantity_available,
+          threshold: low_threshold,
+        });
+      }
+    }
+
     return {
       stock_level: updated_stock,
       transaction,

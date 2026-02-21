@@ -196,7 +196,7 @@ export class ProductListComponent implements OnChanges {
   cardConfig: ItemListCardConfig = {
     titleKey: 'name',
     subtitleKey: 'brand',
-    subtitleTransform: (val: any) => val?.name || '-',
+    subtitleTransform: (item: any) => item?.brand?.name || '-',
     avatarKey: 'image_url',
     avatarShape: 'square', // Square images for products
     badgeKey: 'state',

@@ -54,31 +54,6 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
           </button>
         </div>
 
-        <!-- Customer Section -->
-        <div class="customer-section">
-          <button
-            *ngIf="!cartState?.customer"
-            class="assign-customer-btn"
-            (click)="assignCustomer.emit()"
-          >
-            <app-icon name="user-plus" [size]="18"></app-icon>
-            <span>Asignar Cliente</span>
-          </button>
-
-          <div *ngIf="cartState?.customer" class="customer-card">
-            <div class="customer-avatar">
-              <app-icon name="user" [size]="16"></app-icon>
-            </div>
-            <div class="customer-info">
-              <span class="customer-name">{{ cartState?.customer?.name }}</span>
-              <span class="customer-email">{{ cartState?.customer?.email }}</span>
-            </div>
-            <button class="change-customer-btn" (click)="assignCustomer.emit()">
-              <app-icon name="edit-2" [size]="14"></app-icon>
-            </button>
-          </div>
-        </div>
-
         <!-- Items List -->
         <div class="items-container">
           <!-- Empty State -->
@@ -176,6 +151,14 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
           >
             <app-icon name="save" [size]="18"></app-icon>
             <span>Guardar</span>
+          </button>
+          <button
+            class="action-btn shipping-btn"
+            (click)="shipping.emit()"
+            [disabled]="!cartState?.items?.length"
+          >
+            <app-icon name="truck" [size]="18"></app-icon>
+            <span>Envío</span>
           </button>
           <button
             class="action-btn checkout-btn"
@@ -287,102 +270,6 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       .clear-btn:disabled {
         color: var(--color-text-muted);
         cursor: not-allowed;
-      }
-
-      /* Customer Section */
-      .customer-section {
-        padding: 12px 20px;
-        border-bottom: 1px solid var(--color-border);
-        flex-shrink: 0;
-      }
-
-      .assign-customer-btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        width: 100%;
-        padding: 12px;
-        border: 2px dashed var(--color-border);
-        border-radius: 12px;
-        background: transparent;
-        color: var(--color-text-secondary);
-        font-size: 14px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.2s ease;
-      }
-
-      .assign-customer-btn:hover {
-        border-color: var(--color-primary);
-        color: var(--color-primary);
-        background: var(--color-primary-light);
-      }
-
-      .customer-card {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 10px 14px;
-        background: var(--color-primary-light);
-        border: 1px solid var(--color-primary);
-        border-radius: 12px;
-      }
-
-      .customer-avatar {
-        width: 36px;
-        height: 36px;
-        border-radius: 50%;
-        background: var(--color-primary);
-        color: white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-      }
-
-      .customer-info {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-      }
-
-      .customer-name {
-        font-size: 14px;
-        font-weight: 600;
-        color: var(--color-text-primary);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      .customer-email {
-        font-size: 12px;
-        color: var(--color-text-secondary);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      .change-customer-btn {
-        width: 32px;
-        height: 32px;
-        border: none;
-        background: white;
-        border-radius: 8px;
-        color: var(--color-text-secondary);
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: all 0.2s ease;
-        flex-shrink: 0;
-      }
-
-      .change-customer-btn:hover {
-        color: var(--color-primary);
-        background: var(--color-surface);
       }
 
       /* Items Container */
@@ -630,6 +517,16 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         border-color: var(--color-text-secondary);
       }
 
+      .shipping-btn {
+        background: var(--color-surface);
+        border: 1px solid rgba(var(--color-primary-rgb), 0.5);
+        color: var(--color-primary);
+      }
+
+      .shipping-btn:hover:not(:disabled) {
+        background: rgba(var(--color-primary-rgb), 0.05);
+      }
+
       .checkout-btn {
         background: var(--color-primary);
         color: white;
@@ -662,8 +559,8 @@ export class PosCartModalComponent implements OnChanges {
   }>();
   @Output() itemRemoved = new EventEmitter<string>();
   @Output() clearCart = new EventEmitter<void>();
-  @Output() assignCustomer = new EventEmitter<void>();
   @Output() saveDraft = new EventEmitter<void>();
+  @Output() shipping = new EventEmitter<void>();
   @Output() checkout = new EventEmitter<void>();
 
   ngOnChanges(changes: SimpleChanges): void {

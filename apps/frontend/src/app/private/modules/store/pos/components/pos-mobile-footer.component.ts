@@ -54,6 +54,14 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
           <span>Guardar</span>
         </button>
         <button
+          class="action-btn shipping-btn"
+          (click)="shipping.emit()"
+          [disabled]="itemCount === 0"
+        >
+          <app-icon name="truck" [size]="18"></app-icon>
+          <span>Envío</span>
+        </button>
+        <button
           class="action-btn checkout-btn"
           (click)="checkout.emit()"
           [disabled]="itemCount === 0"
@@ -231,6 +239,16 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         border-color: var(--color-text-secondary);
       }
 
+      .shipping-btn {
+        background: var(--color-surface);
+        border: 1px solid rgba(var(--color-primary-rgb), 0.5);
+        color: var(--color-primary);
+      }
+
+      .shipping-btn:hover:not(:disabled) {
+        background: rgba(var(--color-primary-rgb), 0.05);
+      }
+
       .checkout-btn {
         background: var(--color-primary);
         color: white;
@@ -282,6 +300,7 @@ export class PosMobileFooterComponent {
 
   @Output() viewCart = new EventEmitter<void>();
   @Output() saveDraft = new EventEmitter<void>();
+  @Output() shipping = new EventEmitter<void>();
   @Output() checkout = new EventEmitter<void>();
 
   formatCurrency(amount: number): string {

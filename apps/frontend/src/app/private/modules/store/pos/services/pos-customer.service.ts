@@ -323,6 +323,18 @@ export class PosCustomerService {
       phone: apiCustomer.phone,
       document_type: apiCustomer.document_type,
       document_number: apiCustomer.document_number,
+      addresses: (apiCustomer.addresses || []).map((addr: any) => ({
+        id: addr.id,
+        address_line1: addr.address_line1,
+        address_line2: addr.address_line2,
+        city: addr.city,
+        state_province: addr.state_province,
+        postal_code: addr.postal_code,
+        country_code: addr.country_code,
+        phone_number: addr.phone_number,
+        type: addr.type,
+        is_primary: addr.is_primary,
+      })),
       created_at: new Date(apiCustomer.created_at),
       updated_at: new Date(apiCustomer.updated_at),
     };

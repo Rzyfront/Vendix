@@ -85,6 +85,19 @@ export class StoreSettingsService {
       );
   }
 
+  uploadStoreFavicon(file: File): Observable<{ key: string; url: string }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('entityType', 'store_favicons');
+
+    return this.http
+      .post<any>(`${environment.apiUrl}/upload`, formData)
+      .pipe(
+        map((response) => response.data ?? response),
+        catchError(this.handleError)
+      );
+  }
+
   private update_settings_api(
     settings: Partial<StoreSettings>,
   ): Observable<ApiResponse<StoreSettings>> {

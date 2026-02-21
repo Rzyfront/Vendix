@@ -1,0 +1,130 @@
+/* ── Timeline Item ─────────────────────────────── */
+
+.tl-item {
+  position: relative;
+  padding-left: 2rem;
+  padding-bottom: 1.75rem;
+}
+
+.tl-item::before {
+  content: "";
+  position: absolute;
+  left: 0.4375rem;
+  top: 1.125rem;
+  bottom: 0;
+  width: 2px;
+  background-color: var(--color-border, #e5e7eb);
+}
+
+.tl-item:last-child::before {
+  display: none;
+}
+
+.tl-item:last-child {
+  padding-bottom: 0;
+}
+
+.tl-item.line-completed::before {
+  background-color: #22c55e;
+}
+
+/* ── Timeline Marker ──────────────────────────── */
+
+.tl-marker {
+  position: absolute;
+  left: 0;
+  top: 0.125rem;
+  height: 1rem;
+  width: 1rem;
+  border-radius: 9999px;
+  z-index: 1;
+  border: 3px solid #fff;
+}
+
+.tl-marker.completed {
+  background-color: #22c55e;
+  box-shadow: 0 0 0 1px #22c55e;
+}
+
+.tl-marker.current {
+  background-color: #166534;
+  box-shadow:
+    0 0 0 3px rgba(22, 101, 52, 0.15),
+    0 0 0 1px #166534;
+}
+
+.tl-marker.upcoming {
+  background-color: var(--color-border, #e5e7eb);
+  box-shadow: 0 0 0 1px var(--color-border, #e5e7eb);
+}
+
+.tl-marker.pending {
+  background-color: var(--color-border, #e5e7eb);
+  box-shadow: 0 0 0 1px var(--color-border, #e5e7eb);
+}
+
+.tl-marker.terminal-danger {
+  background-color: #ef4444;
+  box-shadow: 0 0 0 1px #ef4444;
+}
+
+.tl-marker.terminal-warning {
+  background-color: #f97316;
+  box-shadow: 0 0 0 1px #f97316;
+}
+
+/* ── Inline marker (collapsed view) ───────────── */
+
+.tl-marker-inline {
+  height: 0.75rem;
+  width: 0.75rem;
+  border-radius: 9999px;
+  flex-shrink: 0;
+  border: 2px solid #fff;
+}
+
+.tl-marker-inline.completed {
+  background-color: #22c55e;
+  box-shadow: 0 0 0 1px #22c55e;
+}
+
+.tl-marker-inline.current {
+  background-color: #166534;
+  box-shadow:
+    0 0 0 3px rgba(22, 101, 52, 0.15),
+    0 0 0 1px #166534;
+}
+
+.tl-marker-inline.upcoming,
+.tl-marker-inline.pending {
+  background-color: var(--color-border, #e5e7eb);
+  box-shadow: 0 0 0 1px var(--color-border, #e5e7eb);
+}
+
+.tl-marker-inline.terminal-danger {
+  background-color: #ef4444;
+  box-shadow: 0 0 0 1px #ef4444;
+}
+
+.tl-marker-inline.terminal-warning {
+  background-color: #f97316;
+  box-shadow: 0 0 0 1px #f97316;
+}
+
+/* ── Small variant (tracking) ─────────────────── */
+
+.tl-item.tl-sm {
+  padding-left: 1.5rem;
+  padding-bottom: 1.25rem;
+}
+
+.tl-item.tl-sm::before {
+  left: 0.3125rem;
+  top: 0.875rem;
+}
+
+.tl-item.tl-sm .tl-marker {
+  height: 0.75rem;
+  width: 0.75rem;
+  border-width: 2px;
+}

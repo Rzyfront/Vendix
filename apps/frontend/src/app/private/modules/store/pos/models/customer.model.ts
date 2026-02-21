@@ -1,3 +1,16 @@
+export interface PosCustomerAddress {
+  id: number;
+  address_line1: string;
+  address_line2?: string;
+  city: string;
+  state_province?: string;
+  postal_code?: string;
+  country_code: string;
+  phone_number?: string;
+  type: string;
+  is_primary: boolean;
+}
+
 export interface PosCustomer {
   id: number;
   email: string;
@@ -8,6 +21,7 @@ export interface PosCustomer {
   document_type?: string;
   document_number?: string;
   address?: string;
+  addresses?: PosCustomerAddress[];
   created_at: Date;
   updated_at: Date;
 }

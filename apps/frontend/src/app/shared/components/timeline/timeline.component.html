@@ -1,0 +1,62 @@
+<div>
+  @if (!show_timeline()) {
+    <!-- Collapsed: show only the current step as a compact indicator -->
+    @if (current_step(); as step) {
+      <div class="flex items-center gap-2.5">
+        <div class="tl-marker-inline" [ngClass]="getMarkerClasses(step)"></div>
+        @if (step_template) {
+          <ng-container [ngTemplateOutlet]="step_template"
+            [ngTemplateOutletContext]="{ $implicit: step, index: 0, isLast: true }">
+          </ng-container>
+        } @else {
+          <div>
+            <span class="text-sm font-semibold" [ngClass]="getLabelClasses(step)">{{ step.label }}</span>
+            @if (step.description) {
+              <p class="text-xs text-gray-500 mt-0.5">{{ step.description }}</p>
+            }
+            @if (step.date) {
+              <span class="text-[10px] font-bold text-gray-400 uppercase tracking-tighter block mt-0.5">{{ step.date }}</span>
+            }
+          </div>
+        }
+      </div>
+    }
+  } @else {
+    <!-- Expanded: full timeline with lines and markers -->
+    <div class="space-y-0">
+      @for (step of steps(); track step.key; let i = $index; let last = $last) {
+        <div class="tl-item" [class.tl-sm]="size() === 'sm'" [class.line-completed]="step.status === 'completed'">
+          <div class="tl-marker" [ngClass]="getMarkerClasses(step)"></div>
+
+          @if (step_template) {
+            <ng-container [ngTemplateOutlet]="step_template"
+              [ngTemplateOutletContext]="{ $implicit: step, index: i, isLast: last }">
+            </ng-container>
+          } @else {
+            <div>
+              <span class="text-sm font-semibold" [ngClass]="getLabelClasses(step)">{{ step.label }}</span>
+              @if (step.description) {
+                <p class="text-xs text-gray-500 mt-1">{{ step.description }}</p>
+              }
+              @if (step.date) {
+                <span class="text-[10px] font-bold text-gray-400 uppercase tracking-tighter block mt-1">{{ step.date }}</span>
+              }
+            </div>
+          }
+        </div>
+      }
+    </div>
+  }
+
+  @if (show_toggle()) {
+    <button (click)="toggle()" type="button"
+      class="flex items-center gap-1.5 text-xs font-semibold text-primary-600 hover:text-primary-700
+             mt-2 transition-colors min-h-[44px]"
+      [class.ml-8]="show_timeline()"
+      [attr.aria-expanded]="expanded()"
+      [attr.aria-label]="expanded() ? collapse_label() : expand_label()">
+      <app-icon [name]="expanded() ? 'chevron-up' : 'chevron-down'" [size]="14"></app-icon>
+      {{ expanded() ? collapse_label() : expand_label() }}
+    </button>
+  }
+</div>

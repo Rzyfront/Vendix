@@ -11,6 +11,7 @@ import {
   PaymentResponse,
   Transaction,
 } from '../models/payment.model';
+import { PosShippingAddress } from '../models/shipping.model';
 
 // Re-export types for component usage
 export type {
@@ -308,6 +309,132 @@ export class PosPaymentService {
           };
         } else {
           throw new Error(data.message || 'Error al procesar la venta');
+        }
+      }),
+      catchError((error) => throwError(() => error)),
+    );
+  }
+
+  /**
+   * Process sale with shipping (home delivery / pickup)
+   */
+  processShippingSale(
+    cartState: CartState,
+    shippingData: {
+      shippingMethodId: number;
+      shippingCost: number;
+      deliveryType: string;
+      shippingAddress: PosShippingAddress;
+      deliveryNotes?: string;
+      shippingAddressId?: number | null;
+    },
+    paymentRequest: PaymentRequest | null,
+    createdBy: string,
+  ): Observable<any> {
+    const user_id = this.storeContextService.getUserId();
+    if (!user_id) {
+      return throwError(() => new Error('Usuario no identificado.'));
+    }
+
+    const register_id = localStorage.getItem('pos_register_id');
+    if (!register_id) {
+      return throwError(() => new Error('Caja no configurada.'));
+    }
+
+    if (!cartState.customer) {
+      return throwError(
+        () => new Error('Debe seleccionar un cliente para órdenes con envío.'),
+      );
+    }
+
+    const totalWithShipping = Number(
+      parseFloat(
+        (cartState.summary.total + shippingData.shippingCost).toString(),
+      ).toFixed(2),
+    );
+
+    const sale_data: Record<string, any> = {
+      customer_id: cartState.customer.id,
+      customer_name: `${cartState.customer.first_name} ${cartState.customer.last_name || ''}`.trim(),
+      customer_email: cartState.customer.email,
+      customer_phone: cartState.customer.phone,
+      store_id: this.getStoreId(),
+      items: cartState.items.map((item) => ({
+        product_id: parseInt(item.product.id),
+        product_name: item.product.name,
+        product_sku: item.product.sku,
+        quantity: item.quantity,
+        unit_price: Number(parseFloat(item.unitPrice.toString()).toFixed(2)),
+        total_price: Number(parseFloat(item.totalPrice.toString()).toFixed(2)),
+        cost: item.product.cost
+          ? parseFloat(item.product.cost.toString())
+          : undefined,
+        product_variant_id: item.variant_id || null,
+        variant_sku: item.variant_sku || null,
+        variant_attributes: item.variant_attributes || null,
+      })),
+      subtotal: Number(
+        parseFloat(cartState.summary.subtotal.toString()).toFixed(2),
+      ),
+      tax_amount: Number(
+        parseFloat(cartState.summary.taxAmount.toString()).toFixed(2),
+      ),
+      discount_amount: Number(
+        parseFloat(cartState.summary.discountAmount.toString()).toFixed(2),
+      ),
+      total_amount: totalWithShipping,
+      // Shipping fields
+      delivery_type: shippingData.deliveryType,
+      shipping_method_id: shippingData.shippingMethodId,
+      shipping_cost: Number(
+        parseFloat(shippingData.shippingCost.toString()).toFixed(2),
+      ),
+      shipping_address_snapshot: shippingData.shippingAddress,
+      ...(shippingData.shippingAddressId ? { shipping_address_id: shippingData.shippingAddressId } : {}),
+      // POS meta
+      register_id: register_id,
+      seller_user_id: user_id,
+      internal_notes: shippingData.deliveryNotes || cartState.notes || '',
+      update_inventory: true,
+    };
+
+    if (paymentRequest) {
+      // "Pagar ahora" flow
+      sale_data['requires_payment'] = true;
+      sale_data['store_payment_method_id'] = parseInt(paymentRequest.paymentMethod.id);
+      sale_data['amount_received'] = Number(
+        parseFloat(
+          (paymentRequest.cashReceived || totalWithShipping).toString(),
+        ).toFixed(2),
+      );
+      sale_data['payment_reference'] = paymentRequest.reference || '';
+    } else {
+      // "Contra entrega" flow
+      sale_data['requires_payment'] = false;
+    }
+
+    return this.http.post<any>(this.apiUrl, sale_data).pipe(
+      map((response) => {
+        const data = response.data || response;
+        if (data.success) {
+          const mappedPayment =
+            data.payment && paymentRequest
+              ? {
+                  ...data.payment,
+                  paymentMethod: paymentRequest.paymentMethod,
+                  transactionId: data.payment.transaction_id,
+                }
+              : undefined;
+
+          return {
+            success: true,
+            order: data.order,
+            payment: mappedPayment,
+            message: data.message,
+            change: data.payment?.change,
+          };
+        } else {
+          throw new Error(data.message || 'Error al procesar el envío');
         }
       }),
       catchError((error) => throwError(() => error)),

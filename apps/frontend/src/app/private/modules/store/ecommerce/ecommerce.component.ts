@@ -24,6 +24,7 @@ import {
   SliderPhoto,
 } from './interfaces';
 import { FooterSettingsFormComponent } from './components/footer-settings-form';
+import { StoreShareModalComponent } from './components/store-share-modal';
 import {
   ToastService,
   DialogService,
@@ -52,6 +53,7 @@ import type { Currency } from '../../../../shared/pipes/currency';
     SettingToggleComponent,
     StickyHeaderComponent,
     FooterSettingsFormComponent,
+    StoreShareModalComponent,
   ],
   templateUrl: './ecommerce.component.html',
   styleUrls: ['./ecommerce.component.scss'],
@@ -105,6 +107,9 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   // Ecommerce URL for "Open Store" button
   ecommerceUrl: string | null = null;
 
+  // Share modal state
+  isShareModalOpen = false;
+
   // Footer settings (managed separately from the main form)
   footerSettings: FooterSettings | undefined;
 
@@ -125,6 +130,13 @@ export class EcommerceComponent implements OnInit, OnDestroy {
     }
 
     if (this.isEditMode() && this.ecommerceUrl) {
+      actions.push({
+        id: 'share',
+        label: 'Compartir',
+        variant: 'outline',
+        icon: 'share-2',
+        disabled: !this.ecommerceUrl,
+      });
       actions.push({
         id: 'open',
         label: 'Abrir Tienda',
@@ -825,6 +837,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
 
   onHeaderAction(actionId: string): void {
     if (actionId === 'reset') this.onReset();
+    else if (actionId === 'share') this.isShareModalOpen = true;
     else if (actionId === 'open') this.openEcommerceStore();
     else if (actionId === 'save') this.onSubmit();
   }

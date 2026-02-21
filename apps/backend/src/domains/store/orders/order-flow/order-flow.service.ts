@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { order_state_enum } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   PayOrderDto,
   PaymentType,
@@ -37,7 +38,10 @@ const REFUNDABLE_STATES: OrderState[] = ['delivered', 'finished'];
 export class OrderFlowService {
   private readonly logger = new Logger(OrderFlowService.name);
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly eventEmitter: EventEmitter2,
+  ) {}
 
   private async getOrder(orderId: number) {
     const order = await this.prisma.orders.findFirst({
@@ -120,7 +124,12 @@ export class OrderFlowService {
       });
     }
 
-    return this.prisma.orders.update({
+    const previous_order = await this.prisma.orders.findUnique({
+      where: { id: orderId },
+      select: { state: true, store_id: true, order_number: true },
+    });
+
+    const updated_order = await this.prisma.orders.update({
       where: { id: orderId },
       data: schemaFields,
       include: {
@@ -129,6 +138,16 @@ export class OrderFlowService {
         payments: true,
       },
     });
+
+    this.eventEmitter.emit('order.status_changed', {
+      store_id: updated_order.store_id,
+      order_id: orderId,
+      order_number: previous_order?.order_number || '',
+      old_state: previous_order?.state || '',
+      new_state: newState,
+    });
+
+    return updated_order;
   }
 
   /**

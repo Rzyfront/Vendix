@@ -13,7 +13,8 @@ import {
   OrderActionConfig,
   PayOrderDto,
 } from '../../interfaces/order.interface';
-import { AlertBannerComponent, DialogService, ModalComponent, ToastService } from '../../../../../../shared/components';
+import { AlertBannerComponent, DialogService, ModalComponent, ToastService, TimelineComponent } from '../../../../../../shared/components';
+import { TimelineStep, TimelineVariant } from '../../../../../../shared/components/timeline/timeline.interfaces';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -53,6 +54,7 @@ export interface LifecycleStep {
     ModalComponent,
     CurrencyPipe,
     OrderPaymentModalComponent,
+    TimelineComponent,
   ],
   templateUrl: './order-details-page.component.html',
   styleUrls: ['./order-details-page.component.css'],
@@ -465,6 +467,46 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
 
     return steps;
   });
+
+  // ── Timeline Computed Signals (mapped to TimelineStep[]) ──
+
+  readonly history_timeline_steps = computed<TimelineStep[]>(() => {
+    const logs = this.sortedTimeline();
+    if (logs.length === 0) {
+      const order = this.order();
+      return [{
+        key: 'created',
+        label: 'Orden Creada',
+        status: 'current' as const,
+        date: order ? this.formatDate(order.created_at) : '',
+      }];
+    }
+    return logs.map((log, i) => ({
+      key: `log-${i}`,
+      label: this.getTimelineLabel(log),
+      status: i === logs.length - 1 ? 'current' as const : 'completed' as const,
+      date: this.formatDate(log.created_at),
+      data: log,
+    }));
+  });
+
+  readonly lifecycle_steps_timeline = computed<TimelineStep[]>(() =>
+    this.lifecycleSteps().map(step => ({
+      ...step,
+      variant: step.status === 'terminal'
+        ? (step.key === 'cancelled' ? 'danger' : 'warning') as TimelineVariant
+        : 'default' as TimelineVariant,
+    })),
+  );
+
+  readonly tracking_steps_timeline = computed<TimelineStep[]>(() =>
+    this.trackingSteps().map(step => ({
+      key: step.key,
+      label: step.label,
+      status: step.status as TimelineStep['status'],
+      variant: 'default' as TimelineVariant,
+    })),
+  );
 
   // ── Sticky Header Configuration ───────────────────────────
 

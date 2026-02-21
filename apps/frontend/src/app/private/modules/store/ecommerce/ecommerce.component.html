@@ -406,4 +406,16 @@
       </div>
     </form>
   </ng-container>
+
+  <!-- Share Store Modal -->
+  <app-store-share-modal
+    [isOpen]="isShareModalOpen"
+    [storeUrl]="ecommerceUrl"
+    [storeName]="storeName"
+    [logoUrl]="logoPreview"
+    [primaryColor]="primaryColorControl.value"
+    [secondaryColor]="secondaryColorControl.value"
+    [accentColor]="accentColorControl.value"
+    (closed)="isShareModalOpen = false">
+  </app-store-share-modal>
 </div>

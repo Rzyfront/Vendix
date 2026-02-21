@@ -123,7 +123,9 @@ export class SettingsService {
       throw new ForbiddenException('Store context required');
     }
 
-    const currentSettings = await this.getSettings();
+    // Read raw DB settings (without signed URLs) to avoid leaking temporary URLs into stored JSON
+    const storeSettings = await this.prisma.store_settings.findUnique({ where: { store_id } });
+    const currentSettings = (storeSettings?.settings || getDefaultStoreSettings()) as StoreSettings;
 
     // Guardar valores antiguos para auditoría
     const oldValues = { ...currentSettings };
@@ -240,6 +242,17 @@ export class SettingsService {
           console.error('Error updating stores table:', error);
         }
       }
+    }
+
+    // Safety net: sanitize any signed URLs that may have leaked into the settings object
+    if (updatedSettings.general?.logo_url) {
+      updatedSettings.general.logo_url = extractS3KeyFromUrl(updatedSettings.general.logo_url) ?? undefined;
+    }
+    if (updatedSettings.app?.logo_url) {
+      updatedSettings.app.logo_url = extractS3KeyFromUrl(updatedSettings.app.logo_url) ?? undefined;
+    }
+    if (updatedSettings.app?.favicon_url) {
+      updatedSettings.app.favicon_url = extractS3KeyFromUrl(updatedSettings.app.favicon_url) ?? undefined;
     }
 
     const result = await this.prisma.store_settings.upsert({

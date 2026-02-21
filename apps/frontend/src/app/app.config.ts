@@ -21,6 +21,10 @@ import { tenantReducer, TenantEffects } from './core/store/tenant';
 import { authReducer, AuthEffects } from './core/store/auth';
 import { configReducer } from './core/store/config/config.reducer';
 import { ConfigEffects } from './core/store/config/config.effects';
+import {
+  notificationsReducer,
+  NotificationsEffects,
+} from './core/store/notifications';
 import { hydrateAuthState } from './core/store/persistence';
 import * as ConfigActions from './core/store/config/config.actions';
 import { ThemeService } from './core/services/theme.service';
@@ -82,7 +86,8 @@ export const appConfig: ApplicationConfig = {
     provideState('tenant', tenantReducer),
     provideState('auth', authReducer, { initialState: hydrateAuthState() }),
     provideState('config', configReducer),
-    provideEffects([TenantEffects, AuthEffects, ConfigEffects]),
+    provideState('notifications', notificationsReducer),
+    provideEffects([TenantEffects, AuthEffects, ConfigEffects, NotificationsEffects]),
     provideStoreDevtools({
       maxAge: 25,
       logOnly: !isDevMode(),

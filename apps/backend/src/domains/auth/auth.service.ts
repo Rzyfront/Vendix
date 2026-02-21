@@ -27,6 +27,7 @@ import { DefaultPanelUIService } from '../../common/services/default-panel-ui.se
 import { toTitleCase } from '@common/utils/format.util';
 import { TOKEN_DEFAULTS } from './constants/token.constants';
 import { S3Service } from '@common/services/s3.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { organizations } from '@prisma/client';
 
 /**
@@ -84,6 +85,7 @@ export class AuthService {
     private readonly onboardingService: OnboardingService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
     private readonly s3Service: S3Service,
+    private readonly eventEmitter: EventEmitter2,
   ) { }
 
   /**
@@ -941,6 +943,15 @@ export class AuthService {
         registration_method: 'store_registration',
       },
     );
+
+    // Emitir evento para el sistema de notificaciones
+    this.eventEmitter.emit('customer.created', {
+      store_id: store.id,
+      customer_id: user.id,
+      first_name: formatted_first_name,
+      last_name: formatted_last_name,
+      email: user.email,
+    });
 
     // Obtener el slug de la organización para el vLink
     let organizationSlug: string | undefined;

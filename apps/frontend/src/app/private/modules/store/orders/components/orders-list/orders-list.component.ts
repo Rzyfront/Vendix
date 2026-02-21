@@ -266,7 +266,13 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     footerStyle: 'prominent',
     footerTransform: (value: any) => `$${(value || 0).toFixed(2)}`,
     detailKeys: [
-      { key: 'grand_total', label: 'Total', transform: (value: any) => this.currencyService.format(value || 0) },
+      {
+        key: 'channel',
+        label: 'Canal',
+        transform: (value: any) => this.formatChannel(value),
+        infoIconTransform: (value: any) => this.getChannelIcon(value),
+        infoIconVariantTransform: (value: any) => this.getChannelVariant(value),
+      },
       {
         key: 'created_at',
         label: 'Fecha',
@@ -284,7 +290,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     private customersService: CustomersService,
     private dialogService: DialogService,
     private toastService: ToastService,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.loadOrders();
@@ -538,6 +544,30 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       marketplace: 'Marketplace',
     };
     return channelMap[channel] || channel.charAt(0).toUpperCase() + channel.slice(1);
+  }
+
+  getChannelIcon(channel: string | undefined): string | undefined {
+    if (!channel) return undefined;
+    const iconMap: Record<string, string> = {
+      pos: 'monitor',
+      ecommerce: 'shopping-cart',
+      agent: 'cpu',
+      whatsapp: 'message-circle',
+      marketplace: 'shopping-bag',
+    };
+    return iconMap[channel] || 'globe';
+  }
+
+  getChannelVariant(channel: string | undefined): 'primary' | 'warning' | 'danger' | 'success' | 'default' | undefined {
+    if (!channel) return undefined;
+    const variantMap: Record<string, 'primary' | 'warning' | 'danger' | 'success' | 'default'> = {
+      pos: 'primary',
+      ecommerce: 'success',
+      agent: 'warning',
+      whatsapp: 'success',
+      marketplace: 'warning',
+    };
+    return variantMap[channel] || 'default';
   }
 
   // Math utility for template

@@ -40,7 +40,8 @@
           </div>
           <div class="section-body">
             <app-general-settings-form [settings]="settings.general"
-              (settingsChange)="onSectionChange('general', $event)" />
+              (settingsChange)="onSectionChange('general', $event)"
+              (pendingLogoUpload)="onPendingGeneralLogo($event)" />
           </div>
         </section>
 
@@ -53,7 +54,10 @@
             <h2 class="section-title">Personalización</h2>
           </div>
           <div class="section-body">
-            <app-app-settings-form [settings]="settings.app" (settingsChange)="onSectionChange('app', $event)" />
+            <app-app-settings-form [settings]="settings.app"
+              (settingsChange)="onSectionChange('app', $event)"
+              (pendingLogoUpload)="onPendingAppLogo($event)"
+              (pendingFaviconUpload)="onPendingAppFavicon($event)" />
 
             <!-- Vendix Domain Info Box -->
             @if (isVendixDomain) {

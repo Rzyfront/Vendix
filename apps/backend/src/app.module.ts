@@ -5,6 +5,7 @@ import {
   RequestMethod,
 } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './domains/auth/auth.module';
@@ -35,6 +36,7 @@ import { DomainResolverMiddleware } from './common/middleware/domain-resolver.mi
       isGlobal: true,
       envFilePath: '.env',
     }),
+    EventEmitterModule.forRoot(),
     AuthModule,
     PrismaModule,
     UsersModule,

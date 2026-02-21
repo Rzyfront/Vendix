@@ -14,7 +14,7 @@ import { IconComponent } from '../../../../../shared/components/index';
 import { StickyHeaderComponent, StickyHeaderBadgeColor, StickyHeaderActionButton } from '../../../../../shared/components/sticky-header/sticky-header.component';
 import { ConfigFacade } from '../../../../../core/store/config';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
-import { combineLatest } from 'rxjs';
+import { combineLatest, firstValueFrom } from 'rxjs';
 import { take } from 'rxjs/operators';
 
 
@@ -53,6 +53,11 @@ export class GeneralSettingsComponent implements OnInit {
 
   showTemplates = false;
   templates: any[] = [];
+
+  // Pending file uploads (lazy — deferred until save)
+  pendingGeneralLogo: { file: File; preview: string } | null = null;
+  pendingAppLogo: { file: File; preview: string } | null = null;
+  pendingAppFavicon: { file: File; preview: string } | null = null;
 
   readonly sections = [
     { id: 'identity', label: 'Identidad', icon: 'user' },
@@ -148,6 +153,21 @@ export class GeneralSettingsComponent implements OnInit {
     this.lastSaved.set(null);
   }
 
+  onPendingGeneralLogo(event: { file: File; preview: string } | null): void {
+    this.pendingGeneralLogo = event;
+    this.hasUnsavedChanges.set(true);
+  }
+
+  onPendingAppLogo(event: { file: File; preview: string } | null): void {
+    this.pendingAppLogo = event;
+    this.hasUnsavedChanges.set(true);
+  }
+
+  onPendingAppFavicon(event: { file: File; preview: string } | null): void {
+    this.pendingAppFavicon = event;
+    this.hasUnsavedChanges.set(true);
+  }
+
   onHeaderAction(actionId: string): void {
     if (actionId === 'reset') this.resetToDefaults();
     else if (actionId === 'save') this.saveAllSettings();
@@ -168,25 +188,51 @@ export class GeneralSettingsComponent implements OnInit {
     return date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
 
-  saveAllSettings() {
+  async saveAllSettings() {
     this.isSaving.set(true);
     // Ensure shipping is not sent
     if ((this.settings as any).shipping) {
       delete (this.settings as any).shipping;
     }
 
-    this.settings_service.saveSettingsNow(this.settings).subscribe({
-      next: () => {
-        this.isSaving.set(false);
-        this.hasUnsavedChanges.set(false);
-        this.lastSaved.set(new Date());
-      },
-      error: (error) => {
-        this.isSaving.set(false);
-        console.error('Error saving settings:', error);
-        this.toast_service.error('Error saving settings');
-      },
-    });
+    try {
+      // Upload pending files to S3 before saving settings
+      if (this.pendingGeneralLogo) {
+        const result = await firstValueFrom(this.settings_service.uploadStoreLogo(this.pendingGeneralLogo.file));
+        this.settings = { ...this.settings, general: { ...this.settings.general, logo_url: result.key } };
+        this.pendingGeneralLogo = null;
+      }
+
+      if (this.pendingAppLogo) {
+        const result = await firstValueFrom(this.settings_service.uploadStoreLogo(this.pendingAppLogo.file));
+        this.settings = { ...this.settings, app: { ...this.settings.app, logo_url: result.key } };
+        this.pendingAppLogo = null;
+      }
+
+      if (this.pendingAppFavicon) {
+        const result = await firstValueFrom(this.settings_service.uploadStoreFavicon(this.pendingAppFavicon.file));
+        this.settings = { ...this.settings, app: { ...this.settings.app, favicon_url: result.key } };
+        this.pendingAppFavicon = null;
+      }
+
+      // Save all settings
+      this.settings_service.saveSettingsNow(this.settings).subscribe({
+        next: () => {
+          this.isSaving.set(false);
+          this.hasUnsavedChanges.set(false);
+          this.lastSaved.set(new Date());
+        },
+        error: (error) => {
+          this.isSaving.set(false);
+          console.error('Error saving settings:', error);
+          this.toast_service.error('Error saving settings');
+        },
+      });
+    } catch (error) {
+      this.isSaving.set(false);
+      console.error('Error uploading files:', error);
+      this.toast_service.error('Error al subir archivos');
+    }
   }
 
   resetToDefaults() {

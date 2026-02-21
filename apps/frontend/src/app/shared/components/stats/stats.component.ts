@@ -17,4 +17,5 @@ export class StatsComponent {
   @Input() iconBgColor: string = 'bg-primary/10';
   @Input() iconColor: string = 'text-primary';
   @Input() clickable: boolean = true;
+  @Input() loading: boolean = false;
 }
