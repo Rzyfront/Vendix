@@ -11,6 +11,23 @@
       </div>
     </div>
 
+    <!-- In-App Notification Subscriptions -->
+    <div>
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Notificaciones en la App</h4>
+      <p class="text-xs text-gray-500 mb-3">Elige qué notificaciones deseas recibir en tiempo real dentro de la aplicación.</p>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        @for (type of subscriptionTypes; track type) {
+          <app-setting-toggle
+            [ngModel]="subscriptions[type]"
+            [ngModelOptions]="{ standalone: true }"
+            [label]="subscriptionLabels[type]"
+            description="Recibir en la app"
+            (changed)="onSubscriptionToggle(type)"
+          ></app-setting-toggle>
+        }
+      </div>
+    </div>
+
     <!-- Alert Subscriptions -->
     <div>
       <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Alertas de Eventos</h4>

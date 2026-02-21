@@ -5,3 +5,4 @@ export { PosPaymentInterfaceComponent } from './pos-payment-interface.component'
 export { PosOrderConfirmationComponent } from './pos-order-confirmation.component';
 export { PosMobileFooterComponent } from './pos-mobile-footer.component';
 export { PosCartModalComponent } from './pos-cart-modal.component';
+export { PosShippingModalComponent } from './pos-shipping-modal/pos-shipping-modal.component';

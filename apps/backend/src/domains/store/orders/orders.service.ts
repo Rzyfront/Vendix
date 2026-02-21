@@ -11,6 +11,7 @@ import { Prisma, order_state_enum, order_delivery_type_enum } from '@prisma/clie
 import { RequestContextService } from '@common/context/request-context.service';
 import { OrderStatsDto } from './dto/order-stats.dto';
 import { S3Service } from '@common/services/s3.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { resolveCostPrice } from './utils/resolve-cost-price';
 
 @Injectable()
@@ -18,6 +19,7 @@ export class OrdersService {
   constructor(
     private prisma: StorePrismaService,
     private s3Service: S3Service,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   async create(createOrderDto: CreateOrderDto, creatingUser: any) {
@@ -45,7 +47,7 @@ export class OrdersService {
         }
 
         // Use scoped client (creates are not scoped by extension but using correct service is good style)
-        return await this.prisma.orders.create({
+        const order = await this.prisma.orders.create({
           data: {
             customer_id: createOrderDto.customer_id,
             store_id: store_id, // Force strict store_id
@@ -85,6 +87,16 @@ export class OrdersService {
             },
           },
         });
+
+        this.eventEmitter.emit('order.created', {
+          store_id: order.store_id,
+          order_id: order.id,
+          order_number: order.order_number,
+          grand_total: order.grand_total,
+          currency: order.currency,
+        });
+
+        return order;
       } catch (error) {
         if (
           error instanceof Prisma.PrismaClientKnownRequestError &&

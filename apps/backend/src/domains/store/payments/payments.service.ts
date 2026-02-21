@@ -22,6 +22,7 @@ import {
 } from './dto';
 import { PaymentError, PaymentErrorCodes } from './utils';
 import { resolveCostPrice } from '../orders/utils/resolve-cost-price';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class PaymentsService {
@@ -30,6 +31,7 @@ export class PaymentsService {
     private paymentGateway: PaymentGatewayService,
     private readonly stockLevelManager: StockLevelManager,
     private readonly taxes_service: TaxesService,
+    private readonly eventEmitter: EventEmitter2,
   ) { }
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -410,10 +412,10 @@ export class PaymentsService {
             order,
             createPosPaymentDto,
           );
-          await this.updateOrderPaymentStatus(tx, order.id, 'succeeded');
+          await this.updateOrderPaymentStatus(tx, order.id, 'succeeded', order.delivery_type);
         } else {
           // Credit sale - update order status
-          await this.updateOrderPaymentStatus(tx, order.id, 'pending_payment');
+          await this.updateOrderPaymentStatus(tx, order.id, 'pending_payment', order.delivery_type);
         }
 
         // 3. Update inventory if required
@@ -421,7 +423,30 @@ export class PaymentsService {
           await this.updateInventoryFromOrder(tx, order);
         }
 
-        // 4. Send confirmation if required
+        // 4. Emit order.created event
+        this.eventEmitter.emit('order.created', {
+          store_id: createPosPaymentDto.store_id,
+          order_id: order.id,
+          order_number: order.order_number,
+          grand_total: Number(order.grand_total),
+          currency: order.currency || 'USD',
+        });
+
+        // 5. Emit payment event
+        if (payment) {
+          this.eventEmitter.emit('payment.received', {
+            store_id: createPosPaymentDto.store_id,
+            order_id: order.id,
+            order_number: order.order_number,
+            amount: payment.amount,
+            currency: payment.currency || 'USD',
+            payment_method:
+              payment.store_payment_method?.system_payment_method?.display_name ||
+              'Unknown',
+          });
+        }
+
+        // 6. Send confirmation if required
         if (createPosPaymentDto.send_email_confirmation) {
           // TODO: Implement email confirmation
         }
@@ -535,10 +560,19 @@ export class PaymentsService {
           billing_address_id: dto.billing_address_id,
           shipping_address_id: dto.shipping_address_id,
           internal_notes: dto.internal_notes,
+          // Shipping fields (for delivery orders)
+          delivery_type: dto.delivery_type || 'direct_delivery',
+          shipping_cost: dto.shipping_cost || 0,
+          shipping_address_snapshot: dto.shipping_address_snapshot || undefined,
           order_items: {
             create: orderItems,
           },
         };
+
+        // Set shipping method if provided
+        if (dto.shipping_method_id) {
+          orderData.shipping_method_id = dto.shipping_method_id;
+        }
 
         // Only include customer_id if provided (for anonymous sales, this will be undefined/null)
         if (dto.customer_id !== undefined && dto.customer_id !== null) {
@@ -644,27 +678,31 @@ export class PaymentsService {
 
   /**
    * Update order payment status for POS transactions
-   * For POS with direct payment: created -> finished (immediate sale)
+   * For POS direct delivery with payment: created -> finished (immediate sale)
+   * For POS home delivery with payment: created -> processing (needs shipping)
    * For POS without payment (credit sale): stays in 'created'
    */
   private async updateOrderPaymentStatus(
     tx: any,
     orderId: number,
     paymentState: string,
+    deliveryType?: string,
   ) {
-    // Update order state based on payment state
-    // POS direct payments go straight to 'finished' (immediate sale)
     let orderState: string;
     let additionalData: any = { updated_at: new Date() };
 
     switch (paymentState) {
       case 'succeeded':
-        // POS direct payment completed - order is finished
-        orderState = 'finished';
-        additionalData.completed_at = new Date();
+        if (deliveryType === 'home_delivery') {
+          // Shipping order — needs to be prepared and dispatched
+          orderState = 'processing';
+        } else {
+          // Direct POS sale — finished immediately
+          orderState = 'finished';
+          additionalData.completed_at = new Date();
+        }
         break;
       case 'pending':
-        // No payment made yet - order stays in 'created'
         orderState = 'created';
         break;
       case 'failed':

@@ -36,6 +36,7 @@ export { BadgeComponent } from './badge/badge.component';
 export { ItemListComponent } from './item-list/item-list.component';
 export { ResponsiveDataViewComponent } from './responsive-data-view/responsive-data-view.component';
 export { OptionsDropdownComponent } from './options-dropdown';
+export { TimelineComponent } from './timeline/timeline.component';
 
 // Types
 export type { AlertBannerVariant } from './alert-banner/alert-banner.component';
@@ -88,4 +89,10 @@ export type {
   DropdownAction,
   FilterValues,
 } from './options-dropdown';
+export type {
+  TimelineStep,
+  TimelineStepStatus,
+  TimelineVariant,
+  TimelineSize,
+} from './timeline/timeline.interfaces';
 export { CHART_THEMES } from './chart';

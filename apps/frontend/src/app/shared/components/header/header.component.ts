@@ -13,6 +13,7 @@ import { Subscription, Observable } from 'rxjs';
 
 import { IconComponent } from '../icon/icon.component';
 import { UserDropdownComponent } from '../user-dropdown/user-dropdown.component';
+import { NotificationsDropdownComponent } from '../notifications-dropdown/notifications-dropdown.component';
 
 import { BreadcrumbService } from '../../../core/services/breadcrumb.service';
 import { BreadcrumbItem } from '../../../core/services/breadcrumb.service';
@@ -26,6 +27,7 @@ import { GlobalFacade } from '../../../core/store/global.facade';
     RouterModule,
     IconComponent,
     UserDropdownComponent,
+    NotificationsDropdownComponent,
   ],
   template: `
     <header
@@ -130,8 +132,9 @@ import { GlobalFacade } from '../../../core/store/global.facade';
           </div>
         </div>
 
-        <!-- User Dropdown -->
-        <div class="flex-shrink-0">
+        <!-- Notifications + User Dropdown -->
+        <div class="flex-shrink-0 flex items-center gap-2">
+          <app-notifications-dropdown></app-notifications-dropdown>
           <app-user-dropdown
             (closeDropdown)="onDropdownClose()"
           ></app-user-dropdown>

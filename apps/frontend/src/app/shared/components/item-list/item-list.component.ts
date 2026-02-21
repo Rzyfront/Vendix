@@ -196,7 +196,7 @@ export class ItemListComponent {
   /**
    * Get detail field value
    */
-  getDetailValue(item: any, field: { key: string; transform?: (value: any, item?: any) => string }): string {
+  getDetailValue(item: any, field: any): string {
     const value = this.getNestedValue(item, field.key);
     if (value === null || value === undefined) return '-';
 
@@ -204,6 +204,28 @@ export class ItemListComponent {
       return field.transform(value, item);
     }
     return String(value);
+  }
+
+  /**
+   * Get dynamic info icon for detail field
+   */
+  getInfoIcon(item: any, field: any): string | undefined {
+    if (field.infoIconTransform) {
+      const value = this.getNestedValue(item, field.key);
+      return field.infoIconTransform(value, item);
+    }
+    return field.infoIcon;
+  }
+
+  /**
+   * Get dynamic info icon variant (color) for detail field
+   */
+  getInfoIconVariant(item: any, field: any): string | undefined {
+    if (field.infoIconVariantTransform) {
+      const value = this.getNestedValue(item, field.key);
+      return field.infoIconVariantTransform(value, item);
+    }
+    return field.infoIconVariant;
   }
 
   /**

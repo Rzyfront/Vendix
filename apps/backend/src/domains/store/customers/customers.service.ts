@@ -10,10 +10,14 @@ import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { AuditResource } from '../../../common/audit/audit.service';
 import * as bcrypt from 'bcrypt';
 import { toTitleCase } from '@common/utils/format.util';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class CustomersService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly eventEmitter: EventEmitter2,
+  ) {}
 
   private async generateUniqueUsername(email: string): Promise<string> {
     let baseUsername = email.split('@')[0];
@@ -133,6 +137,14 @@ export class CustomersService {
       },
     });
 
+    this.eventEmitter.emit('customer.created', {
+      store_id: store.id,
+      customer_id: user.id,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      email: user.email,
+    });
+
     return user;
   }
 
@@ -173,6 +185,12 @@ export class CustomersService {
         skip,
         take: Number(limit),
         orderBy: { created_at: 'desc' },
+        include: {
+          addresses: {
+            where: { type: 'shipping' },
+            orderBy: { is_primary: 'desc' },
+          },
+        },
       }),
       this.prisma.users.count({ where }),
     ]);

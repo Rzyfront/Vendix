@@ -1062,6 +1062,20 @@ export async function seedPermissionsAndRoles(
       path: '/organization/settings',
       method: 'PUT',
     },
+
+    // Notificaciones (Tienda)
+    {
+      name: 'store:notifications:read',
+      description: 'Leer notificaciones de tienda',
+      path: '/api/store/notifications',
+      method: 'GET',
+    },
+    {
+      name: 'store:notifications:update',
+      description: 'Actualizar notificaciones (marcar leídas, suscripciones)',
+      path: '/api/store/notifications',
+      method: 'PATCH',
+    },
   ];
 
   // Get valid permission names from our list

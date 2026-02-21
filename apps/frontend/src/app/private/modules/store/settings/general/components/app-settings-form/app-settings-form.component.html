@@ -47,32 +47,48 @@
     <div>
       <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Recursos de Marca</h4>
       <div class="brand-grid">
-        <!-- Logo URL -->
+        <!-- Logo Upload -->
         <div class="brand-card">
-          <div class="brand-preview">
-            <img *ngIf="logoUrlControl.value" [src]="logoUrlControl.value" alt="Logo"
+          <div class="brand-preview relative group">
+            <img *ngIf="logoPreview" [src]="logoPreview" alt="Logo"
               class="brand-preview-img">
-            <app-icon *ngIf="!logoUrlControl.value" name="image" size="20" class="text-gray-300"></app-icon>
+            <app-icon *ngIf="!logoPreview" name="image" size="20" class="text-gray-300"></app-icon>
+            <button *ngIf="logoPreview" type="button" (click)="removeLogo()"
+              class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-lg">
+              <app-icon name="x" size="12"></app-icon>
+            </button>
           </div>
           <div class="brand-info">
-            <label class="brand-label">URL del Logo</label>
-            <input type="text" [formControl]="logoUrlControl" (input)="onFieldChange()"
-              class="brand-url-input"
-              placeholder="https://...">
+            <label class="brand-label">Logo de la App</label>
+            <div class="flex items-center gap-2">
+              <app-button variant="outline" size="sm" (clicked)="triggerLogoInput()">
+                <app-icon name="upload" size="14" slot="icon"></app-icon>
+                <span>{{ logoPreview ? 'Cambiar' : 'Subir' }}</span>
+              </app-button>
+              <span class="text-xs text-gray-400">PNG, JPG. Máx 2MB.</span>
+            </div>
           </div>
         </div>
-        <!-- Favicon URL -->
+        <!-- Favicon Upload -->
         <div class="brand-card">
-          <div class="brand-preview">
-            <img *ngIf="faviconUrlControl.value" [src]="faviconUrlControl.value" alt="Favicon"
+          <div class="brand-preview relative group">
+            <img *ngIf="faviconPreview" [src]="faviconPreview" alt="Favicon"
               class="brand-preview-img">
-            <app-icon *ngIf="!faviconUrlControl.value" name="feather" size="20" class="text-gray-300"></app-icon>
+            <app-icon *ngIf="!faviconPreview" name="feather" size="20" class="text-gray-300"></app-icon>
+            <button *ngIf="faviconPreview" type="button" (click)="removeFavicon()"
+              class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-lg">
+              <app-icon name="x" size="12"></app-icon>
+            </button>
           </div>
           <div class="brand-info">
-            <label class="brand-label">URL del Favicon</label>
-            <input type="text" [formControl]="faviconUrlControl" (input)="onFieldChange()"
-              class="brand-url-input"
-              placeholder="https://...">
+            <label class="brand-label">Favicon</label>
+            <div class="flex items-center gap-2">
+              <app-button variant="outline" size="sm" (clicked)="triggerFaviconInput()">
+                <app-icon name="upload" size="14" slot="icon"></app-icon>
+                <span>{{ faviconPreview ? 'Cambiar' : 'Subir' }}</span>
+              </app-button>
+              <span class="text-xs text-gray-400">PNG, ICO. Máx 1MB.</span>
+            </div>
           </div>
         </div>
       </div>

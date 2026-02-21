@@ -23,6 +23,9 @@ export class StorePrismaService extends BasePrismaService {
     'shipping_zones',
     'shipping_methods',
     'expenses',
+    'notifications',
+    'notification_subscriptions',
+    'push_subscriptions',
   ];
 
   constructor() {
@@ -452,6 +455,18 @@ export class StorePrismaService extends BasePrismaService {
 
   get expenses() {
     return this.scoped_client.expenses;
+  }
+
+  get notifications() {
+    return this.scoped_client.notifications;
+  }
+
+  get notification_subscriptions() {
+    return this.scoped_client.notification_subscriptions;
+  }
+
+  get push_subscriptions() {
+    return this.scoped_client.push_subscriptions;
   }
 
   // Global tables (no store scoping)

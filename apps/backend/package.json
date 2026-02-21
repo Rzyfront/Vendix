@@ -72,6 +72,7 @@
     "slugify": "^1.6.6",
     "swagger-ui-express": "^5.0.1",
     "ts-node": "^10.9.2",
+    "web-push": "^3.6.7",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
@@ -92,6 +93,7 @@
     "@types/pg": "^8.15.6",
     "@types/sharp": "^0.31.1",
     "@types/supertest": "^6.0.2",
+    "@types/web-push": "^3.6.4",
     "@types/xlsx": "^0.0.35",
     "dotenv": "^16.4.7",
     "eslint": "^9.18.0",

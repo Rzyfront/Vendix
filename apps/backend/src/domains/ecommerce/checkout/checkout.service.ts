@@ -7,6 +7,7 @@ import { CheckoutDto } from './dto/checkout.dto';
 import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { payment_processing_mode_enum } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class CheckoutService {
@@ -15,6 +16,7 @@ export class CheckoutService {
     private readonly store_prisma: StorePrismaService,
     private readonly cart_service: CartService,
     private readonly taxes_service: TaxesService,
+    private readonly eventEmitter: EventEmitter2,
   ) { }
 
   async getPaymentMethods(shippingMethodType?: string) {
@@ -319,6 +321,15 @@ export class CheckoutService {
       },
     });
 
+    // Emit order.created event for notifications
+    this.eventEmitter.emit('order.created', {
+      store_id: order.store_id,
+      order_id: order.id,
+      order_number: order.order_number,
+      grand_total: Number(order.grand_total),
+      currency: order.currency,
+    });
+
     // store_id y customer_id se inyectan automáticamente
     await this.prisma.payments.create({
       data: {
@@ -607,6 +618,15 @@ export class CheckoutService {
       include: {
         order_items: true,
       },
+    });
+
+    // Emit order.created event for notifications
+    this.eventEmitter.emit('order.created', {
+      store_id: order.store_id,
+      order_id: order.id,
+      order_number: order.order_number,
+      grand_total: Number(order.grand_total),
+      currency: order.currency,
     });
 
     for (const item of cart_items) {

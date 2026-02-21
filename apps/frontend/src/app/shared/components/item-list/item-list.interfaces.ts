@@ -12,6 +12,14 @@ export interface ItemListDetailField {
   transform?: (value: any, item?: any) => string;
   /** Optional icon name to show next to the label */
   icon?: string;
+  /** Optional informative icon to display next to the value (like an alert or info circle) */
+  infoIcon?: string;
+  /** Optional dynamic function to compute the info icon specifically per-item */
+  infoIconTransform?: (value: any, item?: any) => string | undefined;
+  /** Optional color for the infoIcon and the left border (e.g., 'primary', 'warning', 'danger', 'success') */
+  infoIconVariant?: 'primary' | 'warning' | 'danger' | 'success' | 'default';
+  /** Optional dynamic function to compute the color variant per-item */
+  infoIconVariantTransform?: (value: any, item?: any) => 'primary' | 'warning' | 'danger' | 'success' | 'default' | undefined;
 }
 
 /**

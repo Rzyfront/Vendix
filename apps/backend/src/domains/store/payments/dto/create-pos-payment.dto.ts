@@ -204,6 +204,27 @@ export class CreatePosPaymentDto {
   @Type(() => Number)
   shipping_address_id?: number;
 
+  // Datos de envío (para órdenes con delivery)
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  delivery_type?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  shipping_method_id?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Type(() => Number)
+  shipping_cost?: number;
+
+  @IsOptional()
+  shipping_address_snapshot?: Record<string, any>;
+
   // Metadatos POS
   @IsOptional()
   @IsString()

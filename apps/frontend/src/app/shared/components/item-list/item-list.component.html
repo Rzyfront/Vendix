@@ -27,83 +27,109 @@
   <!-- Card List -->
   <div *ngIf="!loading && data.length > 0" class="item-list-cards">
     <div *ngFor="let item of data; let i = index" class="item-card" (click)="onItemClick(item)">
-      <!-- Card Header -->
-      <div class="card-header">
-        <!-- Avatar (only shown if avatarKey or avatarFallbackIcon is configured) -->
-        <div *ngIf="showAvatar()" class="card-avatar"
-          [class.avatar-square]="cardConfig.avatarShape === 'square'">
-          <img *ngIf="getAvatarUrl(item)" [src]="getAvatarUrl(item)" [alt]="getTitle(item)" class="avatar-image"
-            (error)="$any($event.target).style.display = 'none'" />
-          <div *ngIf="!getAvatarUrl(item) && cardConfig.avatarFallbackIcon" class="avatar-placeholder">
-            <app-icon [name]="cardConfig.avatarFallbackIcon" [size]="20"></app-icon>
+
+      <!-- Combined Header & Details Wrap -->
+      <div class="card-body">
+
+        <!-- Avatar Section -->
+        <div *ngIf="showAvatar()" class="card-avatar-wrapper">
+          <div class="card-avatar" [class.avatar-square]="cardConfig.avatarShape === 'square'">
+            <img *ngIf="getAvatarUrl(item)" [src]="getAvatarUrl(item)" [alt]="getTitle(item)" class="avatar-image"
+              (error)="$any($event.target).style.display = 'none'" />
+            <div *ngIf="!getAvatarUrl(item) && cardConfig.avatarFallbackIcon" class="avatar-placeholder">
+              <app-icon [name]="cardConfig.avatarFallbackIcon" [size]="20"></app-icon>
+            </div>
           </div>
         </div>
 
-        <!-- Title & Subtitle -->
-        <div class="card-title-group">
-          <h3 class="card-title">{{ getTitle(item) }}</h3>
-          <p *ngIf="getSubtitle(item)" class="card-subtitle">
-            {{ getSubtitle(item) }}
-          </p>
-        </div>
+        <!-- Main Content (Title, Badge, Details) -->
+        <div class="card-main-content">
 
-        <!-- Badge -->
-        <span *ngIf="cardConfig.badgeKey && getBadgeValue(item) !== null" [ngClass]="getBadgeClasses(item)"
-          [ngStyle]="getBadgeStyle(item)">
-          {{ getBadgeText(item) }}
-        </span>
+          <!-- Top Row: Title, Subtitle, Badge -->
+          <div class="card-title-row">
+            <div class="card-title-group">
+              <h3 class="card-title">{{ getTitle(item) }}</h3>
+              <p *ngIf="getSubtitle(item)" class="card-subtitle">
+                {{ getSubtitle(item) }}
+              </p>
+            </div>
 
-        <!-- Menu Button: only show when more than 2 actions -->
-        <button *ngIf="actions && actions.length > 2" class="card-menu-button" (click)="toggleMenu(i, $event)"
-          type="button">
-          <app-icon name="more-vertical" [size]="18"></app-icon>
-        </button>
+            <div class="card-badge-wrap" *ngIf="cardConfig.badgeKey && getBadgeValue(item) !== null">
+              <span [ngClass]="getBadgeClasses(item)" [ngStyle]="getBadgeStyle(item)" class="status-badge-compact">
+                {{ getBadgeText(item) }}
+              </span>
+            </div>
+          </div>
 
-        <!-- Dropdown Menu: only for overflow actions (3+) -->
-        <div *ngIf="activeMenuIndex === i && actions && actions.length > 2" class="card-menu-dropdown" (click)="$event.stopPropagation()">
-          <button *ngFor="let action of getVisibleActions(item).slice(2)" class="menu-item" [ngClass]="{
-              'menu-item-danger': action.variant === 'danger',
-              'menu-item-primary': action.variant === 'primary',
-              'menu-item-disabled': isActionDisabled(action, item)
-            }" [disabled]="isActionDisabled(action, item)" (click)="executeAction(action, item, $event)">
-            <app-icon *ngIf="getActionIcon(action, item)" [name]="getActionIcon(action, item)" [size]="14"></app-icon>
-            <span>{{ getActionLabel(action, item) }}</span>
-          </button>
-        </div>
-      </div>
+          <!-- Detail Grid (2 or 3 columns) -->
+          <div *ngIf="cardConfig.detailKeys && cardConfig.detailKeys.length > 0" class="card-details-grid">
+            <div *ngFor="let field of cardConfig.detailKeys" class="detail-item"
+              [ngClass]="getInfoIconVariant(item, field) ? 'detail-border-' + getInfoIconVariant(item, field) : ''">
+              <p class="detail-label">
+                <app-icon *ngIf="field.icon" [name]="field.icon" [size]="10" class="detail-label-icon"></app-icon>
+                {{ field.label }}
+              </p>
+              <div class="detail-value-wrap">
+                <span class="detail-value">{{ getDetailValue(item, field) }}</span>
+                <app-icon *ngIf="getInfoIcon(item, field)" [name]="getInfoIcon(item, field)!" [size]="14"
+                  class="detail-info-icon"
+                  [ngClass]="getInfoIconVariant(item, field) ? 'text-' + getInfoIconVariant(item, field) : ''"></app-icon>
+              </div>
+            </div>
 
-      <!-- Card Details (2-column grid) -->
-      <div *ngIf="cardConfig.detailKeys && cardConfig.detailKeys.length > 0" class="card-details">
-        <div *ngFor="let field of cardConfig.detailKeys" class="detail-item">
-          <span class="detail-label">
-            <app-icon *ngIf="field.icon" [name]="field.icon" [size]="12" class="detail-icon"></app-icon>
-            {{ field.label }}
-          </span>
-          <span class="detail-value">{{ getDetailValue(item, field) }}</span>
+            <!-- Optional Placeholder for extra detail flex alignment -->
+            <div *ngIf="cardConfig.detailKeys.length % 3 !== 0" class="detail-item-spacer"></div>
+          </div>
+
         </div>
       </div>
 
       <!-- Card Footer -->
-      <div *ngIf="cardConfig.footerKey" class="card-footer"
-        [class.footer-prominent]="cardConfig.footerStyle === 'prominent'">
-        <div class="footer-content">
+      <div *ngIf="cardConfig.footerKey || (actions && actions.length > 0)" class="card-footer">
+
+        <!-- Left: Price / Prominent Footer Value -->
+        <div class="footer-content" *ngIf="cardConfig.footerKey">
           <span *ngIf="cardConfig.footerLabel" class="footer-label">
             {{ cardConfig.footerLabel }}
           </span>
           <span class="footer-value">{{ getFooterValue(item) }}</span>
         </div>
+        <div class="footer-content-spacer" *ngIf="!cardConfig.footerKey"></div>
 
-        <!-- Quick Actions (visible in footer) -->
-        <div *ngIf="actions && actions.length > 0" class="footer-actions">
-          <button *ngFor="let action of getVisibleActions(item).slice(0, 2)" class="footer-action-btn" [ngClass]="{
-              'action-danger': action.variant === 'danger',
-              'action-primary': action.variant === 'primary',
-              'action-disabled': isActionDisabled(action, item)
-            }" [disabled]="isActionDisabled(action, item)" [title]="getActionLabel(action, item)"
-            (click)="executeAction(action, item, $event)">
-            <app-icon [name]="getActionIcon(action, item) || 'circle'" [size]="16"></app-icon>
-          </button>
+        <!-- Right: Actions (Buttons + Dropdown Menu) -->
+        <div class="footer-actions-wrap relative">
+          <div class="footer-actions flex gap-2">
+            <!-- First two visible actions -->
+            <button *ngFor="let action of getVisibleActions(item).slice(0, 2)" class="footer-action-btn" [ngClass]="{
+                'action-danger': action.variant === 'danger',
+                'action-primary': action.variant === 'primary',
+                'action-disabled': isActionDisabled(action, item)
+              }" [disabled]="isActionDisabled(action, item)" [title]="getActionLabel(action, item)"
+              (click)="executeAction(action, item, $event)">
+              <app-icon [name]="getActionIcon(action, item) || 'circle'" [size]="18"></app-icon>
+            </button>
+
+            <!-- More (Vertical) Menu Trigger Button -->
+            <button *ngIf="actions && actions.length > 2" class="footer-action-btn card-menu-button"
+              (click)="toggleMenu(i, $event)" type="button" title="More Actions">
+              <app-icon name="more-horizontal" [size]="18"></app-icon>
+            </button>
+          </div>
+
+          <!-- Dropdown Menu for overflow actions -->
+          <div *ngIf="activeMenuIndex === i && actions && actions.length > 2" class="card-menu-dropdown"
+            (click)="$event.stopPropagation()">
+            <button *ngFor="let action of getVisibleActions(item).slice(2)" class="menu-item" [ngClass]="{
+                'menu-item-danger': action.variant === 'danger',
+                'menu-item-primary': action.variant === 'primary',
+                'menu-item-disabled': isActionDisabled(action, item)
+              }" [disabled]="isActionDisabled(action, item)" (click)="executeAction(action, item, $event)">
+              <app-icon *ngIf="getActionIcon(action, item)" [name]="getActionIcon(action, item)" [size]="14"></app-icon>
+              <span>{{ getActionLabel(action, item) }}</span>
+            </button>
+          </div>
         </div>
+
       </div>
     </div>
   </div>

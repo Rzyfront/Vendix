@@ -16,19 +16,16 @@
               class="w-16 h-16 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden relative group">
               <img *ngIf="logoPreview" [src]="logoPreview" alt="Logo preview"
                 class="w-full h-full object-contain p-1" />
-              <div *ngIf="!logoPreview && !isUploadingLogo" class="text-gray-400 flex flex-col items-center">
+              <div *ngIf="!logoPreview" class="text-gray-400 flex flex-col items-center">
                 <app-icon name="image" size="20"></app-icon>
               </div>
-              <div *ngIf="isUploadingLogo" class="absolute inset-0 bg-white/80 flex items-center justify-center">
-                <div class="animate-spin rounded-full h-5 w-5 border-2 border-primary-600 border-t-transparent"></div>
-              </div>
-              <button *ngIf="logoPreview && !isUploadingLogo" type="button" (click)="removeLogo()"
+              <button *ngIf="logoPreview" type="button" (click)="removeLogo()"
                 class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-lg">
                 <app-icon name="x" size="12"></app-icon>
               </button>
             </div>
             <div class="flex flex-col gap-1">
-              <app-button variant="outline" size="sm" [loading]="isUploadingLogo" (clicked)="triggerLogoInput()">
+              <app-button variant="outline" size="sm" (clicked)="triggerLogoInput()">
                 <app-icon name="upload" size="14" slot="icon"></app-icon>
                 <span>{{ logoPreview ? 'Cambiar' : 'Subir Logo' }}</span>
               </app-button>

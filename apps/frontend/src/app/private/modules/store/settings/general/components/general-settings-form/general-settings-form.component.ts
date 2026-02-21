@@ -10,15 +10,11 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
-import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
 import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
-import { CurrencyService, Currency } from '../../../../../../../services/currency.service';
+import { CurrencyService } from '../../../../../../../services/currency.service';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
-import { StoreSettingsService } from '../../services/store-settings.service';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 
 export interface GeneralSettings {
@@ -44,17 +40,13 @@ export interface GeneralSettings {
 export class GeneralSettingsForm implements OnInit, OnChanges, OnDestroy {
   @Input() settings!: GeneralSettings;
   @Output() settingsChange = new EventEmitter<GeneralSettings>();
+  @Output() pendingLogoUpload = new EventEmitter<{ file: File; preview: string } | null>();
 
   private currencyService = inject(CurrencyService);
-  isUploadingLogo = false;
+  private toastService = inject(ToastService);
   logoPreview: string | null = null;
+  private blobPreviewUrl: string | null = null;
   private logoInputRef: HTMLInputElement | null = null;
-  private destroy$ = new Subject<void>();
-
-  constructor(
-    private storeSettingsService: StoreSettingsService,
-    private toastService: ToastService
-  ) { }
 
   form: FormGroup = new FormGroup({
     // Campos de stores
@@ -168,8 +160,10 @@ export class GeneralSettingsForm implements OnInit, OnChanges, OnDestroy {
   patchForm() {
     if (this.settings) {
       this.form.patchValue(this.settings);
-      // Initialize preview from settings (already signed from backend)
-      this.logoPreview = this.settings.logo_url || null;
+      // Preserve local blob preview if user already selected a file (pending upload)
+      if (!this.blobPreviewUrl) {
+        this.logoPreview = this.settings.logo_url || null;
+      }
     }
   }
 
@@ -180,18 +174,16 @@ export class GeneralSettingsForm implements OnInit, OnChanges, OnDestroy {
   }
 
   triggerLogoInput(): void {
-    if (this.isUploadingLogo) return;
-
     if (!this.logoInputRef) {
       this.logoInputRef = document.createElement('input');
       this.logoInputRef.type = 'file';
       this.logoInputRef.accept = 'image/*';
-      this.logoInputRef.addEventListener('change', (e) => this.onLogoUpload(e));
+      this.logoInputRef.addEventListener('change', (e) => this.onLogoFileSelect(e));
     }
     this.logoInputRef.click();
   }
 
-  onLogoUpload(event: Event): void {
+  onLogoFileSelect(event: Event): void {
     const input = event.target as HTMLInputElement;
     const files = input.files;
     if (!files || files.length === 0) return;
@@ -207,35 +199,34 @@ export class GeneralSettingsForm implements OnInit, OnChanges, OnDestroy {
       return;
     }
 
-    this.isUploadingLogo = true;
+    // Revoke previous blob URL if any
+    if (this.blobPreviewUrl) {
+      URL.revokeObjectURL(this.blobPreviewUrl);
+    }
 
-    this.storeSettingsService.uploadStoreLogo(file)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (result) => {
-          this.logoPreview = result.url;
-          this.logoUrlControl.setValue(result.key);
-          this.onFieldChange();
-          this.isUploadingLogo = false;
-          this.toastService.success('Logo subido exitosamente');
-        },
-        error: () => {
-          this.isUploadingLogo = false;
-          this.toastService.error('Error al subir el logo');
-        },
-      });
+    // Create local preview — no S3 upload yet (lazy upload on save)
+    this.blobPreviewUrl = URL.createObjectURL(file);
+    this.logoPreview = this.blobPreviewUrl;
+    this.pendingLogoUpload.emit({ file, preview: this.blobPreviewUrl });
+    this.onFieldChange();
 
     input.value = '';
   }
 
   removeLogo(): void {
+    if (this.blobPreviewUrl) {
+      URL.revokeObjectURL(this.blobPreviewUrl);
+      this.blobPreviewUrl = null;
+    }
     this.logoPreview = null;
     this.logoUrlControl.setValue(null);
+    this.pendingLogoUpload.emit(null);
     this.onFieldChange();
   }
 
   ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    if (this.blobPreviewUrl) {
+      URL.revokeObjectURL(this.blobPreviewUrl);
+    }
   }
 }

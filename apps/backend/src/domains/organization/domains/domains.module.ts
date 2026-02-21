@@ -17,7 +17,7 @@ import { ResponseModule } from '@common/responses';
 @Module({
   imports: [
     PrismaModule,
-    EventEmitterModule.forRoot(), // EventEmitter para gestión de caché
+    EventEmitterModule, // Registered globally in AppModule
     ResponseModule,
   ],
   controllers: [DomainsController],

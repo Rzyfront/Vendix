@@ -16,7 +16,6 @@ import {
   CartItem,
 } from '../services/pos-cart.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
-import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
@@ -27,7 +26,6 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   standalone: true,
   imports: [
     CommonModule,
-    ButtonComponent,
     IconComponent,
     QuantityControlComponent,
   ],
@@ -78,31 +76,36 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
           </div>
 
           <!-- Checkout Actions -->
-          <div
-            class="grid grid-cols-1 sm:grid-cols-2 gap-2.5"
-          >
-            <app-button
-              variant="outline"
-              size="md"
-              [fullWidth]="true"
-              (clicked)="saveCart()"
+          <div class="cart-actions">
+            <button
+              type="button"
+              class="cart-btn checkout-btn"
+              (click)="proceedToPayment()"
               [disabled]="(isEmpty$ | async) ?? false"
-              customClasses="!w-full !h-10 sm:!h-11 !font-semibold !border-border !text-text-primary !bg-surface hover:!bg-muted/40 hover:!text-text-primary"
             >
-              <app-icon name="save" [size]="16" slot="icon"></app-icon>
-              Guardar
-            </app-button>
-            <app-button
-              variant="primary"
-              size="md"
-              [fullWidth]="true"
-              (clicked)="proceedToPayment()"
-              [disabled]="(isEmpty$ | async) ?? false"
-              customClasses="!w-full !h-10 sm:!h-11 !font-semibold !shadow-sm"
-            >
-              <app-icon [name]="isEditMode ? 'check' : 'credit-card'" [size]="18" slot="icon"></app-icon>
-              {{ isEditMode ? 'Actualizar Orden' : 'Cobrar' }}
-            </app-button>
+              <app-icon [name]="isEditMode ? 'check' : 'credit-card'" [size]="18"></app-icon>
+              <span>{{ isEditMode ? 'Actualizar Orden' : 'Cobrar' }}</span>
+            </button>
+            <div class="cart-actions-row">
+              <button
+                type="button"
+                class="cart-btn save-btn"
+                (click)="saveCart()"
+                [disabled]="(isEmpty$ | async) ?? false"
+              >
+                <app-icon name="save" [size]="16"></app-icon>
+                <span>Guardar</span>
+              </button>
+              <button
+                type="button"
+                class="cart-btn shipping-btn"
+                (click)="shipping.emit()"
+                [disabled]="(isEmpty$ | async) ?? false"
+              >
+                <app-icon name="truck" [size]="16"></app-icon>
+                <span>Envío</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -241,6 +244,78 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         display: block;
         height: 100%;
       }
+
+      .cart-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .cart-actions-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .cart-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 12px 8px;
+        border-radius: 12px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        border: none;
+      }
+
+      .cart-btn:active:not(:disabled) {
+        transform: scale(0.97);
+      }
+
+      .cart-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      .checkout-btn {
+        width: 100%;
+        padding: 14px;
+        background: var(--color-primary);
+        color: white;
+        font-size: 15px;
+        font-weight: 700;
+        box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
+      }
+
+      .checkout-btn:hover:not(:disabled) {
+        filter: brightness(1.05);
+        transform: translateY(-1px);
+      }
+
+      .save-btn {
+        background: var(--color-muted);
+        border: 1px solid var(--color-border);
+        color: var(--color-text-secondary);
+      }
+
+      .save-btn:hover:not(:disabled) {
+        background: var(--color-surface);
+        color: var(--color-text-primary);
+        border-color: var(--color-text-secondary);
+      }
+
+      .shipping-btn {
+        background: var(--color-primary);
+        color: white;
+        opacity: 0.85;
+      }
+
+      .shipping-btn:hover:not(:disabled) {
+        opacity: 1;
+      }
     `,
   ],
 })
@@ -253,6 +328,7 @@ export class PosCartComponent implements OnInit, OnDestroy {
 
   @Input() isEditMode = false;
   @Output() saveDraft = new EventEmitter<void>();
+  @Output() shipping = new EventEmitter<void>();
   @Output() checkout = new EventEmitter<void>();
 
   constructor(

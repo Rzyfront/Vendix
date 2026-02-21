@@ -1,0 +1,489 @@
+<app-modal
+  [isOpen]="isOpen"
+  [size]="'xl'"
+  [title]="'Orden con Envío'"
+  [subtitle]="'Configura envío, pago y cliente'"
+  (closed)="onModalClosed()"
+>
+  <!-- Main Content -->
+  <div class="shipping-content">
+    <!-- SECTION 1: Order Summary -->
+    <section class="payment-section">
+      <div class="section-header">
+        <div class="section-indicator"></div>
+        <h2 class="section-title">Resumen</h2>
+      </div>
+
+      <!-- Product List -->
+      <div class="product-list">
+        <div *ngFor="let item of cartState?.items" class="product-item">
+          <span class="product-name">{{ item.product.name }}<span *ngIf="item.variant_display_name" style="font-size: 0.85em; opacity: 0.7;"> - {{ item.variant_display_name }}</span></span>
+          <span class="product-qty">x{{ item.quantity }}</span>
+        </div>
+        <div *ngIf="!cartState?.items?.length" class="empty-cart">
+          El carrito está vacío
+        </div>
+      </div>
+
+      <!-- Summary Details -->
+      <div class="summary-details">
+        <div class="summary-row">
+          <span>Subtotal</span>
+          <span class="summary-value">{{ cartState?.summary?.subtotal || 0 | currency }}</span>
+        </div>
+        <div class="summary-row">
+          <span>Impuestos</span>
+          <span class="summary-value">{{ cartState?.summary?.taxAmount || 0 | currency }}</span>
+        </div>
+        <div *ngIf="(cartState?.summary?.discountAmount ?? 0) > 0" class="summary-row">
+          <span>Descuento</span>
+          <span class="summary-value discount">-{{ cartState?.summary?.discountAmount | currency }}</span>
+        </div>
+        <div class="summary-row">
+          <span>Envío</span>
+          <span class="summary-value" [class.shipping-cost-highlight]="shippingCost > 0">{{ shippingCost | currency }}</span>
+        </div>
+      </div>
+
+      <!-- Total -->
+      <div class="total-section">
+        <p class="total-label">Total (con envío)</p>
+        <p class="total-amount">{{ totalWithShipping | currency }}</p>
+      </div>
+    </section>
+
+    <!-- SECTION 2: Tabs (Envío / Pagos) -->
+    <section class="payment-section tabs-section">
+      <!-- Tab Headers -->
+      <div class="tab-headers">
+        <button
+          type="button"
+          class="tab-btn"
+          [class.active]="activeTab === 'shipping'"
+          (click)="activeTab = 'shipping'"
+        >
+          <app-icon name="truck" [size]="16"></app-icon>
+          <span>Envío</span>
+        </button>
+        <button
+          type="button"
+          class="tab-btn"
+          [class.active]="activeTab === 'payment'"
+          (click)="activeTab = 'payment'"
+        >
+          <app-icon name="credit-card" [size]="16"></app-icon>
+          <span>Pagos</span>
+        </button>
+      </div>
+
+      <!-- Tab: Shipping -->
+      <div *ngIf="activeTab === 'shipping'" class="tab-content">
+        <!-- Shipping Methods Grid -->
+        <div #shippingMethodSection
+             style="position: relative; border-radius: 12px;"
+             [class.config-flash-warning]="validationWarningSection === 'shipping-method'">
+          <app-tooltip
+            position="top"
+            color="warning"
+            size="sm"
+            [visible]="validationWarningSection === 'shipping-method'"
+            style="position: absolute; left: 50%; transform: translateX(-50%); top: -4px; z-index: 10;"
+          >{{ validationWarningMessage }}</app-tooltip>
+
+          <div class="section-header" style="margin-top: 4px;">
+            <app-icon name="package" [size]="16" class="section-icon"></app-icon>
+            <h2 class="section-title">Método de envío</h2>
+          </div>
+
+          <div *ngIf="shippingMethods.length > 0; else noShippingMethods" class="payment-methods-grid">
+            <button
+              *ngFor="let method of shippingMethods"
+              type="button"
+              (click)="selectShippingMethod(method)"
+              class="payment-method-btn"
+              [class.selected]="selectedShippingMethod?.id === method.id"
+            >
+              <app-icon [name]="getShippingIcon(method.type)" [size]="24"></app-icon>
+              <span class="method-name">{{ method.name }}</span>
+            </button>
+          </div>
+
+          <ng-template #noShippingMethods>
+            <div class="no-methods">
+              <app-icon name="truck" [size]="24"></app-icon>
+              <p>No hay métodos de envío configurados</p>
+            </div>
+          </ng-template>
+        </div>
+
+        <!-- Address Form (hidden for pickup) -->
+        <div *ngIf="selectedShippingMethod && selectedShippingMethod.type !== 'pickup'" class="address-form"
+             #addressSection
+             style="position: relative;"
+             [class.config-flash-warning]="validationWarningSection === 'address'">
+          <app-tooltip
+            position="top"
+            color="warning"
+            size="sm"
+            [visible]="validationWarningSection === 'address'"
+            style="position: absolute; left: 50%; transform: translateX(-50%); top: -4px; z-index: 10;"
+          >{{ validationWarningMessage }}</app-tooltip>
+          <div class="section-header">
+            <app-icon name="map-pin" [size]="16" class="section-icon"></app-icon>
+            <h2 class="section-title">Dirección de envío</h2>
+          </div>
+
+          <!-- Auto-fill badge -->
+          <div *ngIf="selectedCustomerAddressId" style="display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: rgba(var(--color-success-rgb), 0.1); border: 1px solid rgba(var(--color-success-rgb), 0.3); border-radius: 8px; margin-bottom: 8px;">
+            <app-icon name="map-pin" [size]="14" style="color: var(--color-success);"></app-icon>
+            <span style="font-size: 12px; font-weight: 500; color: var(--color-success);">Dirección del cliente (editable)</span>
+          </div>
+
+          <!-- New address hint -->
+          <div *ngIf="!selectedCustomerAddressId && cartState?.customer" style="display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: rgba(var(--color-primary-rgb), 0.05); border: 1px solid rgba(var(--color-primary-rgb), 0.2); border-radius: 8px; margin-bottom: 8px;">
+            <app-icon name="plus-circle" [size]="14" style="color: var(--color-primary);"></app-icon>
+            <span style="font-size: 12px; font-weight: 500; color: var(--color-text-secondary);">Nueva dirección (se guardará al cliente)</span>
+          </div>
+
+          <app-input
+            [formControl]="addressLine1Control"
+            [label]="'Dirección *'"
+            [placeholder]="'Calle, número, barrio...'"
+            [size]="'sm'"
+          ></app-input>
+
+          <div class="form-row">
+            <app-selector
+              label="Departamento"
+              placeholder="Seleccionar..."
+              [options]="departmentOptions"
+              [required]="true"
+              [size]="'sm'"
+              [ngModel]="selectedDepartmentId"
+              (valueChange)="onDepartmentChange(+($event || 0))"
+            ></app-selector>
+            <app-selector
+              label="Ciudad"
+              placeholder="Seleccionar..."
+              [options]="cityOptions"
+              [required]="true"
+              [disabled]="!cities.length"
+              [size]="'sm'"
+              [ngModel]="selectedCityId"
+              (valueChange)="onCityChange(+($event || 0))"
+            ></app-selector>
+          </div>
+        </div>
+
+        <!-- Shipping Cost -->
+        <div *ngIf="selectedShippingMethod" class="shipping-cost-section">
+          <div class="section-header">
+            <app-icon name="calculator" [size]="16" class="section-icon"></app-icon>
+            <h2 class="section-title">Costo de envío</h2>
+          </div>
+
+          <div *ngIf="isCalculatingShipping" class="calculating-indicator">
+            <span class="spinner-sm"></span>
+            <span>Calculando...</span>
+          </div>
+
+          <div *ngIf="!isCalculatingShipping" class="cost-display">
+            <div *ngIf="!manualCostOverride && calculatedShippingCost !== null" class="calculated-cost">
+              <span class="cost-label">Calculado:</span>
+              <span class="cost-value">{{ calculatedShippingCost | currency }}</span>
+            </div>
+
+            <div class="manual-toggle" *ngIf="calculatedShippingCost !== null">
+              <label class="toggle-label">
+                <input
+                  type="checkbox"
+                  [checked]="manualCostOverride"
+                  (change)="toggleManualCost()"
+                />
+                <span>Editar costo manualmente</span>
+              </label>
+            </div>
+
+            <div *ngIf="manualCostOverride || calculatedShippingCost === null" class="manual-cost-input">
+              <div class="cash-input">
+                <span class="currency">{{ currencySymbol() }}</span>
+                <input
+                  type="number"
+                  [value]="shippingCost"
+                  (input)="onManualCostChange($event)"
+                  placeholder="0.00"
+                  step="0.01"
+                  min="0"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Delivery Notes -->
+        <div *ngIf="selectedShippingMethod" class="delivery-notes">
+          <app-input
+            [formControl]="deliveryNotesControl"
+            [label]="'Notas de envío'"
+            [placeholder]="'Instrucciones especiales de entrega...'"
+            [size]="'sm'"
+          ></app-input>
+        </div>
+      </div>
+
+      <!-- Tab: Payment -->
+      <div *ngIf="activeTab === 'payment'" class="tab-content">
+        <div class="section-header" style="margin-top: 4px;">
+          <app-icon name="credit-card" [size]="16" class="section-icon"></app-icon>
+          <h2 class="section-title">Modo de pago</h2>
+        </div>
+
+        <!-- Payment Mode Radio -->
+        <div class="sale-type-options">
+          <button
+            type="button"
+            class="sale-type-btn"
+            [class.selected]="paymentMode === 'on_delivery'"
+            (click)="setPaymentMode('on_delivery')"
+          >
+            <div class="radio-indicator">
+              <div *ngIf="paymentMode === 'on_delivery'" class="radio-dot"></div>
+            </div>
+            <app-icon name="package" [size]="20"></app-icon>
+            <div class="sale-type-info">
+              <span class="sale-type-name">Pago contra entrega</span>
+              <span class="sale-type-desc">El cliente paga al recibir</span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            class="sale-type-btn"
+            [class.selected]="paymentMode === 'pay_now'"
+            (click)="setPaymentMode('pay_now')"
+          >
+            <div class="radio-indicator">
+              <div *ngIf="paymentMode === 'pay_now'" class="radio-dot"></div>
+            </div>
+            <app-icon name="credit-card" [size]="20"></app-icon>
+            <div class="sale-type-info">
+              <span class="sale-type-name">Pagar ahora</span>
+              <span class="sale-type-desc">Procesar pago inmediato</span>
+            </div>
+          </button>
+        </div>
+
+        <!-- Payment Methods (only if pay_now) -->
+        <div *ngIf="paymentMode === 'pay_now'" class="pay-now-section"
+             #paymentSection
+             style="position: relative;"
+             [class.config-flash-warning]="validationWarningSection === 'payment'">
+          <app-tooltip
+            position="top"
+            color="warning"
+            size="sm"
+            [visible]="validationWarningSection === 'payment'"
+            style="position: absolute; left: 50%; transform: translateX(-50%); top: -4px; z-index: 10;"
+          >{{ validationWarningMessage }}</app-tooltip>
+          <div *ngIf="paymentMethods.length > 0" class="payment-methods-grid" style="margin-top: 16px;">
+            <button
+              *ngFor="let method of paymentMethods"
+              type="button"
+              (click)="selectPaymentMethod(method)"
+              class="payment-method-btn"
+              [class.selected]="selectedPaymentMethod?.id === method.id"
+            >
+              <app-icon [name]="method.icon" [size]="24"></app-icon>
+              <span class="method-name">{{ method.name }}</span>
+            </button>
+          </div>
+
+          <!-- Cash Input -->
+          <div *ngIf="selectedPaymentMethod?.type === 'cash'" class="cash-section">
+            <div class="cash-inputs">
+              <div class="cash-input-group">
+                <label>Monto Recibido</label>
+                <div class="cash-input" [class.error]="isCashInsufficient">
+                  <span class="currency">{{ currencySymbol() }}</span>
+                  <input
+                    type="number"
+                    [formControl]="cashReceivedControl"
+                    placeholder="0.00"
+                    step="0.01"
+                  />
+                </div>
+                <span *ngIf="isCashInsufficient" class="error-text">
+                  Faltan: {{ totalWithShipping - cashReceived | currency }}
+                </span>
+              </div>
+              <div class="cash-input-group">
+                <label>Cambio</label>
+                <div class="change-display">
+                  <span>{{ cashChange | currency }}</span>
+                  <app-icon name="coins" [size]="18"></app-icon>
+                </div>
+              </div>
+            </div>
+
+            <!-- Quick Amounts -->
+            <div class="quick-amounts">
+              <button type="button" (click)="setCashAmount(totalWithShipping / 2)" class="quick-btn">
+                <span>1/2 Pago</span>
+                <span class="quick-value">{{ totalWithShipping / 2 | currency }}</span>
+              </button>
+              <button type="button" (click)="setCashAmount(totalWithShipping)" class="quick-btn primary">
+                <span>Total</span>
+                <app-icon name="check" [size]="16"></app-icon>
+              </button>
+            </div>
+
+            <!-- Numeric Keypad -->
+            <div class="keypad">
+              <button *ngFor="let num of [1, 2, 3, 4, 5, 6, 7, 8, 9]" type="button" (click)="appendNumber(num)" class="keypad-btn">
+                {{ num }}
+              </button>
+              <button type="button" (click)="clearCashAmount()" class="keypad-btn clear">C</button>
+              <button type="button" (click)="appendNumber(0)" class="keypad-btn">0</button>
+              <button type="button" (click)="backspace()" class="keypad-btn">
+                <app-icon name="delete" [size]="20"></app-icon>
+              </button>
+            </div>
+          </div>
+
+          <!-- Reference Input -->
+          <div *ngIf="selectedPaymentMethod?.requiresReference" class="reference-section">
+            <div class="reference-header">
+              <app-icon [name]="selectedPaymentMethod?.icon || 'credit-card'" [size]="28"></app-icon>
+              <p>Ingresa el número de referencia</p>
+            </div>
+            <app-input
+              [formControl]="referenceControl"
+              [label]="selectedPaymentMethod?.referenceLabel || 'Referencia'"
+              [placeholder]="'Ingresa la referencia'"
+              [size]="'lg'"
+            ></app-input>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 3: Customer (Required) -->
+    <section class="payment-section"
+             #customerSection
+             style="position: relative;"
+             [class.config-flash-warning]="validationWarningSection === 'customer'">
+      <app-tooltip
+        position="top"
+        color="warning"
+        size="sm"
+        [visible]="validationWarningSection === 'customer'"
+        style="position: absolute; left: 50%; transform: translateX(-50%); top: -4px; z-index: 10;"
+      >{{ validationWarningMessage }}</app-tooltip>
+      <div class="section-header">
+        <app-icon name="user" [size]="16" class="section-icon"></app-icon>
+        <h2 class="section-title">Cliente (obligatorio)</h2>
+      </div>
+
+      <!-- Selected Customer Display -->
+      <div *ngIf="cartState?.customer" class="selected-customer">
+        <div class="customer-avatar">
+          <app-icon name="user-check" [size]="16"></app-icon>
+        </div>
+        <div class="customer-info">
+          <span class="customer-name">{{ customerDisplayName }}</span>
+          <span class="customer-email">{{ cartState?.customer?.email }}</span>
+        </div>
+        <button type="button" class="change-customer-btn" (click)="openCustomerSelector()">
+          <app-icon name="edit-2" [size]="14"></app-icon>
+        </button>
+      </div>
+
+      <!-- Select Customer Button -->
+      <button
+        *ngIf="!cartState?.customer && !showCustomerSelector"
+        type="button"
+        class="select-customer-btn"
+        (click)="openCustomerSelector()"
+      >
+        <app-icon name="user-plus" [size]="18"></app-icon>
+        <span>Seleccionar Cliente</span>
+      </button>
+
+      <!-- Customer Selector Panel -->
+      <div *ngIf="showCustomerSelector" class="customer-selector">
+        <div class="selector-header">
+          <span>Buscar Cliente</span>
+          <button type="button" (click)="closeCustomerSelector()">
+            <app-icon name="x" [size]="16"></app-icon>
+          </button>
+        </div>
+
+        <app-input
+          [placeholder]="'Buscar por nombre, email o documento...'"
+          [size]="'sm'"
+          (inputChange)="onCustomerSearch($event)"
+        ></app-input>
+
+        <!-- Search Results -->
+        <div *ngIf="!showCreateCustomerForm && customerSearchResults.length > 0" class="search-results">
+          <button
+            *ngFor="let customer of customerSearchResults"
+            type="button"
+            class="customer-result"
+            (click)="selectCustomer(customer)"
+          >
+            <span class="result-name">{{ customer.first_name }} {{ customer.last_name }}</span>
+            <span class="result-email">{{ customer.email }}</span>
+            <span *ngIf="customer.addresses?.length" style="font-size: 10px; color: var(--color-success); margin-top: 2px; display: flex; align-items: center; gap: 4px;">
+              <app-icon name="map-pin" [size]="10"></app-icon>
+              {{ customer.addresses![0].city }}
+            </span>
+          </button>
+        </div>
+
+        <!-- Create Customer Button -->
+        <div *ngIf="!showCreateCustomerForm" class="create-customer-action">
+          <button type="button" class="create-customer-btn" (click)="showCreateCustomerForm = true">
+            <app-icon name="user-plus" [size]="16"></app-icon>
+            <span>Crear nuevo cliente</span>
+          </button>
+        </div>
+
+        <!-- Create Customer Form -->
+        <div *ngIf="showCreateCustomerForm" class="create-customer-form">
+          <h5>Nuevo Cliente</h5>
+          <app-input [formControl]="customerEmailControl" [label]="'Email'" [placeholder]="'correo@ejemplo.com'" [size]="'sm'"></app-input>
+          <div class="form-row">
+            <app-input [formControl]="customerFirstNameControl" [label]="'Nombre'" [placeholder]="'Juan'" [size]="'sm'"></app-input>
+            <app-input [formControl]="customerLastNameControl" [label]="'Apellido'" [placeholder]="'Pérez'" [size]="'sm'"></app-input>
+          </div>
+          <app-input [formControl]="customerPhoneControl" [label]="'Teléfono'" [placeholder]="'+1 234 5678'" [size]="'sm'"></app-input>
+          <div class="form-actions">
+            <button type="button" class="btn-create" (click)="onCreateCustomer()">Crear</button>
+            <button type="button" class="btn-cancel" (click)="showCreateCustomerForm = false">Cancelar</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Footer Buttons -->
+  <div slot="footer" class="payment-footer">
+    <div class="footer-row">
+      <button type="button" class="btn-cancel-payment" (click)="onModalClosed()" [disabled]="isProcessing">
+        Cancelar
+      </button>
+    </div>
+    <button
+      type="button"
+      class="btn-confirm"
+      (click)="confirmShipping()"
+      [disabled]="isProcessing"
+      [class.loading]="isProcessing"
+    >
+      <app-icon *ngIf="!isProcessing" name="truck" [size]="20"></app-icon>
+      <span *ngIf="isProcessing" class="spinner"></span>
+      Confirmar Envío
+    </button>
+  </div>
+</app-modal>

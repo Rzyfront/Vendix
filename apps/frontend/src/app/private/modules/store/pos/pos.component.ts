@@ -43,6 +43,7 @@ import { PosCartComponent } from './cart/pos-cart.component';
 import { PosRegisterConfigModalComponent } from './components/pos-register-config-modal.component';
 import { PosMobileFooterComponent } from './components/pos-mobile-footer.component';
 import { PosCartModalComponent } from './components/pos-cart-modal.component';
+import { PosShippingModalComponent } from './components/pos-shipping-modal/pos-shipping-modal.component';
 
 @Component({
   selector: 'app-pos',
@@ -63,6 +64,7 @@ import { PosCartModalComponent } from './components/pos-cart-modal.component';
     BadgeComponent,
     PosMobileFooterComponent,
     PosCartModalComponent,
+    PosShippingModalComponent,
   ],
   template: `
     <div class="h-full flex flex-col gap-4 overflow-hidden pos-container">
@@ -199,6 +201,7 @@ import { PosCartModalComponent } from './components/pos-cart-modal.component';
                 class="h-full block"
                 [isEditMode]="isEditMode()"
                 (saveDraft)="onSaveDraft()"
+                (shipping)="onShipping()"
                 (checkout)="onCheckout()"
               ></app-pos-cart>
             </div>
@@ -222,6 +225,7 @@ import { PosCartModalComponent } from './components/pos-cart-modal.component';
         [itemCount]="cartItems.length"
         (viewCart)="onOpenCartModal()"
         (saveDraft)="onSaveDraft()"
+        (shipping)="onShipping()"
         (checkout)="onCheckout()"
       ></app-pos-mobile-footer>
 
@@ -233,8 +237,8 @@ import { PosCartModalComponent } from './components/pos-cart-modal.component';
         (itemQuantityChanged)="onCartItemQuantityChanged($event)"
         (itemRemoved)="onCartItemRemoved($event)"
         (clearCart)="onClearCart()"
-        (assignCustomer)="onOpenCustomerModal()"
         (saveDraft)="onSaveDraftFromModal()"
+        (shipping)="onShippingFromModal()"
         (checkout)="onCheckoutFromModal()"
       ></app-pos-cart-modal>
 
@@ -272,6 +276,14 @@ import { PosCartModalComponent } from './components/pos-cart-modal.component';
         (requestRegisterConfig)="onOpenRegisterConfigModal()"
         (customerSelected)="onPaymentCustomerSelected($event)"
       ></app-pos-payment-interface>
+
+      <app-pos-shipping-modal
+        [isOpen]="showShippingModal"
+        [cartState]="cartState"
+        (closed)="onShippingModalClosed()"
+        (shippingCompleted)="onShippingCompleted($event)"
+        (customerSelected)="onPaymentCustomerSelected($event)"
+      ></app-pos-shipping-modal>
 
       <app-pos-order-confirmation
         [isOpen]="showOrderConfirmation"
@@ -326,6 +338,7 @@ export class PosComponent implements OnInit, OnDestroy {
   showPaymentModal = false;
   selectedPaymentMethod: any = null;
 
+  showShippingModal = false;
   showRegisterConfigModal = false;
 
   showOrderConfirmation = false;
@@ -706,6 +719,70 @@ export class PosComponent implements OnInit, OnDestroy {
   onCheckoutFromModal(): void {
     this.showCartModal = false;
     this.onCheckout();
+  }
+
+  // Shipping Modal Methods
+  onShipping(): void {
+    if (!this.cartState || this.isEmpty) {
+      this.toastService.warning('El carrito está vacío');
+      return;
+    }
+    this.showShippingModal = true;
+  }
+
+  onShippingFromModal(): void {
+    this.showCartModal = false;
+    this.onShipping();
+  }
+
+  onShippingModalClosed(): void {
+    this.showShippingModal = false;
+  }
+
+  onShippingCompleted(shippingData: any): void {
+    if (!this.cartState || this.isEmpty) return;
+
+    this.loading = false;
+    this.showShippingModal = false;
+
+    if (shippingData.success) {
+      this.currentOrderId = shippingData.order?.id;
+      this.currentOrderNumber = shippingData.order?.order_number;
+
+      this.completedOrder = {
+        ...(shippingData.order || {}),
+        isShippingSale: true,
+        items:
+          shippingData.order?.items ||
+          this.cartState?.items.map((item) => ({
+            product_id: item.product.id,
+            product_name: item.product.name,
+            quantity: item.quantity,
+            unit_price: item.unitPrice,
+            total_price: item.totalPrice,
+            variant_id: item.variant_id,
+            variant_sku: item.variant_sku,
+            variant_attributes: item.variant_attributes,
+            variant_display_name: item.variant_display_name,
+          })),
+        subtotal: shippingData.order?.subtotal || this.cartSummary.subtotal,
+        tax_amount: shippingData.order?.tax_amount || this.cartSummary.taxAmount,
+        discount_amount:
+          shippingData.order?.discount_amount || this.cartSummary.discountAmount,
+        total_amount: shippingData.order?.total_amount || this.cartSummary.total,
+        customer_name: this.selectedCustomer
+          ? `${this.selectedCustomer.first_name} ${this.selectedCustomer.last_name}`
+          : shippingData.order?.customer_name || '',
+        customer_email: this.selectedCustomer?.email || shippingData.order?.customer_email || '',
+        customer_tax_id: this.selectedCustomer?.document_number || shippingData.order?.customer_tax_id || '',
+        customer: shippingData.order?.customer || this.selectedCustomer,
+        payment: shippingData.order?.payment || shippingData.payment,
+      };
+
+      this.showOrderConfirmation = true;
+      this.toastService.success('Orden con envío creada correctamente');
+      this.onClearCart();
+    }
   }
 
   private checkEditMode(): void {

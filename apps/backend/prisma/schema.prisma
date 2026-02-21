@@ -60,6 +60,8 @@ model users {
   main_store                stores?                     @relation("main_store", fields: [main_store_id], references: [id], onUpdate: NoAction)
   organizations             organizations               @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
   document_acceptances      document_acceptances[]
+  notification_subscriptions notification_subscriptions[]
+  push_subscriptions         push_subscriptions[]
 
   // Campos de tracking de términos
   terms_accepted_version String?   @db.VarChar(20)
@@ -351,6 +353,9 @@ model stores {
   shipping_zones         shipping_zones[]
   shipping_methods       shipping_methods[]
   expenses               expenses[]
+  notifications          notifications[]
+  notification_subscriptions notification_subscriptions[]
+  push_subscriptions         push_subscriptions[]
 
   @@unique([organization_id, slug])
   @@index([onboarding])
@@ -1455,6 +1460,65 @@ model default_templates {
   @@index([configuration_type])
   @@index([is_active])
   @@index([is_system])
+}
+
+// ===== NOTIFICATIONS =====
+
+enum notification_type_enum {
+  new_order
+  order_status_change
+  low_stock
+  new_customer
+  payment_received
+}
+
+model notifications {
+  id         Int                    @id @default(autoincrement())
+  store_id   Int
+  type       notification_type_enum
+  title      String                 @db.VarChar(255)
+  body       String                 @db.Text
+  data       Json?
+  is_read    Boolean                @default(false)
+  created_at DateTime               @default(now()) @db.Timestamp(6)
+  updated_at DateTime               @default(now()) @db.Timestamp(6)
+  stores     stores                 @relation(fields: [store_id], references: [id], onDelete: Cascade)
+
+  @@index([store_id])
+  @@index([store_id, is_read])
+  @@index([store_id, created_at(sort: Desc)])
+}
+
+model notification_subscriptions {
+  id         Int                    @id @default(autoincrement())
+  store_id   Int
+  user_id    Int
+  type       notification_type_enum
+  in_app     Boolean                @default(true)
+  email      Boolean                @default(false)
+  created_at DateTime               @default(now()) @db.Timestamp(6)
+  stores     stores                 @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  users      users                  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([store_id, user_id, type])
+  @@index([store_id, user_id])
+}
+
+model push_subscriptions {
+  id         Int      @id @default(autoincrement())
+  store_id   Int
+  user_id    Int
+  endpoint   String   @db.Text
+  p256dh     String   @db.Text
+  auth       String   @db.Text
+  user_agent String?  @db.VarChar(512)
+  created_at DateTime @default(now()) @db.Timestamp(6)
+  updated_at DateTime @default(now()) @db.Timestamp(6)
+  stores     stores   @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  users      users    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([store_id, user_id, endpoint])
+  @@index([store_id, user_id])
 }
 
 enum address_type_enum {

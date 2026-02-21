@@ -57,6 +57,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working on backend domains | `vendix-backend-domain` |
 | Working on frontend domains | `vendix-frontend-domain` |
 | Working with Prisma scoped services | `vendix-prisma-scopes` |
+| Working with notifications, SSE, or adding new event-driven alerts | `vendix-notifications-system` |
 | Writing Code (Naming) | `vendix-naming-conventions` |
 | Writing Validation Logic | `vendix-validation` |
 | cambios con migraciones de base de datos | `git-workflow` |

@@ -34,15 +34,36 @@ export class AddressesService {
     // Force store_id from context
     createAddressDto.store_id = store_id;
 
-    // Enforce that we are only creating store addresses in this domain
-    if (createAddressDto.organization_id || createAddressDto.user_id) {
-      throw new BadRequestException('Cannot create organization or user addresses in Store domain');
+    // Block direct organization_id or user_id — use customer_id instead
+    if (createAddressDto.organization_id) {
+      throw new BadRequestException('Cannot create organization addresses in Store domain');
+    }
+    if (createAddressDto.user_id) {
+      throw new BadRequestException('Use customer_id instead of user_id to associate addresses with customers');
+    }
+
+    // If customer_id is provided, resolve the user_id from the customer in this store
+    let resolvedUserId: number | null = null;
+    if (createAddressDto.customer_id) {
+      const customer = await this.prisma.users.findFirst({
+        where: {
+          id: createAddressDto.customer_id,
+          store_users: { some: { store_id: store_id } },
+        },
+        select: { id: true },
+      });
+      if (!customer) {
+        throw new BadRequestException('Customer not found in this store');
+      }
+      resolvedUserId = customer.id;
     }
 
     if (createAddressDto.is_primary) {
-      await this.unsetOtherDefaults({
-        store_id: store_id,
-      });
+      const unsetCriteria: { store_id?: number; user_id?: number } = { store_id: store_id };
+      if (resolvedUserId) {
+        unsetCriteria.user_id = resolvedUserId;
+      }
+      await this.unsetOtherDefaults(unsetCriteria);
     }
 
     const address_data: Prisma.addressesUncheckedCreateInput = {
@@ -61,9 +82,8 @@ export class AddressesService {
         ? parseFloat(createAddressDto.longitude)
         : null,
       store_id: store_id,
-      // Ensure other foreign keys are null
       organization_id: null,
-      user_id: null,
+      user_id: resolvedUserId,
     };
 
     try {

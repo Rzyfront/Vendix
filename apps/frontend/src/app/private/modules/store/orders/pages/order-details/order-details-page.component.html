@@ -189,43 +189,29 @@
 
           <!-- 3. HISTORIAL DE LA ORDEN (cronológico ascendente) -->
           <app-card title="Historial de la Orden" shadow="sm" [responsivePadding]="true">
-            <div class="space-y-0">
-              @for (log of sortedTimeline(); track $index; let last = $last) {
-                <div class="timeline-item">
-                  <div class="timeline-marker" [ngClass]="{ 'bg-primary': last }"></div>
-                  <div class="flex flex-col sm:flex-row sm:justify-between gap-2">
-                    <div>
-                      <p class="text-sm font-bold text-gray-900">{{ getTimelineLabel(log) }}</p>
+            <app-timeline [steps]="history_timeline_steps()" [collapsible]="true"
+              expand_label="Ver historial completo" collapse_label="Ocultar historial">
+              <ng-template #stepTemplate let-step let-isLast="isLast">
+                <div class="flex flex-col sm:flex-row sm:justify-between gap-2">
+                  <div>
+                    <p class="text-sm font-bold text-gray-900">{{ step.label }}</p>
+                    @if (step.data) {
                       <p class="text-xs text-gray-500 mt-1">
                         Realizado por
-                        <span class="font-semibold text-gray-700">{{ log.users?.first_name }} {{ log.users?.last_name }}</span>
+                        <span class="font-semibold text-gray-700">{{ step.data.users?.first_name }} {{ step.data.users?.last_name }}</span>
                       </p>
-                      @if (log.new_values?.state) {
+                      @if (step.data.new_values?.state) {
                         <div class="mt-2 text-xs bg-[var(--color-surface)] text-text-secondary px-3 py-1.5 rounded-lg inline-flex items-center gap-2 border border-border">
                           <span class="w-1.5 h-1.5 rounded-full bg-primary-500"></span>
-                          Nuevo estado: {{ formatStatus(log.new_values.state) }}
+                          Nuevo estado: {{ formatStatus(step.data.new_values.state) }}
                         </div>
                       }
-                    </div>
-                    <span class="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">
-                      {{ formatDate(log.created_at) }}
-                    </span>
+                    }
                   </div>
+                  <span class="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">{{ step.date }}</span>
                 </div>
-              }
-
-              @if (sortedTimeline().length === 0) {
-                <div class="timeline-item">
-                  <div class="timeline-marker bg-primary"></div>
-                  <div>
-                    <p class="text-sm font-bold text-gray-900">Orden Creada</p>
-                    <span class="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">
-                      {{ formatDate(orderData.created_at) }}
-                    </span>
-                  </div>
-                </div>
-              }
-            </div>
+              </ng-template>
+            </app-timeline>
           </app-card>
         </div>
 
@@ -313,33 +299,8 @@
               Progreso de la Orden
             </h2>
 
-            <div class="space-y-0">
-              @for (step of lifecycleSteps(); track step.key) {
-                <div class="progress-item"
-                  [class.line-completed]="step.status === 'completed'">
-                  <div class="progress-marker"
-                    [ngClass]="{
-                      'completed': step.status === 'completed',
-                      'current': step.status === 'current',
-                      'upcoming': step.status === 'upcoming',
-                      'terminal-cancelled': step.status === 'terminal' && step.key === 'cancelled',
-                      'terminal-refunded': step.status === 'terminal' && step.key === 'refunded'
-                    }"
-                  ></div>
-                  <span class="text-sm font-semibold"
-                    [ngClass]="{
-                      'text-green-600': step.status === 'completed',
-                      'text-green-800': step.status === 'current',
-                      'text-gray-400': step.status === 'upcoming',
-                      'text-red-600': step.status === 'terminal' && step.key === 'cancelled',
-                      'text-orange-600': step.status === 'terminal' && step.key === 'refunded'
-                    }"
-                  >
-                    {{ step.label }}
-                  </span>
-                </div>
-              }
-            </div>
+            <app-timeline [steps]="lifecycle_steps_timeline()" [collapsible]="true"
+              expand_label="Ver progreso completo" collapse_label="Ocultar progreso" />
           </app-card>
 
           <!-- 5. FLOW METADATA CARDS -->
@@ -433,38 +394,8 @@
               </h2>
 
               <!-- Tracking Timeline -->
-              <div class="tracking-timeline">
-                @for (step of trackingSteps(); track step.key; let last = $last) {
-                  <div class="tracking-step">
-                    <div class="tracking-indicator">
-                      <div class="tracking-dot"
-                        [ngClass]="{
-                          'bg-green-500 border-green-500': step.status === 'completed',
-                          'bg-primary-500 border-primary-500 shadow-sm': step.status === 'current',
-                          'bg-gray-200 border-gray-300': step.status === 'pending'
-                        }"
-                      ></div>
-                      @if (!last) {
-                        <div class="tracking-line"
-                          [ngClass]="{
-                            'bg-green-400': step.status === 'completed',
-                            'bg-gray-200': step.status !== 'completed'
-                          }"
-                        ></div>
-                      }
-                    </div>
-                    <span class="text-xs font-semibold"
-                      [ngClass]="{
-                        'text-green-700': step.status === 'completed',
-                        'text-primary-600': step.status === 'current',
-                        'text-gray-400': step.status === 'pending'
-                      }"
-                    >
-                      {{ step.label }}
-                    </span>
-                  </div>
-                }
-              </div>
+              <app-timeline [steps]="tracking_steps_timeline()" [collapsible]="true"
+                expand_label="Ver seguimiento completo" collapse_label="Ocultar seguimiento" size="sm" />
 
               <!-- Tracking number -->
               @if (flowMetadata().tracking_number) {
