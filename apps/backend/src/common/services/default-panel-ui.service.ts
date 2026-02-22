@@ -93,6 +93,7 @@ export class DefaultPanelUIService {
         settings_domains: true,
         settings_shipping: true,
         settings_legal_documents: true,
+        settings_support: true,
       },
       STORE_ECOMMERCE: {
         profile: true,

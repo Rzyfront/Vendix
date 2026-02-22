@@ -13,6 +13,7 @@ import { TemplatesModule } from './templates/templates.module';
 import { CurrenciesModule } from './currencies/currencies.module';
 import { ShippingModule } from './shipping/shipping.module';
 import { LegalDocumentsModule } from './legal-documents/legal-documents.module';
+import { SuperadminSupportModule } from './support/support.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { LegalDocumentsModule } from './legal-documents/legal-documents.module';
     CurrenciesModule,
     ShippingModule,
     LegalDocumentsModule,
+    SuperadminSupportModule,
   ],
   providers: [GlobalPrismaService],
   exports: [GlobalPrismaService],

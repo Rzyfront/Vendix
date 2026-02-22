@@ -99,4 +99,12 @@ export class S3PathHelper {
     buildOrgEntityPath(org: S3OrgContext, entityType: string): string {
         return `${this.buildOrgPath(org)}/${entityType}`;
     }
+
+    /**
+     * Builds the path for support ticket attachments
+     * @returns organizations/{org_slug}-{org_id}/support/{ticket_id}
+     */
+    buildSupportPath(org: S3OrgContext, ticketId: number): string {
+        return `${this.buildOrgPath(org)}/support/${ticketId}`;
+    }
 }

@@ -151,6 +151,10 @@ import {
   MessageCircle,
   ImagePlus,
   PanelBottom,
+  // Support icons
+  Ticket,
+  File,
+  MessageSquare,
 } from 'lucide-angular';
 
 /**
@@ -352,6 +356,11 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'image-plus': ImagePlus,
   'panel-bottom': PanelBottom,
   'share-2': Share2,
+
+  // Support icons
+  ticket: Ticket,
+  file: File,
+  'message-square': MessageSquare,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

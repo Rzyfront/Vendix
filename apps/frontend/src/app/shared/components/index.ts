@@ -37,6 +37,14 @@ export { ItemListComponent } from './item-list/item-list.component';
 export { ResponsiveDataViewComponent } from './responsive-data-view/responsive-data-view.component';
 export { OptionsDropdownComponent } from './options-dropdown';
 export { TimelineComponent } from './timeline/timeline.component';
+export { TourModalComponent } from './tour/tour-modal/tour-modal.component';
+export { ImageLightboxComponent } from './image-lightbox/image-lightbox.component';
+
+// Services
+export { TourService } from './tour/services/tour.service';
+
+// Types
+export type { TourConfig, TourStep } from './tour/services/tour.service';
 
 // Types
 export type { AlertBannerVariant } from './alert-banner/alert-banner.component';

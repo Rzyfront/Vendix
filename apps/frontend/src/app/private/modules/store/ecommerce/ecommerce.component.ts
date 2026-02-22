@@ -36,6 +36,9 @@ import {
   StickyHeaderComponent,
   StickyHeaderActionButton,
 } from '../../../../shared/components';
+import { TourModalComponent } from '../../../../shared/components/tour/tour-modal/tour-modal.component';
+import { TourService } from '../../../../shared/components/tour/services/tour.service';
+import { ECOMMERCE_TOUR_CONFIG } from '../../../../shared/components/tour/configs/ecommerce-tour.config';
 import { SelectorOption } from '../../../../shared/components/selector/selector.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import type { Currency } from '../../../../shared/pipes/currency';
@@ -54,6 +57,7 @@ import type { Currency } from '../../../../shared/pipes/currency';
     StickyHeaderComponent,
     FooterSettingsFormComponent,
     StoreShareModalComponent,
+    TourModalComponent,
   ],
   templateUrl: './ecommerce.component.html',
   styleUrls: ['./ecommerce.component.scss'],
@@ -68,8 +72,13 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   private store = inject(Store);
   private router = inject(Router);
   private shippingMethodsService = inject(ShippingMethodsService);
+  private tourService = inject(TourService);
 
   private destroy$ = new Subject<void>();
+
+  // Tour
+  showTourModal = false;
+  readonly ecommerceTourConfig = ECOMMERCE_TOUR_CONFIG;
 
   // Currencies for selector
   currencies: SelectorOption[] = [];
@@ -169,6 +178,9 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    // Check if should show ecommerce tour
+    this.checkAndStartEcommerceTour();
+
     // Configurar prefijo +57 para WhatsApp ANTES de cargar datos
     this.setupWhatsappPrefixEnforcement();
 
@@ -900,5 +912,17 @@ export class EcommerceComponent implements OnInit, OnDestroy {
         this.toastService.success('Colores sincronizados desde el branding de la tienda');
       }
     });
+  }
+
+  /**
+   * Check and start ecommerce tour for first-time users
+   */
+  private checkAndStartEcommerceTour(): void {
+    const tourId = 'ecommerce-config-first-visit';
+    if (this.tourService.canShowTour(tourId)) {
+      setTimeout(() => {
+        this.showTourModal = true;
+      }, 1500);
+    }
   }
 }

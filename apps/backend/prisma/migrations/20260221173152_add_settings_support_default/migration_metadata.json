@@ -1,0 +1,9 @@
+{
+  "basename": "add_settings_support_default",
+  "datamodel": "",
+  "field_index_sizes": [],
+  "indexed_fields": [],
+  "migration_id": "20260221173152_add_settings_support_default",
+  "model_name": "",
+  "naming_convention": {}
+}

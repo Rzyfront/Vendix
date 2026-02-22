@@ -17,8 +17,8 @@ export class NotificationsPushService implements OnModuleInit {
    * are not yet available at constructor time.
    */
   onModuleInit() {
-    this.vapid_public_key = (process.env.VAPID_PUBLIC_KEY || '').trim();
-    const vapid_private_key = (process.env.VAPID_PRIVATE_KEY || '').trim();
+    this.vapid_public_key = (process.env.VAPID_PUBLIC_KEY || '').replace(/\s/g, '');
+    const vapid_private_key = (process.env.VAPID_PRIVATE_KEY || '').replace(/\s/g, '');
     const vapid_subject = (process.env.VAPID_SUBJECT || 'mailto:support@vendix.online').trim();
 
     // Strip any Base64 padding — web-push requires URL-safe Base64 without "="

@@ -1,13 +1,15 @@
-import { Component, ViewChild } from '@angular/core';
+import { Component, ViewChild, inject, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
+import { RouterModule, Router } from '@angular/router';
 import {
   SidebarComponent,
   MenuItem,
 } from '../../../shared/components/sidebar/sidebar.component';
 import { HeaderComponent } from '../../../shared/components/header/header.component';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
-import { Observable } from 'rxjs';
+import { SupportService } from '../../modules/super-admin/support/services/support.service';
+import { Observable, Subject, BehaviorSubject, timer, combineLatest, of } from 'rxjs';
+import { takeUntil, map, switchMap, startWith } from 'rxjs/operators';
 
 @Component({
   selector: 'app-super-admin-layout',
@@ -18,7 +20,7 @@ import { Observable } from 'rxjs';
       <!-- Sidebar -->
       <app-sidebar
         #sidebarRef
-        [menuItems]="menuItems"
+        [menuItems]="(menuItems$ | async) || []"
         [title]="(organizationName$ | async) || platformTitle"
         subtitle="Super Administrador"
         [vlink]="(organizationSlug$ | async) || currentVlink"
@@ -57,7 +59,7 @@ import { Observable } from 'rxjs';
   `,
   styleUrls: ['./super-admin-layout.component.scss'],
 })
-export class SuperAdminLayoutComponent {
+export class SuperAdminLayoutComponent implements OnInit, OnDestroy {
   @ViewChild('sidebarRef') sidebarRef!: SidebarComponent;
 
   sidebarCollapsed = false;
@@ -68,9 +70,39 @@ export class SuperAdminLayoutComponent {
   organizationName$: Observable<string | null>;
   organizationSlug$: Observable<string | null>;
 
+  // Support tickets open count
+  openTicketsCount$ = new BehaviorSubject<number>(0);
+  private destroy$ = new Subject<void>();
+  private supportService = inject(SupportService);
+
   constructor(private authFacade: AuthFacade) {
     this.organizationName$ = this.authFacade.userOrganizationName$;
     this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
+  }
+
+  ngOnInit(): void {
+    // Load support tickets stats for badge - refresh every 60 seconds
+    timer(0, 60000).pipe(
+      switchMap(() => this.supportService.getTicketStats()),
+      takeUntil(this.destroy$)
+    ).subscribe({
+      next: (stats: any) => {
+        // Calculate open tickets (NEW + OPEN + IN_PROGRESS)
+        const openCount = (stats.by_status?.['NEW'] || 0) +
+                         (stats.by_status?.['OPEN'] || 0) +
+                         (stats.by_status?.['IN_PROGRESS'] || 0) +
+                         (stats.by_status?.['WAITING_RESPONSE'] || 0);
+        this.openTicketsCount$.next(openCount);
+      },
+      error: (err) => {
+        console.error('Error loading support stats:', err);
+      }
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
   breadcrumb = {
@@ -84,7 +116,8 @@ export class SuperAdminLayoutComponent {
     initials: 'UA',
   };
 
-  menuItems: MenuItem[] = [
+  // Base menu items (without badge)
+  private baseMenuItems: MenuItem[] = [
     {
       label: 'Panel Principal',
       icon: 'home',
@@ -149,7 +182,6 @@ export class SuperAdminLayoutComponent {
       label: 'Soporte',
       icon: 'headset',
       route: '/super-admin/support',
-      badge: '3',
     },
     {
       label: 'Analíticas',
@@ -199,6 +231,23 @@ export class SuperAdminLayoutComponent {
       ],
     },
   ];
+
+  // Dynamic menu items with support badge
+  menuItems$: Observable<MenuItem[]> = combineLatest([
+    of(this.baseMenuItems),
+    this.openTicketsCount$
+  ]).pipe(
+    map(([items, openCount]) => {
+      // Find and update the Support menu item badge
+      return items.map(item => {
+        if (item.label === 'Soporte') {
+          return { ...item, badge: openCount > 0 ? openCount.toString() : undefined };
+        }
+        return item;
+      });
+    }),
+    startWith(this.baseMenuItems)
+  );
 
   toggleSidebar() {
     // If mobile, delegate to sidebar component
