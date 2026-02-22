@@ -110,11 +110,10 @@ export const superAdminRoutes: Routes = [
       },
       {
         path: 'support',
-        loadComponent: () =>
-          import(
-            '../../shared/components/under-construction/under-construction.component'
-          ).then((c) => c.UnderConstructionComponent),
-        data: { title: 'Soporte', description: 'El módulo de soporte está siendo desarrollado.' },
+        loadChildren: () =>
+          import('../../private/modules/super-admin/support/support.routes').then(
+            (m) => m.SUPPORT_ROUTES
+          ),
       },
       {
         path: 'analytics/platform',

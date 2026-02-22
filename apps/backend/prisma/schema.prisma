@@ -62,6 +62,12 @@ model users {
   document_acceptances      document_acceptances[]
   notification_subscriptions notification_subscriptions[]
   push_subscriptions         push_subscriptions[]
+  created_tickets            support_tickets[]          @relation("ticket_creator")
+  assigned_tickets           support_tickets[]          @relation("ticket_assigned")
+  uploaded_attachments       support_attachments[]      @relation("attachment_uploaded_by")
+  comments                   support_comments[]          @relation("comment_author")
+  status_changes             support_status_history[]   @relation("status_changed_by")
+  support_notifications      support_notifications[]    @relation("notification_user")
 
   // Campos de tracking de términos
   terms_accepted_version String?   @db.VarChar(20)
@@ -277,6 +283,7 @@ model organizations {
   roles                         roles[]
   expenses                      expenses[]
   expense_categories            expense_categories[]
+  support_tickets               support_tickets[]
 
   @@index([onboarding])
   @@index([account_type])
@@ -356,6 +363,7 @@ model stores {
   notifications          notifications[]
   notification_subscriptions notification_subscriptions[]
   push_subscriptions         push_subscriptions[]
+  support_tickets            support_tickets[]
 
   @@unique([organization_id, slug])
   @@index([onboarding])
@@ -1978,4 +1986,162 @@ enum legal_document_type_enum {
   RETURN_POLICY
   COOKIES_POLICY
   MERCHANT_AGREEMENT
+}
+
+// Support System Enums
+enum ticket_category_enum {
+  INCIDENT
+  SERVICE_REQUEST
+  PROBLEM
+  CHANGE
+  QUESTION
+}
+
+enum ticket_priority_enum {
+  P0
+  P1
+  P2
+  P3
+  P4
+}
+
+enum ticket_status_enum {
+  NEW
+  OPEN
+  IN_PROGRESS
+  WAITING_RESPONSE
+  RESOLVED
+  CLOSED
+  REOPENED
+}
+
+enum ticket_attachment_type_enum {
+  IMAGE
+  DOCUMENT
+  LOG
+  SCREENSHOT
+}
+
+model support_tickets {
+  id                  Int                     @id @default(autoincrement())
+  ticket_number       String                  @unique
+  organization_id     Int
+  store_id            Int?
+  created_by_user_id  Int
+  created_by          users                   @relation("ticket_creator", fields: [created_by_user_id], references: [id], onDelete: Restrict)
+  title               String                  @db.VarChar(255)
+  description         String                  @db.Text
+  category            ticket_category_enum    @default(QUESTION)
+  priority            ticket_priority_enum    @default(P3)
+  status              ticket_status_enum      @default(NEW)
+  assigned_to_user_id Int?
+  assigned_to         users?                  @relation("ticket_assigned", fields: [assigned_to_user_id], references: [id], onDelete: SetNull)
+  related_order_id    Int?
+  related_order_type  String?                 @db.VarChar(50)
+  related_product_id  Int?
+  sla_deadline        DateTime?               @db.Timestamp(6)
+  sla_breached        Boolean                 @default(false)
+  first_response_at   DateTime?               @db.Timestamp(6)
+  resolved_at         DateTime?               @db.Timestamp(6)
+  closed_at           DateTime?               @db.Timestamp(6)
+  resolution_summary  String?                 @db.Text
+  resolution_time_minutes Int?
+  customer_satisfied  Boolean?
+  source_channel      String                  @default("web")
+  tags                String[]                @default([])
+  created_at          DateTime?               @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?               @default(now()) @db.Timestamp(6)
+  organization        organizations           @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store               stores?                 @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  attachments         support_attachments[]
+  comments            support_comments[]
+  status_history      support_status_history[]
+  notifications       support_notifications[]
+
+  @@unique([organization_id, ticket_number], name: "support_tickets_organization_id_ticket_number_key")
+  @@index([organization_id, status], name: "support_tickets_organization_id_status_idx")
+  @@index([store_id, status], name: "support_tickets_store_id_status_idx")
+  @@index([created_by_user_id, status], name: "support_tickets_created_by_user_id_status_idx")
+  @@index([assigned_to_user_id, status], name: "support_tickets_assigned_to_user_id_status_idx")
+  @@index([priority, status], name: "support_tickets_priority_status_idx")
+  @@index([created_at], name: "support_tickets_created_at_idx")
+  @@index([sla_deadline], name: "support_tickets_sla_deadline_idx")
+}
+
+model support_attachments {
+  id              Int                        @id @default(autoincrement())
+  ticket_id       Int
+  file_name       String
+  file_key        String
+  file_url        String?                    @db.Text
+  file_size       Int
+  file_type       ticket_attachment_type_enum
+  mime_type       String
+  thumbnail_key   String?
+  thumbnail_url   String?                    @db.Text
+  width           Int?
+  height          Int?
+  uploaded_by_user_id Int?
+  description     String?                    @db.Text
+  created_at      DateTime?                  @default(now()) @db.Timestamp(6)
+  ticket          support_tickets            @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+  uploaded_by     users?                     @relation("attachment_uploaded_by", fields: [uploaded_by_user_id], references: [id], onDelete: SetNull)
+
+  @@index([ticket_id], name: "support_attachments_ticket_id_idx")
+  @@index([file_type], name: "support_attachments_file_type_idx")
+}
+
+model support_comments {
+  id              Int                        @id @default(autoincrement())
+  ticket_id       Int
+  content         String                    @db.Text
+  is_internal     Boolean                   @default(false)
+  author_id       Int
+  author_type     String
+  author_name     String
+  author_email    String?
+  created_at      DateTime?                  @default(now()) @db.Timestamp(6)
+  updated_at      DateTime?                  @default(now()) @db.Timestamp(6)
+  ticket          support_tickets            @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+  author          users                     @relation("comment_author", fields: [author_id], references: [id], onDelete: Restrict)
+
+  @@index([ticket_id, created_at], name: "support_comments_ticket_id_created_at_idx")
+  @@index([author_id], name: "support_comments_author_id_idx")
+}
+
+model support_status_history {
+  id                  Int                     @id @default(autoincrement())
+  ticket_id           Int
+  old_status          ticket_status_enum?
+  new_status          ticket_status_enum
+  changed_by_user_id  Int?
+  change_reason       String?                 @db.Text
+  change_notes        String?                 @db.Text
+  created_at          DateTime?               @default(now()) @db.Timestamp(6)
+  ticket              support_tickets         @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+  changed_by          users?                  @relation("status_changed_by", fields: [changed_by_user_id], references: [id], onDelete: SetNull)
+
+  @@index([ticket_id, created_at], name: "support_status_history_ticket_id_created_at_idx")
+}
+
+model support_notifications {
+  id              Int                     @id @default(autoincrement())
+  ticket_id       Int
+  user_id         Int?
+  user_email      String?
+  channel         String                  @default("email")
+  status          String                  @default("pending")
+  subject         String
+  message         String                  @db.Text
+  template_name   String?
+  sent_at         DateTime?              @db.Timestamp(6)
+  error_message   String?                @db.Text
+  retry_count     Int                    @default(0)
+  created_at      DateTime?              @default(now()) @db.Timestamp(6)
+  ticket          support_tickets        @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+  user            users?                 @relation("notification_user", fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([ticket_id], name: "support_notifications_ticket_id_idx")
+  @@index([user_id, status], name: "support_notifications_user_id_status_idx")
+  @@index([status], name: "support_notifications_status_idx")
 }

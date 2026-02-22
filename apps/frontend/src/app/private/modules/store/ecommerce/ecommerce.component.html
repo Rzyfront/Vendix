@@ -44,7 +44,7 @@
       <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
         <!-- Columna Izquierda -->
         <div class="space-y-6">
-          <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+          <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm" data-tour="inicio-section">
             <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
               <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
                 <app-icon name="home" size="18" class="text-primary-600"></app-icon>
@@ -173,7 +173,7 @@
           </div>
 
           <!-- SECCIÓN 3: CONFIGURACIÓN DE SLIDER -->
-          <div formGroupName="slider" class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+          <div formGroupName="slider" class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm" data-tour="slider-section">
             <div class="flex items-center justify-between mb-4">
               <h2 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
                 <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
@@ -314,7 +314,7 @@
           </div>
 
           <!-- SECCIÓN 4: CATÁLOGO -->
-          <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+          <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm" data-tour="catalog-section">
             <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
               <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
                 <app-icon name="package" size="18" class="text-primary-600"></app-icon>
@@ -344,7 +344,7 @@
           </div>
 
           <!-- SECCIÓN 5: CARRITO Y CHECKOUT -->
-          <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+          <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm" data-tour="checkout-section">
             <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
               <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
                 <app-icon name="shopping-cart" size="18" class="text-primary-600"></app-icon>
@@ -418,4 +418,10 @@
     [accentColor]="accentColorControl.value"
     (closed)="isShareModalOpen = false">
   </app-store-share-modal>
+
+  <!-- Tour Modal -->
+  <app-tour-modal
+    [(isOpen)]="showTourModal"
+    [tourConfig]="ecommerceTourConfig">
+  </app-tour-modal>
 </div>
