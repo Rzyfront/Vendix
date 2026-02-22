@@ -11,6 +11,9 @@ import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { ConfigFacade } from '../../../core/store/config';
 import { OnboardingWizardService } from '../../../core/services/onboarding-wizard.service';
 import { OnboardingModalComponent } from '../../../shared/components/onboarding-modal';
+import { TourModalComponent } from '../../../shared/components/tour/tour-modal/tour-modal.component';
+import { TourService } from '../../../shared/components/tour/services/tour.service';
+import { POS_TOUR_CONFIG } from '../../../shared/components/tour/configs/pos-tour.config';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
 import { Observable, Subject } from 'rxjs';
 import { takeUntil, map } from 'rxjs/operators';
@@ -25,6 +28,7 @@ import { takeUntil, map } from 'rxjs/operators';
     HeaderComponent,
     IconComponent,
     OnboardingModalComponent,
+    TourModalComponent,
   ],
   template: `
     <div class="flex">
@@ -103,6 +107,12 @@ import { takeUntil, map } from 'rxjs/operators';
       [(isOpen)]="showOnboardingModal"
       (completed)="onOnboardingCompleted($event)"
     ></app-onboarding-modal>
+
+    <!-- Tour Modal -->
+    <app-tour-modal
+      [(isOpen)]="showTourModal"
+      [tourConfig]="posTourConfig">
+    </app-tour-modal>
   `,
   styleUrls: ['./store-admin-layout.component.scss'],
 })
@@ -127,6 +137,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   showOnboardingModal = false; // Will be set in ngOnInit based on actual status
   needsOnboarding = false;
   private destroy$ = new Subject<void>();
+
+  // Tour
+  showTourModal = false;
+  private tourService = inject(TourService);
+  readonly posTourConfig = POS_TOUR_CONFIG;
 
   // Panel UI menu filtering
   private menuFilterService = inject(MenuFilterService);
@@ -308,6 +323,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           icon: 'circle',
           route: '/admin/settings/legal-documents',
         },
+        {
+          label: 'Soporte',
+          icon: 'circle',
+          route: '/admin/settings/support',
+        },
       ],
     },
   ];
@@ -364,6 +384,21 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     // Resolve isVendixDomain for promotional tooltip
     this.isVendixDomain = !!this.configFacade.getCurrentConfig()?.domainConfig?.isVendixDomain;
 
+    // Check if should show POS first sale tour
+    this.checkAndStartPosTour();
+
+  }
+
+  /**
+   * Check and start POS first sale tour for new users
+   */
+  private checkAndStartPosTour(): void {
+    const tourId = 'pos-first-sale';
+    if (this.tourService.canShowTour(tourId)) {
+      setTimeout(() => {
+        this.showTourModal = true;
+      }, 1500);
+    }
   }
 
   private checkOnboardingWithRoleValidation(): void {

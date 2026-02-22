@@ -300,4 +300,25 @@ export class GlobalPrismaService extends BasePrismaService {
   get push_subscriptions() {
     return this.baseClient.push_subscriptions;
   }
+
+  // Support models
+  get support_tickets() {
+    return this.baseClient.support_tickets;
+  }
+
+  get support_attachments() {
+    return this.baseClient.support_attachments;
+  }
+
+  get support_comments() {
+    return this.baseClient.support_comments;
+  }
+
+  get support_status_history() {
+    return this.baseClient.support_status_history;
+  }
+
+  get support_notifications() {
+    return this.baseClient.support_notifications;
+  }
 }

@@ -26,6 +26,11 @@ export class OrganizationPrismaService extends BasePrismaService {
     'stock_transfers',
     'return_orders',
     'organization_payment_policies',
+    'support_tickets',
+    'support_attachments',
+    'support_comments',
+    'support_status_history',
+    'support_notifications',
   ];
 
   constructor() {
@@ -218,5 +223,26 @@ export class OrganizationPrismaService extends BasePrismaService {
 
   get store_payment_methods() {
     return this.baseClient.store_payment_methods;
+  }
+
+  // Support models
+  get support_tickets() {
+    return this.baseClient.support_tickets;
+  }
+
+  get support_attachments() {
+    return this.baseClient.support_attachments;
+  }
+
+  get support_comments() {
+    return this.baseClient.support_comments;
+  }
+
+  get support_status_history() {
+    return this.baseClient.support_status_history;
+  }
+
+  get support_notifications() {
+    return this.baseClient.support_notifications;
   }
 }

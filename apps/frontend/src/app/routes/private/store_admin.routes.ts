@@ -302,6 +302,26 @@ export const storeAdminRoutes: Routes = [
                 '../../private/modules/store/settings/legal-documents/legal-documents.component'
               ).then((c) => c.LegalDocumentsComponent),
           },
+          {
+            path: 'support',
+            children: [
+              {
+                path: '',
+                pathMatch: 'full',
+                loadComponent: () =>
+                  import(
+                    '../../private/modules/store/settings/support/support-settings.component'
+                  ).then((c) => c.SupportSettingsComponent),
+              },
+              {
+                path: ':id',
+                loadComponent: () =>
+                  import(
+                    '../../private/modules/store/settings/support/components/ticket-detail/ticket-detail.component'
+                  ).then((c) => c.TicketDetailComponent),
+              },
+            ],
+          },
         ],
       },
       // Expenses Routes
