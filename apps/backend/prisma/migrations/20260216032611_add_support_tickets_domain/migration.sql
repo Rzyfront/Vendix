@@ -1,23 +1,20 @@
--- CreateEnum
-CREATE TYPE "ticket_priority_enum" AS ENUM ('P0', 'P1', 'P2', 'P3', 'P4');
+-- CreateEnum (idempotent)
+DO $$ BEGIN CREATE TYPE "ticket_priority_enum" AS ENUM ('P0', 'P1', 'P2', 'P3', 'P4'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- CreateEnum
-CREATE TYPE "ticket_status_enum" AS ENUM ('NEW', 'OPEN', 'IN_PROGRESS', 'WAITING_RESPONSE', 'RESOLVED', 'CLOSED', 'REOPENED');
+DO $$ BEGIN CREATE TYPE "ticket_status_enum" AS ENUM ('NEW', 'OPEN', 'IN_PROGRESS', 'WAITING_RESPONSE', 'RESOLVED', 'CLOSED', 'REOPENED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- CreateEnum
-CREATE TYPE "ticket_category_enum" AS ENUM ('INCIDENT', 'SERVICE_REQUEST', 'PROBLEM', 'CHANGE', 'QUESTION');
+DO $$ BEGIN CREATE TYPE "ticket_category_enum" AS ENUM ('INCIDENT', 'SERVICE_REQUEST', 'PROBLEM', 'CHANGE', 'QUESTION'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- CreateEnum
-CREATE TYPE "ticket_attachment_type_enum" AS ENUM ('IMAGE', 'DOCUMENT', 'LOG', 'SCREENSHOT');
+DO $$ BEGIN CREATE TYPE "ticket_attachment_type_enum" AS ENUM ('IMAGE', 'DOCUMENT', 'LOG', 'SCREENSHOT'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- DropIndex
-DROP INDEX "idx_domain_settings_org_active_app_type";
+DROP INDEX IF EXISTS "idx_domain_settings_org_active_app_type";
 
 -- DropIndex
-DROP INDEX "idx_domain_settings_store_active_app_type";
+DROP INDEX IF EXISTS "idx_domain_settings_store_active_app_type";
 
 -- DropIndex
-DROP INDEX "idx_domain_settings_store_active_type";
+DROP INDEX IF EXISTS "idx_domain_settings_store_active_type";
 
 -- CreateTable
 CREATE TABLE "support_tickets" (
