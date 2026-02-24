@@ -7,9 +7,16 @@ export interface TourStep {
   title: string;
   description: string;
   action?: string;
+  // Target selector (fallback if device-specific target not provided)
   target?: string;
+  // Device-specific target selectors (takes precedence over `target`)
+  targetMobile?: string;
+  targetDesktop?: string;
   // Target for click detection only (no spotlight shown)
   autoAdvanceTarget?: string;
+  // Device-specific click detection targets
+  autoAdvanceTargetMobile?: string;
+  autoAdvanceTargetDesktop?: string;
   position?: 'top' | 'bottom' | 'left' | 'right' | 'center';
   beforeShow?: () => Promise<void> | void;
   afterShow?: () => Promise<void> | void;
