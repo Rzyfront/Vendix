@@ -1,6 +1,7 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 
 // Shared Components
 import {
@@ -146,6 +147,7 @@ import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '.
   `,
 })
 export class PurchaseOrderDetailModalComponent {
+  private currencyService = inject(CurrencyFormatService);
   @Input() isOpen = false;
   @Input() order: PurchaseOrder | null = null;
 
@@ -209,6 +211,8 @@ export class PurchaseOrderDetailModalComponent {
   onClose(): void {
     this.is_receiving_mode = false;
     this.receive_quantities = [];
+    this.close.emit();
+    this.isOpenChange.emit(false);
   }
 
   onCancel(): void {
@@ -224,11 +228,7 @@ export class PurchaseOrderDetailModalComponent {
   }
 
   formatCurrency(value: number): string {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0,
-    }).format(value || 0);
+    return this.currencyService.format(value || 0, 0);
   }
 
   getStatusLabel(status: string): string {

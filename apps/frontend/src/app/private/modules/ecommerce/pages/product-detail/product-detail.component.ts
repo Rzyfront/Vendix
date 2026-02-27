@@ -107,9 +107,13 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                         [variant]="selectedVariantId() === v.id ? 'primary' : 'outline'"
                         size="sm"
                         customClasses="v-btn"
+                        [disabled]="!isOnDemand() && v.stock_quantity === 0"
                         (clicked)="selectVariant(v)"
                       >
                         {{ v.name }}
+                        @if (!isOnDemand() && v.stock_quantity === 0) {
+                          <span class="text-[10px] opacity-60 ml-1">(Agotado)</span>
+                        }
                       </app-button>
                     }
                   </div>
@@ -121,7 +125,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                 <app-quantity-control
                   [value]="quantity()"
                   [min]="1"
-                  [max]="displayStock() || 99"
+                  [max]="isOnDemand() ? 999 : (displayStock() || 99)"
                   [size]="'sm'"
                   (valueChange)="quantity.set($event)"
                 />
@@ -130,11 +134,11 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                   variant="primary"
                   size="sm"
                   customClasses="btn-cart"
-                  [disabled]="displayStock() === 0"
+                  [disabled]="!isOnDemand() && displayStock() === 0"
                   (clicked)="onAddToCart(p)"
                 >
                   <app-icon slot="icon" name="shopping-cart" [size]="18" />
-                  {{ displayStock() === 0 ? 'Agotado' : 'Añadir' }}
+                  {{ !isOnDemand() && displayStock() === 0 ? 'Agotado' : 'Añadir' }}
                 </app-button>
 
                 <app-button
@@ -153,15 +157,18 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                 size="md"
                 [fullWidth]="true"
                 customClasses="btn-buy-now"
-                [disabled]="displayStock() === 0"
+                [disabled]="!isOnDemand() && displayStock() === 0"
                 (clicked)="onBuyNow(p)"
               >
-                {{ displayStock() === 0 ? 'Agotado' : 'Comprar ahora' }}
+                {{ !isOnDemand() && displayStock() === 0 ? 'Agotado' : 'Comprar ahora' }}
               </app-button>
 
               <!-- Stock Minimal -->
               <div class="stock-minimal">
-                @if (displayStock() > 0) {
+                @if (isOnDemand()) {
+                  <span class="s-dot on-demand"></span>
+                  <span class="s-text">Disponible bajo pedido</span>
+                } @else if (displayStock() > 0) {
                   <span [class.warn]="displayStock() <= 5" class="s-dot"></span>
                   <span class="s-text">{{ displayStock() <= 5 ? 'Pocas unidades' : 'En stock' }}</span>
                 } @else {
@@ -361,7 +368,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
 
     .stock-minimal {
       display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; 
-      .s-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; &.warn { background: #f59e0b; } &.err { background: #ef4444; } }
+      .s-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; &.warn { background: #f59e0b; } &.err { background: #ef4444; } &.on-demand { background: #0ea5e9; } }
       .s-text { color: var(--color-text-muted); }
     }
 
@@ -481,6 +488,12 @@ export class ProductDetailComponent implements OnInit {
     return p?.stock_quantity || 0;
   });
 
+  /** True when the product does not track inventory (bajo pedido / made-to-order) */
+  isOnDemand = computed((): boolean => {
+    const p = this.product();
+    return p?.track_inventory === false;
+  });
+
   // Quick View Modal
   quickViewOpen = false;
   selectedProductSlug: string | null = null;
@@ -574,8 +587,8 @@ export class ProductDetailComponent implements OnInit {
     if (variant.image_url) {
       this.activeImageUrl.set(variant.image_url);
     }
-    // Reset quantity if it exceeds variant stock
-    if (this.quantity() > variant.stock_quantity) {
+    // Reset quantity if it exceeds variant stock (skip for on-demand products)
+    if (!this.isOnDemand() && this.quantity() > variant.stock_quantity) {
       this.quantity.set(Math.max(1, variant.stock_quantity));
     }
   }

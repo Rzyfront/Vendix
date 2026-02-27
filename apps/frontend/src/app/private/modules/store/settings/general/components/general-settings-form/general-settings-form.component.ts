@@ -13,6 +13,7 @@ import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 import { CurrencyService } from '../../../../../../../services/currency.service';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
@@ -43,6 +44,7 @@ export class GeneralSettingsForm implements OnInit, OnChanges, OnDestroy {
   @Output() pendingLogoUpload = new EventEmitter<{ file: File; preview: string } | null>();
 
   private currencyService = inject(CurrencyService);
+  private currencyFormatService = inject(CurrencyFormatService);
   private toastService = inject(ToastService);
   logoPreview: string | null = null;
   private blobPreviewUrl: string | null = null;
@@ -55,7 +57,7 @@ export class GeneralSettingsForm implements OnInit, OnChanges, OnDestroy {
     store_type: new FormControl('physical'),
     // Campos de store_settings
     timezone: new FormControl('America/Bogota'),
-    currency: new FormControl('COP'),
+    currency: new FormControl(this.currencyFormatService.currencyCode() || 'COP'),
     language: new FormControl('es'),
     tax_included: new FormControl(false),
   });

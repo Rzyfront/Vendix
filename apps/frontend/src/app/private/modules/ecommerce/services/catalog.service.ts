@@ -14,6 +14,7 @@ export interface EcommerceProduct {
   is_on_sale?: boolean;
   sku: string | null;
   stock_quantity: number | null;
+  track_inventory?: boolean;
   final_price: number;
   image_url: string | null;
   weight?: number | null;

@@ -25,6 +25,7 @@ import {
   DropdownAction,
   ButtonComponent,
   IconComponent,
+  PaginationComponent,
 } from '../../../../../../shared/components/index';
 
 import { OrderEmptyStateComponent } from '../order-empty-state';
@@ -51,6 +52,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
     OrderEmptyStateComponent,
     ButtonComponent,
     IconComponent,
+    PaginationComponent,
   ],
   templateUrl: './orders-list.component.html',
   styleUrls: ['./orders-list.component.css'],

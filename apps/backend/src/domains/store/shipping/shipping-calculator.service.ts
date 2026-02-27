@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { shipping_rate_type_enum } from '@prisma/client';
+import { SettingsService } from '../settings/settings.service';
 
 export interface AddressDTO {
     country_code: string;
@@ -28,7 +29,10 @@ export interface ShippingOption {
 
 @Injectable()
 export class ShippingCalculatorService {
-    constructor(private prisma: StorePrismaService) { }
+    constructor(
+        private prisma: StorePrismaService,
+        private settingsService: SettingsService,
+    ) { }
 
     /**
      * Main entry point to calculate shipping rates for a cart and address
@@ -56,6 +60,7 @@ export class ShippingCalculatorService {
 
         const options: ShippingOption[] = [];
         const cartTotals = this.getCartTotals(items);
+        const storeCurrency = await this.settingsService.getStoreCurrency();
 
         // 3. Process rates
         for (const rate of rates) {
@@ -108,7 +113,7 @@ export class ShippingCalculatorService {
                     method_name: rate.name || rate.shipping_method.name,
                     method_type: rate.shipping_method.type, // 'pickup' | 'own_fleet' | 'carrier' | etc.
                     cost: cost,
-                    currency: 'COP', // TODO: Get store currency
+                    currency: storeCurrency,
                     estimated_days: {
                         min: rate.shipping_method.min_days || 0,
                         max: rate.shipping_method.max_days || 0

@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 
@@ -12,6 +12,7 @@ import {
 
 // Services
 import { InventoryService, PurchaseOrdersService, SuppliersService } from './services';
+import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
 
 // Interfaces
 import { InventoryStats, PurchaseOrder, Supplier } from './interfaces';
@@ -141,6 +142,7 @@ import { InventoryStats, PurchaseOrder, Supplier } from './interfaces';
   `,
 })
 export class InventoryDashboardComponent implements OnInit {
+  private currencyService = inject(CurrencyFormatService);
   // Stats
   stats: InventoryStats = {
     total_products: 0,
@@ -201,6 +203,7 @@ export class InventoryDashboardComponent implements OnInit {
   ) { }
 
   ngOnInit(): void {
+    this.currencyService.loadCurrency();
     this.loadStats();
     this.loadRecentOrders();
     this.loadTopSuppliers();
@@ -252,11 +255,7 @@ export class InventoryDashboardComponent implements OnInit {
   }
 
   formatCurrency(value: number): string {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0,
-    }).format(value || 0);
+    return this.currencyService.format(value || 0, 0);
   }
 
   getStatusLabel(status: string): string {

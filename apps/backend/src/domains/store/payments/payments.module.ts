@@ -12,6 +12,7 @@ import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { InventoryTransactionsService } from '../inventory/transactions/inventory-transactions.service';
 import { TaxesModule } from '../taxes/taxes.module';
+import { SettingsModule } from '../settings/settings.module';
 import {
   PaymentGatewayService,
   PaymentValidatorService,
@@ -42,6 +43,7 @@ import { BankTransferProcessor } from './processors/bank-transfer/bank-transfer.
     forwardRef(() => OrdersModule),
     forwardRef(() => OrderFlowModule),
     TaxesModule,
+    SettingsModule,
   ],
   controllers: [
     PaymentsController,

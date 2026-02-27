@@ -154,7 +154,7 @@ export class CreatePosPaymentDto {
   @IsOptional()
   @IsString()
   @MaxLength(3)
-  currency?: string = 'USD';
+  currency?: string;
 
   // Datos del pago (opcionales para ventas a crédito)
   @IsOptional()

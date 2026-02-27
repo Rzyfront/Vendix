@@ -17,7 +17,7 @@ export interface TableColumn {
   width?: string;
   align?: 'left' | 'center' | 'right';
   template?: TemplateRef<any>;
-  transform?: (value: any) => string;
+  transform?: (value: any, item?: any) => string;
   defaultValue?: string;
   badge?: boolean;
   badgeConfig?: {
@@ -374,7 +374,7 @@ export class TableComponent implements AfterContentInit {
     if (column.badgeConfig.type === 'status') {
       // For status type, use predefined color classes
       // Apply transform if exists to get display value, but use original for class
-      const displayValue = column.transform ? column.transform(value) : value;
+      const displayValue = column.transform ? column.transform(value, undefined) : value;
       const originalValue = value; // Use original value for CSS class
 
       // Handle UserState enum values and common status strings
@@ -460,7 +460,7 @@ export class TableComponent implements AfterContentInit {
   private getBadgeColorFromMap(column: TableColumn, value: any): string | null {
     if (column.badgeConfig?.colorMap) {
       // Apply transform function to get display value if exists
-      const displayValue = column.transform ? column.transform(value) : value;
+      const displayValue = column.transform ? column.transform(value, undefined) : value;
 
       // First try exact match with original value
       const exactValue = String(value);

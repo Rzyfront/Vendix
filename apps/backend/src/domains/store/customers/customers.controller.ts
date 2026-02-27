@@ -40,11 +40,13 @@ export class CustomersController {
     findAll(
         @Req() req: AuthenticatedRequest,
         @Query('search') search?: string,
-        @Query('page') page?: number,
-        @Query('limit') limit?: number,
+        @Query('page') page?: string,
+        @Query('limit') limit?: string,
     ) {
         if (!req.user.store_id) throw new Error('Store context required');
-        return this.customersService.findAll(req.user.store_id, { search, page, limit });
+        const pageNum = page ? parseInt(page, 10) : 1;
+        const limitNum = limit ? parseInt(limit, 10) : 20;
+        return this.customersService.findAll(req.user.store_id, { search, page: pageNum, limit: limitNum });
     }
 
     @Get(':id')

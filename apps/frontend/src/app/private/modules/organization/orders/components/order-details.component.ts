@@ -5,11 +5,13 @@ import {
   EventEmitter,
   OnInit,
   OnDestroy,
+  inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup } from '@angular/forms';
 import { Subscription } from 'rxjs';
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency/currency.pipe';
 
 import {
   OrderListItem,
@@ -48,6 +50,7 @@ import {
   templateUrl: './order-details.component.html',
 })
 export class OrderDetailsComponent implements OnInit, OnDestroy {
+  private currencyService = inject(CurrencyFormatService);
   @Input() isOpen = false;
   @Input() order?: OrderListItem;
   @Output() isOpenChange = new EventEmitter<boolean>();
@@ -255,10 +258,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
   }
 
   formatCurrency(amount: number): string {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-    }).format(amount);
+    return this.currencyService.format(amount);
   }
 
   getStatusColor(status: OrderStatus): string {

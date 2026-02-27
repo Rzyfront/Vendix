@@ -1,7 +1,8 @@
-import { Component, Input } from '@angular/core';
+import { Component, Input, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { PaymentMethodStats } from '../interfaces/payment-methods.interface';
 import { StatsComponent } from '../../../../../../shared/components/index';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'app-payment-methods-stats',
@@ -52,13 +53,11 @@ import { StatsComponent } from '../../../../../../shared/components/index';
   ],
 })
 export class PaymentMethodsStatsComponent {
+  private currencyService = inject(CurrencyFormatService);
   @Input() stats: PaymentMethodStats | null = null;
   @Input() is_loading = false;
 
   formatCurrency(value: number): string {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-    }).format(value);
+    return this.currencyService.format(value);
   }
 }

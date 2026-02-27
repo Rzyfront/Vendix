@@ -61,6 +61,7 @@ import { DomainFormModalComponent } from './components/domain-form-modal.compone
         <app-stats
           title="Total"
           [value]="stats.total"
+          smallText="Dominios registrados"
           iconName="globe"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-500"
@@ -68,6 +69,7 @@ import { DomainFormModalComponent } from './components/domain-form-modal.compone
         <app-stats
           title="Activos"
           [value]="stats.active"
+          smallText="DNS/SSL verificado"
           iconName="check-circle"
           iconBgColor="bg-emerald-100"
           iconColor="text-emerald-500"
@@ -75,6 +77,7 @@ import { DomainFormModalComponent } from './components/domain-form-modal.compone
         <app-stats
           title="Pendientes"
           [value]="stats.pending"
+          smallText="Verificación DNS/SSL"
           iconName="clock"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-500"
@@ -82,6 +85,7 @@ import { DomainFormModalComponent } from './components/domain-form-modal.compone
         <app-stats
           title="Principal"
           [value]="stats.primary"
+          smallText="Dominio por defecto"
           iconName="star"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
@@ -169,6 +173,7 @@ import { DomainFormModalComponent } from './components/domain-form-modal.compone
             [loading]="is_loading"
             emptyMessage="No hay dominios configurados"
             emptyIcon="globe"
+            (rowClick)="openEditModal($event)"
           >
           </app-responsive-data-view>
         </div>
@@ -245,7 +250,7 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
   card_config: ItemListCardConfig = {
     titleKey: 'hostname',
     subtitleKey: 'domain_type',
-    subtitleTransform: (val: string) => this.getDomainTypeLabel(val),
+    subtitleTransform: (item: any) => this.getDomainTypeLabel(item.domain_type),
     badgeKey: 'status',
     badgeConfig: { type: 'status' },
     badgeTransform: (val: string) => this.getStatusLabel(val),
@@ -339,6 +344,11 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
   ];
 
   table_actions: TableAction[] = [
+    {
+      label: 'Abrir',
+      icon: 'external-link',
+      action: (item: StoreDomain) => this.openDomainInNewTab(item),
+    },
     {
       label: 'Editar',
       icon: 'edit',
@@ -441,6 +451,10 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
   clearFilters(): void {
     this.filterValues = {};
     this.loadDomains();
+  }
+
+  openDomainInNewTab(domain: StoreDomain): void {
+    window.open('https://' + domain.hostname, '_blank');
   }
 
   openCreateModal(): void {

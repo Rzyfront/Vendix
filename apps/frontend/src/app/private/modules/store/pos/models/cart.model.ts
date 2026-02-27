@@ -69,3 +69,4 @@ export interface CartValidationError {
   message: string;
   itemId?: string;
 }
+

@@ -21,15 +21,21 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
           </div>
         }
 
-        <!-- Stock Badge (POS style con backdrop-blur) -->
-        @if (product.stock_quantity !== null && product.stock_quantity <= 5 && product.stock_quantity > 0) {
-          <div class="stock-badge stock-badge--warning">
-            ¡Últimas {{ product.stock_quantity }}!
-          </div>
-        }
-        @if (product.stock_quantity === 0) {
-          <div class="stock-badge stock-badge--error">
-            Agotado
+        <!-- Stock Badge (POS style con backdrop-blur) — Solo para productos con inventario -->
+        @if (product.track_inventory !== false) {
+          @if (product.stock_quantity !== null && product.stock_quantity <= 5 && product.stock_quantity > 0) {
+            <div class="stock-badge stock-badge--warning">
+              ¡Últimas {{ product.stock_quantity }}!
+            </div>
+          }
+          @if (product.stock_quantity === 0) {
+            <div class="stock-badge stock-badge--error">
+              Agotado
+            </div>
+          }
+        } @else {
+          <div class="stock-badge stock-badge--on-demand">
+            Bajo pedido
           </div>
         }
 
@@ -76,7 +82,7 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
           variant="primary"
           size="sm"
           customClasses="buy-btn"
-          [disabled]="product.stock_quantity === 0"
+          [disabled]="product.track_inventory !== false && product.stock_quantity === 0"
           (clicked)="onBuyNow($event)">
           Comprar
         </app-button>
@@ -84,7 +90,7 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
           variant="secondary"
           size="sm"
           customClasses="add-to-cart-btn"
-          [disabled]="product.stock_quantity === 0"
+          [disabled]="product.track_inventory !== false && product.stock_quantity === 0"
           title="Agregar al carrito"
           (clicked)="onAddToCart($event)">
           <app-icon slot="icon" name="shopping-cart" [size]="16"></app-icon>
@@ -177,6 +183,12 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
         background: rgba(239, 68, 68, 0.8);
         color: white;
         border-color: rgba(239, 68, 68, 0.6);
+      }
+
+      &--on-demand {
+        background: rgba(14, 165, 233, 0.8);
+        color: white;
+        border-color: rgba(14, 165, 233, 0.6);
       }
     }
 

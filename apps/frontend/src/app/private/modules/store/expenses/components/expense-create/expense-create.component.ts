@@ -1,9 +1,9 @@
-import { Component, OnInit, Output, EventEmitter, Input, inject } from '@angular/core';
+import { Component, Output, EventEmitter, Input, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable, map } from 'rxjs';
-import { createExpense, loadExpenseCategories } from '../../state/actions/expenses.actions';
+import { createExpense } from '../../state/actions/expenses.actions';
 import { selectActiveExpenseCategories, selectExpensesLoading } from '../../state/selectors/expenses.selectors';
 import { ExpenseCategory } from '../../interfaces/expense.interface';
 import { ExpensesService } from '../../services/expenses.service';
@@ -143,7 +143,7 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
     </app-modal>
   `
 })
-export class ExpenseCreateComponent implements OnInit {
+export class ExpenseCreateComponent {
   @Input() isOpen = false;
   @Output() isOpenChange = new EventEmitter<boolean>();
 
@@ -181,10 +181,6 @@ export class ExpenseCreateComponent implements OnInit {
       expense_date: [today, [Validators.required]],
       notes: ['']
     });
-  }
-
-  ngOnInit() {
-    this.store.dispatch(loadExpenseCategories());
   }
 
   onFileSelected(event: Event): void {

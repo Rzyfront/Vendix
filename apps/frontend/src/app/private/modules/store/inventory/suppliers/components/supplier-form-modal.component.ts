@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 
@@ -14,6 +14,8 @@ import {
 
 // Interfaces
 import { Supplier, CreateSupplierDto, UpdateSupplierDto } from '../../interfaces';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { CurrencyService } from '../../../../../../services/currency.service';
 
 @Component({
   selector: 'app-supplier-form-modal',
@@ -179,7 +181,9 @@ import { Supplier, CreateSupplierDto, UpdateSupplierDto } from '../../interfaces
     </app-modal>
   `,
 })
-export class SupplierFormModalComponent implements OnChanges {
+export class SupplierFormModalComponent implements OnChanges, OnInit {
+  private currencyFormatService = inject(CurrencyFormatService);
+  private currencyHttpService = inject(CurrencyService);
   @Input() isOpen = false;
   @Input() supplier: Supplier | null = null;
   @Input() isSubmitting = false;
@@ -188,15 +192,31 @@ export class SupplierFormModalComponent implements OnChanges {
   @Output() cancel = new EventEmitter<void>();
   @Output() save = new EventEmitter<CreateSupplierDto | UpdateSupplierDto>();
 
-  currencyOptions = [
-    { value: 'COP', label: 'Peso colombiano (COP)' },
-    { value: 'USD', label: 'Dolar (USD)' }
-  ];
+  currencyOptions: { value: string; label: string }[] = [];
 
   form: FormGroup;
 
   constructor(private fb: FormBuilder) {
     this.form = this.createForm();
+  }
+
+  async ngOnInit(): Promise<void> {
+    await this.loadCurrencyOptions();
+  }
+
+  private async loadCurrencyOptions(): Promise<void> {
+    try {
+      const currencies = await this.currencyHttpService.getActiveCurrencies();
+      this.currencyOptions = currencies.map((c) => ({
+        value: c.code,
+        label: `${c.name} (${c.code})`,
+      }));
+    } catch {
+      this.currencyOptions = [
+        { value: 'COP', label: 'Peso Colombiano (COP)' },
+        { value: 'USD', label: 'Dólar Americano (USD)' },
+      ];
+    }
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -218,7 +238,7 @@ export class SupplierFormModalComponent implements OnChanges {
       website: [''],
       tax_id: [''],
       payment_terms: [''],
-      currency: ['COP'],
+      currency: [this.currencyFormatService.currencyCode() || 'COP'],
       lead_time_days: [null],
       notes: [''],
       is_active: [true],
@@ -236,7 +256,7 @@ export class SupplierFormModalComponent implements OnChanges {
       website: supplier.website || '',
       tax_id: supplier.tax_id || '',
       payment_terms: supplier.payment_terms || '',
-      currency: supplier.currency || 'COP',
+      currency: supplier.currency || this.currencyFormatService.currencyCode() || 'COP',
       lead_time_days: supplier.lead_time_days || null,
       notes: supplier.notes || '',
       is_active: supplier.is_active,

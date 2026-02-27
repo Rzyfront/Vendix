@@ -6,6 +6,7 @@ import {
   ChangeDetectionStrategy,
   OnChanges,
   SimpleChanges,
+  inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -13,6 +14,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { TooltipComponent } from '../../../../../../shared/components/tooltip/tooltip.component';
 import { QuantityControlComponent } from '../../../../../../shared/components/quantity-control/quantity-control.component';
 import { PopCartState, PopCartItem } from '../services/pop-cart.service';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'app-pop-cart-modal',
@@ -760,6 +762,7 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
   ],
 })
 export class PopCartModalComponent implements OnChanges {
+  private currencyService = inject(CurrencyFormatService);
   @Input() isOpen: boolean = false;
   @Input() cartState: PopCartState | null = null;
   @Input() supplierName: string = '';
@@ -834,10 +837,6 @@ export class PopCartModalComponent implements OnChanges {
   }
 
   formatCurrency(amount: number): string {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0,
-    }).format(amount);
+    return this.currencyService.format(amount, 0);
   }
 }

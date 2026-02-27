@@ -600,4 +600,29 @@ export class SettingsService {
       where: { id },
     });
   }
+
+  /**
+   * Returns the currency code configured for the current store.
+   * Reads from store_settings.settings.general.currency with fallback to 'USD'.
+   */
+  async getStoreCurrency(): Promise<string> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+
+    if (!store_id) {
+      return 'USD';
+    }
+
+    try {
+      const storeSettings = await this.prisma.store_settings.findUnique({
+        where: { store_id },
+        select: { settings: true },
+      });
+
+      const settings = storeSettings?.settings as StoreSettings | null;
+      return settings?.general?.currency || 'USD';
+    } catch {
+      return 'USD';
+    }
+  }
 }

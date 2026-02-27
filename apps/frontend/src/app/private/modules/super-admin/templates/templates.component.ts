@@ -14,7 +14,6 @@ import { TemplateListItem, TemplateConfigType } from './interfaces/template.inte
 // Import components
 import {
   TemplateStatsComponent,
-  TemplatePaginationComponent,
   TemplateEmptyStateComponent,
   TemplateCreateModalComponent,
   TemplateEditModalComponent,
@@ -28,6 +27,7 @@ import {
   ButtonComponent,
   DialogService,
   ToastService,
+  PaginationComponent,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
   TableColumn,
@@ -46,13 +46,13 @@ import './templates.component.css';
     FormsModule,
     ReactiveFormsModule,
     TemplateStatsComponent,
-    TemplatePaginationComponent,
     TemplateEmptyStateComponent,
     TemplateCreateModalComponent,
     TemplateEditModalComponent,
     InputsearchComponent,
     IconComponent,
     ResponsiveDataViewComponent,
+    PaginationComponent,
     ButtonComponent,
   ],
   providers: [TemplatesService],
@@ -146,11 +146,14 @@ import './templates.component.css';
 
           <!-- Pagination -->
           <div class="mt-6 flex justify-center">
-            <app-template-pagination
-              [pagination]="pagination"
+            <app-pagination
+              [currentPage]="pagination.page"
+              [totalPages]="pagination.totalPages"
+              [total]="pagination.total"
+              [limit]="pagination.limit"
+              infoStyle="range"
               (pageChange)="changePage($event)"
-            >
-            </app-template-pagination>
+            />
           </div>
         </div>
       </div>

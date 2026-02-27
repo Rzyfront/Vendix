@@ -8,6 +8,7 @@ import { ButtonComponent } from '../../../../shared/components/button/button.com
 import { CardComponent } from '../../../../shared/components/card/card.component';
 import { InputsearchComponent } from '../../../../shared/components/inputsearch/inputsearch.component';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
+import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'app-storefront',
@@ -20,6 +21,7 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
     CardComponent,
     InputsearchComponent,
     IconComponent,
+    CurrencyPipe,
   ],
   template: `
     <div class="storefront-container">
@@ -172,12 +174,12 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
                   <p class="product-description">{{ product.description }}</p>
                   <div class="product-pricing">
                     <span class="current-price">{{
-                      product.price | currency: 'USD' : 'symbol' : '1.2-2'
+                      product.price | currency
                     }}</span>
                     <span *ngIf="product.originalPrice" class="original-price">
                       {{
                         product.originalPrice
-                          | currency: 'USD' : 'symbol' : '1.2-2'
+                          | currency
                       }}
                     </span>
                   </div>
@@ -222,7 +224,7 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
             <div class="cart-item-info">
               <h5>{{ item.name }}</h5>
               <p>
-                {{ item.price | currency: 'USD' : 'symbol' : '1.2-2' }} ×
+                {{ item.price | currency }} ×
                 {{ item.quantity }}
               </p>
             </div>
@@ -238,7 +240,7 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
         </div>
         <div class="cart-footer">
           <div class="cart-total">
-            Total: {{ cartTotal | currency: 'USD' : 'symbol' : '1.2-2' }}
+            Total: {{ cartTotal | currency }}
           </div>
           <app-button variant="primary" size="lg" (click)="proceedToCheckout()">
             Proceder al Pago

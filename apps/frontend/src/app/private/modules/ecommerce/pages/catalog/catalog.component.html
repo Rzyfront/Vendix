@@ -115,23 +115,13 @@
             }
 
             <!-- Pagination -->
-            @if (total_pages > 1) {
-            <div class="pagination">
-                <button class="pagination-arrow" [disabled]="current_page === 1" (click)="goToPage(current_page - 1)">
-                    <app-icon name="chevron-left" [size]="16" />
-                </button>
-
-                @for (page of page_numbers; track page) {
-                <button class="pagination-page" [class.active]="current_page === page" (click)="goToPage(page)">
-                    {{ page }}
-                </button>
-                }
-
-                <button class="pagination-arrow" [disabled]="current_page === total_pages" (click)="goToPage(current_page + 1)">
-                    <app-icon name="chevron-right" [size]="16" />
-                </button>
-            </div>
-            }
+            <app-pagination
+              [currentPage]="current_page"
+              [totalPages]="total_pages"
+              [total]="total_products"
+              [limit]="limit"
+              (pageChange)="goToPage($event)"
+            />
             }
         </main>
     </div>

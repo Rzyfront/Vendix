@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   FormGroup,
@@ -19,6 +19,7 @@ import {
   TextareaComponent,
   SelectorOption,
 } from '../../../../../../shared/components/index';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'app-store-edit-modal',
@@ -180,6 +181,7 @@ import {
   `,
 })
 export class StoreEditModalComponent {
+  private currencyFormatService = inject(CurrencyFormatService);
   @Input() isOpen = false;
   @Input() isSubmitting = false;
   @Input() store?: StoreListItem;
@@ -232,7 +234,7 @@ export class StoreEditModalComponent {
       taxRate: [0],
       enableShipping: [true],
       freeShippingThreshold: [0],
-      currency: ['USD'],
+      currency: [this.currencyFormatService.currencyCode() || 'USD'],
       timezone: ['UTC'],
       language: ['en'],
     });

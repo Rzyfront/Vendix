@@ -1,7 +1,7 @@
 <div class="md:space-y-4">
   <!-- Lista de Gastos -->
   <div
-    class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border md:min-h-[600px] md:overflow-hidden">
+    class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border md:overflow-hidden">
     <!-- Search Section: sticky below stats on mobile, normal on desktop -->
     <div
       class="sticky top-[99px] z-10 bg-background px-2 py-1.5 pt-[5px] -mt-[5px] md:mt-0 md:pt-4 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
@@ -70,21 +70,14 @@
         (rowClick)="onRowClick($event)"></app-responsive-data-view>
 
       <!-- Pagination -->
-      <div *ngIf="meta$ | async as meta"
-        class="flex items-center justify-between px-2 py-3 md:px-0 md:pt-4 border-t border-border mt-3">
-        <span class="text-sm text-text-secondary">
-          Página {{ meta.page }} de {{ meta.total_pages }}
-          <span class="hidden md:inline"> &middot; {{ meta.total }} registros</span>
-        </span>
-        <div class="flex items-center gap-2">
-          <app-button variant="outline" size="sm" [disabled]="meta.page <= 1" (clicked)="onPageChange(meta.page - 1)">
-            Anterior
-          </app-button>
-          <app-button variant="outline" size="sm" [disabled]="meta.page >= meta.total_pages"
-            (clicked)="onPageChange(meta.page + 1)">
-            Siguiente
-          </app-button>
-        </div>
+      <div *ngIf="meta$ | async as meta" class="flex justify-center pt-3 mt-3 border-t border-border">
+        <app-pagination
+          [currentPage]="meta.page"
+          [totalPages]="meta.totalPages"
+          [total]="meta.total"
+          [limit]="meta.limit"
+          (pageChange)="onPageChange($event)"
+        ></app-pagination>
       </div>
     </div>
   </div>

@@ -711,7 +711,7 @@ model products {
   sale_price               Decimal?                   @db.Decimal(12, 2)
   weight                   Decimal?                   @db.Decimal(12, 3)
   dimensions               Json?
-  track_inventory          Boolean                    @default(false)
+  track_inventory          Boolean                    @default(true)
   min_stock_level          Int?                       @default(0)
   max_stock_level          Int?                       @default(0)
   reorder_point            Int?                       @default(0)

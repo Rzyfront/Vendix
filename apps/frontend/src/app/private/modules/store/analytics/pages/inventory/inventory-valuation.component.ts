@@ -11,6 +11,7 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 import { AnalyticsService } from '../../services/analytics.service';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { InventoryValuation } from '../../interfaces/inventory-analytics.interface';
 
 import { EChartsOption } from 'echarts';
@@ -100,6 +101,7 @@ import { EChartsOption } from 'echarts';
 export class InventoryValuationComponent implements OnInit, OnDestroy {
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
+  private currencyService = inject(CurrencyFormatService);
   private destroy$ = new Subject<void>();
 
   loading = signal(true);
@@ -165,6 +167,7 @@ export class InventoryValuationComponent implements OnInit, OnDestroy {
   };
 
   ngOnInit(): void {
+    this.currencyService.loadCurrency();
     this.loadData();
   }
 
@@ -274,10 +277,6 @@ export class InventoryValuationComponent implements OnInit, OnDestroy {
   }
 
   formatCurrency(value: number): string {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0,
-    }).format(value);
+    return this.currencyService.format(value, 0);
   }
 }

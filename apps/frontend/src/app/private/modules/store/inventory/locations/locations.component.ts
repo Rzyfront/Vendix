@@ -19,6 +19,7 @@ import {
     FilterConfig,
     DropdownAction,
     FilterValues,
+    PaginationComponent,
 } from '../../../../../shared/components/index';
 
 // Services
@@ -42,6 +43,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
         StatsComponent,
         IconComponent,
         OptionsDropdownComponent,
+        PaginationComponent,
         LocationFormModalComponent,
     ],
     template: `
@@ -92,7 +94,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
           <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
             <!-- Title - smaller on mobile, larger on desktop -->
             <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
-              Ubicaciones ({{ stats.total }})
+              Ubicaciones ({{ pagination.total }})
             </h2>
 
             <!-- Search row - horizontal on mobile -->
@@ -161,6 +163,17 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
             (sort)="onSort($event)"
             (rowClick)="onRowClick($event)"
           ></app-responsive-data-view>
+
+          <div class="mt-4 flex justify-center">
+            <app-pagination
+              [currentPage]="pagination.page"
+              [totalPages]="pagination.totalPages"
+              [total]="pagination.total"
+              [limit]="pagination.limit"
+              infoStyle="none"
+              (pageChange)="changePage($event)"
+            />
+          </div>
         </div>
       </div>
 
@@ -188,6 +201,9 @@ export class LocationsComponent implements OnInit, OnDestroy {
         inactive: 0,
         warehouses: 0,
     };
+
+    // Pagination
+    pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
 
     // Filters
     status_filter: 'all' | 'active' | 'inactive' = 'all';
@@ -340,14 +356,30 @@ export class LocationsComponent implements OnInit, OnDestroy {
 
     loadLocations(): void {
         this.is_loading = true;
-        const query = this.search_term ? { search: this.search_term } : {};
+        const query: any = {
+            page: this.pagination.page,
+            limit: this.pagination.limit,
+            ...(this.search_term ? { search: this.search_term } : {}),
+            ...(this.status_filter === 'active' ? { is_active: true } : {}),
+            ...(this.status_filter === 'inactive' ? { is_active: false } : {}),
+            ...(this.type_filter ? { type: this.type_filter } : {}),
+        };
 
         const sub = this.locationsService.getLocations(query).subscribe({
-            next: (response) => {
+            next: (response: any) => {
                 if (response.data) {
                     this.locations = response.data;
-                    this.applyFilters();
+                    if (response.meta) {
+                        this.pagination.total = response.meta.total;
+                        this.pagination.totalPages = response.meta.totalPages;
+                    }
+                    this.filtered_locations = [...this.locations];
                     this.calculateStats();
+                }
+                if (this.locations.length === 0 && this.pagination.page > 1) {
+                    this.pagination.page--;
+                    this.loadLocations();
+                    return;
                 }
                 this.is_loading = false;
             },
@@ -360,32 +392,11 @@ export class LocationsComponent implements OnInit, OnDestroy {
     }
 
     applyFilters(): void {
-        let filtered = [...this.locations];
-
-        if (this.status_filter === 'active') {
-            filtered = filtered.filter((l) => l.is_active);
-        } else if (this.status_filter === 'inactive') {
-            filtered = filtered.filter((l) => !l.is_active);
-        }
-
-        if (this.type_filter) {
-            filtered = filtered.filter((l) => l.type === this.type_filter);
-        }
-
-        if (this.search_term) {
-            const term = this.search_term.toLowerCase();
-            filtered = filtered.filter(
-                (l) =>
-                    l.name?.toLowerCase().includes(term) ||
-                    l.code?.toLowerCase().includes(term)
-            );
-        }
-
-        this.filtered_locations = filtered;
+        this.filtered_locations = [...this.locations];
     }
 
     calculateStats(): void {
-        this.stats.total = this.locations.length;
+        this.stats.total = this.pagination.total || this.locations.length;
         this.stats.active = this.locations.filter((l) => l.is_active).length;
         this.stats.inactive = this.locations.filter((l) => !l.is_active).length;
         this.stats.warehouses = this.locations.filter((l) => l.type === 'warehouse').length;
@@ -397,7 +408,8 @@ export class LocationsComponent implements OnInit, OnDestroy {
 
     onSearch(term: string): void {
         this.search_term = term;
-        this.applyFilters();
+        this.pagination.page = 1;
+        this.loadLocations();
     }
 
     onFilterChange(values: FilterValues): void {
@@ -413,7 +425,8 @@ export class LocationsComponent implements OnInit, OnDestroy {
             this.status_filter = 'all';
         }
 
-        this.applyFilters();
+        this.pagination.page = 1;
+        this.loadLocations();
     }
 
     clearFilters(): void {
@@ -421,7 +434,13 @@ export class LocationsComponent implements OnInit, OnDestroy {
         this.type_filter = '';
         this.search_term = '';
         this.filterValues = {};
-        this.applyFilters();
+        this.pagination.page = 1;
+        this.loadLocations();
+    }
+
+    changePage(page: number): void {
+        this.pagination.page = page;
+        this.loadLocations();
     }
 
     onActionClick(action: string): void {

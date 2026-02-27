@@ -290,6 +290,7 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
         inventory_adjustments: false,
         inventory_locations: false,
         inventory_suppliers: false,
+        inventory_movements: false,
         customers: true,
         customers_all: true,
         customers_reviews: false,

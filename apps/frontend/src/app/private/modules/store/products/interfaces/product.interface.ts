@@ -20,6 +20,7 @@ export interface Product {
   available_for_ecommerce?: boolean;
   sku?: string;
   stock_quantity?: number;
+  track_inventory?: boolean;
   weight?: number;
   dimensions?: {
     length: number;
@@ -165,6 +166,7 @@ export interface CreateProductDto {
   available_for_ecommerce?: boolean;
   sku?: string;
   stock_quantity?: number;
+  track_inventory?: boolean;
   weight?: number;
   dimensions?: {
     length: number;
@@ -187,6 +189,7 @@ export interface UpdateProductDto {
   base_price?: number;
   sku?: string;
   stock_quantity?: number;
+  track_inventory?: boolean;
   weight?: number;
   dimensions?: {
     length: number;
@@ -209,7 +212,7 @@ export interface CreateProductVariantDto {
   profit_margin?: number;
   is_on_sale?: boolean;
   sale_price?: number;
-  stock_quantity: number;
+  stock_quantity?: number;
   image_id?: number;
   attributes?: Record<string, any>;
   variant_image_url?: string;
@@ -283,7 +286,7 @@ export interface ProductVariantManagement {
   profit_margin?: number;
   is_on_sale?: boolean;
   sale_price?: number;
-  stock_quantity: number;
+  stock_quantity?: number;
   image_id?: number;
   image_url?: string;
   attributes?: Record<string, any>;
@@ -307,6 +310,7 @@ export interface ProductManagement {
   available_for_ecommerce?: boolean;
   sku?: string;
   stock_quantity?: number;
+  track_inventory?: boolean;
   state?: ProductState;
   category_id?: number | null;
   brand_id?: number | null;

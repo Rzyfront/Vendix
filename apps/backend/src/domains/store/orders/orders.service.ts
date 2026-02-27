@@ -13,6 +13,7 @@ import { OrderStatsDto } from './dto/order-stats.dto';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { resolveCostPrice } from './utils/resolve-cost-price';
+import { SettingsService } from '../settings/settings.service';
 
 @Injectable()
 export class OrdersService {
@@ -20,6 +21,7 @@ export class OrdersService {
     private prisma: StorePrismaService,
     private s3Service: S3Service,
     private eventEmitter: EventEmitter2,
+    private settingsService: SettingsService,
   ) {}
 
   async create(createOrderDto: CreateOrderDto, creatingUser: any) {
@@ -58,7 +60,7 @@ export class OrdersService {
             shipping_cost: createOrderDto.shipping_cost || 0,
             discount_amount: createOrderDto.discount_amount || 0,
             grand_total: createOrderDto.total_amount,
-            currency: createOrderDto.currency || 'USD',
+            currency: createOrderDto.currency || await this.settingsService.getStoreCurrency(),
             billing_address_id: createOrderDto.billing_address_id,
             shipping_address_id: createOrderDto.shipping_address_id,
             internal_notes: createOrderDto.internal_notes,

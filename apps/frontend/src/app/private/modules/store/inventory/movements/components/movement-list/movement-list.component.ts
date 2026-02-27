@@ -106,12 +106,6 @@ export class MovementListComponent {
       priority: 1,
     },
     {
-      key: 'from_location.name',
-      label: 'Origen',
-      defaultValue: '-',
-      priority: 2,
-    },
-    {
       key: 'to_location.name',
       label: 'Destino',
       defaultValue: '-',
@@ -122,12 +116,6 @@ export class MovementListComponent {
       label: 'Razón',
       defaultValue: '-',
       priority: 3,
-    },
-    {
-      key: 'users.user_name',
-      label: 'Usuario',
-      defaultValue: '-',
-      priority: 4,
     },
   ];
 
@@ -175,12 +163,6 @@ export class MovementListComponent {
         icon: 'calendar',
         transform: (val: string) =>
           new Date(val).toLocaleDateString('es-CO'),
-      },
-      {
-        key: 'from_location.name',
-        label: 'Origen',
-        icon: 'map-pin',
-        transform: (val: any) => val || '-',
       },
       {
         key: 'to_location.name',

@@ -11,6 +11,7 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 import { AnalyticsService } from '../../services/analytics.service';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { SalesByProduct, SalesAnalyticsQueryDto } from '../../interfaces/sales-analytics.interface';
 
@@ -80,6 +81,7 @@ import { SalesByProduct, SalesAnalyticsQueryDto } from '../../interfaces/sales-a
 export class SalesByProductComponent implements OnInit, OnDestroy {
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
+  private currencyService = inject(CurrencyFormatService);
   private destroy$ = new Subject<void>();
 
   loading = signal(true);
@@ -158,6 +160,7 @@ export class SalesByProductComponent implements OnInit, OnDestroy {
   };
 
   ngOnInit(): void {
+    this.currencyService.loadCurrency();
     this.loadData();
   }
 
@@ -216,11 +219,7 @@ export class SalesByProductComponent implements OnInit, OnDestroy {
   }
 
   formatCurrency(value: number): string {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0,
-    }).format(value);
+    return this.currencyService.format(value, 0);
   }
 
   private getDefaultStartDate(): string {

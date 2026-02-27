@@ -13,6 +13,7 @@ import {
   FilterConfig,
   DropdownAction,
   FilterValues,
+  PaginationComponent,
 } from '../../../../../../shared/components';
 import { Customer } from '../../models/customer.model';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
@@ -28,6 +29,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
     IconComponent,
     ButtonComponent,
     FormsModule,
+    PaginationComponent,
   ],
   template: `
     <!-- Customer List Container - Mobile First -->
@@ -107,6 +109,19 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
           [emptyIcon]="'users'"
           tableSize="md"
         ></app-responsive-data-view>
+
+        <!-- Pagination section -->
+        <div class="mt-4 border-t border-border pt-4">
+          <app-pagination
+            *ngIf="totalItems > 0"
+            [currentPage]="page"
+            [total]="totalItems"
+            [limit]="limit"
+            [totalPages]="totalPages"
+            infoStyle="none"
+            (pageChange)="onPageChangeAction($event)"
+          ></app-pagination>
+        </div>
       </div>
     </div>
   `,
@@ -117,6 +132,12 @@ export class CustomerListComponent implements OnInit {
   @Input() customers: Customer[] = [];
   @Input() loading = false;
   @Input() totalItems = 0;
+  @Input() page = 1;
+  @Input() limit = 10;
+
+  get totalPages(): number {
+    return Math.ceil(this.totalItems / this.limit);
+  }
 
   ngOnInit(): void {
     // Asegurar que la moneda esté cargada
@@ -129,6 +150,7 @@ export class CustomerListComponent implements OnInit {
   @Output() edit = new EventEmitter<Customer>();
   @Output() delete = new EventEmitter<Customer>();
   @Output() bulkUpload = new EventEmitter<void>();
+  @Output() pageChange = new EventEmitter<number>();
 
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
@@ -211,6 +233,10 @@ export class CustomerListComponent implements OnInit {
 
   onSearch(query: string) {
     this.search.emit(query);
+  }
+
+  onPageChangeAction(page: number) {
+    this.pageChange.emit(page);
   }
 
   onFilterChange(values: FilterValues): void {

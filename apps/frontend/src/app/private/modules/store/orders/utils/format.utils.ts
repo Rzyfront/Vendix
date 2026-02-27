@@ -8,7 +8,7 @@ export class OrderFormatUtils {
   /**
    * Format currency amount
    */
-  static formatCurrency(amount: number, currency: string = 'USD'): string {
+  static formatCurrency(amount: number, currency: string): string {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: currency,

@@ -120,8 +120,8 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
                     <button
                       class="variant-chip"
                       [class.selected]="selectedVariant?.id === variant.id"
-                      [class.out-of-stock]="variant.stock_quantity === 0"
-                      [disabled]="variant.stock_quantity === 0"
+                      [class.out-of-stock]="!isOnDemand && variant.stock_quantity === 0"
+                      [disabled]="!isOnDemand && variant.stock_quantity === 0"
                       (click)="selectVariant(variant)"
                     >
                       {{ getVariantLabel(variant) }}
@@ -142,7 +142,11 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
 
             <!-- Stock Status -->
             <div class="stock-status">
-              @if (displayStock === 0) {
+              @if (isOnDemand) {
+                <span class="on-demand">
+                  <app-icon name="package" [size]="14" /> Disponible bajo pedido
+                </span>
+              } @else if (displayStock === 0) {
                 <span class="out-of-stock">
                   <app-icon name="circle-x" [size]="14" /> Agotado
                 </span>
@@ -163,7 +167,7 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
               <app-quantity-control
                 [value]="quantity"
                 [min]="1"
-                [max]="displayStock || 99"
+                [max]="isOnDemand ? 999 : (displayStock || 99)"
                 [size]="'sm'"
                 (valueChange)="quantity = $event"
               />
@@ -175,7 +179,7 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
                 variant="secondary"
                 size="sm"
                 [fullWidth]="true"
-                [disabled]="displayStock === 0 || (hasVariants && !selectedVariant)"
+                [disabled]="(!isOnDemand && displayStock === 0) || (hasVariants && !selectedVariant)"
                 (clicked)="onAddToCart()"
               >
                 <app-icon slot="icon" name="shopping-cart" [size]="18" />
@@ -196,7 +200,7 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
               variant="primary"
               size="md"
               [fullWidth]="true"
-              [disabled]="displayStock === 0 || (hasVariants && !selectedVariant)"
+              [disabled]="(!isOnDemand && displayStock === 0) || (hasVariants && !selectedVariant)"
               (clicked)="onBuyNow()"
             >
               <app-icon slot="icon" name="shopping-bag" [size]="18" />
@@ -457,6 +461,10 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
       .out-of-stock {
         color: var(--color-error);
       }
+
+      .on-demand {
+        color: #0ea5e9;
+      }
     }
 
     .quantity-selector {
@@ -593,6 +601,11 @@ export class ProductQuickViewModalComponent implements OnChanges {
     return this.product?.stock_quantity ?? null;
   }
 
+  /** True when the product does not track inventory (bajo pedido / made-to-order) */
+  get isOnDemand(): boolean {
+    return this.product?.track_inventory === false;
+  }
+
   get displayImageUrl(): string | null {
     if (this.selectedVariant?.image_url) return this.selectedVariant.image_url;
     if (!this.product) return null;
@@ -660,8 +673,12 @@ export class ProductQuickViewModalComponent implements OnChanges {
             this.product = response.data;
             // Auto-select first available variant
             if (this.product.variants?.length > 0) {
-              const firstAvailable = this.product.variants.find(v => v.stock_quantity > 0);
-              this.selectedVariant = firstAvailable || this.product.variants[0];
+              if (this.isOnDemand) {
+                this.selectedVariant = this.product.variants[0];
+              } else {
+                const firstAvailable = this.product.variants.find(v => v.stock_quantity > 0);
+                this.selectedVariant = firstAvailable || this.product.variants[0];
+              }
             }
           } else {
             this.hasError = true;

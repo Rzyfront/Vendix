@@ -1,0 +1,56 @@
+@if (isVisible) {
+<nav class="pagination-container" aria-label="Pagination">
+  <!-- Info text (range style): "Showing X to Y of Z" -->
+  @if (infoStyle === 'range') {
+  <span class="pagination-info">
+    Showing {{ rangeStart }} to {{ rangeEnd }} of {{ total }}
+  </span>
+  }
+
+  <div class="pagination-controls">
+    <!-- Previous -->
+    <button
+      class="pagination-arrow"
+      [disabled]="currentPage <= 1"
+      (click)="goToPage(currentPage - 1)"
+      aria-label="Previous page"
+    >
+      <app-icon name="chevron-left" [size]="16" />
+    </button>
+
+    <!-- Page numbers -->
+    @for (page of pageNumbers; track $index) {
+      @if (isEllipsis(page)) {
+        <span class="pagination-ellipsis">&hellip;</span>
+      } @else {
+        <button
+          class="pagination-page"
+          [class.active]="isActivePage(page)"
+          [attr.aria-current]="isActivePage(page) ? 'page' : null"
+          [disabled]="isActivePage(page)"
+          (click)="goToPage(page)"
+        >
+          {{ page }}
+        </button>
+      }
+    }
+
+    <!-- Next -->
+    <button
+      class="pagination-arrow"
+      [disabled]="currentPage >= totalPages"
+      (click)="goToPage(currentPage + 1)"
+      aria-label="Next page"
+    >
+      <app-icon name="chevron-right" [size]="16" />
+    </button>
+  </div>
+
+  <!-- Info text (page style): "Page X of Y (Z items)" -->
+  @if (infoStyle === 'page') {
+  <span class="pagination-info">
+    Page {{ currentPage }} of {{ totalPages }} ({{ total }} items)
+  </span>
+  }
+</nav>
+}

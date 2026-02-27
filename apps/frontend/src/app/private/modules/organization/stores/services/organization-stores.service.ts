@@ -1,8 +1,9 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { CurrencyService } from '../../../../../services/currency.service';
 
 import {
   Store,
@@ -250,21 +251,24 @@ export class OrganizationStoresService {
   }
 
   /**
-   * Common currency codes for dropdown
+   * Common currency codes for dropdown — loaded from CurrencyService
    */
-  getCurrencyOptions(): Array<{ value: string; label: string }> {
-    return [
-      { value: 'COP', label: 'Peso Colombiano (COP)' },
-      { value: 'USD', label: 'Dólar Americano (USD)' },
-      { value: 'EUR', label: 'Euro (EUR)' },
-      { value: 'GBP', label: 'Libra Esterlina (GBP)' },
-      { value: 'MXN', label: 'Peso Mexicano (MXN)' },
-      { value: 'BRL', label: 'Real Brasileño (BRL)' },
-      { value: 'CAD', label: 'Dólar Canadiense (CAD)' },
-      { value: 'AUD', label: 'Dólar Australiano (AUD)' },
-      { value: 'JPY', label: 'Yen Japonés (JPY)' },
-      { value: 'CNY', label: 'Yuan Chino (CNY)' },
-    ];
+  private currencyService = inject(CurrencyService);
+
+  async getCurrencyOptions(): Promise<Array<{ value: string; label: string }>> {
+    try {
+      const currencies = await this.currencyService.getActiveCurrencies();
+      return currencies.map((c) => ({
+        value: c.code,
+        label: `${c.name} (${c.code})`,
+      }));
+    } catch {
+      return [
+        { value: 'COP', label: 'Peso Colombiano (COP)' },
+        { value: 'USD', label: 'Dólar Americano (USD)' },
+        { value: 'EUR', label: 'Euro (EUR)' },
+      ];
+    }
   }
 
   /**

@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, Output, EventEmitter, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   FormsModule,
@@ -10,6 +10,8 @@ import {
 } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../../../environments/environment';
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency/currency.pipe';
+import { CurrencyService } from '../../../../../services/currency.service';
 
 import {
   ModalComponent,
@@ -605,7 +607,9 @@ import {
     `,
   ],
 })
-export class OrderCreateModalComponent {
+export class OrderCreateModalComponent implements OnInit {
+  private currencyFormatService = inject(CurrencyFormatService);
+  private currencyService = inject(CurrencyService);
   @Input() isOpen = false;
   @Input() storeOptions: Array<{ label: string; value: string }> = [];
   @Input() selectedStoreId: number | null = null;
@@ -628,13 +632,7 @@ export class OrderCreateModalComponent {
     { label: 'Return', value: OrderType.RETURN },
   ];
 
-  currencyOptions = [
-    { label: 'USD - US Dollar', value: 'USD' },
-    { label: 'EUR - Euro', value: 'EUR' },
-    { label: 'GBP - British Pound', value: 'GBP' },
-    { label: 'JPY - Japanese Yen', value: 'JPY' },
-    { label: 'MXN - Mexican Peso', value: 'MXN' },
-  ];
+  currencyOptions: Array<{ label: string; value: string }> = [];
 
   getStatusOptions() {
     return [
@@ -709,6 +707,29 @@ export class OrderCreateModalComponent {
     });
   }
 
+  ngOnInit(): void {
+    this.currencyFormatService.loadCurrency();
+    this.loadCurrencyOptions();
+  }
+
+  private async loadCurrencyOptions(): Promise<void> {
+    try {
+      const currencies = await this.currencyService.getActiveCurrencies();
+      this.currencyOptions = currencies.map(c => ({
+        label: `${c.code} - ${c.name}`,
+        value: c.code,
+      }));
+      // Set form default to store currency
+      const storeCurrency = this.currencyFormatService.currencyCode();
+      if (storeCurrency) {
+        this.orderForm.patchValue({ currency: storeCurrency });
+      }
+    } catch {
+      // Fallback if API fails
+      this.currencyOptions = [{ label: 'USD - US Dollar', value: 'USD' }];
+    }
+  }
+
   private initializeForm(): void {
     this.orderForm = this.fb.group({
       // Common fields for all order types
@@ -727,7 +748,7 @@ export class OrderCreateModalComponent {
       discount_amount: [0, [Validators.min(0)]],
       subtotal: [0, [Validators.min(0)]],
       total_amount: [0, [Validators.min(0)]],
-      currency: ['USD', Validators.required],
+      currency: [this.currencyFormatService.currencyCode() || 'USD', Validators.required],
       notes: [''],
       internal_notes: [''],
       internal_reference: [''],
@@ -1107,7 +1128,7 @@ export class OrderCreateModalComponent {
       discount_amount: 0,
       subtotal: 0,
       total_amount: 0,
-      currency: 'USD',
+      currency: this.currencyFormatService.currencyCode() || 'USD',
       notes: '',
       internal_notes: '',
       internal_reference: '',

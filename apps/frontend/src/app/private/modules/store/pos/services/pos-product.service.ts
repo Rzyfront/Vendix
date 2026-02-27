@@ -15,6 +15,7 @@ export interface Product {
   category: string;
   brand?: string;
   stock: number;
+  track_inventory?: boolean;
   minStock: number;
   image?: string;
   image_url?: string;
@@ -323,6 +324,7 @@ export class PosProductService {
             : product.category?.name || 'Sin categoría',
         brand: product.brands?.name || '',
         stock: totalStock,
+        track_inventory: product.track_inventory,
         minStock: product.min_stock_level || 5,
         image: imageUrl,
         image_url: imageUrl,
@@ -540,3 +542,4 @@ export class PosProductService {
     return of(null).pipe(delay(100));
   }
 }
+

@@ -57,7 +57,7 @@
                 ">
                 {{
                 column.transform
-                ? column.transform(getNestedValue(item, column.key))
+                ? column.transform(getNestedValue(item, column.key), item)
                 : getNestedValue(item, column.key)
                 }}
               </span>
@@ -91,7 +91,7 @@
                   ">
                   {{
                   column.transform
-                  ? column.transform(getNestedValue(item, column.key))
+                  ? column.transform(getNestedValue(item, column.key), item)
                   : getNestedValue(item, column.key)
                   }}
                 </ng-container>

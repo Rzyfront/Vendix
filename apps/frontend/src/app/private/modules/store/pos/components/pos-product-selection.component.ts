@@ -148,7 +148,7 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
             (click)="onAddToCart(product)"
             class="group relative bg-surface border border-border rounded-2xl shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer overflow-hidden product-card"
             [class]="
-              product.stock === 0
+              product.track_inventory !== false && product.stock === 0
                 ? 'opacity-60 cursor-not-allowed'
                 : 'cursor-pointer hover:border-primary active:scale-[0.97]'
             "
@@ -183,15 +183,21 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
               </div>
 
               <!-- Stock Badge -->
-              <div
-                *ngIf="product.stock <= 5"
-                class="absolute top-2 right-2 px-2 py-1 rounded-md text-xs font-semibold backdrop-blur-md text-white"
-                style="background: rgba(var(--color-secondary-rgb), 0.85)"
-              >
-                {{
-                  product.stock === 0 ? 'AGOTADO' : 'Últimas ' + product.stock
-                }}
-              </div>
+              @if (product.track_inventory !== false) {
+                <div
+                  *ngIf="product.stock <= 5"
+                  class="absolute top-2 right-2 px-2 py-1 rounded-md text-xs font-semibold backdrop-blur-md text-white"
+                  style="background: rgba(var(--color-secondary-rgb), 0.85)"
+                >
+                  {{
+                    product.stock === 0 ? 'AGOTADO' : 'Últimas ' + product.stock
+                  }}
+                </div>
+              } @else {
+                <div class="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold shadow-sm backdrop-blur-sm bg-blue-100/90 text-blue-700">
+                  Bajo pedido
+                </div>
+              }
 
               <!-- Variant Indicator -->
               <div
@@ -230,17 +236,23 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
                     {{ product.final_price | currency }}
                   </span>
                   <!-- Stock indicator for non-variant products -->
-                  <span
-                    *ngIf="!product.has_variants"
-                    class="text-[10px] sm:text-xs leading-tight"
-                    [class]="product.stock === 0
-                      ? 'text-error font-semibold'
-                      : product.stock <= 5
-                        ? 'text-warning font-medium'
-                        : 'text-text-muted'"
-                  >
-                    {{ product.stock === 0 ? 'Sin stock' : product.stock + ' en stock' }}
-                  </span>
+                  @if (product.track_inventory !== false) {
+                    <span
+                      *ngIf="!product.has_variants"
+                      class="text-[10px] sm:text-xs leading-tight"
+                      [class]="product.stock === 0
+                        ? 'text-error font-semibold'
+                        : product.stock <= 5
+                          ? 'text-warning font-medium'
+                          : 'text-text-muted'"
+                    >
+                      {{ product.stock === 0 ? 'Sin stock' : product.stock + ' en stock' }}
+                    </span>
+                  } @else {
+                    <span *ngIf="!product.has_variants" class="text-[10px] sm:text-xs leading-tight text-blue-600 font-medium">
+                      Bajo pedido
+                    </span>
+                  }
                 </div>
               </div>
 
@@ -736,15 +748,17 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   }
 
   private addToCartNormal(product: any): void {
-    if (product.stock > 0 && product.stock <= 5) {
-      this.toastService.warning(
-        `Producto con existencias bajo (${product.stock} unidades restantes)`,
-      );
-    }
+    if (product.track_inventory !== false) {
+      if (product.stock > 0 && product.stock <= 5) {
+        this.toastService.warning(
+          `Producto con existencias bajo (${product.stock} unidades restantes)`,
+        );
+      }
 
-    if (product.stock === 0) {
-      this.toastService.warning('Producto sin stock disponible');
-      return;
+      if (product.stock === 0) {
+        this.toastService.warning('Producto sin stock disponible');
+        return;
+      }
     }
 
     this.addingToCart.add(product.id);

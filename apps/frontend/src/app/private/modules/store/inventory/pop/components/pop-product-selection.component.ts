@@ -143,18 +143,24 @@ import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
               </div>
 
               <!-- Compact Stock Badge -->
-              <div
-                class="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold shadow-sm backdrop-blur-sm"
-                [ngClass]="{
-                  'bg-green-100/90 text-green-700':
-                    product.stock > 10,
-                  'bg-amber-100/90 text-amber-700':
-                    product.stock <= 10 && product.stock > 0,
-                  'bg-red-100/90 text-red-700': product.stock === 0
-                }"
-              >
-                {{ product.stock }}
-              </div>
+              @if (product.track_inventory !== false) {
+                <div
+                  class="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold shadow-sm backdrop-blur-sm"
+                  [ngClass]="{
+                    'bg-green-100/90 text-green-700':
+                      product.stock_quantity > 10,
+                    'bg-amber-100/90 text-amber-700':
+                      product.stock_quantity <= 10 && product.stock_quantity > 0,
+                    'bg-red-100/90 text-red-700': product.stock_quantity === 0
+                  }"
+                >
+                  {{ product.stock_quantity }}
+                </div>
+              } @else {
+                <div class="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold shadow-sm backdrop-blur-sm bg-blue-100/90 text-blue-700">
+                  Bajo pedido
+                </div>
+              }
             </div>
 
             <!-- Product Info -->

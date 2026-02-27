@@ -8,7 +8,7 @@
       <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
         <!-- Title - smaller on mobile, larger on desktop -->
         <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
-          Ajustes de Inventario ({{ adjustments().length }})
+          Ajustes de Inventario ({{ paginationData().total || adjustments().length }})
         </h2>
 
         <!-- Search row - horizontal on mobile -->
@@ -73,6 +73,17 @@
         [cardConfig]="cardConfig" [loading]="isLoading()" [sortable]="true" emptyMessage="No hay ajustes de inventario"
         emptyIcon="clipboard-list">
       </app-responsive-data-view>
+
+      <div class="mt-4 flex justify-center">
+        <app-pagination
+          [currentPage]="paginationData().page"
+          [totalPages]="paginationData().totalPages"
+          [total]="paginationData().total"
+          [limit]="paginationData().limit"
+          infoStyle="none"
+          (pageChange)="pageChange.emit($event)"
+        />
+      </div>
     </div>
     }
   </div>

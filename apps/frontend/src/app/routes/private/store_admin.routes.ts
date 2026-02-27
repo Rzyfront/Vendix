@@ -129,6 +129,13 @@ export const storeAdminRoutes: Routes = [
                 '../../private/modules/store/inventory/operations/stock-adjustments.component'
               ).then((c) => c.StockAdjustmentsComponent),
           },
+          {
+            path: 'movements',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/inventory/movements/movements.component'
+              ).then((c) => c.MovementsComponent),
+          },
         ],
       },
       // Orders Routes

@@ -72,8 +72,12 @@ import { SupplierListComponent } from './components/supplier-list/supplier-list.
 
       <!-- Supplier List -->
       <app-supplier-list
-        [suppliers]="filtered_suppliers"
+        [suppliers]="suppliers"
         [isLoading]="is_loading"
+        [totalItems]="totalItems"
+        [currentPage]="filters.page"
+        [totalPages]="totalPages"
+        [limit]="filters.limit"
         (refresh)="loadSuppliers()"
         (search)="onSearch($event)"
         (filter)="onFilterChange($event)"
@@ -81,6 +85,7 @@ import { SupplierListComponent } from './components/supplier-list/supplier-list.
         (edit)="openEditModal($event)"
         (delete)="confirmDelete($event)"
         (sort)="onSort($event)"
+        (pageChange)="onPageChange($event)"
       ></app-supplier-list>
 
       <!-- Create/Edit Modal -->
@@ -97,8 +102,11 @@ import { SupplierListComponent } from './components/supplier-list/supplier-list.
 export class SuppliersComponent implements OnInit, OnDestroy {
   // Data
   suppliers: Supplier[] = [];
-  filtered_suppliers: Supplier[] = [];
   selected_supplier: Supplier | null = null;
+
+  // Pagination
+  filters = { page: 1, limit: 10 };
+  totalItems = 0;
 
   // Stats
   stats = {
@@ -137,15 +145,33 @@ export class SuppliersComponent implements OnInit, OnDestroy {
   // Data Loading
   // ============================================================
 
+  get totalPages(): number {
+    return Math.ceil(this.totalItems / this.filters.limit) || 1;
+  }
+
   loadSuppliers(): void {
     this.is_loading = true;
-    const query = this.search_term ? { search: this.search_term } : {};
+
+    const query: any = {
+      page: this.filters.page,
+      limit: this.filters.limit,
+    };
+
+    if (this.search_term) {
+      query.search = this.search_term;
+    }
+
+    if (this.status_filter === 'active') {
+      query.is_active = true;
+    } else if (this.status_filter === 'inactive') {
+      query.is_active = false;
+    }
 
     const sub = this.suppliersService.getSuppliers(query).subscribe({
-      next: (response) => {
+      next: (response: any) => {
         if (response.data) {
           this.suppliers = response.data;
-          this.applyFilters();
+          this.totalItems = response.meta?.pagination?.total ?? response.data.length;
           this.calculateStats();
         }
         this.is_loading = false;
@@ -156,28 +182,6 @@ export class SuppliersComponent implements OnInit, OnDestroy {
       },
     });
     this.subscriptions.push(sub);
-  }
-
-  applyFilters(): void {
-    let filtered = [...this.suppliers];
-
-    if (this.status_filter === 'active') {
-      filtered = filtered.filter((s) => s.is_active);
-    } else if (this.status_filter === 'inactive') {
-      filtered = filtered.filter((s) => !s.is_active);
-    }
-
-    if (this.search_term) {
-      const term = this.search_term.toLowerCase();
-      filtered = filtered.filter(
-        (s) =>
-          s.name?.toLowerCase().includes(term) ||
-          s.code?.toLowerCase().includes(term) ||
-          s.contact_person?.toLowerCase().includes(term)
-      );
-    }
-
-    this.filtered_suppliers = filtered;
   }
 
   calculateStats(): void {
@@ -193,7 +197,8 @@ export class SuppliersComponent implements OnInit, OnDestroy {
 
   onSearch(term: string): void {
     this.search_term = term;
-    this.applyFilters();
+    this.filters.page = 1;
+    this.loadSuppliers();
   }
 
   onFilterChange(values: FilterValues): void {
@@ -207,7 +212,13 @@ export class SuppliersComponent implements OnInit, OnDestroy {
       this.status_filter = 'all';
     }
 
-    this.applyFilters();
+    this.filters.page = 1;
+    this.loadSuppliers();
+  }
+
+  onPageChange(page: number): void {
+    this.filters.page = page;
+    this.loadSuppliers();
   }
 
   onSort(event: { column: string; direction: 'asc' | 'desc' | null }): void {
@@ -216,7 +227,7 @@ export class SuppliersComponent implements OnInit, OnDestroy {
       return;
     }
     // Client-side sorting for simplicity
-    this.filtered_suppliers = [...this.filtered_suppliers].sort((a, b) => {
+    this.suppliers = [...this.suppliers].sort((a, b) => {
       const val_a = (a as any)[event.column] || '';
       const val_b = (b as any)[event.column] || '';
       const comparison = String(val_a).localeCompare(String(val_b));

@@ -163,6 +163,8 @@ import {
   CornerDownLeft,
   // Tax / government icons
   Landmark,
+  // Overflow menu icon
+  MoreHorizontal,
 } from 'lucide-angular';
 
 /**
@@ -379,6 +381,9 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // Tax / government icons
   landmark: Landmark,
+
+  // Overflow menu icon
+  'more-horizontal': MoreHorizontal,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

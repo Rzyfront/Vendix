@@ -220,7 +220,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
 
       // Configuración General
       general: this.fb.group({
-        currency: ['COP'],
+        currency: [this.currencyService.currencyCode() || 'COP'],
         locale: ['es-CO'],
         timezone: ['America/Bogota'],
       }),

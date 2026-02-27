@@ -4,10 +4,12 @@ import {
   Output,
   EventEmitter,
   ChangeDetectionStrategy,
+  inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { PopCartSummary } from '../services/pop-cart.service';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'app-pop-mobile-footer',
@@ -299,6 +301,7 @@ import { PopCartSummary } from '../services/pop-cart.service';
   ],
 })
 export class PopMobileFooterComponent {
+  private currencyService = inject(CurrencyFormatService);
   @Input() cartSummary: PopCartSummary | null = null;
   @Input() itemCount: number = 0;
 
@@ -308,10 +311,6 @@ export class PopMobileFooterComponent {
   @Output() createAndReceive = new EventEmitter<void>();
 
   formatCurrency(amount: number): string {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0,
-    }).format(amount);
+    return this.currencyService.format(amount, 0);
   }
 }

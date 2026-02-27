@@ -197,19 +197,10 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
   }
 
   onClearAllFilters(): void {
-    // Reset all filter values to their defaults (or null if no default)
-    for (const filter of this.filters) {
-      if (filter.defaultValue !== undefined) {
-        this.localFilterValues[filter.key] = filter.defaultValue;
-      } else if (filter.type === 'multi-select') {
-        this.localFilterValues[filter.key] = [];
-      } else {
-        this.localFilterValues[filter.key] = null;
-      }
-    }
-    this.calculateActiveFiltersCount();
-    // Emit immediately without debounce for explicit clear action
-    this.emitFilterChange();
+    // Emit clearAllFilters so the parent can reset to its own defaults
+    // (e.g. thisMonth date range, default granularity).
+    // We intentionally do NOT emit filterChange here to avoid dispatching
+    // null/empty values before the parent sets the correct defaults.
     this.clearAllFilters.emit();
   }
 

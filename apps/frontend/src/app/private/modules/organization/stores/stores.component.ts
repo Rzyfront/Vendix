@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   FormsModule,
@@ -8,6 +8,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
+import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
 
 import {
   StoreListItem,
@@ -241,6 +242,7 @@ interface StatItem {
   ],
 })
 export class StoresComponent implements OnInit, OnDestroy {
+  private currencyService = inject(CurrencyFormatService);
   stores: StoreListItem[] = [];
   isLoading = false;
   searchTerm = '';
@@ -410,6 +412,7 @@ export class StoresComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    this.currencyService.loadCurrency();
     this.loadStores();
     this.loadStats();
   }
@@ -608,12 +611,7 @@ export class StoresComponent implements OnInit, OnDestroy {
 
   // Formatear moneda
   private formatCurrency(amount: number): string {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
+    return this.currencyService.format(amount, 0);
   }
 
   refreshStores(): void {

@@ -48,6 +48,15 @@
       <app-responsive-data-view [data]="orders" [columns]="table_columns" [actions]="table_actions"
         [cardConfig]="cardConfig" [loading]="loading" [sortable]="true"
         (rowClick)="viewOrder.emit($event)"></app-responsive-data-view>
+
+      <!-- Pagination -->
+      <app-pagination
+        [currentPage]="filters.page || 1"
+        [totalPages]="totalPages"
+        [total]="totalItems"
+        [limit]="filters.limit || 10"
+        (pageChange)="onPageChange($event)">
+      </app-pagination>
     </div>
   </div>
 </div>

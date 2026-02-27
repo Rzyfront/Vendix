@@ -90,6 +90,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         [isLoading]="isLoading"
         [categories]="categories"
         [brands]="brands"
+        [paginationData]="pagination"
         (refresh)="loadProducts()"
         (search)="onSearch($event)"
         (filter)="onFilter($event)"
@@ -98,6 +99,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         (delete)="deleteProduct($event)"
         (bulkUpload)="openBulkUploadModal()"
         (bulkImageUpload)="openBulkImageUploadModal()"
+        (pageChange)="changePage($event)"
       ></app-product-list>
 
       <!-- Modals -->
@@ -129,6 +131,9 @@ export class ProductsComponent implements OnInit, OnDestroy {
   brands: Brand[] = [];
   isLoading = false;
   storeId: string | null = null;
+
+  // Pagination
+  pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
 
   // Stats
   stats: ProductStats = {
@@ -193,6 +198,8 @@ export class ProductsComponent implements OnInit, OnDestroy {
     const query: ProductQueryDto = {
       ...(this.searchTerm && { search: this.searchTerm }),
       ...this.currentFilters,
+      page: this.pagination.page,
+      limit: this.pagination.limit,
     };
 
     const sub = this.productsService.getProducts(query).subscribe({
@@ -202,6 +209,19 @@ export class ProductsComponent implements OnInit, OnDestroy {
         } else {
           this.products = [];
         }
+
+        // Extract pagination metadata
+        if (response.pagination) {
+          this.pagination = { ...this.pagination, ...response.pagination };
+        }
+
+        // Edge case: if current page is empty but not the first page, go back
+        if (this.products.length === 0 && this.pagination.page > 1) {
+          this.pagination.page--;
+          this.loadProducts();
+          return;
+        }
+
         this.isLoading = false;
       },
       error: (error: any) => {
@@ -245,11 +265,18 @@ export class ProductsComponent implements OnInit, OnDestroy {
   // Event Handlers
   onSearch(term: string): void {
     this.searchTerm = term;
+    this.pagination.page = 1;
     this.loadProducts();
   }
 
   onFilter(filters: Partial<ProductQueryDto>): void {
     this.currentFilters = filters;
+    this.pagination.page = 1;
+    this.loadProducts();
+  }
+
+  changePage(page: number): void {
+    this.pagination.page = page;
     this.loadProducts();
   }
 

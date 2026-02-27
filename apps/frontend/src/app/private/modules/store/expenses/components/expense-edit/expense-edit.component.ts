@@ -1,11 +1,10 @@
-import { Component, OnInit, OnChanges, SimpleChanges, Output, EventEmitter, Input, inject } from '@angular/core';
+import { Component, OnChanges, SimpleChanges, Output, EventEmitter, Input, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable, map } from 'rxjs';
 import {
   updateExpense,
-  loadExpenseCategories,
   approveExpense,
   rejectExpense,
   payExpense,
@@ -140,18 +139,19 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
           </div>
 
         </form>
-      </div>
 
-      <!-- Footer -->
-      <div slot="footer">
-        <div class="flex flex-col gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
-          <!-- State transition buttons -->
-          <div *ngIf="expense" class="flex flex-wrap items-center gap-2">
-            <!-- Pending: Approve + Reject -->
-            <ng-container *ngIf="expense.state === 'pending'">
+        <!-- Action buttons (state transitions) -->
+        <ng-container *ngIf="expense">
+          <div *ngIf="expense.state === 'pending' || expense.state === 'approved' || expense.state === 'rejected'"
+            class="mt-5 pt-4 border-t border-border space-y-2">
+            <span class="text-xs font-medium text-text-secondary uppercase tracking-wide">Acciones</span>
+
+            <!-- Pending: Approve / Reject -->
+            <div *ngIf="expense.state === 'pending'" class="grid grid-cols-2 gap-2">
               <app-button
                 variant="success"
                 size="sm"
+                [fullWidth]="true"
                 (clicked)="onApprove()"
                 [loading]="(loading$ | async) || false"
               >
@@ -160,81 +160,98 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
               <app-button
                 variant="danger"
                 size="sm"
+                [fullWidth]="true"
                 (clicked)="onReject()"
                 [loading]="(loading$ | async) || false"
               >
                 Rechazar
               </app-button>
-            </ng-container>
+            </div>
+
+            <!-- Pending: Cancel + Delete -->
+            <div *ngIf="expense.state === 'pending'" class="grid grid-cols-2 gap-2">
+              <app-button
+                variant="outline-warning"
+                size="sm"
+                [fullWidth]="true"
+                (clicked)="onCancel()"
+                [loading]="(loading$ | async) || false"
+              >
+                Cancelar Gasto
+              </app-button>
+              <app-button
+                variant="outline-danger"
+                size="sm"
+                [fullWidth]="true"
+                (clicked)="onDelete()"
+                [loading]="(loading$ | async) || false"
+              >
+                Eliminar
+              </app-button>
+            </div>
 
             <!-- Approved: Pay + Cancel -->
-            <ng-container *ngIf="expense.state === 'approved'">
+            <div *ngIf="expense.state === 'approved'" class="grid grid-cols-2 gap-2">
               <app-button
-                variant="primary"
+                variant="success"
                 size="sm"
+                [fullWidth]="true"
                 (clicked)="onPay()"
                 [loading]="(loading$ | async) || false"
               >
                 Marcar Pagado
               </app-button>
               <app-button
-                variant="danger"
+                variant="outline-warning"
                 size="sm"
+                [fullWidth]="true"
                 (clicked)="onCancel()"
                 [loading]="(loading$ | async) || false"
               >
                 Cancelar
               </app-button>
-            </ng-container>
+            </div>
 
-            <!-- Pending: can also cancel -->
-            <ng-container *ngIf="expense.state === 'pending'">
+            <!-- Rejected: Delete only -->
+            <div *ngIf="expense.state === 'rejected'" class="flex justify-end">
               <app-button
-                variant="ghost"
-                size="sm"
-                (clicked)="onCancel()"
-                [loading]="(loading$ | async) || false"
-              >
-                Cancelar Gasto
-              </app-button>
-            </ng-container>
-
-            <!-- Delete: only pending/rejected -->
-            <ng-container *ngIf="expense.state === 'pending' || expense.state === 'rejected'">
-              <app-button
-                variant="ghost"
+                variant="outline-danger"
                 size="sm"
                 (clicked)="onDelete()"
                 [loading]="(loading$ | async) || false"
               >
                 Eliminar
               </app-button>
-            </ng-container>
+            </div>
           </div>
+        </ng-container>
+      </div>
 
-          <!-- Save / Close -->
-          <div class="flex items-center justify-end gap-3">
-            <app-button
-              variant="outline"
-              (clicked)="onClose()">
-              Cerrar
-            </app-button>
+      <!-- Footer: solo controles del modal -->
+      <div slot="footer">
+        <div class="flex items-center justify-end gap-2 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+          <app-button
+            variant="outline"
+            size="sm"
+            (clicked)="onClose()">
+            Cerrar
+          </app-button>
 
-            <app-button
-              *ngIf="expense?.state === 'pending'"
-              variant="primary"
-              (clicked)="onSubmit()"
-              [disabled]="expenseForm.invalid || ((loading$ | async) || false)"
-              [loading]="(loading$ | async) || false">
-              Actualizar Gasto
-            </app-button>
-          </div>
+          <app-button
+            *ngIf="expense?.state === 'pending'"
+            variant="primary"
+            size="sm"
+            (clicked)="onSubmit()"
+            [disabled]="expenseForm.invalid || ((loading$ | async) || false)"
+            [loading]="(loading$ | async) || false">
+            Actualizar Gasto
+          </app-button>
         </div>
       </div>
     </app-modal>
   `
 })
-export class ExpenseEditComponent implements OnInit, OnChanges {
+export class ExpenseEditComponent implements OnChanges {
   @Input() isOpen = false;
   @Input() expense: Expense | null = null;
   @Output() isOpenChange = new EventEmitter<boolean>();
@@ -271,10 +288,6 @@ export class ExpenseEditComponent implements OnInit, OnChanges {
       expense_date: ['', [Validators.required]],
       notes: ['']
     });
-  }
-
-  ngOnInit() {
-    this.store.dispatch(loadExpenseCategories());
   }
 
   ngOnChanges(changes: SimpleChanges) {

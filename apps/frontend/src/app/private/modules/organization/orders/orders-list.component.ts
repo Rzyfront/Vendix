@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup } from '@angular/forms';
@@ -27,6 +27,7 @@ import {
 
 // Import order components
 import { OrderStatsComponent } from './components/order-stats.component';
+import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
 import { OrderCreateModalComponent } from './components/order-create-modal.component';
 
 // Import styles
@@ -194,6 +195,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   filterForm!: FormGroup;
 
   private subscriptions: Subscription[] = [];
+  private currencyService = inject(CurrencyFormatService);
 
   constructor(private fb: FormBuilder) {
     this.initializeFilterForm();
@@ -315,6 +317,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    this.currencyService.loadCurrency();
     this.loadOrders();
     this.loadStats();
     this.loadAvailableStores();
@@ -478,7 +481,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
         tax_amount: 0,
         shipping_amount: 0,
         discount_amount: 0,
-        currency: 'USD',
+        currency: this.currencyService.currencyCode() || 'USD',
         order_date: date.toISOString(),
         items_count: Math.floor(Math.random() * 10) + 1,
         notes: '',
@@ -667,10 +670,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   }
 
   formatCurrency(amount: number): string {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-    }).format(amount);
+    return this.currencyService.format(amount);
   }
 
   getStatusClass(status: string): string {
@@ -766,7 +766,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       tax_amount: parseFloat(orderData.tax_amount) || 0,
       shipping_amount: parseFloat(orderData.shipping_cost) || 0,
       discount_amount: parseFloat(orderData.discount_amount) || 0,
-      currency: orderData.currency || 'USD',
+      currency: orderData.currency || this.currencyService.currencyCode() || 'USD',
       order_date: orderData.created_at || new Date().toISOString(),
       items_count: orderData.order_items?.length || 1,
       notes: orderData.internal_notes || '',

@@ -24,6 +24,7 @@ import {
   DropdownAction,
   ButtonComponent,
   IconComponent,
+  PaginationComponent,
 } from '../../../../../../shared/components/index';
 
 import { PurchaseOrdersService } from '../../../inventory/services';
@@ -49,6 +50,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
     PurchaseOrderEmptyStateComponent,
     ButtonComponent,
     IconComponent,
+    PaginationComponent,
   ],
   templateUrl: './purchase-order-list.component.html',
   styleUrls: ['./purchase-order-list.component.scss'],
@@ -68,6 +70,9 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
   suppliers: any[] = [];
   loading = false;
   totalItems = 0;
+
+  // Pagination
+  filters = { page: 1, limit: 10 };
 
   // Filter state
   searchTerm = '';
@@ -230,7 +235,10 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
   loadOrders(): void {
     this.loading = true;
 
-    const query: any = {};
+    const query: any = {
+      page: this.filters.page,
+      limit: this.filters.limit,
+    };
     if (this.selectedStatus) {
       query.status = this.selectedStatus;
     }
@@ -245,7 +253,7 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
         next: (response: any) => {
           const orders = response.data || response;
           this.orders = Array.isArray(orders) ? orders : [];
-          this.totalItems = this.orders.length;
+          this.totalItems = response.meta?.pagination?.total ?? response.meta?.total ?? this.orders.length;
 
           // Enrich orders with supplier names
           this.enrichOrdersWithSuppliers();
@@ -323,15 +331,27 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
     this.statsUpdated.emit(stats);
   }
 
+  // Pagination
+  get totalPages(): number {
+    return Math.ceil(this.totalItems / (this.filters.limit || 10));
+  }
+
+  onPageChange(page: number): void {
+    this.filters.page = page;
+    this.loadOrders();
+  }
+
   // Filter event handlers
   onSearchChange(term: string): void {
     this.searchTerm = term;
+    this.filters.page = 1;
     this.loadOrders();
   }
 
   onFilterChange(values: FilterValues): void {
     this.filterValues = values;
     this.selectedStatus = (values['status'] as string) || '';
+    this.filters.page = 1;
     this.loadOrders();
   }
 
@@ -339,6 +359,7 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
     this.searchTerm = '';
     this.selectedStatus = '';
     this.filterValues = {};
+    this.filters.page = 1;
     this.loadOrders();
   }
 
