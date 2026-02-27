@@ -6,6 +6,7 @@ import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { CatalogService, EcommerceProduct } from './catalog.service';
 import { environment } from '../../../../../environments/environment';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
+import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
 
 export interface CartItem {
     id: number;
@@ -66,7 +67,8 @@ export class CartService {
         private http: HttpClient,
         private domain_service: TenantFacade,
         private catalog_service: CatalogService,
-        private auth_facade: AuthFacade
+        private auth_facade: AuthFacade,
+        private currencyFormatService: CurrencyFormatService,
     ) {
         this.initializeCart();
     }
@@ -152,7 +154,7 @@ export class CartService {
 
                             const cart: Cart = {
                                 id: 0,
-                                currency: 'USD',
+                                currency: this.currencyFormatService.currencyCode() || 'USD',
                                 subtotal: cartItems.reduce(
                                     (sum, i) => sum + i.total_price,
                                     0,
@@ -179,7 +181,7 @@ export class CartService {
     private emitEmptyCart() {
         const cart: Cart = {
             id: 0,
-            currency: 'USD',
+            currency: this.currencyFormatService.currencyCode() || 'USD',
             subtotal: 0,
             item_count: 0,
             items: [],

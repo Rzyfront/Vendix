@@ -23,6 +23,7 @@ import {
 import { PaymentError, PaymentErrorCodes } from './utils';
 import { resolveCostPrice } from '../orders/utils/resolve-cost-price';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { SettingsService } from '../settings/settings.service';
 
 @Injectable()
 export class PaymentsService {
@@ -32,6 +33,7 @@ export class PaymentsService {
     private readonly stockLevelManager: StockLevelManager,
     private readonly taxes_service: TaxesService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly settingsService: SettingsService,
   ) { }
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -396,6 +398,11 @@ export class PaymentsService {
     try {
       await this.validateUserAccess(user, createPosPaymentDto.store_id);
 
+      // Resolve store currency once if not provided in DTO
+      if (!createPosPaymentDto.currency) {
+        createPosPaymentDto.currency = await this.settingsService.getStoreCurrency();
+      }
+
       return await this.prisma.$transaction(async (tx) => {
         // 1. Create or update order
         const order = await this.createOrUpdateOrderFromPos(
@@ -429,7 +436,7 @@ export class PaymentsService {
           order_id: order.id,
           order_number: order.order_number,
           grand_total: Number(order.grand_total),
-          currency: order.currency || 'USD',
+          currency: order.currency || createPosPaymentDto.currency,
         });
 
         // 5. Emit payment event
@@ -439,7 +446,7 @@ export class PaymentsService {
             order_id: order.id,
             order_number: order.order_number,
             amount: payment.amount,
-            currency: payment.currency || 'USD',
+            currency: payment.currency || createPosPaymentDto.currency,
             payment_method:
               payment.store_payment_method?.system_payment_method?.display_name ||
               'Unknown',
@@ -556,7 +563,7 @@ export class PaymentsService {
           tax_amount: dto.tax_amount || 0,
           discount_amount: dto.discount_amount || 0,
           grand_total: dto.total_amount,
-          currency: dto.currency || 'USD',
+          currency: dto.currency,
           billing_address_id: dto.billing_address_id,
           shipping_address_id: dto.shipping_address_id,
           internal_notes: dto.internal_notes,
@@ -650,7 +657,7 @@ export class PaymentsService {
         order_id: order.id,
         store_payment_method_id: dto.store_payment_method_id,
         amount: dto.total_amount,
-        currency: dto.currency || 'USD',
+        currency: dto.currency,
         state: 'succeeded',
         transaction_id: await this.generateTransactionId(),
         gateway_response: {
@@ -747,6 +754,13 @@ export class PaymentsService {
     }
 
     for (const item of order.order_items) {
+      // Skip stock update for products that don't track inventory
+      const product = await tx.products.findUnique({
+        where: { id: item.product_id },
+        select: { track_inventory: true },
+      });
+      if (!product?.track_inventory) continue;
+
       await this.stockLevelManager.updateStock(
         {
           product_id: item.product_id,

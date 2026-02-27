@@ -15,6 +15,7 @@ import {
   FilterConfig,
   DropdownAction,
   FilterValues,
+  PaginationComponent,
 } from '../../../../../../../shared/components/index';
 
 // Interfaces
@@ -31,12 +32,17 @@ import { Supplier } from '../../../interfaces';
     IconComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
+    PaginationComponent,
   ],
   templateUrl: './supplier-list.component.html',
 })
 export class SupplierListComponent {
   @Input() suppliers: Supplier[] = [];
   @Input() isLoading = false;
+  @Input() totalItems = 0;
+  @Input() currentPage = 1;
+  @Input() totalPages = 1;
+  @Input() limit = 10;
 
   @Output() refresh = new EventEmitter<void>();
   @Output() search = new EventEmitter<string>();
@@ -48,6 +54,7 @@ export class SupplierListComponent {
     column: string;
     direction: 'asc' | 'desc' | null;
   }>();
+  @Output() pageChange = new EventEmitter<number>();
 
   searchTerm = '';
   selectedStatus = '';

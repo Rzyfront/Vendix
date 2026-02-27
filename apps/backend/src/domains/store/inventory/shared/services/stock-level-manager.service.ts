@@ -84,6 +84,20 @@ export class StockLevelManager {
       throw new BadRequestException('Organization context is required');
     }
 
+    // Skip stock operations for products that don't track inventory
+    const productForTracking = await prisma.products.findUnique({
+      where: { id: params.product_id },
+      select: { track_inventory: true },
+    });
+
+    if (!productForTracking || !productForTracking.track_inventory) {
+      return {
+        stock_level: null,
+        transaction: null,
+        previous_quantity: 0,
+      };
+    }
+
     // 1. Obtener o crear stock level
     const stock_level = await this.getOrCreateStockLevel(
       prisma,

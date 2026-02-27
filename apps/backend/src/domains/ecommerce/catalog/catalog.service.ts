@@ -468,6 +468,7 @@ export class CatalogService {
       final_price: this.calculateFinalPrice(product),
       sku: product.sku,
       stock_quantity: product.stock_quantity,
+      track_inventory: product.track_inventory,
       image_url: signed_image_url || null,
       brand: product.brands,
       categories:
@@ -503,6 +504,7 @@ export class CatalogService {
       final_price: this.calculateFinalPrice(product),
       sku: product.sku,
       stock_quantity: product.stock_quantity,
+      track_inventory: product.track_inventory,
       images: signed_images,
       image_url: signed_images[0]?.image_url || null,
       brand: product.brands,

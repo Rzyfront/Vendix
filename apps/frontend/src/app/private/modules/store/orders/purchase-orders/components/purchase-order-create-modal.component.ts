@@ -1,6 +1,7 @@
-import { Component, Input, Output, EventEmitter, OnInit } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, FormArray, Validators, ReactiveFormsModule } from '@angular/forms';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 
 // Shared Components
 import {
@@ -196,6 +197,7 @@ import { InventoryService } from '../../../inventory/services';
   `,
 })
 export class PurchaseOrderCreateModalComponent implements OnInit {
+  private currencyService = inject(CurrencyFormatService);
   @Input() isOpen = false;
   @Input() suppliers: Supplier[] = [];
   @Input() isSubmitting = false;
@@ -292,11 +294,7 @@ export class PurchaseOrderCreateModalComponent implements OnInit {
   }
 
   formatCurrency(value: number): string {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0,
-    }).format(value || 0);
+    return this.currencyService.format(value || 0, 0);
   }
 
   onCancel(): void {

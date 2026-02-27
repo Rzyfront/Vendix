@@ -77,7 +77,10 @@ export class InventoryAnalyticsService {
         id: true,
         name: true,
         sku: true,
-        image_url: true,
+        product_images: {
+          select: { image_url: true },
+          take: 1,
+        },
         stock_quantity: true,
         cost_price: true,
         min_stock_level: true,
@@ -111,7 +114,7 @@ export class InventoryAnalyticsService {
         product_id: product.id,
         product_name: product.name,
         sku: product.sku,
-        image_url: product.image_url,
+        image_url: (product as any).product_images?.[0]?.image_url || null,
         quantity_on_hand: qty,
         quantity_reserved: 0, // TODO: Calculate from stock_reservations
         quantity_available: qty,
@@ -141,7 +144,10 @@ export class InventoryAnalyticsService {
         id: true,
         name: true,
         sku: true,
-        image_url: true,
+        product_images: {
+          select: { image_url: true },
+          take: 1,
+        },
         stock_quantity: true,
         cost_price: true,
         min_stock_level: true,
@@ -167,7 +173,7 @@ export class InventoryAnalyticsService {
           product_id: product.id,
           product_name: product.name,
           sku: product.sku,
-          image_url: product.image_url,
+          image_url: (product as any).product_images?.[0]?.image_url || null,
           quantity_available: qty,
           reorder_point: reorderPoint,
           days_of_stock: null, // TODO: Calculate from sales velocity

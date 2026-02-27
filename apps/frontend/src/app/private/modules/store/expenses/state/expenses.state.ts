@@ -12,7 +12,7 @@ export interface ExpensesState {
     total: number;
     page: number;
     limit: number;
-    total_pages: number;
+    totalPages: number;
   } | null;
 
   // Summary from backend

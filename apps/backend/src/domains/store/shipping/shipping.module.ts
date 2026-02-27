@@ -8,9 +8,10 @@ import { StoreShippingZonesService } from './services/store-shipping-zones.servi
 import { StoreShippingZonesController } from './controllers/store-shipping-zones.controller';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { ResponseModule } from '../../../common/responses/response.module';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
-  imports: [PrismaModule, ResponseModule],
+  imports: [PrismaModule, ResponseModule, SettingsModule],
   controllers: [
     ShippingController,
     StoreShippingMethodsController,

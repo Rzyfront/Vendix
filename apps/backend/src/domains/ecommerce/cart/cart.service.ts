@@ -2,12 +2,14 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { AddToCartDto, UpdateCartItemDto, SyncCartDto } from './dto/cart.dto';
 import { S3Service } from '@common/services/s3.service';
+import { SettingsService } from '../../store/settings/settings.service';
 
 @Injectable()
 export class CartService {
     constructor(
         private readonly prisma: EcommercePrismaService,
         private readonly s3Service: S3Service,
+        private readonly settingsService: SettingsService,
     ) { }
 
     private readonly cartInclude = {
@@ -35,9 +37,10 @@ export class CartService {
         });
 
         if (!cart) {
+            const currency = await this.settingsService.getStoreCurrency();
             cart = await this.prisma.carts.create({
                 data: {
-                    currency: 'USD',
+                    currency,
                     // store_id y user_id se inyectan automáticamente
                 },
                 include: this.cartInclude,
@@ -86,7 +89,7 @@ export class CartService {
             available_stock = variant.stock_quantity || 0;
         }
 
-        if (dto.quantity > available_stock) {
+        if (product.track_inventory && dto.quantity > available_stock) {
             throw new BadRequestException(`Only ${available_stock} units available`);
         }
 
@@ -112,8 +115,9 @@ export class CartService {
         let cart = await this.prisma.carts.findFirst({});
 
         if (!cart) {
+            const currency = await this.settingsService.getStoreCurrency();
             cart = await this.prisma.carts.create({
-                data: { currency: 'USD' },
+                data: { currency },
             });
         }
 
@@ -137,7 +141,7 @@ export class CartService {
 
         if (existing_item) {
             const new_quantity = existing_item.quantity + dto.quantity;
-            if (new_quantity > available_stock) {
+            if (product.track_inventory && new_quantity > available_stock) {
                 throw new BadRequestException(`Only ${available_stock} units available`);
             }
 
@@ -177,9 +181,11 @@ export class CartService {
             throw new NotFoundException('Cart item not found');
         }
 
-        const available_stock = item.product_variant?.stock_quantity ?? item.product.stock_quantity ?? 0;
-        if (dto.quantity > available_stock) {
-            throw new BadRequestException(`Only ${available_stock} units available`);
+        if (item.product.track_inventory) {
+            const available_stock = item.product_variant?.stock_quantity ?? item.product.stock_quantity ?? 0;
+            if (dto.quantity > available_stock) {
+                throw new BadRequestException(`Only ${available_stock} units available`);
+            }
         }
 
         await this.prisma.cart_items.update({

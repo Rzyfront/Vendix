@@ -25,6 +25,7 @@ import {
   DropdownAction,
   FilterValues,
   IconComponent,
+  PaginationComponent,
 } from '../../../../../../shared/components/index';
 
 @Component({
@@ -38,6 +39,7 @@ import {
     ResponsiveDataViewComponent,
     ButtonComponent,
     IconComponent,
+    PaginationComponent,
   ],
   templateUrl: './expenses-list.component.html',
 })

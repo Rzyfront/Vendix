@@ -1,4 +1,4 @@
-import { Component, OnInit, ViewChild, TemplateRef, AfterViewInit, Input, Output, EventEmitter } from '@angular/core';
+import { Component, ViewChild, TemplateRef, AfterViewInit, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
@@ -8,7 +8,7 @@ import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../../
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
-import { loadExpenseCategories, createExpenseCategory, deleteExpenseCategory } from '../../state/actions/expenses.actions';
+import { createExpenseCategory, deleteExpenseCategory } from '../../state/actions/expenses.actions';
 import { selectExpenseCategories, selectExpenseCategoriesLoading } from '../../state/selectors/expenses.selectors';
 import { ExpenseCategory } from '../../interfaces/expense.interface';
 
@@ -105,7 +105,7 @@ import { ExpenseCategory } from '../../interfaces/expense.interface';
     </app-modal>
   `
 })
-export class ExpenseCategoriesComponent implements OnInit, AfterViewInit {
+export class ExpenseCategoriesComponent implements AfterViewInit {
   @Input() isOpen = false;
   @Output() isOpenChange = new EventEmitter<boolean>();
 
@@ -135,10 +135,6 @@ export class ExpenseCategoriesComponent implements OnInit, AfterViewInit {
     });
     this.categories$ = this.store.select(selectExpenseCategories);
     this.loading$ = this.store.select(selectExpenseCategoriesLoading);
-  }
-
-  ngOnInit() {
-    this.store.dispatch(loadExpenseCategories());
   }
 
   ngAfterViewInit() {

@@ -15,6 +15,7 @@ import {
   FilterValues,
   IconComponent,
   ButtonComponent,
+  PaginationComponent,
 } from '../../../../../../../shared/components/index';
 
 // Interfaces
@@ -31,6 +32,7 @@ import { InventoryAdjustment, AdjustmentType } from '../../../interfaces';
     ResponsiveDataViewComponent,
     IconComponent,
     ButtonComponent,
+    PaginationComponent,
   ],
   templateUrl: './adjustment-list.component.html',
 })
@@ -38,9 +40,11 @@ export class AdjustmentListComponent {
   // Inputs
   readonly adjustments = input.required<InventoryAdjustment[]>();
   readonly isLoading = input<boolean>(false);
+  readonly paginationData = input({ page: 1, limit: 10, total: 0, totalPages: 0 });
 
   // Outputs
   readonly search = output<string>();
+  readonly pageChange = output<number>();
   readonly filterChange = output<FilterValues>();
   readonly clearFilters = output<void>();
   readonly actionClick = output<string>();

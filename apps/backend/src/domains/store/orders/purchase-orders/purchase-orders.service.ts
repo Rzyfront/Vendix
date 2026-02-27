@@ -311,7 +311,10 @@ export class PurchaseOrdersService {
     });
   }
 
-  findAll(query: PurchaseOrderQueryDto) {
+  async findAll(query: PurchaseOrderQueryDto) {
+    const { page = 1, limit = 10, sort_by = 'order_date', sort_order = 'desc' } = query;
+    const skip = (page - 1) * limit;
+
     const where: any = {
       supplier_id: query.supplier_id,
       location_id: query.location_id,
@@ -350,22 +353,37 @@ export class PurchaseOrdersService {
       ];
     }
 
-    return this.prisma.purchase_orders.findMany({
-      where,
-      include: {
-        suppliers: true,
-        location: true,
-        purchase_order_items: {
-          include: {
-            products: true,
-            product_variants: true,
-          },
+    const include = {
+      suppliers: true,
+      location: true,
+      purchase_order_items: {
+        include: {
+          products: true,
+          product_variants: true,
         },
       },
-      orderBy: {
-        order_date: 'desc',
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.purchase_orders.findMany({
+        where,
+        include,
+        skip,
+        take: limit,
+        orderBy: { [sort_by]: sort_order },
+      }),
+      this.prisma.purchase_orders.count({ where }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        total_pages: Math.ceil(total / limit),
       },
-    });
+    };
   }
 
   findByStatus(

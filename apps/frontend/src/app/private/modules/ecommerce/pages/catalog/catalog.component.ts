@@ -21,12 +21,13 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { PaginationComponent } from '../../../../../shared/components/pagination/pagination.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 
 @Component({
   selector: 'app-catalog-page',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, ProductCardComponent, ProductQuickViewModalComponent, ShareModalComponent, ButtonComponent, InputComponent, IconComponent],
+  imports: [CommonModule, RouterModule, FormsModule, ProductCardComponent, ProductQuickViewModalComponent, ShareModalComponent, ButtonComponent, InputComponent, IconComponent, PaginationComponent],
   templateUrl: './catalog.component.html',
   styleUrls: ['./catalog.component.scss'],
 })
@@ -326,14 +327,4 @@ export class CatalogComponent implements OnInit, OnDestroy {
     });
   }
 
-  get page_numbers(): number[] {
-    const pages: number[] = [];
-    const start = Math.max(1, this.current_page - 2);
-    const end = Math.min(this.total_pages, this.current_page + 2);
-
-    for (let i = start; i <= end; i++) {
-      pages.push(i);
-    }
-    return pages;
-  }
 }

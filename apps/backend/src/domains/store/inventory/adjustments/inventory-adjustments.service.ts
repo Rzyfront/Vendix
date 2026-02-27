@@ -346,8 +346,8 @@ export class InventoryAdjustmentsService {
         where,
         include: ADJUSTMENT_INCLUDE,
         orderBy: { created_at: 'desc' },
-        skip: query.offset || 0,
-        take: query.limit || 50,
+        skip: Number(query.offset) || 0,
+        take: Number(query.limit) || 50,
       }),
       this.prisma.inventory_adjustments.count({ where }),
     ]);
@@ -355,7 +355,7 @@ export class InventoryAdjustmentsService {
     return {
       adjustments: adjustments.map((a) => this.mapAdjustmentResponse(a)),
       total,
-      hasMore: (query.offset || 0) + adjustments.length < total,
+      hasMore: (Number(query.offset) || 0) + adjustments.length < total,
     };
   }
 

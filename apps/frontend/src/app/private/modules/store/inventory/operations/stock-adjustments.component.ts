@@ -76,11 +76,13 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
       <app-adjustment-list
         [adjustments]="filtered_adjustments"
         [isLoading]="is_loading"
+        [paginationData]="pagination"
         (search)="onSearch($event)"
         (filterChange)="onFilterChange($event)"
         (clearFilters)="onClearFilters()"
         (actionClick)="onActionClick($event)"
         (viewDetail)="viewDetail($event)"
+        (pageChange)="changePage($event)"
       ></app-adjustment-list>
 
       <!-- Instruction Modal -->
@@ -120,6 +122,9 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
     corrections: 0,
   };
 
+  // Pagination
+  pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
+
   // Filters
   current_type: AdjustmentType | 'all' = 'all';
   search_term = '';
@@ -152,15 +157,28 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
 
   loadAdjustments(): void {
     this.is_loading = true;
-    const query =
-      this.current_type !== 'all' ? { type: this.current_type } : {};
+    const query: any = {
+      ...(this.current_type !== 'all' ? { type: this.current_type } : {}),
+      limit: this.pagination.limit,
+      offset: (this.pagination.page - 1) * this.pagination.limit,
+    };
 
     const sub = this.inventoryService.getAdjustments(query).subscribe({
       next: (response) => {
         if (response.data?.adjustments) {
           this.adjustments = response.data.adjustments;
+          this.pagination.total = response.data.total;
+          this.pagination.totalPages = Math.ceil(
+            response.data.total / this.pagination.limit,
+          );
           this.applyFilters();
           this.calculateStats();
+        }
+        // Edge case: página vacía, retroceder
+        if (this.adjustments.length === 0 && this.pagination.page > 1) {
+          this.pagination.page--;
+          this.loadAdjustments();
+          return;
         }
         this.is_loading = false;
       },
@@ -219,13 +237,20 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
   onFilterChange(values: FilterValues): void {
     const typeValue = values['adjustment_type'] as string;
     this.current_type = typeValue ? (typeValue as AdjustmentType) : 'all';
-    this.applyFilters();
+    this.pagination.page = 1;
+    this.loadAdjustments();
   }
 
   onClearFilters(): void {
     this.current_type = 'all';
     this.search_term = '';
-    this.applyFilters();
+    this.pagination.page = 1;
+    this.loadAdjustments();
+  }
+
+  changePage(page: number): void {
+    this.pagination.page = page;
+    this.loadAdjustments();
   }
 
   onActionClick(action: string): void {

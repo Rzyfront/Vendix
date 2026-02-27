@@ -17,7 +17,7 @@ export class CustomersService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly eventEmitter: EventEmitter2,
-  ) {}
+  ) { }
 
   private async generateUniqueUsername(email: string): Promise<string> {
     let baseUsername = email.split('@')[0];
@@ -183,7 +183,7 @@ export class CustomersService {
       this.prisma.users.findMany({
         where,
         skip,
-        take: Number(limit),
+        take: limit,
         orderBy: { created_at: 'desc' },
         include: {
           addresses: {
@@ -199,9 +199,9 @@ export class CustomersService {
       data,
       meta: {
         total,
-        page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(total / Number(limit)),
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
       },
     };
   }

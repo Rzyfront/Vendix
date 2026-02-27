@@ -8,6 +8,7 @@ import { StockTransfersModule } from './stock-transfers/stock-transfers.module';
 import { ReturnOrdersModule } from './return-orders/return-orders.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { OrderFlowModule } from './order-flow/order-flow.module';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { OrderFlowModule } from './order-flow/order-flow.module';
     ReturnOrdersModule,
     forwardRef(() => PaymentsModule),
     OrderFlowModule,
+    SettingsModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService],

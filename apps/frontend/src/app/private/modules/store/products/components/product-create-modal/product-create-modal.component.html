@@ -16,31 +16,10 @@
           [error]="getErrorMessage('name')" [required]="true"></app-input>
       </div>
 
-      <!-- Price, Stock & SKU Row -->
-      <div class="grid grid-cols-3 gap-2 md:gap-4">
+      <!-- Price & SKU Row -->
+      <div class="grid grid-cols-2 gap-2 md:gap-4">
         <app-input label="Precio Base" type="number" formControlName="base_price" [error]="getErrorMessage('base_price')"
           prefix="$" [required]="true" placeholder="0.00"></app-input>
-
-        <!-- Stock Field: Different behavior for create vs edit mode -->
-        <div *ngIf="!isEditMode">
-          <app-input label="Cantidad/Stock" type="number" formControlName="stock_quantity"
-            [error]="getErrorMessage('stock_quantity')" placeholder="0"
-            tooltipText="Stock inicial del producto" [required]="true"></app-input>
-        </div>
-
-        <div *ngIf="isEditMode" class="relative">
-          <div (click)="onStockAdjustmentClick()" class="cursor-pointer group" title="Click para ajustar stock">
-            <app-input label="Stock" type="number" formControlName="stock_quantity"
-              [disabled]="true" placeholder="Click para ajustar stock" class="opacity-75 cursor-pointer"
-              [suffixIcon]="true">
-              <ng-container slot="suffix-icon">
-                <svg class="h-5 w-5 text-gray-400 group-hover:text-primary-600 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                </svg>
-              </ng-container>
-            </app-input>
-          </div>
-        </div>
 
         <div>
           <app-input label="SKU" formControlName="sku" placeholder="Ej. CAM-001"
@@ -48,6 +27,40 @@
           <small class="text-xs text-gray-400 mt-0.5 block">Opcional</small>
         </div>
       </div>
+
+      <!-- Track Inventory Toggle -->
+      <app-setting-toggle formControlName="track_inventory"
+        label="Controlar inventario"
+        [description]="productForm.get('track_inventory')?.value
+          ? 'Se controla el stock de este producto'
+          : 'Producto bajo pedido — siempre disponible para venta'">
+      </app-setting-toggle>
+
+      <!-- Stock Field: Only shown when track_inventory is enabled -->
+      @if (productForm.get('track_inventory')?.value) {
+        <div class="grid grid-cols-1 gap-2 md:gap-4">
+          <!-- Stock Field: Different behavior for create vs edit mode -->
+          <div *ngIf="!isEditMode">
+            <app-input label="Cantidad/Stock" type="number" formControlName="stock_quantity"
+              [error]="getErrorMessage('stock_quantity')" placeholder="0"
+              tooltipText="Stock inicial del producto" [required]="true"></app-input>
+          </div>
+
+          <div *ngIf="isEditMode" class="relative">
+            <div (click)="onStockAdjustmentClick()" class="cursor-pointer group" title="Click para ajustar stock">
+              <app-input label="Stock" type="number" formControlName="stock_quantity"
+                [disabled]="true" placeholder="Click para ajustar stock" class="opacity-75 cursor-pointer"
+                [suffixIcon]="true">
+                <ng-container slot="suffix-icon">
+                  <svg class="h-5 w-5 text-gray-400 group-hover:text-primary-600 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                  </svg>
+                </ng-container>
+              </app-input>
+            </div>
+          </div>
+        </div>
+      }
 
       <!-- Category & Brand Row -->
       <div class="grid grid-cols-2 gap-2 md:gap-4">

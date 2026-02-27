@@ -10,6 +10,7 @@ import { SalesAnalyticsService } from './services/sales-analytics.service';
 import { InventoryAnalyticsService } from './services/inventory-analytics.service';
 import { ProductsAnalyticsService } from './services/products-analytics.service';
 import { OverviewAnalyticsService } from './services/overview-analytics.service';
+import { CustomersAnalyticsService } from './services/customers-analytics.service';
 import { AnalyticsQueryDto, SalesAnalyticsQueryDto, InventoryAnalyticsQueryDto, ProductsAnalyticsQueryDto } from './dto/analytics-query.dto';
 import { ResponseService } from '../../../common/responses/response.service';
 
@@ -20,6 +21,7 @@ export class AnalyticsController {
     private readonly inventory_analytics_service: InventoryAnalyticsService,
     private readonly products_analytics_service: ProductsAnalyticsService,
     private readonly overview_analytics_service: OverviewAnalyticsService,
+    private readonly customers_analytics_service: CustomersAnalyticsService,
     private readonly response_service: ResponseService,
   ) {}
 
@@ -274,6 +276,59 @@ export class AnalyticsController {
     });
 
     return new StreamableFile(Buffer.from(csv, 'utf-8'));
+  }
+
+  // ==================== CUSTOMERS ANALYTICS ====================
+
+  @Get('customers/summary')
+  async getCustomersSummary(@Query() query: AnalyticsQueryDto) {
+    const result = await this.customers_analytics_service.getCustomersSummary(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('customers/trends')
+  async getCustomersTrends(@Query() query: AnalyticsQueryDto) {
+    const result = await this.customers_analytics_service.getCustomersTrends(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('customers/top')
+  async getTopCustomers(@Query() query: AnalyticsQueryDto) {
+    const result = await this.customers_analytics_service.getTopCustomers(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('customers/export')
+  async exportCustomersAnalytics(
+    @Query() query: AnalyticsQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const rows = await this.customers_analytics_service.getCustomersForExport(query);
+
+    const data = rows.map(r => ({
+      'Nombre': r.name,
+      'Email': r.email,
+      'Teléfono': r.phone,
+      'Total Órdenes': r.total_orders,
+      'Total Gastado': r.total_spent,
+      'Última Orden': r.last_order_date,
+      'Fecha Registro': r.registration_date,
+      'Estado': r.state,
+    }));
+
+    const XLSX = await import('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const filename = `clientes_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+
+    return new StreamableFile(buffer);
   }
 
   // ==================== HELPERS ====================

@@ -15,7 +15,6 @@ import { Organization } from '../../../../core/models/organization.model';
 // Import new components
 import {
   OrganizationStatsComponent,
-  OrganizationPaginationComponent,
   OrganizationEmptyStateComponent,
   OrganizationCreateModalComponent,
   OrganizationEditModalComponent,
@@ -29,6 +28,7 @@ import {
   ButtonComponent,
   DialogService,
   ToastService,
+  PaginationComponent,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
   TableColumn,
@@ -47,13 +47,13 @@ import './organizations.component.css';
     FormsModule,
     ReactiveFormsModule,
     OrganizationStatsComponent,
-    OrganizationPaginationComponent,
     OrganizationEmptyStateComponent,
     OrganizationCreateModalComponent,
     OrganizationEditModalComponent,
     InputsearchComponent,
     IconComponent,
     ResponsiveDataViewComponent,
+    PaginationComponent,
     ButtonComponent,
   ],
   providers: [OrganizationsService],
@@ -149,11 +149,14 @@ import './organizations.component.css';
 
           <!-- Pagination -->
           <div class="mt-6 flex justify-center">
-            <app-organization-pagination
-              [pagination]="pagination"
+            <app-pagination
+              [currentPage]="pagination.page"
+              [totalPages]="pagination.totalPages"
+              [total]="pagination.total"
+              [limit]="pagination.limit"
+              infoStyle="page"
               (pageChange)="changePage($event)"
-            >
-            </app-organization-pagination>
+            />
           </div>
         </div>
       </div>

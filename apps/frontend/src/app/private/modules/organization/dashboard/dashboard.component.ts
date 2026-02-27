@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   ChartComponent,
@@ -8,6 +8,7 @@ import {
 } from '../../../../shared/components';
 import { EChartsOption } from 'echarts';
 import { OrganizationDashboardService } from './services/organization-dashboard.service';
+import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
 import { ActivatedRoute } from '@angular/router';
 import { GlobalFacade } from '../../../../core/store/global.facade';
 import { Subject } from 'rxjs';
@@ -21,6 +22,7 @@ import { takeUntil } from 'rxjs/operators';
   styleUrls: ['./dashboard.component.scss'],
 })
 export class DashboardComponent implements OnInit, OnDestroy {
+  private currencyService = inject(CurrencyFormatService);
   private destroy$ = new Subject<void>();
   isLoading = false;
   organizationId: string = '';
@@ -46,7 +48,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   ) { }
 
   ngOnInit(): void {
-    
+    this.currencyService.loadCurrency();
 
     // Try to get organizationId synchronously first
     const context = this.globalFacade.getUserContext();
@@ -134,12 +136,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   private formatCurrency(value: number): string {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value || 0);
+    return this.currencyService.format(value || 0, 0);
   }
 
   // Helper methods for template
@@ -205,7 +202,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
           {
             type: 'value',
             axisLabel: {
-              formatter: (value: any) => '$' + value / 1000 + 'K'
+              formatter: (value: any) => this.currencyService.formatChartAxis(value)
             }
           }
         ],

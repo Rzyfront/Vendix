@@ -47,8 +47,8 @@ export interface UpdateSupplierDto extends Partial<CreateSupplierDto> {}
 export interface SupplierQueryDto {
   search?: string;
   is_active?: boolean;
+  page?: number;
   limit?: number;
-  offset?: number;
 }
 
 // ============================================================
@@ -213,8 +213,9 @@ export interface PurchaseOrderQueryDto {
   location_id?: number;
   start_date?: string;
   end_date?: string;
+  search?: string;
+  page?: number;
   limit?: number;
-  offset?: number;
 }
 
 // ============================================================

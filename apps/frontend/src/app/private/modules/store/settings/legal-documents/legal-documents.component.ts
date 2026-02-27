@@ -20,6 +20,7 @@ import {
 import {
     ResponsiveDataViewComponent,
     ItemListCardConfig,
+    IconComponent,
 } from '../../../../../shared/components/index';
 
 @Component({
@@ -34,25 +35,26 @@ import {
         StatsComponent,
         InputsearchComponent,
         ResponsiveDataViewComponent,
+        IconComponent,
     ],
     template: `
-    <div class="flex flex-col gap-6 p-6">
-      <!-- Stats Grid -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="md:space-y-4">
+      <!-- Stats -->
+      <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Total Documentos"
           [value]="totalDocuments()"
           iconName="file-text"
-          iconBgColor="bg-gray-100"
-          iconColor="text-gray-600"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-500"
         ></app-stats>
 
         <app-stats
           title="Activos"
           [value]="activeDocumentsCount()"
           iconName="check-circle"
-          iconBgColor="bg-green-100"
-          iconColor="text-green-600"
+          iconBgColor="bg-emerald-100"
+          iconColor="text-emerald-500"
         ></app-stats>
 
         <app-stats
@@ -60,7 +62,7 @@ import {
           [value]="documentTypesCount()"
           iconName="layers"
           iconBgColor="bg-blue-100"
-          iconColor="text-blue-600"
+          iconColor="text-blue-500"
         ></app-stats>
 
         <app-stats
@@ -68,51 +70,59 @@ import {
           [value]="lastUpdateFormatted()"
           iconName="clock"
           iconBgColor="bg-purple-100"
-          iconColor="text-purple-600"
+          iconColor="text-purple-500"
         ></app-stats>
       </div>
 
-      <!-- Main Content Card -->
-      <div class="flex flex-col bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
-        <div class="p-4 md:px-6 md:py-4 border-b border-border flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between bg-surface">
-          <div class="flex-1 min-w-0">
-            <h3 class="text-lg font-semibold text-text-primary">
-              Documentos Legales de la Tienda
-            </h3>
-            <p class="hidden sm:block text-xs text-text-secondary mt-0.5">
-              Administra tus propios términos y condiciones. Si no configuras ninguno, se usarán los del sistema.
-            </p>
-          </div>
-
-          <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
-            <div class="w-full sm:w-60">
+      <!-- Main Card (desktop only styling) -->
+      <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border md:min-h-[600px] md:overflow-hidden">
+        <!-- Search Section (sticky mobile) -->
+        <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
+          <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
+            <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
+              Documentos ({{ totalDocuments() }})
+            </h2>
+            <div class="flex items-center gap-2 w-full md:w-auto">
               <app-inputsearch
-                placeholder="Buscar..."
+                class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                size="sm"
+                placeholder="Buscar documentos..."
                 [debounceTime]="300"
                 (searchChange)="onSearch($event)"
-                size="sm"
-                fullWidth="true"
               ></app-inputsearch>
-            </div>
-
-            <div class="flex gap-2 items-center sm:ml-auto">
               <app-button
-                variant="primary"
+                variant="outline"
                 size="sm"
-                iconName="plus"
+                customClasses="w-9 h-9 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
                 (clicked)="openCreateModal()"
+                title="Nuevo Documento"
               >
-                Nuevo Documento
+                <app-icon slot="icon" name="plus" [size]="18"></app-icon>
               </app-button>
             </div>
           </div>
         </div>
 
-        <div class="relative min-h-[400px] p-2 md:p-4">
-          <div *ngIf="loading()" class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
-            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-          </div>
+        <!-- Loading -->
+        <div *ngIf="loading()" class="p-4 md:p-6 text-center">
+          <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <p class="mt-2 text-text-secondary">Cargando documentos...</p>
+        </div>
 
+        <!-- Empty State -->
+        <div *ngIf="!loading() && filteredDocuments().length === 0" class="p-8 md:p-16 text-center">
+          <div class="flex justify-center mb-4">
+            <div class="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center">
+              <app-icon name="file-text" [size]="28" class="text-gray-400"></app-icon>
+            </div>
+          </div>
+          <h3 class="text-lg font-medium text-text-primary">{{ searchQuery() ? 'Sin resultados' : 'Sin documentos' }}</h3>
+          <p class="text-text-secondary mt-1">{{ searchQuery() ? 'Intenta con otro término de búsqueda' : 'Crea tu primer documento legal' }}</p>
+          <app-button *ngIf="searchQuery()" variant="outline" size="sm" class="mt-4" (clicked)="onSearch('')">Limpiar búsqueda</app-button>
+        </div>
+
+        <!-- Data -->
+        <div *ngIf="!loading() && filteredDocuments().length > 0" class="px-2 pb-2 pt-3 md:p-4">
           <app-responsive-data-view
             [data]="filteredDocuments()"
             [columns]="columns"

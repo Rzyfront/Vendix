@@ -60,7 +60,6 @@ export class PaypalProcessor extends BasePaymentProcessor {
           id: refundId,
           status: 'COMPLETED',
           amount: {
-            currency_code: 'USD',
             value: amount ? amount.toFixed(2) : '0.00',
           },
         },

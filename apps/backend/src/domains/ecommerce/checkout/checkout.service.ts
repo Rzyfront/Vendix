@@ -8,6 +8,7 @@ import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { payment_processing_mode_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { SettingsService } from '../../store/settings/settings.service';
 
 @Injectable()
 export class CheckoutService {
@@ -17,6 +18,7 @@ export class CheckoutService {
     private readonly cart_service: CartService,
     private readonly taxes_service: TaxesService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly settingsService: SettingsService,
   ) { }
 
   async getPaymentMethods(shippingMethodType?: string) {
@@ -113,13 +115,15 @@ export class CheckoutService {
         );
       }
 
-      const available = item.product_variant
-        ? item.product_variant.stock_quantity ?? 0
-        : item.product.stock_quantity ?? 0;
-      if (item.quantity > available) {
-        throw new BadRequestException(
-          `Insufficient stock for ${item.product.name}. Only ${available} available.`,
-        );
+      if (item.product.track_inventory) {
+        const available = item.product_variant
+          ? item.product_variant.stock_quantity ?? 0
+          : item.product.stock_quantity ?? 0;
+        if (item.quantity > available) {
+          throw new BadRequestException(
+            `Insufficient stock for ${item.product.name}. Only ${available} available.`,
+          );
+        }
       }
     }
 
@@ -342,6 +346,8 @@ export class CheckoutService {
     });
 
     for (const item of cart.cart_items) {
+      if (!item.product.track_inventory) continue;
+
       if (item.product_variant_id) {
         await this.prisma.product_variants.update({
           where: { id: item.product_variant_id },
@@ -435,7 +441,7 @@ export class CheckoutService {
       product: any;
       product_variant: any;
     }>;
-    let cart_currency = 'USD';
+    let cart_currency = await this.settingsService.getStoreCurrency();
 
     // Helper: build cart_items from DTO items (localStorage)
     const buildItemsFromDto = async () => {
@@ -510,13 +516,15 @@ export class CheckoutService {
         );
       }
 
-      const available = item.product_variant
-        ? item.product_variant.stock_quantity ?? 0
-        : item.product.stock_quantity ?? 0;
-      if (item.quantity > available) {
-        throw new BadRequestException(
-          `Insufficient stock for ${item.product.name}. Only ${available} available.`,
-        );
+      if (item.product.track_inventory) {
+        const available = item.product_variant
+          ? item.product_variant.stock_quantity ?? 0
+          : item.product.stock_quantity ?? 0;
+        if (item.quantity > available) {
+          throw new BadRequestException(
+            `Insufficient stock for ${item.product.name}. Only ${available} available.`,
+          );
+        }
       }
     }
 
@@ -630,6 +638,8 @@ export class CheckoutService {
     });
 
     for (const item of cart_items) {
+      if (!item.product.track_inventory) continue;
+
       if (item.product_variant_id) {
         await this.prisma.product_variants.update({
           where: { id: item.product_variant_id },

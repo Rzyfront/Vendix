@@ -156,6 +156,11 @@ const APP_MODULES = {
           label: 'Proveedores',
           description: 'Directorio de proveedores',
         },
+        {
+          key: 'inventory_movements',
+          label: 'Movimientos',
+          description: 'Historial de movimientos de inventario',
+        },
       ],
     },
 

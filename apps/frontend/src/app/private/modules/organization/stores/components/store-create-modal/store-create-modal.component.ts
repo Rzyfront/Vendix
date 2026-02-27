@@ -359,10 +359,10 @@ export class StoreCreateModalComponent implements OnInit, OnDestroy {
     });
   }
 
-  private loadOptions(): void {
+  private async loadOptions(): Promise<void> {
     this.storeTypeOptions = this.storesService.getStoreTypeOptions();
     this.timezoneOptions = this.storesService.getTimezoneOptions();
-    this.currencyOptions = this.storesService.getCurrencyOptions();
+    this.currencyOptions = await this.storesService.getCurrencyOptions();
   }
 
   private setupAutoSlugGeneration(): void {

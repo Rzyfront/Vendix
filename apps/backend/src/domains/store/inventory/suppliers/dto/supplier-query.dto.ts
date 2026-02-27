@@ -1,4 +1,5 @@
 import { IsOptional, IsNumber, IsString, IsBoolean } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class SupplierQueryDto {
@@ -33,11 +34,13 @@ export class SupplierQueryDto {
   phone?: string;
 
   @ApiProperty({ description: 'Page number', required: false })
+  @Type(() => Number)
   @IsNumber()
   @IsOptional()
   page?: number = 1;
 
   @ApiProperty({ description: 'Items per page', required: false })
+  @Type(() => Number)
   @IsNumber()
   @IsOptional()
   limit?: number = 10;

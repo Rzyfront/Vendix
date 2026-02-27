@@ -13,6 +13,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 
 import { StoreSettings, ApiResponse } from '../../../../../../core/models/store-settings.interface';
 
@@ -314,6 +315,7 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
   ],
 })
 export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnChanges {
+  private currencyFormatService = inject(CurrencyFormatService);
   @Input() isOpen: boolean = false;
   @Input() storeId: number | null = null;
   @Input() storeName: string = '';
@@ -349,7 +351,7 @@ export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnCh
   private defaultSettings: StoreSettings = {
     general: {
       timezone: 'America/Bogota',
-      currency: 'COP',
+      currency: this.currencyFormatService.currencyCode() || 'COP',
       language: 'es',
       tax_included: false,
     },

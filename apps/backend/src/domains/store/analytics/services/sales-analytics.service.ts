@@ -156,11 +156,14 @@ export class SalesAnalyticsService {
         id: true,
         name: true,
         sku: true,
-        image_url: true,
+        product_images: {
+          select: { image_url: true },
+          take: 1,
+        },
         base_price: true,
         cost_price: true,
       },
-    }) as { id: number; name: string; sku: string | null; image_url: string | null; base_price: any; cost_price: any }[];
+    }) as { id: number; name: string; sku: string | null; product_images: { image_url: string }[]; base_price: any; cost_price: any }[];
 
     const productMap = new Map(products.map((p) => [p.id, p]));
 
@@ -178,7 +181,7 @@ export class SalesAnalyticsService {
         product_id: r.product_id,
         product_name: product?.name || 'Unknown',
         sku: product?.sku || '',
-        image_url: product?.image_url,
+        image_url: product?.product_images?.[0]?.image_url || null,
         units_sold: units,
         revenue: revenue,
         average_price: avgPrice,

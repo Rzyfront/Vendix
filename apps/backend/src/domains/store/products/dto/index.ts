@@ -347,6 +347,11 @@ export class UpdateProductDto {
   stock_quantity?: number;
 
   @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  track_inventory?: boolean;
+
+  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El precio no puede ser negativo' })

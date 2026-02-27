@@ -41,6 +41,12 @@ import {
   OverviewTrend,
   OverviewAnalyticsQueryDto,
 } from '../interfaces/overview-analytics.interface';
+import {
+  CustomersSummary,
+  CustomerTrend,
+  TopCustomer,
+  CustomersAnalyticsQueryDto,
+} from '../interfaces/customers-analytics.interface';
 import { PaginatedResponse } from '../interfaces/analytics.interface';
 
 // Cache entry interface
@@ -349,6 +355,44 @@ export class AnalyticsService {
 
   exportInventoryAnalytics(query: InventoryAnalyticsQueryDto = {}): Observable<Blob> {
     return this.http.get(this.getApiUrl('inventory/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
+  // ==================== CUSTOMERS ANALYTICS ====================
+
+  getCustomersSummary(
+    query: CustomersAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<CustomersSummary>> {
+    const cacheKey = `customers-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<CustomersSummary>>(this.getApiUrl('customers/summary'), {
+        params: this.buildParams(query),
+      }),
+    );
+  }
+
+  getCustomersTrends(
+    query: CustomersAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<CustomerTrend[]>> {
+    return this.http.get<ApiResponse<CustomerTrend[]>>(
+      this.getApiUrl('customers/trends'),
+      { params: this.buildParams(query) },
+    );
+  }
+
+  getTopCustomers(
+    query: CustomersAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<TopCustomer[]>> {
+    return this.http.get<ApiResponse<TopCustomer[]>>(
+      this.getApiUrl('customers/top'),
+      { params: this.buildParams(query) },
+    );
+  }
+
+  exportCustomersAnalytics(query: CustomersAnalyticsQueryDto = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('customers/export'), {
       params: this.buildParams(query),
       responseType: 'blob',
     });

@@ -206,6 +206,7 @@ export class ProductCreatePageComponent implements OnInit {
       available_for_ecommerce: [true],
       sku: ['', [Validators.maxLength(100)]],
       stock_quantity: [0, [Validators.min(0)]],
+      track_inventory: [true],
       category_ids: [[] as number[]],
       brand_id: [null],
       tax_category_ids: [[] as number[]],
@@ -318,6 +319,7 @@ export class ProductCreatePageComponent implements OnInit {
       available_for_ecommerce: product.available_for_ecommerce !== false,
       sku: product.sku,
       stock_quantity: product.stock_quantity,
+      track_inventory: product.track_inventory !== false,
       category_ids: categoryIds,
       brand_id: product.brand?.id ?? product.brand_id,
       tax_category_ids: taxCategoryIds,
@@ -949,7 +951,8 @@ export class ProductCreatePageComponent implements OnInit {
       sale_price: Number(formValue.sale_price),
       available_for_ecommerce: !!formValue.available_for_ecommerce,
       sku: formValue.sku || undefined,
-      stock_quantity: Number(formValue.stock_quantity),
+      track_inventory: !!formValue.track_inventory,
+      stock_quantity: formValue.track_inventory ? Number(formValue.stock_quantity) : undefined,
       category_ids: formValue.category_ids || [],
       tax_category_ids: formValue.tax_category_ids || [],
       brand_id: formValue.brand_id ? Number(formValue.brand_id) : null,
@@ -979,14 +982,16 @@ export class ProductCreatePageComponent implements OnInit {
         profit_margin: Number(v.profit_margin),
         is_on_sale: !!v.is_on_sale,
         sale_price: Number(v.sale_price),
-        stock_quantity: Number(v.stock),
+        stock_quantity: formValue.track_inventory ? Number(v.stock) : undefined,
         attributes: v.attributes,
         variant_image_url: v.image_url?.startsWith('data:') ? v.image_url : undefined,
       }));
 
       // Set base stock_quantity to the sum of variant stocks for immediate UI consistency
       // Backend syncProductStock() handles the real sync
-      productData.stock_quantity = this.totalVariantStock;
+      if (formValue.track_inventory) {
+        productData.stock_quantity = this.totalVariantStock;
+      }
     }
 
     const request$ =

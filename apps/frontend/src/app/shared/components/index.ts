@@ -39,6 +39,7 @@ export { OptionsDropdownComponent } from './options-dropdown';
 export { TimelineComponent } from './timeline/timeline.component';
 export { TourModalComponent } from './tour/tour-modal/tour-modal.component';
 export { ImageLightboxComponent } from './image-lightbox/image-lightbox.component';
+export { PaginationComponent } from './pagination/pagination.component';
 
 // Services
 export { TourService } from './tour/services/tour.service';
@@ -76,6 +77,7 @@ export type {
   MultiSelectorSize,
 } from './multi-selector/multi-selector.component';
 export type { QuantityControlSize } from './quantity-control/quantity-control.component';
+export type { PaginationInfoStyle } from './pagination/pagination.component';
 export type {
   ExtendedChartType,
   ChartTheme,

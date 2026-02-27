@@ -17,6 +17,13 @@ export class InventoryIntegrationService {
     orderId: number,
     productVariantId?: number,
   ) {
+    // Skip reservation for products that don't track inventory
+    const product = await this.prisma.products.findUnique({
+      where: { id: productId },
+      select: { track_inventory: true },
+    });
+    if (!product?.track_inventory) return null;
+
     return this.prisma.$transaction(async (tx) => {
       // Check stock availability
       const stockLevel = await tx.stock_levels.findUnique({

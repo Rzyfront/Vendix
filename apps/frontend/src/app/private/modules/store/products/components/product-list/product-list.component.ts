@@ -24,6 +24,7 @@ import {
   FilterValues,
   ButtonComponent,
   IconComponent,
+  PaginationComponent,
 } from '../../../../../../shared/components/index';
 
 import { ProductEmptyStateComponent } from '../product-empty-state.component';
@@ -45,6 +46,7 @@ import './product-list.component.css';
     ResponsiveDataViewComponent,
     ButtonComponent,
     IconComponent,
+    PaginationComponent,
   ],
   templateUrl: './product-list.component.html',
 })
@@ -68,6 +70,8 @@ export class ProductListComponent implements OnChanges {
     column: string;
     direction: 'asc' | 'desc' | null;
   }>();
+  @Input() paginationData = { page: 1, limit: 10, total: 0, totalPages: 0 };
+  @Output() pageChange = new EventEmitter<number>();
 
   searchTerm = '';
   selectedState = '';
@@ -155,10 +159,11 @@ export class ProductListComponent implements OnChanges {
       key: 'stock_quantity',
       label: 'Stock',
       sortable: true,
-      width: '80px',
+      width: '100px',
       align: 'center',
       priority: 1,
-      transform: (value: number) => value?.toString() || '0',
+      transform: (value: number, item?: any) =>
+        item?.track_inventory === false ? 'Bajo pedido' : (value?.toString() || '0'),
     },
     {
       key: 'state',
@@ -226,7 +231,8 @@ export class ProductListComponent implements OnChanges {
       {
         key: 'stock_quantity',
         label: 'Stock',
-        transform: (val: any) => val?.toString() || '0'
+        transform: (val: any, item?: any) =>
+          item?.track_inventory === false ? 'Bajo pedido' : (val?.toString() || '0'),
       }
     ]
   };

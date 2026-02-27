@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { Store } from '@ngrx/store';
 import { of } from 'rxjs';
-import { map, switchMap, catchError, withLatestFrom } from 'rxjs/operators';
+import { map, switchMap, exhaustMap, catchError, withLatestFrom } from 'rxjs/operators';
 import { ExpensesService } from '../../services/expenses.service';
 import * as ExpensesActions from '../actions/expenses.actions';
 import { selectExpensesState } from '../selectors/expenses.selectors';
@@ -216,7 +216,7 @@ export class ExpensesEffects {
   loadCategories$ = createEffect(() =>
     this.actions$.pipe(
       ofType(ExpensesActions.loadExpenseCategories),
-      switchMap(() =>
+      exhaustMap(() =>
         this.expensesService.getExpenseCategories().pipe(
           map((response) =>
             ExpensesActions.loadExpenseCategoriesSuccess({ categories: response.data })

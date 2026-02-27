@@ -8,6 +8,7 @@ import { InputComponent } from '../../../../../../shared/components/input/input.
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 
 import { PreBulkData } from '../interfaces/pop-cart.interface';
+import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 
 /**
  * POP Pre-Bulk Product Modal
@@ -23,6 +24,7 @@ import { PreBulkData } from '../interfaces/pop-cart.interface';
     ButtonComponent,
     InputComponent,
     TextareaComponent,
+    CurrencyPipe,
   ],
   template: `
     <app-modal
@@ -102,7 +104,7 @@ import { PreBulkData } from '../interfaces/pop-cart.interface';
           <div class="flex justify-between items-center">
             <span class="text-sm text-[var(--color-text-secondary)]">Total estimado:</span>
             <span class="text-lg font-semibold text-[var(--color-text-primary)]">
-              {{ calculatedTotal | currency:'COP':'symbol-narrow':'1.0-0' }}
+              {{ calculatedTotal | currency: 0 }}
             </span>
           </div>
         </div>

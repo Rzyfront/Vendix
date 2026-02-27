@@ -113,7 +113,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
                 <app-quantity-control
                   [value]="item.quantity"
                   [min]="1"
-                  [max]="item.product.stock"
+                  [max]="item.product.track_inventory !== false ? item.product.stock : 999"
                   [editable]="true"
                   [size]="'sm'"
                   (valueChange)="onQuantityChange(item.id, $event)"

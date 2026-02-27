@@ -9,6 +9,8 @@ import { productsAnalyticsReducer } from './pages/products/state/products-analyt
 import { ProductsAnalyticsEffects } from './pages/products/state/products-analytics.effects';
 import { inventoryOverviewReducer } from './pages/inventory/overview/state/inventory-overview.reducer';
 import { InventoryOverviewEffects } from './pages/inventory/overview/state/inventory-overview.effects';
+import { customersAnalyticsReducer } from './pages/customers/state/customers-analytics.reducer';
+import { CustomersAnalyticsEffects } from './pages/customers/state/customers-analytics.effects';
 
 export const analyticsRoutes: Routes = [
   {
@@ -210,6 +212,10 @@ export const analyticsRoutes: Routes = [
       // Customers Analytics
       {
         path: 'customers',
+        providers: [
+          provideState({ name: 'customersAnalytics', reducer: customersAnalyticsReducer }),
+          provideEffects(CustomersAnalyticsEffects),
+        ],
         children: [
           {
             path: '',

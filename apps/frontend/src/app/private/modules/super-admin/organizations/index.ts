@@ -4,7 +4,6 @@ export { OrganizationCreateModalComponent } from './components/organization-crea
 export { OrganizationEditModalComponent } from './components/organization-edit-modal.component';
 export { OrganizationCardComponent } from './components/organization-card.component';
 export { OrganizationStatsComponent } from './components/organization-stats.component';
-export { OrganizationPaginationComponent } from './components/organization-pagination.component';
 export { OrganizationEmptyStateComponent } from './components/organization-empty-state.component';
 
 // Services

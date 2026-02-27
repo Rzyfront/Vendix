@@ -24,6 +24,7 @@ import {
   SelectorComponent,
   SelectorOption,
   DialogService,
+  SettingToggleComponent,
 } from '../../../../../shared/components';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
@@ -45,6 +46,7 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
     InputComponent,
     IconComponent,
     SelectorComponent,
+    SettingToggleComponent,
     CategoryQuickCreateComponent,
     BrandQuickCreateComponent,
   ],
@@ -117,6 +119,7 @@ export class ProductCreateModalComponent implements OnChanges {
       description: [''],
       base_price: [null, [Validators.required, Validators.min(0)]],
       stock_quantity: [0, [Validators.required, Validators.min(0)]],
+      track_inventory: [true],
       sku: [''],
       category_id: [null],
       brand_id: [null],
@@ -128,6 +131,7 @@ export class ProductCreateModalComponent implements OnChanges {
     this.productForm.reset({
       base_price: 0,
       stock_quantity: 0,
+      track_inventory: true,
       state: ProductState.ACTIVE,
     });
   }
@@ -150,6 +154,7 @@ export class ProductCreateModalComponent implements OnChanges {
       name: this.product.name,
       base_price: this.product.base_price,
       stock_quantity: this.product.stock_quantity || 0,
+      track_inventory: this.product.track_inventory !== false,
       // Try to get category from new structure or legacy if exists
       category_id:
         (this.product as any).category_ids?.[0] ||
@@ -230,7 +235,8 @@ export class ProductCreateModalComponent implements OnChanges {
     const dto: any = {
       name: val.name,
       base_price: val.base_price,
-      stock_quantity: val.stock_quantity,
+      track_inventory: !!val.track_inventory,
+      stock_quantity: val.track_inventory ? val.stock_quantity : null,
       sku: val.sku || undefined,
       // Map single category to array for backend compat
       category_ids: val.category_id ? [Number(val.category_id)] : [],

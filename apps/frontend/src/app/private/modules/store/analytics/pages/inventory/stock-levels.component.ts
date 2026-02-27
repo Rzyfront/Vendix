@@ -13,6 +13,7 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 import { AnalyticsService } from '../../services/analytics.service';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { InventorySummary, StockLevelReport, InventoryAnalyticsQueryDto } from '../../interfaces/inventory-analytics.interface';
 
 @Component({
@@ -136,6 +137,7 @@ import { InventorySummary, StockLevelReport, InventoryAnalyticsQueryDto } from '
 export class StockLevelsComponent implements OnInit, OnDestroy {
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
+  private currencyService = inject(CurrencyFormatService);
   private destroy$ = new Subject<void>();
 
   loading = signal(true);
@@ -252,6 +254,7 @@ export class StockLevelsComponent implements OnInit, OnDestroy {
   };
 
   ngOnInit(): void {
+    this.currencyService.loadCurrency();
     this.loadSummary();
     this.loadData();
   }
@@ -328,10 +331,6 @@ export class StockLevelsComponent implements OnInit, OnDestroy {
   }
 
   formatCurrency(value: number): string {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0,
-    }).format(value);
+    return this.currencyService.format(value, 0);
   }
 }

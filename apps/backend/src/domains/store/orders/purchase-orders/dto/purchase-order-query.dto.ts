@@ -5,6 +5,7 @@ import {
   IsEnum,
   IsDateString,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 import { purchase_order_status_enum } from '@prisma/client';
 
@@ -62,4 +63,26 @@ export class PurchaseOrderQueryDto {
   @IsNumber()
   @IsOptional()
   max_total?: number;
+
+  @ApiProperty({ description: 'Page number', required: false, default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  page?: number = 1;
+
+  @ApiProperty({ description: 'Items per page', required: false, default: 10 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  limit?: number = 10;
+
+  @ApiProperty({ description: 'Sort field', required: false, default: 'order_date' })
+  @IsOptional()
+  @IsString()
+  sort_by?: string = 'order_date';
+
+  @ApiProperty({ description: 'Sort direction', required: false, default: 'desc' })
+  @IsOptional()
+  @IsString()
+  sort_order?: 'asc' | 'desc' = 'desc';
 }

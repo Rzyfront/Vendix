@@ -334,6 +334,7 @@ export async function seedUsers(
           inventory_adjustments: true,
           inventory_locations: true,
           inventory_suppliers: true,
+          inventory_movements: true,
           // Customers - ALL enabled
           customers: true,
           customers_all: true,
@@ -388,6 +389,7 @@ export async function seedUsers(
           inventory_adjustments: true,
           inventory_locations: true,
           inventory_suppliers: true,
+          inventory_movements: true,
           // Customers - ALL enabled
           customers: true,
           customers_all: true,
@@ -429,6 +431,7 @@ export async function seedUsers(
           inventory_adjustments: true,
           inventory_locations: true,
           inventory_suppliers: true,
+          inventory_movements: true,
           // Customers - ALL enabled
           customers: true,
           customers_all: true,
