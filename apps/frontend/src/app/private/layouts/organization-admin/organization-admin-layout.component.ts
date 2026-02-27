@@ -183,9 +183,9 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
     this.organizationDomainHostname$ = this.authFacade.userDomainHostname$;
     this.logoUrl$ = this.authFacade.userOrganization$.pipe(
       map(org => {
-        if (org?.logo_url) return org.logo_url;
-        const isVendix = this.configFacade.getCurrentConfig()?.domainConfig?.isVendixDomain;
-        return isVendix ? 'vlogo.png' : null;
+        const domainConfig = this.configFacade.getCurrentConfig()?.domainConfig;
+        if (domainConfig?.isMainVendixDomain) return 'vlogo.png';
+        return org?.logo_url || null;
       })
     );
   }

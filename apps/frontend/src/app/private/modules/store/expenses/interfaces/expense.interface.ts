@@ -76,6 +76,13 @@ export interface QueryExpenseDto {
 export interface ExpenseSummary {
   total_amount: number;
   total_count: number;
+  counts_by_state: {
+    pending: number;
+    approved: number;
+    rejected: number;
+    paid: number;
+    cancelled: number;
+  };
   category_breakdown: Array<{
     category_id: number;
     category_name: string;
@@ -102,4 +109,3 @@ export interface ApiResponse<T> {
   timestamp?: string;
   path?: string;
 }
-

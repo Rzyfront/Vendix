@@ -23,6 +23,8 @@ import {
   FilterConfig,
   FilterValues,
   DropdownAction,
+  ButtonComponent,
+  IconComponent,
 } from '../../../../../../shared/components/index';
 
 import { OrderEmptyStateComponent } from '../order-empty-state';
@@ -47,6 +49,8 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
     InputsearchComponent,
     OptionsDropdownComponent,
     OrderEmptyStateComponent,
+    ButtonComponent,
+    IconComponent,
   ],
   templateUrl: './orders-list.component.html',
   styleUrls: ['./orders-list.component.css'],

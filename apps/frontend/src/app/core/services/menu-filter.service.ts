@@ -48,6 +48,7 @@ export class MenuFilterService {
     'Ajustes de Stock': 'inventory_adjustments',
     Ubicaciones: 'inventory_locations',
     Proveedores: 'inventory_suppliers',
+    Movimientos: 'inventory_movements',
 
     // STORE_ADMIN - Clientes (padre + submódulos)
     Clientes: 'customers',
@@ -61,6 +62,7 @@ export class MenuFilterService {
 
     // STORE_ADMIN - Analíticas (padre + submódulos)
     Analíticas: 'analytics',
+    Resumen: 'analytics_overview',
     Ventas: 'analytics_sales',
     Tráfico: 'analytics_traffic',
     Rendimiento: 'analytics_performance',

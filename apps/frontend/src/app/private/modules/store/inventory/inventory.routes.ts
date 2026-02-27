@@ -41,6 +41,13 @@ export const INVENTORY_ROUTES: Routes = [
                         (m) => m.StockAdjustmentsComponent
                     ),
             },
+            {
+                path: 'movements',
+                loadComponent: () =>
+                    import('./movements/movements.component').then(
+                        (m) => m.MovementsComponent
+                    ),
+            },
         ],
     },
 ];

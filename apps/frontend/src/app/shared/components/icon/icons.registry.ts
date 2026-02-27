@@ -155,6 +155,14 @@ import {
   Ticket,
   File,
   MessageSquare,
+  // Inventory movement icons
+  Activity,
+  ArrowDownCircle,
+  ArrowUpCircle,
+  Repeat,
+  CornerDownLeft,
+  // Tax / government icons
+  Landmark,
 } from 'lucide-angular';
 
 /**
@@ -361,6 +369,16 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   ticket: Ticket,
   file: File,
   'message-square': MessageSquare,
+
+  // Inventory movement icons
+  activity: Activity,
+  'arrow-down-circle': ArrowDownCircle,
+  'arrow-up-circle': ArrowUpCircle,
+  repeat: Repeat,
+  'corner-down-left': CornerDownLeft,
+
+  // Tax / government icons
+  landmark: Landmark,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

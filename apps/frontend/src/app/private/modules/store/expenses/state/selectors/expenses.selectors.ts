@@ -1,6 +1,6 @@
 import { createFeatureSelector, createSelector } from '@ngrx/store';
 import { ExpensesState } from '../expenses.state';
-import { Expense, ExpenseCategory } from '../../interfaces/expense.interface';
+import { ExpenseCategory } from '../../interfaces/expense.interface';
 
 export const selectExpensesState =
   createFeatureSelector<ExpensesState>('expenses');
@@ -37,6 +37,63 @@ export const selectCurrentExpenseLoading = createSelector(
   (state) => state.currentExpenseLoading,
 );
 
+// Summary (from backend, NOT derived client-side)
+export const selectSummary = createSelector(
+  selectExpensesState,
+  (state) => state.summary,
+);
+
+export const selectLoadingSummary = createSelector(
+  selectExpensesState,
+  (state) => state.loadingSummary,
+);
+
+// Filter selectors
+export const selectSearch = createSelector(
+  selectExpensesState,
+  (state) => state.search,
+);
+
+export const selectPage = createSelector(
+  selectExpensesState,
+  (state) => state.page,
+);
+
+export const selectLimit = createSelector(
+  selectExpensesState,
+  (state) => state.limit,
+);
+
+export const selectSortBy = createSelector(
+  selectExpensesState,
+  (state) => state.sortBy,
+);
+
+export const selectSortOrder = createSelector(
+  selectExpensesState,
+  (state) => state.sortOrder,
+);
+
+export const selectStateFilter = createSelector(
+  selectExpensesState,
+  (state) => state.stateFilter,
+);
+
+export const selectCategoryFilter = createSelector(
+  selectExpensesState,
+  (state) => state.categoryFilter,
+);
+
+export const selectDateFrom = createSelector(
+  selectExpensesState,
+  (state) => state.dateFrom,
+);
+
+export const selectDateTo = createSelector(
+  selectExpensesState,
+  (state) => state.dateTo,
+);
+
 // Expense Categories
 export const selectExpenseCategories = createSelector(
   selectExpensesState,
@@ -46,40 +103,6 @@ export const selectExpenseCategories = createSelector(
 export const selectExpenseCategoriesLoading = createSelector(
   selectExpensesState,
   (state) => state.categoriesLoading,
-);
-
-// Derived selectors
-export const selectPendingExpenses = createSelector(
-  selectExpenses,
-  (expenses: Expense[]) =>
-    expenses.filter((expense: Expense) => expense.state === 'pending'),
-);
-
-export const selectApprovedExpenses = createSelector(
-  selectExpenses,
-  (expenses: Expense[]) =>
-    expenses.filter((expense: Expense) => expense.state === 'approved'),
-);
-
-export const selectRejectedExpenses = createSelector(
-  selectExpenses,
-  (expenses: Expense[]) =>
-    expenses.filter((expense: Expense) => expense.state === 'rejected'),
-);
-
-export const selectPaidExpenses = createSelector(
-  selectExpenses,
-  (expenses: Expense[]) =>
-    expenses.filter((expense: Expense) => expense.state === 'paid'),
-);
-
-export const selectTotalExpensesAmount = createSelector(
-  selectExpenses,
-  (expenses: Expense[]) =>
-    expenses.reduce(
-      (total: number, expense: Expense) => total + expense.amount,
-      0,
-    ),
 );
 
 export const selectActiveExpenseCategories = createSelector(

@@ -1,4 +1,4 @@
-import { Expense, ExpenseCategory } from '../interfaces/expense.interface';
+import { Expense, ExpenseCategory, ExpenseSummary } from '../interfaces/expense.interface';
 
 export interface ExpensesState {
   expenses: Expense[];
@@ -14,6 +14,21 @@ export interface ExpensesState {
     limit: number;
     total_pages: number;
   } | null;
+
+  // Summary from backend
+  summary: ExpenseSummary | null;
+  loadingSummary: boolean;
+
+  // Filter-as-state
+  search: string;
+  page: number;
+  limit: number;
+  sortBy: string;
+  sortOrder: 'asc' | 'desc';
+  stateFilter: string;
+  categoryFilter: number | null;
+  dateFrom: string;
+  dateTo: string;
 }
 
 export const initialExpensesState: ExpensesState = {
@@ -25,4 +40,17 @@ export const initialExpensesState: ExpensesState = {
   currentExpenseLoading: false,
   error: null,
   meta: null,
+
+  summary: null,
+  loadingSummary: false,
+
+  search: '',
+  page: 1,
+  limit: 10,
+  sortBy: 'created_at',
+  sortOrder: 'desc',
+  stateFilter: '',
+  categoryFilter: null,
+  dateFrom: '',
+  dateTo: '',
 };

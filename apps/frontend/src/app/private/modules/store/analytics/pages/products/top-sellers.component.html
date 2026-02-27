@@ -41,13 +41,15 @@
       <h3 class="font-semibold text-text-primary">Detalle de Más Vendidos</h3>
     </div>
 
-    <app-responsive-data-view
-      [data]="(topSellers$ | async) ?? []"
-      [columns]="tableColumns"
-      [cardConfig]="cardConfig"
-      [loading]="(loadingTopSellers$ | async) ?? false"
-      emptyMessage="No hay datos de ventas en este período"
-      emptyIcon="trophy"
-    ></app-responsive-data-view>
+    <div class="p-4">
+      <app-responsive-data-view
+        [data]="(topSellers$ | async) ?? []"
+        [columns]="tableColumns"
+        [cardConfig]="cardConfig"
+        [loading]="(loadingTopSellers$ | async) ?? false"
+        emptyMessage="No hay datos de ventas en este período"
+        emptyIcon="trophy"
+      ></app-responsive-data-view>
+    </div>
   </div>
 </div>

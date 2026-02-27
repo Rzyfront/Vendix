@@ -19,6 +19,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 |--------|-------|
 | "revisar PR", "review PR", "analizar PR", "code review", "revisar pull request" | `pr-code-review` |
 | -- | `git-workflow` |
+| -- | `how-to-dev` |
 | -- | `vendix-monorepo-workspaces` |
 | -- | `vendix-prisma-scopes` |
 | Adding new models to domain scopes | `vendix-prisma-scopes` |
@@ -89,6 +90,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 
 | Skill                 | Trigger             | Priority     | Description                           |
 | --------------------- | ------------------- | ------------ | ------------------------------------- |
+| **`how-to-dev`**      | **ALWAYS**          | **CRITICAL** | Mandatory ultra-obligatory dev flow   |
 | **`Vendix-core`**     | **ALWAYS**          | **CRITICAL** | Core patterns and conventions         |
 | **`git-workflow`**    | **ALWAYS**          | **CRITICAL** | Git commit, PR, branching and conflict rules |
 | **`knowledge-gap`**   | **UNKNOWN PATTERN** | **HIGH**     | Protocol for new/undefined patterns   |

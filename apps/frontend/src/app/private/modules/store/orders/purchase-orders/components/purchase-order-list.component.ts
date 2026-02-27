@@ -22,6 +22,8 @@ import {
   FilterConfig,
   FilterValues,
   DropdownAction,
+  ButtonComponent,
+  IconComponent,
 } from '../../../../../../shared/components/index';
 
 import { PurchaseOrdersService } from '../../../inventory/services';
@@ -45,6 +47,8 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
     InputsearchComponent,
     OptionsDropdownComponent,
     PurchaseOrderEmptyStateComponent,
+    ButtonComponent,
+    IconComponent,
   ],
   templateUrl: './purchase-order-list.component.html',
   styleUrls: ['./purchase-order-list.component.scss'],
@@ -210,7 +214,7 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
     private suppliersService: SuppliersService,
     private dialogService: DialogService,
     private toastService: ToastService
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.loadOrders();

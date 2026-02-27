@@ -11,6 +11,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ExpensesService } from './expenses.service';
+import { ExpenseFlowService } from './expense-flow/expense-flow.service';
 import { ResponseService } from '../../../common/responses/response.service';
 import { CreateExpenseDto } from './dto/create-expense.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
@@ -22,6 +23,7 @@ import { UpdateExpenseCategoryDto } from './dto/update-category.dto';
 export class ExpensesController {
   constructor(
     private readonly expenses_service: ExpensesService,
+    private readonly expense_flow_service: ExpenseFlowService,
     private readonly response_service: ResponseService,
   ) { }
 
@@ -112,7 +114,7 @@ export class ExpensesController {
   @Post(':id/approve')
   @HttpCode(HttpStatus.OK)
   async approve(@Param('id') id: string) {
-    const result = await this.expenses_service.approve(+id);
+    const result = await this.expense_flow_service.approve(+id);
     return this.response_service.success(
       result,
       'Expense approved successfully',
@@ -122,10 +124,30 @@ export class ExpensesController {
   @Post(':id/reject')
   @HttpCode(HttpStatus.OK)
   async reject(@Param('id') id: string) {
-    const result = await this.expenses_service.reject(+id);
+    const result = await this.expense_flow_service.reject(+id);
     return this.response_service.success(
       result,
       'Expense rejected successfully',
+    );
+  }
+
+  @Post(':id/pay')
+  @HttpCode(HttpStatus.OK)
+  async pay(@Param('id') id: string) {
+    const result = await this.expense_flow_service.pay(+id);
+    return this.response_service.success(
+      result,
+      'Expense marked as paid successfully',
+    );
+  }
+
+  @Post(':id/cancel')
+  @HttpCode(HttpStatus.OK)
+  async cancel(@Param('id') id: string) {
+    const result = await this.expense_flow_service.cancel(+id);
+    return this.response_service.success(
+      result,
+      'Expense cancelled successfully',
     );
   }
 

@@ -384,9 +384,14 @@ export class AppConfigService {
       organization_id: domainInfo.organization_id,
       store_id: domainInfo.store_id,
       // NUEVO: customConfig ahora incluye datos desde store_settings
+      store_logo_url: domainInfo.store_logo_url,
       customConfig: {
         // NUEVO: Branding desde store_settings (prioridad) o config.branding (fallback)
-        branding: domainInfo.branding || domainInfo.config?.branding,
+        branding: {
+          ...(domainInfo.branding || domainInfo.config?.branding),
+          // Inyectar store_logo_url en branding.logo_url si no existe
+          logo_url: (domainInfo.branding || domainInfo.config?.branding)?.logo_url || domainInfo.store_logo_url,
+        },
         fonts: domainInfo.fonts,
         ecommerce: domainInfo.ecommerce,
         publication: domainInfo.publication,
@@ -394,6 +399,7 @@ export class AppConfigService {
         security: domainInfo.config?.security,
       },
       isVendixDomain: domainInfo.organization_slug === 'vendix-corp',
+      isMainVendixDomain: hostname === environment.vendixDomain || hostname === `www.${environment.vendixDomain}`,
     };
 
     console.log('[AppConfigService] buildDomainConfig() output:', {

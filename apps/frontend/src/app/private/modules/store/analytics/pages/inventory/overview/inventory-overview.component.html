@@ -1,0 +1,184 @@
+<div class="md:space-y-4">
+  <!-- Stats Cards -->
+  @if (loading$ | async) {
+    <div class="stats-container">
+      @for (i of [1, 2, 3, 4]; track i) {
+        <div class="bg-surface border border-border rounded-xl p-4 animate-pulse">
+          <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+          <div class="h-8 bg-gray-200 rounded w-3/4"></div>
+        </div>
+      }
+    </div>
+  } @else {
+    <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <app-stats
+        title="Valor en Stock"
+        [value]="(summary$ | async)?.total_stock_value | currency"
+        smallText="Costo total del inventario actual"
+        iconName="dollar-sign"
+        iconBgColor="bg-green-100"
+        iconColor="text-green-600"
+      ></app-stats>
+
+      <app-stats
+        title="Unidades en Mano"
+        [value]="(summary$ | async)?.total_quantity_on_hand || 0"
+        smallText="Cantidad total disponible"
+        iconName="layers"
+        iconBgColor="bg-purple-100"
+        iconColor="text-purple-600"
+      ></app-stats>
+
+      <app-stats
+        title="Bajo Stock"
+        [value]="(summary$ | async)?.low_stock_count || 0"
+        [smallText]="(lowStockPct$ | async) + '% del total de SKUs'"
+        iconName="alert-triangle"
+        iconBgColor="bg-amber-100"
+        iconColor="text-amber-600"
+      ></app-stats>
+
+      <app-stats
+        title="Sin Stock"
+        [value]="(summary$ | async)?.out_of_stock_count || 0"
+        [smallText]="(outOfStockPct$ | async) + '% del total de SKUs'"
+        iconName="x-circle"
+        iconBgColor="bg-red-100"
+        iconColor="text-red-600"
+      ></app-stats>
+    </div>
+  }
+
+  <!-- Filter Bar: sticky below stats on mobile, standard on desktop -->
+  <div class="sticky top-[99px] z-10 bg-background px-2 py-0.5 -mt-[11px] md:-mt-2 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border">
+    <div class="flex items-center justify-between gap-2">
+      <div class="min-w-0">
+        <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-base md:font-semibold md:text-text-primary truncate">
+          Dashboard de Inventario
+        </h2>
+        <p class="text-[11px] text-gray-400 md:text-xs md:text-text-secondary truncate">
+          Resumen consolidado de inventario, movimientos y valorización
+        </p>
+      </div>
+
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <vendix-export-button
+          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+          [loading]="(exporting$ | async) ?? false"
+          (export)="exportReport()"
+        ></vendix-export-button>
+
+        <app-options-dropdown
+          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+          [filters]="filterConfigs"
+          [filterValues]="filterValues"
+          title="Filtros"
+          triggerLabel="Filtros"
+          (filterChange)="onFilterChange($event)"
+          (clearAllFilters)="onClearAllFilters()"
+        ></app-options-dropdown>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts Grid -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Movement Trend Chart: full width -->
+    <div class="lg:col-span-3 bg-surface border border-border rounded-xl overflow-hidden">
+      <div class="p-4 border-b border-border">
+        <h3 class="font-semibold text-text-primary">Tendencia de Movimientos</h3>
+        <p class="text-sm text-text-secondary">Evolución de entradas, salidas, ajustes y transferencias</p>
+      </div>
+      <div class="p-4">
+        @if (loadingTrends$ | async) {
+          <div class="h-64 flex items-center justify-center">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+        } @else {
+          <app-chart
+            [options]="movementTrendChartOptions"
+            size="large"
+          ></app-chart>
+        }
+      </div>
+    </div>
+
+    <!-- Valuation & Quantity by Location: 2 rosa charts side by side -->
+    <div class="lg:col-span-3 grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Valor por Ubicación -->
+      <div class="bg-surface border border-border rounded-xl overflow-hidden">
+        <div class="p-4 border-b border-border">
+          <h3 class="font-semibold text-text-primary">Valor por Ubicación</h3>
+          <p class="text-sm text-text-secondary">Valorización de inventario por ubicación</p>
+        </div>
+        <div class="p-4">
+          @if (loadingValuation$ | async) {
+            <div class="h-64 flex items-center justify-center">
+              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          } @else {
+            <app-chart
+              [options]="valuationChartOptions"
+              size="large"
+            ></app-chart>
+          }
+        </div>
+      </div>
+
+      <!-- Cantidad por Ubicación -->
+      <div class="bg-surface border border-border rounded-xl overflow-hidden">
+        <div class="p-4 border-b border-border">
+          <h3 class="font-semibold text-text-primary">Cantidad por Ubicación</h3>
+          <p class="text-sm text-text-secondary">Unidades en inventario por ubicación</p>
+        </div>
+        <div class="p-4">
+          @if (loadingValuation$ | async) {
+            <div class="h-64 flex items-center justify-center">
+              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          } @else {
+            <app-chart
+              [options]="quantityChartOptions"
+              size="large"
+            ></app-chart>
+          }
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick Links -->
+  <div class="bg-surface border border-border rounded-xl p-4">
+    <h3 class="font-semibold text-text-primary mb-4">Reportes Detallados</h3>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <a
+        routerLink="../stock-levels"
+        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
+      >
+        <app-icon name="layers" [size]="18" class="text-text-secondary"></app-icon>
+        <span class="text-text-primary">Niveles de Stock</span>
+      </a>
+      <a
+        routerLink="../low-stock"
+        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
+      >
+        <app-icon name="alert-triangle" [size]="18" class="text-text-secondary"></app-icon>
+        <span class="text-text-primary">Bajo Stock</span>
+      </a>
+      <a
+        routerLink="../movements"
+        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
+      >
+        <app-icon name="repeat" [size]="18" class="text-text-secondary"></app-icon>
+        <span class="text-text-primary">Movimientos</span>
+      </a>
+      <a
+        routerLink="../valuation"
+        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
+      >
+        <app-icon name="dollar-sign" [size]="18" class="text-text-secondary"></app-icon>
+        <span class="text-text-primary">Valorización</span>
+      </a>
+    </div>
+  </div>
+</div>

@@ -207,6 +207,11 @@ const APP_MODULES = {
       isParent: true,
       children: [
         {
+          key: 'analytics_overview',
+          label: 'Resumen',
+          description: 'Resumen general de analíticas',
+        },
+        {
           key: 'analytics_sales',
           label: 'Ventas',
           description: 'Métricas de ventas',

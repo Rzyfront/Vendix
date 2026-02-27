@@ -199,22 +199,24 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
 
         <!-- Action Buttons -->
         <div class="modal-actions">
-          <button
-            class="action-btn create-btn"
-            (click)="createOrder.emit()"
-            [disabled]="!cartState?.items?.length"
-          >
-            <app-icon name="file-plus" [size]="18"></app-icon>
-            <span>Crear orden</span>
-          </button>
-          <button
-            class="action-btn draft-btn"
-            (click)="saveDraft.emit()"
-            [disabled]="!cartState?.items?.length"
-          >
-            <app-icon name="save" [size]="18"></app-icon>
-            <span>Borrador</span>
-          </button>
+          <div class="modal-actions-row">
+            <button
+              class="action-btn draft-btn"
+              (click)="saveDraft.emit()"
+              [disabled]="!cartState?.items?.length"
+            >
+              <app-icon name="save" [size]="18"></app-icon>
+              <span>Borrador</span>
+            </button>
+            <button
+              class="action-btn create-btn"
+              (click)="createOrder.emit()"
+              [disabled]="!cartState?.items?.length"
+            >
+              <app-icon name="file-plus" [size]="18"></app-icon>
+              <span>Crear orden</span>
+            </button>
+          </div>
           <button
             class="action-btn receive-btn"
             (click)="createAndReceive.emit()"
@@ -684,6 +686,12 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
         flex-shrink: 0;
       }
 
+      .modal-actions-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
       .modal-actions .action-btn {
         display: flex;
         align-items: center;
@@ -697,6 +705,11 @@ import { PopCartState, PopCartItem } from '../services/pop-cart.service';
         cursor: pointer;
         transition: all 0.2s ease;
         width: 100%;
+      }
+
+      .modal-actions-row > .action-btn {
+        height: 42px;
+        font-size: 13px;
       }
 
       .modal-actions .action-btn:active:not(:disabled) {

@@ -1,9 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
-import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import {
   Expense,
   ExpenseCategory,
@@ -15,35 +13,25 @@ import {
   ApiResponse,
 } from '../interfaces/expense.interface';
 
-// Caché estático global (persiste entre instancias del servicio)
-interface CacheEntry<T> {
-  observable: T;
-  lastFetch: number;
-}
-
-let expensesSummaryCache: CacheEntry<Observable<ApiResponse<ExpenseSummary>>> | null = null;
-
 @Injectable({
   providedIn: 'root',
 })
 export class ExpensesService {
   private http = inject(HttpClient);
-  private readonly CACHE_TTL = 30000; // 30 segundos
-  // private authFacade = inject(AuthFacade); // Not used currently but ready for dynamic domain ID
 
-  /**
-   * Helper to construct the API URL.
-   * Uses 'current' as placeholder for domain ID which should be handled by backend or interceptor,
-   * or replaced with actual domain ID when available in state.
-   */
   private getApiUrl(endpoint: string): string {
     return `${environment.apiUrl}/store/expenses${endpoint ? '/' + endpoint : ''}`;
   }
 
   getExpenses(query: QueryExpenseDto): Observable<ExpenseListResponse> {
-    return this.http.get<ExpenseListResponse>(this.getApiUrl(''), {
-      params: query as any,
-    });
+    // Remove undefined/empty values so they don't send as query params
+    const params: Record<string, any> = {};
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== null && value !== '') {
+        params[key] = value;
+      }
+    }
+    return this.http.get<ExpenseListResponse>(this.getApiUrl(''), { params });
   }
 
   getExpense(id: number): Observable<ApiResponse<Expense>> {
@@ -66,49 +54,32 @@ export class ExpensesService {
     return this.http.post<ApiResponse<Expense>>(this.getApiUrl(`${id}/reject`), {});
   }
 
+  payExpense(id: number): Observable<ApiResponse<Expense>> {
+    return this.http.post<ApiResponse<Expense>>(this.getApiUrl(`${id}/pay`), {});
+  }
+
+  cancelExpense(id: number): Observable<ApiResponse<Expense>> {
+    return this.http.post<ApiResponse<Expense>>(this.getApiUrl(`${id}/cancel`), {});
+  }
+
   deleteExpense(id: number): Observable<ApiResponse<null>> {
     return this.http.delete<ApiResponse<null>>(this.getApiUrl(`${id}`));
   }
 
-  getExpensesSummary(
-    dateFrom?: Date,
-    dateTo?: Date,
-  ): Observable<ApiResponse<ExpenseSummary>> {
-    // Si hay parámetros de fecha, no usar caché
-    if (dateFrom || dateTo) {
-      const params: any = {};
-      if (dateFrom) params.date_from = dateFrom.toISOString();
-      if (dateTo) params.date_to = dateTo.toISOString();
+  // NgRx is the cache — no manual cache needed
+  getExpensesSummary(): Observable<ApiResponse<ExpenseSummary>> {
+    return this.http.get<ApiResponse<ExpenseSummary>>(this.getApiUrl('summary'));
+  }
 
-      return this.http.get<ApiResponse<ExpenseSummary>>(this.getApiUrl('summary'), {
-        params,
-      });
-    }
-
-    // Sin parámetros - usar caché
-    const now = Date.now();
-
-    if (expensesSummaryCache && (now - expensesSummaryCache.lastFetch) < this.CACHE_TTL) {
-      return expensesSummaryCache.observable;
-    }
-
-    const observable$ = this.http
-      .get<ApiResponse<ExpenseSummary>>(this.getApiUrl('summary'))
-      .pipe(
-        shareReplay({ bufferSize: 1, refCount: false }),
-        tap(() => {
-          if (expensesSummaryCache) {
-            expensesSummaryCache.lastFetch = Date.now();
-          }
-        }),
-      );
-
-    expensesSummaryCache = {
-      observable: observable$,
-      lastFetch: now,
-    };
-
-    return observable$;
+  // Upload receipt
+  uploadReceipt(file: File): Observable<{ key: string; url: string }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('entityType', 'receipts');
+    return this.http.post<{ key: string; url: string }>(
+      `${environment.apiUrl}/upload`,
+      formData,
+    );
   }
 
   // Expense Categories
@@ -139,13 +110,5 @@ export class ExpensesService {
 
   deleteExpenseCategory(id: number): Observable<ApiResponse<null>> {
     return this.http.delete<ApiResponse<null>>(this.getApiUrl(`categories/${id}`));
-  }
-
-  /**
-   * Invalida el caché de estadísticas
-   * Útil después de crear/editar/eliminar gastos
-   */
-  invalidateCache(): void {
-    expensesSummaryCache = null;
   }
 }

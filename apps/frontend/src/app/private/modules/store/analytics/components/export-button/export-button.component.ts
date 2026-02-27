@@ -10,7 +10,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
   template: `
     <app-button
       variant="outline"
-      size="sm"
+      size="md"
       [loading]="loading()"
       (clicked)="export.emit()"
     >

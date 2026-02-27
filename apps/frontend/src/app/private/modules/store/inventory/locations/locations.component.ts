@@ -105,6 +105,16 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
                 (search)="onSearch($event)"
               ></app-inputsearch>
 
+              <app-button
+                variant="outline"
+                size="sm"
+                customClasses="w-9 h-9 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
+                (clicked)="openCreateModal()"
+                title="Nueva Ubicación"
+              >
+                <app-icon slot="icon" name="plus" [size]="18"></app-icon>
+              </app-button>
+
               <app-options-dropdown
                 class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                 [filters]="filterConfigs"

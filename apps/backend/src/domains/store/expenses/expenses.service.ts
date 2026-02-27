@@ -37,26 +37,25 @@ export class ExpensesService {
 
     const skip = (page - 1) * limit;
 
-    const where: any = {
-      ...this.prisma.storeWhere,
+    const where: Prisma.expensesWhereInput = {
       ...(search && {
         OR: [
-          { description: { contains: search, mode: 'insensitive' } },
-          { notes: { contains: search, mode: 'insensitive' } },
+          { description: { contains: search, mode: 'insensitive' as const } },
+          { notes: { contains: search, mode: 'insensitive' as const } },
         ],
       }),
       ...(state && { state: state as any }),
       ...(category_id && { category_id }),
       ...(date_from && {
         expense_date: {
-          ...{ gte: new Date(date_from) },
+          gte: new Date(date_from),
           ...(date_to && { lte: new Date(date_to) }),
         },
       }),
     };
 
     const [data, total] = await Promise.all([
-      (this.prisma.expenses as any).findMany({
+      this.prisma.expenses.findMany({
         where,
         skip,
         take: limit,
@@ -73,7 +72,7 @@ export class ExpensesService {
           },
         },
       }),
-      (this.prisma.expenses as any).count({ where }),
+      this.prisma.expenses.count({ where }),
     ]);
 
     return {
@@ -88,11 +87,8 @@ export class ExpensesService {
   }
 
   async findOne(id: number) {
-    const expense = await (this.prisma.expenses as any).findFirst({
-      where: {
-        id,
-        ...this.prisma.storeWhere,
-      },
+    const expense = await this.prisma.expenses.findFirst({
+      where: { id },
       include: {
         expense_categories: true,
         created_by_user: {
@@ -116,7 +112,7 @@ export class ExpensesService {
     const context = this.getContext();
 
     if (category_id) {
-      const category = await (this.prisma.expense_categories as any).findFirst({
+      const category = await this.prisma.expense_categories.findFirst({
         where: {
           id: category_id,
           ...this.prisma.organizationWhere,
@@ -128,7 +124,7 @@ export class ExpensesService {
       }
     }
 
-    const expense = await (this.prisma.expenses as any).create({
+    const expense = await this.prisma.expenses.create({
       data: {
         ...data,
         amount: new Prisma.Decimal(data.amount),
@@ -150,12 +146,19 @@ export class ExpensesService {
   }
 
   async update(id: number, updateExpenseDto: UpdateExpenseDto) {
-    await this.findOne(id);
+    const expense = await this.findOne(id);
+
+    // Only allow editing expenses in pending state
+    if (expense.state !== 'pending') {
+      throw new ConflictException(
+        `Cannot edit expense in '${expense.state}' state. Only pending expenses can be edited.`,
+      );
+    }
 
     const { category_id, ...data } = updateExpenseDto;
 
     if (category_id) {
-      const category = await (this.prisma.expense_categories as any).findFirst({
+      const category = await this.prisma.expense_categories.findFirst({
         where: {
           id: category_id,
           ...this.prisma.organizationWhere,
@@ -167,7 +170,7 @@ export class ExpensesService {
       }
     }
 
-    const expense = await (this.prisma.expenses as any).update({
+    const updated = await this.prisma.expenses.update({
       where: { id },
       data: {
         ...data,
@@ -186,7 +189,7 @@ export class ExpensesService {
       },
     });
 
-    return expense;
+    return updated;
   }
 
   async approve(id: number) {
@@ -197,7 +200,7 @@ export class ExpensesService {
       throw new ConflictException('Expense can only be approved when pending');
     }
 
-    const updatedExpense = await (this.prisma.expenses as any).update({
+    return this.prisma.expenses.update({
       where: { id },
       data: {
         state: 'approved',
@@ -214,8 +217,6 @@ export class ExpensesService {
         },
       },
     });
-
-    return updatedExpense;
   }
 
   async reject(id: number) {
@@ -226,12 +227,12 @@ export class ExpensesService {
       throw new ConflictException('Expense can only be rejected when pending');
     }
 
-    const updatedExpense = await (this.prisma.expenses as any).update({
+    // Fix: reject should NOT set approved_at (semantically incorrect)
+    return this.prisma.expenses.update({
       where: { id },
       data: {
         state: 'rejected',
         approved_by_user_id: context.user_id,
-        approved_at: new Date(),
       },
       include: {
         expense_categories: true,
@@ -243,22 +244,25 @@ export class ExpensesService {
         },
       },
     });
-
-    return updatedExpense;
   }
 
   async remove(id: number) {
-    await this.findOne(id);
-    await (this.prisma.expenses as any).delete({
+    const expense = await this.findOne(id);
+
+    // Only allow deleting expenses in pending or rejected state
+    if (!['pending', 'rejected'].includes(expense.state)) {
+      throw new ConflictException(
+        `Cannot delete expense in '${expense.state}' state. Only pending or rejected expenses can be deleted. Use cancel instead.`,
+      );
+    }
+
+    await this.prisma.expenses.delete({
       where: { id },
     });
   }
 
   async getExpensesSummary(dateFrom?: Date, dateTo?: Date) {
-    const context = this.getContext();
-    const where: any = {
-      ...this.prisma.storeWhere,
-      state: { in: ['approved', 'paid'] },
+    const where: Prisma.expensesWhereInput = {
       ...(dateFrom &&
         dateTo && {
         expense_date: {
@@ -268,42 +272,47 @@ export class ExpensesService {
       }),
     };
 
-    const summary = await (this.prisma.expenses as any).aggregate({
-      where,
-      _sum: {
-        amount: true,
-      },
-      _count: {
-        id: true,
-      },
-    });
+    // Aggregate totals for approved+paid expenses
+    const approvedPaidWhere: Prisma.expensesWhereInput = {
+      ...where,
+      state: { in: ['approved', 'paid'] },
+    };
 
-    const expensesByCategory = await (this.prisma.expenses as any).groupBy({
-      by: ['category_id'],
-      where,
-      _sum: {
-        amount: true,
-      },
-      _count: {
-        id: true,
-      },
-    });
+    const [summary, expensesByCategory, countsByState] = await Promise.all([
+      this.prisma.expenses.aggregate({
+        where: approvedPaidWhere,
+        _sum: { amount: true },
+        _count: { id: true },
+      }),
+      this.prisma.expenses.groupBy({
+        by: ['category_id'],
+        where: approvedPaidWhere,
+        _sum: { amount: true },
+        _count: { id: true },
+      }),
+      // Count by state (all states, for dashboard cards)
+      this.prisma.expenses.groupBy({
+        by: ['state'],
+        where,
+        _count: { id: true },
+      }),
+    ]);
 
-    const categories = await (this.prisma.expense_categories as any).findMany({
+    const context = this.getContext();
+
+    const categories = await this.prisma.expense_categories.findMany({
       where: {
         id: {
           in: expensesByCategory
-            .map((item: any) => item.category_id)
-            .filter(Boolean),
+            .map((item) => item.category_id)
+            .filter((id): id is number => id !== null),
         },
         organization_id: context.organization_id,
       },
     });
 
-    const categorySummary = expensesByCategory.map((item: any) => {
-      const category = categories.find(
-        (cat: any) => cat.id === item.category_id,
-      );
+    const categorySummary = expensesByCategory.map((item) => {
+      const category = categories.find((cat) => cat.id === item.category_id);
       return {
         category_id: item.category_id,
         category_name: category?.name || 'Uncategorized',
@@ -313,9 +322,24 @@ export class ExpensesService {
       };
     });
 
+    // Build counts_by_state map
+    const counts_by_state: Record<string, number> = {
+      pending: 0,
+      approved: 0,
+      rejected: 0,
+      paid: 0,
+      cancelled: 0,
+    };
+    for (const row of countsByState) {
+      if (row.state) {
+        counts_by_state[row.state] = row._count.id;
+      }
+    }
+
     return {
       total_amount: summary._sum.amount || 0,
       total_count: summary._count.id,
+      counts_by_state,
       category_breakdown: categorySummary,
     };
   }
@@ -323,7 +347,7 @@ export class ExpensesService {
   // --- Categories Management ---
 
   async findAllCategories() {
-    return (this.prisma.expense_categories as any).findMany({
+    return this.prisma.expense_categories.findMany({
       where: this.prisma.organizationWhere,
       orderBy: { name: 'asc' },
     });
@@ -331,7 +355,7 @@ export class ExpensesService {
 
   async createCategory(data: any) {
     const context = this.getContext();
-    return (this.prisma.expense_categories as any).create({
+    return this.prisma.expense_categories.create({
       data: {
         ...data,
         organization_id: context.organization_id,
@@ -340,7 +364,7 @@ export class ExpensesService {
   }
 
   async updateCategory(id: number, data: any) {
-    const category = await (this.prisma.expense_categories as any).findFirst({
+    const category = await this.prisma.expense_categories.findFirst({
       where: {
         id,
         ...this.prisma.organizationWhere,
@@ -351,14 +375,14 @@ export class ExpensesService {
       throw new NotFoundException('Category not found');
     }
 
-    return (this.prisma.expense_categories as any).update({
+    return this.prisma.expense_categories.update({
       where: { id },
       data,
     });
   }
 
   async removeCategory(id: number) {
-    const category = await (this.prisma.expense_categories as any).findFirst({
+    const category = await this.prisma.expense_categories.findFirst({
       where: {
         id,
         ...this.prisma.organizationWhere,
@@ -370,7 +394,7 @@ export class ExpensesService {
     }
 
     // Check if used
-    const usageCount = await (this.prisma.expenses as any).count({
+    const usageCount = await this.prisma.expenses.count({
       where: { category_id: id },
     });
 
@@ -380,9 +404,8 @@ export class ExpensesService {
       );
     }
 
-    await (this.prisma.expense_categories as any).delete({
+    await this.prisma.expense_categories.delete({
       where: { id },
     });
   }
 }
-

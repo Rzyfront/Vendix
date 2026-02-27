@@ -77,15 +77,6 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
           <!-- Checkout Actions -->
           <div class="cart-actions">
-            <button
-              type="button"
-              class="cart-btn checkout-btn"
-              (click)="proceedToPayment()"
-              [disabled]="(isEmpty$ | async) ?? false"
-            >
-              <app-icon [name]="isEditMode ? 'check' : 'credit-card'" [size]="18"></app-icon>
-              <span>{{ isEditMode ? 'Actualizar Orden' : 'Cobrar' }}</span>
-            </button>
             <div class="cart-actions-row">
               <button
                 type="button"
@@ -106,6 +97,15 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
                 <span>Envío</span>
               </button>
             </div>
+            <button
+              type="button"
+              class="cart-btn checkout-btn"
+              (click)="proceedToPayment()"
+              [disabled]="(isEmpty$ | async) ?? false"
+            >
+              <app-icon [name]="isEditMode ? 'check' : 'credit-card'" [size]="18"></app-icon>
+              <span>{{ isEditMode ? 'Actualizar Orden' : 'Cobrar' }}</span>
+            </button>
           </div>
         </div>
 

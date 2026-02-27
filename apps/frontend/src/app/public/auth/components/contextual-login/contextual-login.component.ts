@@ -504,7 +504,7 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     }
     this.loginForm.get('vlink')?.updateValueAndValidity();
     this.logoUrl = appConfig.branding?.logo?.url || '';
-    if (!this.logoUrl && domainConfig.isVendixDomain) {
+    if (!this.logoUrl && domainConfig.isMainVendixDomain) {
       this.logoUrl = 'vlogo.png';
     }
   }

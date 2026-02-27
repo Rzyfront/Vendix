@@ -10,6 +10,10 @@ export const productsAnalyticsReducer = createReducer(
     ...state,
     dateRange,
   })),
+  on(ProductsActions.setGranularity, (state, { granularity }) => ({
+    ...state,
+    granularity,
+  })),
   on(ProductsActions.setSearch, (state, { search }) => ({
     ...state,
     search,
@@ -59,6 +63,24 @@ export const productsAnalyticsReducer = createReducer(
   on(ProductsActions.loadTopSellersFailure, (state, { error }) => ({
     ...state,
     loadingTopSellers: false,
+    error,
+  })),
+
+  // Load Trends
+  on(ProductsActions.loadProductsTrends, (state) => ({
+    ...state,
+    loadingTrends: true,
+    error: null,
+  })),
+  on(ProductsActions.loadProductsTrendsSuccess, (state, { trends }) => ({
+    ...state,
+    trends,
+    loadingTrends: false,
+    error: null,
+  })),
+  on(ProductsActions.loadProductsTrendsFailure, (state, { error }) => ({
+    ...state,
+    loadingTrends: false,
     error,
   })),
 

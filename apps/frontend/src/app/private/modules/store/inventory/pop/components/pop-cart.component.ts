@@ -97,21 +97,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
               >{{ getDisabledActionsMessage(actionState.loading, actionState.isEmpty) }}</app-tooltip>
 
               <div class="grid grid-cols-2 gap-2">
-                <!-- Primary CTA -->
-                <app-button
-                  class="col-span-2"
-                  variant="primary"
-                  size="md"
-                  [fullWidth]="true"
-                  (clicked)="onSubmitOrder()"
-                  [disabled]="actionState.loading || actionState.isEmpty"
-                  customClasses="!h-11 !font-semibold !shadow-sm"
-                >
-                  <app-icon name="file-text" [size]="18" slot="icon"></app-icon>
-                  Crear orden
-                </app-button>
-
-                <!-- Secondary CTA: Draft -->
+                <!-- Secondary CTAs (top row) -->
                 <app-button
                   variant="outline"
                   size="sm"
@@ -123,14 +109,27 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                   Borrador
                 </app-button>
 
-                <!-- Secondary CTA: Create and Receive -->
                 <app-button
-                  variant="success"
+                  variant="primary"
                   size="sm"
+                  [fullWidth]="true"
+                  (clicked)="onSubmitOrder()"
+                  [disabled]="actionState.loading || actionState.isEmpty"
+                  customClasses="!h-10 !font-semibold"
+                >
+                  <app-icon name="file-text" [size]="18" slot="icon"></app-icon>
+                  Crear orden
+                </app-button>
+
+                <!-- Primary CTA: Create and Receive (bottom, full width) -->
+                <app-button
+                  class="col-span-2"
+                  variant="success"
+                  size="md"
                   [fullWidth]="true"
                   (clicked)="onCreateAndReceive()"
                   [disabled]="actionState.loading || actionState.isEmpty"
-                  customClasses="!h-10 !font-semibold"
+                  customClasses="!h-11 !font-semibold !shadow-sm"
                 >
                   Crear + Recibir
                 </app-button>

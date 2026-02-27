@@ -196,7 +196,7 @@ export class EmailVerificationComponent implements OnInit, OnDestroy {
     const appConfig = this.configFacade.getCurrentConfig();
     if (appConfig) {
       this.logoUrl = appConfig.branding?.logo?.url || '';
-      if (!this.logoUrl && appConfig.domainConfig?.isVendixDomain) {
+      if (!this.logoUrl && appConfig.domainConfig?.isMainVendixDomain) {
         this.logoUrl = 'vlogo.png';
       }
     }

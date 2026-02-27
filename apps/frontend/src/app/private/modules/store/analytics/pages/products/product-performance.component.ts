@@ -2,21 +2,18 @@ import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
-import { Observable, Subject, takeUntil } from 'rxjs';
+import { Observable, Subject, combineLatest, takeUntil } from 'rxjs';
 
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
-import { ResponsiveDataViewComponent } from '../../../../../../shared/components/responsive-data-view/responsive-data-view.component';
-import { TableColumn, SortDirection } from '../../../../../../shared/components/table/table.component';
-import { ItemListCardConfig } from '../../../../../../shared/components/item-list/item-list.interfaces';
+import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import { FilterConfig, FilterValues } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
-import { ProductsSummary, TopSellingProduct, ProductAnalyticsRow } from '../../interfaces/products-analytics.interface';
+import { ProductsSummary, TopSellingProduct, ProductTrend } from '../../interfaces/products-analytics.interface';
 
 import * as ProductsActions from './state/products-analytics.actions';
 import * as ProductsSelectors from './state/products-analytics.selectors';
@@ -32,10 +29,8 @@ import { EChartsOption } from 'echarts';
     StatsComponent,
     ChartComponent,
     IconComponent,
-    InputsearchComponent,
-    ResponsiveDataViewComponent,
+    OptionsDropdownComponent,
     CurrencyPipe,
-    DateRangeFilterComponent,
     ExportButtonComponent,
   ],
   templateUrl: './product-performance.component.html',
@@ -49,49 +44,49 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
   // Observables from store
   summary$: Observable<ProductsSummary | null> = this.store.select(ProductsSelectors.selectSummary);
   topSellers$: Observable<TopSellingProduct[]> = this.store.select(ProductsSelectors.selectTopSellers);
-  products$: Observable<ProductAnalyticsRow[]> = this.store.select(ProductsSelectors.selectProducts);
-  totalProducts$: Observable<number> = this.store.select(ProductsSelectors.selectTotalProducts);
+  trends$: Observable<ProductTrend[]> = this.store.select(ProductsSelectors.selectTrends);
   loading$: Observable<boolean> = this.store.select(ProductsSelectors.selectLoading);
   loadingTopSellers$: Observable<boolean> = this.store.select(ProductsSelectors.selectLoadingTopSellers);
-  loadingTable$: Observable<boolean> = this.store.select(ProductsSelectors.selectLoadingTable);
+  loadingTrends$: Observable<boolean> = this.store.select(ProductsSelectors.selectLoadingTrends);
   exporting$: Observable<boolean> = this.store.select(ProductsSelectors.selectExporting);
   dateRange$: Observable<DateRangeFilter> = this.store.select(ProductsSelectors.selectDateRange);
-  page$: Observable<number> = this.store.select(ProductsSelectors.selectPage);
-  limit$: Observable<number> = this.store.select(ProductsSelectors.selectLimit);
-
-  // Local state for pagination (avoids async pipe in event handlers)
-  currentPage = 1;
-  currentLimit = 20;
+  granularity$: Observable<string> = this.store.select(ProductsSelectors.selectGranularity);
 
   // Chart options
   topSellersChartOptions: EChartsOption = {};
+  unitsTrendChartOptions: EChartsOption = {};
 
-  // Table columns
-  tableColumns: TableColumn[] = [
-    { key: 'name', label: 'Producto', sortable: true },
-    { key: 'sku', label: 'SKU', width: '100px' },
-    { key: 'base_price', label: 'Precio', sortable: true, align: 'right', transform: (v) => this.currencyService.format(v) },
-    { key: 'stock_quantity', label: 'Stock', sortable: true, align: 'right' },
-    { key: 'units_sold', label: 'Vendidas', sortable: true, align: 'right' },
-    { key: 'revenue', label: 'Ingresos', sortable: true, align: 'right', transform: (v) => this.currencyService.format(v) },
-    { key: 'profit_margin', label: 'Margen', align: 'right', transform: (v) => v !== null ? `${v.toFixed(1)}%` : '-' },
+  // Options dropdown config
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'date_from',
+      label: 'Desde',
+      type: 'date',
+      defaultValue: this.getDefaultStartDate(),
+    },
+    {
+      key: 'date_to',
+      label: 'Hasta',
+      type: 'date',
+      defaultValue: this.getDefaultEndDate(),
+    },
+    {
+      key: 'granularity',
+      label: 'Granularidad',
+      type: 'select',
+      options: [
+        { value: 'hour', label: 'Por Hora' },
+        { value: 'day', label: 'Por Día' },
+        { value: 'week', label: 'Por Semana' },
+        { value: 'month', label: 'Por Mes' },
+        { value: 'year', label: 'Por Año' },
+      ],
+      placeholder: 'Seleccionar',
+      defaultValue: 'day',
+    },
   ];
 
-  // Card config for mobile
-  cardConfig: ItemListCardConfig = {
-    titleKey: 'name',
-    subtitleKey: 'sku',
-    avatarFallbackIcon: 'package',
-    detailKeys: [
-      { key: 'stock_quantity', label: 'Stock' },
-      { key: 'units_sold', label: 'Vendidas' },
-      { key: 'base_price', label: 'Precio', transform: (v) => this.currencyService.format(v) },
-      { key: 'profit_margin', label: 'Margen', transform: (v) => v !== null ? `${v.toFixed(1)}%` : '-' },
-    ],
-    footerKey: 'revenue',
-    footerLabel: 'Ingresos',
-    footerTransform: (v) => this.currencyService.format(v),
-  };
+  filterValues: FilterValues = {};
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
@@ -99,11 +94,25 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
     // Dispatch initial loads
     this.store.dispatch(ProductsActions.loadProductsSummary());
     this.store.dispatch(ProductsActions.loadTopSellers());
-    this.store.dispatch(ProductsActions.loadProductsTable());
+    this.store.dispatch(ProductsActions.loadProductsTrends());
 
-    // Sync page/limit to local state for template bindings
-    this.page$.pipe(takeUntil(this.destroy$)).subscribe((p) => this.currentPage = p);
-    this.limit$.pipe(takeUntil(this.destroy$)).subscribe((l) => this.currentLimit = l);
+    // Sync store state → filterValues for the options dropdown
+    combineLatest([this.dateRange$, this.granularity$])
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(([dateRange, granularity]) => {
+        this.filterValues = {
+          date_from: dateRange.start_date || null,
+          date_to: dateRange.end_date || null,
+          granularity: granularity || 'day',
+        };
+      });
+
+    // Subscribe to trends to build chart
+    combineLatest([this.trends$, this.granularity$])
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(([trends, granularity]) => {
+        this.updateTrendsChart(trends, granularity);
+      });
 
     // Subscribe to top sellers to build chart
     this.topSellers$
@@ -119,23 +128,36 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
     this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
   }
 
-  onDateRangeChange(range: DateRangeFilter): void {
-    this.store.dispatch(ProductsActions.setDateRange({ dateRange: range }));
+  onFilterChange(values: FilterValues): void {
+    const dateFrom = values['date_from'] as string;
+    const dateTo = values['date_to'] as string;
+    const granularity = values['granularity'] as string;
+
+    const currentRange = this.filterValues;
+    if (dateFrom !== currentRange['date_from'] || dateTo !== currentRange['date_to']) {
+      this.store.dispatch(ProductsActions.setDateRange({
+        dateRange: {
+          start_date: dateFrom || '',
+          end_date: dateTo || '',
+          preset: 'custom',
+        },
+      }));
+    }
+
+    if (granularity !== currentRange['granularity']) {
+      this.store.dispatch(ProductsActions.setGranularity({ granularity: granularity || 'day' }));
+    }
   }
 
-  onSearchChange(search: string): void {
-    this.store.dispatch(ProductsActions.setSearch({ search }));
-  }
-
-  onPageChange(page: number): void {
-    this.store.dispatch(ProductsActions.setPage({ page }));
-  }
-
-  onSort(event: { column: string; direction: SortDirection }): void {
-    this.store.dispatch(ProductsActions.setSort({
-      sortBy: event.column,
-      sortOrder: (event.direction || 'desc') as 'asc' | 'desc',
+  onClearAllFilters(): void {
+    this.store.dispatch(ProductsActions.setDateRange({
+      dateRange: {
+        start_date: this.getDefaultStartDate(),
+        end_date: this.getDefaultEndDate(),
+        preset: 'thisMonth',
+      },
     }));
+    this.store.dispatch(ProductsActions.setGranularity({ granularity: 'day' }));
   }
 
   exportReport(): void {
@@ -148,8 +170,75 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
     return `${sign}${growth.toFixed(1)}% vs período anterior`;
   }
 
-  min(a: number, b: number): number {
-    return Math.min(a, b);
+  private getDefaultStartDate(): string {
+    const date = new Date();
+    date.setDate(1);
+    return date.toISOString().split('T')[0];
+  }
+
+  private getDefaultEndDate(): string {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  private updateTrendsChart(trends: ProductTrend[], granularity: string): void {
+    if (!trends.length) return;
+
+    const style = getComputedStyle(document.documentElement);
+    const purpleColor = '#8b5cf6';
+    const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
+    const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+
+    const labels = trends.map((t) => this.formatPeriodLabel(t.period, granularity));
+    const units = trends.map((t) => t.units_sold);
+
+    this.unitsTrendChartOptions = {
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const data = params[0];
+          const trend = trends[data.dataIndex];
+          return `${data.name}<br/>Unidades: ${data.value}<br/>Ingresos: ${this.currencyService.format(trend.revenue)}`;
+        },
+      },
+      grid: {
+        left: '3%',
+        right: '4%',
+        bottom: '3%',
+        containLabel: true,
+      },
+      xAxis: {
+        type: 'category',
+        data: labels,
+        axisLine: { lineStyle: { color: borderColor } },
+        axisLabel: { color: textSecondary },
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary },
+        splitLine: { lineStyle: { color: borderColor } },
+      },
+      series: [
+        {
+          name: 'Unidades',
+          type: 'line',
+          smooth: true,
+          data: units,
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [
+                { offset: 0, color: `${purpleColor}4D` },
+                { offset: 1, color: `${purpleColor}0D` },
+              ],
+            },
+          },
+          lineStyle: { color: purpleColor, width: 2 },
+          itemStyle: { color: purpleColor },
+        },
+      ],
+    };
   }
 
   private updateTopSellersChart(topSellers: TopSellingProduct[]): void {
@@ -160,10 +249,11 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
     const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
     const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
-    // Reverse for horizontal bar chart (top item at top)
-    const reversed = [...topSellers].reverse();
+    // Top 5 by units (reversed for horizontal bar chart — top item at top)
+    const top5 = topSellers.slice(0, 5);
+    const reversed = [...top5].reverse();
     const names = reversed.map((p) => p.product_name.length > 25 ? p.product_name.substring(0, 25) + '...' : p.product_name);
-    const revenues = reversed.map((p) => p.revenue);
+    const units = reversed.map((p) => p.units_sold);
 
     this.topSellersChartOptions = {
       tooltip: {
@@ -172,7 +262,7 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
         formatter: (params: any) => {
           const data = params[0];
           const product = reversed[data.dataIndex];
-          return `<strong>${product.product_name}</strong><br/>Ingresos: ${this.currencyService.format(data.value)}<br/>Unidades: ${product.units_sold}`;
+          return `<strong>${product.product_name}</strong><br/>Unidades: ${data.value}<br/>Ingresos: ${this.currencyService.format(product.revenue)}`;
         },
       },
       grid: {
@@ -185,10 +275,7 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
       xAxis: {
         type: 'value',
         axisLine: { show: false },
-        axisLabel: {
-          color: textSecondary,
-          formatter: (value: number) => this.currencyService.format(value, 0),
-        },
+        axisLabel: { color: textSecondary },
         splitLine: { lineStyle: { color: borderColor } },
       },
       yAxis: {
@@ -199,9 +286,9 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
       },
       series: [
         {
-          name: 'Ingresos',
+          name: 'Unidades',
           type: 'bar',
-          data: revenues,
+          data: units,
           itemStyle: {
             color: primaryColor,
             borderRadius: [0, 4, 4, 0],
@@ -210,5 +297,24 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
         },
       ],
     };
+  }
+
+  private formatPeriodLabel(period: string, granularity: string): string {
+    if (granularity === 'year') return period;
+    if (granularity === 'month') {
+      const [year, month] = period.split('-');
+      const date = new Date(Number(year), Number(month) - 1);
+      return date.toLocaleDateString('es', { month: 'short', year: '2-digit' });
+    }
+    if (granularity === 'hour') {
+      const parts = period.split('T');
+      return parts[1] || period;
+    }
+    try {
+      const date = new Date(period);
+      return date.toLocaleDateString('es', { day: '2-digit', month: 'short' });
+    } catch {
+      return period;
+    }
   }
 }

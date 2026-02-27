@@ -14,7 +14,9 @@ export interface DomainConfig {
   organization_id?: number;
   store_id?: number;
   customConfig?: DomainCustomConfig;
+  store_logo_url?: string;
   isVendixDomain: boolean;
+  isMainVendixDomain: boolean;
   hostname: string;
 }
 
@@ -185,5 +187,6 @@ export interface DomainResolution {
   is_primary: boolean;
   store_slug?: string;
   store_name?: string;
+  store_logo_url?: string;
   ownership?: string;
 }

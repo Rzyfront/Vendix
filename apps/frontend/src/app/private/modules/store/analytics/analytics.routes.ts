@@ -1,10 +1,14 @@
 import { Routes } from '@angular/router';
 import { provideState } from '@ngrx/store';
 import { provideEffects } from '@ngrx/effects';
+import { overviewSummaryReducer } from './pages/overview/state/overview-summary.reducer';
+import { OverviewSummaryEffects } from './pages/overview/state/overview-summary.effects';
 import { salesSummaryReducer } from './pages/sales/state/sales-summary.reducer';
 import { SalesSummaryEffects } from './pages/sales/state/sales-summary.effects';
 import { productsAnalyticsReducer } from './pages/products/state/products-analytics.reducer';
 import { ProductsAnalyticsEffects } from './pages/products/state/products-analytics.effects';
+import { inventoryOverviewReducer } from './pages/inventory/overview/state/inventory-overview.reducer';
+import { InventoryOverviewEffects } from './pages/inventory/overview/state/inventory-overview.effects';
 
 export const analyticsRoutes: Routes = [
   {
@@ -15,6 +19,18 @@ export const analyticsRoutes: Routes = [
         pathMatch: 'full',
         loadComponent: () =>
           import('./analytics.component').then((c) => c.AnalyticsComponent),
+      },
+      // Overview Analytics
+      {
+        path: 'overview',
+        providers: [
+          provideState({ name: 'overviewSummary', reducer: overviewSummaryReducer }),
+          provideEffects(OverviewSummaryEffects),
+        ],
+        loadComponent: () =>
+          import('./pages/overview/overview-summary/overview-summary.component').then(
+            (c) => c.OverviewSummaryComponent,
+          ),
       },
       // Sales Analytics
       {
@@ -80,7 +96,18 @@ export const analyticsRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            redirectTo: 'stock-levels',
+            redirectTo: 'overview',
+          },
+          {
+            path: 'overview',
+            providers: [
+              provideState({ name: 'inventoryOverview', reducer: inventoryOverviewReducer }),
+              provideEffects(InventoryOverviewEffects),
+            ],
+            loadComponent: () =>
+              import('./pages/inventory/overview/inventory-overview.component').then(
+                (c) => c.InventoryOverviewComponent,
+              ),
           },
           {
             path: 'stock-levels',

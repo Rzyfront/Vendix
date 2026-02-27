@@ -41,14 +41,14 @@ import { PopCartSummary } from '../services/pop-cart.service';
         </button>
       </div>
 
-      <!-- Row 2: Action Buttons -->
+      <!-- Row 2: Secondary Action Buttons -->
       <div class="actions-row">
         <button
           class="action-btn draft-btn"
           (click)="saveDraft.emit()"
           [disabled]="itemCount === 0"
         >
-          <app-icon name="save" [size]="18"></app-icon>
+          <app-icon name="save" [size]="16"></app-icon>
           <span>Borrador</span>
         </button>
         <button
@@ -56,18 +56,19 @@ import { PopCartSummary } from '../services/pop-cart.service';
           (click)="createOrder.emit()"
           [disabled]="itemCount === 0"
         >
-          <app-icon name="file-plus" [size]="18"></app-icon>
+          <app-icon name="file-plus" [size]="16"></app-icon>
           <span>Crear</span>
         </button>
-        <button
-          class="action-btn receive-btn"
-          (click)="createAndReceive.emit()"
-          [disabled]="itemCount === 0"
-        >
-          <app-icon name="package-check" [size]="18"></app-icon>
-          <span>C+R</span>
-        </button>
       </div>
+      <!-- Row 3: Primary CTA -->
+      <button
+        class="action-btn receive-btn receive-btn-full"
+        (click)="createAndReceive.emit()"
+        [disabled]="itemCount === 0"
+      >
+        <app-icon name="package-check" [size]="18"></app-icon>
+        <span>Crear + Recibir</span>
+      </button>
     </div>
   `,
   styles: [
@@ -198,24 +199,32 @@ import { PopCartSummary } from '../services/pop-cart.service';
 
       /* Row 2: Actions */
       .actions-row {
-        display: flex;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
         gap: 10px;
       }
 
       .action-btn {
-        flex: 1;
         display: flex;
         align-items: center;
         justify-content: center;
         gap: 8px;
-        height: 44px;
+        height: 38px;
         border: none;
         border-radius: 12px;
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 600;
         cursor: pointer;
         transition: all 0.2s ease;
         white-space: nowrap;
+      }
+
+      .receive-btn-full {
+        width: 100%;
+        height: 46px;
+        font-size: 15px;
+        font-weight: 700;
+        box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);
       }
 
       .action-btn:active:not(:disabled) {

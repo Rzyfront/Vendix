@@ -197,9 +197,11 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
   }
 
   onClearAllFilters(): void {
-    // Reset all filter values
+    // Reset all filter values to their defaults (or null if no default)
     for (const filter of this.filters) {
-      if (filter.type === 'multi-select') {
+      if (filter.defaultValue !== undefined) {
+        this.localFilterValues[filter.key] = filter.defaultValue;
+      } else if (filter.type === 'multi-select') {
         this.localFilterValues[filter.key] = [];
       } else {
         this.localFilterValues[filter.key] = null;

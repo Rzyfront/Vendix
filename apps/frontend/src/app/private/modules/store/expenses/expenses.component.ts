@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 
-import { loadExpenses } from './state/actions/expenses.actions';
+import { loadExpenses, loadExpensesSummary, loadExpenseCategories } from './state/actions/expenses.actions';
 import { selectExpenses, selectExpensesLoading } from './state/selectors/expenses.selectors';
 import { Expense } from './interfaces/expense.interface';
 
@@ -13,7 +13,6 @@ import { ExpenseCreateComponent } from './components/expense-create/expense-crea
 import { ExpenseEditComponent } from './components/expense-edit/expense-edit.component';
 import { ExpenseCategoriesComponent } from './components/expense-categories/expense-categories.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
-import { TableAction, ItemListCardConfig, TableColumn } from '../../../../shared/components/index';
 
 @Component({
   selector: 'vendix-expenses',
@@ -73,98 +72,16 @@ export class ExpensesComponent implements OnInit {
   isCategoriesModalOpen = false;
   selectedExpense: Expense | null = null;
 
-  tableActions: TableAction[] = [
-    {
-      label: 'Editar',
-      icon: 'edit',
-      variant: 'primary',
-      action: (row: any) => this.editExpense(row)
-    }
-  ];
-
-  // Card Config for mobile
-  cardConfig: ItemListCardConfig = {
-    titleKey: 'description',
-    subtitleKey: 'expense_categories.name',
-    subtitleTransform: (val: any) => val || 'Sin categoría',
-    badgeKey: 'state',
-    badgeConfig: {
-      type: 'status',
-      colorMap: {
-        pending: 'warn',
-        approved: 'success',
-        rejected: 'danger',
-        paid: 'info',
-        cancelled: 'default'
-      }
-    },
-    detailKeys: [
-      {
-        key: 'amount',
-        label: 'Monto',
-        transform: (val: any) => this.formatCurrency(val)
-      },
-      {
-        key: 'expense_date',
-        label: 'Fecha',
-        icon: 'calendar',
-        transform: (val: any) => val ? new Date(val).toLocaleDateString() : ''
-      },
-    ],
-  };
-
-  columns: TableColumn[] = [
-    { key: 'id', label: 'ID', width: '80px', priority: 2 },
-    { key: 'description', label: 'Descripción', sortable: true, priority: 1 },
-    {
-      key: 'amount',
-      label: 'Monto',
-      sortable: true,
-      align: 'right',
-      priority: 1,
-      transform: (val: any) => this.formatCurrency(val)
-    },
-    {
-      key: 'expense_date',
-      label: 'Fecha',
-      sortable: true,
-      align: 'center',
-      priority: 2,
-      transform: (val: any) => val ? new Date(val).toLocaleDateString() : ''
-    },
-    {
-      key: 'expense_categories.name',
-      label: 'Categoría',
-      defaultValue: 'Sin categoría',
-      priority: 2
-    },
-    {
-      key: 'state',
-      label: 'Estado',
-      align: 'center',
-      priority: 1,
-      badgeConfig: {
-        type: 'status',
-        colorMap: {
-          pending: 'warn',
-          approved: 'success',
-          rejected: 'danger',
-          paid: 'info',
-          cancelled: 'default'
-        }
-      }
-    }
-  ];
-
   constructor(private store: Store) {
     this.expenses$ = this.store.select(selectExpenses);
     this.loading$ = this.store.select(selectExpensesLoading);
   }
 
   ngOnInit(): void {
-    // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
     this.store.dispatch(loadExpenses());
+    this.store.dispatch(loadExpensesSummary());
+    this.store.dispatch(loadExpenseCategories());
   }
 
   // Modal handlers
@@ -183,11 +100,6 @@ export class ExpensesComponent implements OnInit {
 
   refreshExpenses(): void {
     this.store.dispatch(loadExpenses());
+    this.store.dispatch(loadExpensesSummary());
   }
-
-  formatCurrency(value: any): string {
-    return this.currencyService.format(value || 0);
-  }
-
-  
 }

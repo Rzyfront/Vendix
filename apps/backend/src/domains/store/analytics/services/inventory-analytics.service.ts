@@ -234,13 +234,18 @@ export class InventoryAnalyticsService {
   }
 
   async getInventoryValuation(query: InventoryAnalyticsQueryDto) {
-    // Get stock levels grouped by location
+    // Get stock levels grouped by location, including product cost_price as fallback
     const stockLevels = await this.prisma.stock_levels.findMany({
       include: {
         inventory_locations: {
           select: {
             id: true,
             name: true,
+          },
+        },
+        products: {
+          select: {
+            cost_price: true,
           },
         },
       },
@@ -254,7 +259,7 @@ export class InventoryAnalyticsService {
       const locationId = sl.inventory_locations?.id || 0;
       const locationName = sl.inventory_locations?.name || 'Sin ubicación';
       const qty = Number(sl.quantity_on_hand || 0);
-      const cost = Number(sl.cost_per_unit || 0);
+      const cost = Number(sl.cost_per_unit || 0) || Number(sl.products?.cost_price || 0);
       const value = qty * cost;
       totalValue += value;
 

@@ -1,6 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
-import { ProductsAnalyticsQueryDto, DatePreset } from '../dto/analytics-query.dto';
+import { RequestContextService } from '@common/context/request-context.service';
+import { ProductsAnalyticsQueryDto, DatePreset, Granularity } from '../dto/analytics-query.dto';
+import { fillTimeSeries } from '../utils/fill-time-series.util';
 
 @Injectable()
 export class ProductsAnalyticsService {
@@ -15,7 +18,7 @@ export class ProductsAnalyticsService {
     // Total and active products in the store
     const [totalProducts, activeProducts] = await Promise.all([
       this.prisma.products.count(),
-      this.prisma.products.count({ where: { is_active: true } }),
+      this.prisma.products.count({ where: { state: 'active' } }),
     ]);
 
     // Current period: revenue + units from order_items
@@ -104,11 +107,14 @@ export class ProductsAnalyticsService {
         id: true,
         name: true,
         sku: true,
-        image_url: true,
         base_price: true,
         cost_price: true,
+        product_images: {
+          select: { image_url: true },
+          take: 1,
+        },
       },
-    }) as { id: number; name: string; sku: string | null; image_url: string | null; base_price: any; cost_price: any }[];
+    }) as { id: number; name: string; sku: string | null; base_price: any; cost_price: any; product_images: { image_url: string }[] }[];
 
     const productMap = new Map(products.map((p) => [p.id, p]));
 
@@ -126,7 +132,7 @@ export class ProductsAnalyticsService {
         product_id: r.product_id,
         product_name: product?.name || 'Desconocido',
         sku: product?.sku || '',
-        image_url: product?.image_url || null,
+        image_url: product?.product_images?.[0]?.image_url || null,
         units_sold: units,
         revenue,
         average_price: avgPrice,
@@ -143,7 +149,7 @@ export class ProductsAnalyticsService {
 
     // Build product where clause
     const productWhere: any = {
-      is_active: true,
+      state: 'active',
       ...(search && {
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
@@ -168,10 +174,13 @@ export class ProductsAnalyticsService {
         id: true,
         name: true,
         sku: true,
-        image_url: true,
         base_price: true,
         cost_price: true,
         stock_quantity: true,
+        product_images: {
+          select: { image_url: true },
+          take: 1,
+        },
       },
       orderBy: query.sort_by === 'name'
         ? { name: query.sort_order || 'asc' }
@@ -246,7 +255,7 @@ export class ProductsAnalyticsService {
         product_id: p.id,
         name: p.name,
         sku: p.sku || '',
-        image_url: p.image_url || null,
+        image_url: (p as any).product_images?.[0]?.image_url || null,
         base_price: basePrice,
         cost_price: costPrice,
         stock_quantity: p.stock_quantity || 0,
@@ -283,7 +292,7 @@ export class ProductsAnalyticsService {
     // Get all active products
     const products = await this.prisma.products.findMany({
       where: {
-        is_active: true,
+        state: 'active',
         ...(query.category_id && {
           product_categories: {
             some: { category_id: query.category_id },
@@ -349,6 +358,87 @@ export class ProductsAnalyticsService {
         profit_margin: profitMargin !== null ? Number(profitMargin.toFixed(2)) : null,
       };
     });
+  }
+
+  async getProductsTrends(query: ProductsAnalyticsQueryDto) {
+    const { startDate, endDate } = this.parseDateRange(query);
+    const granularity = query.granularity || Granularity.DAY;
+    const context = RequestContextService.getContext();
+
+    if (!context?.store_id) {
+      throw new ForbiddenException('Store context required for product trends');
+    }
+    const storeId = context.store_id;
+
+    const truncSql = Prisma.raw(`'${this.getDateTruncInterval(granularity)}'`);
+
+    const results = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{
+        period: Date;
+        units_sold: any;
+        revenue: any;
+      }>
+    >`
+      SELECT
+        DATE_TRUNC(${truncSql}, o.created_at) AS period,
+        COALESCE(SUM(oi.quantity), 0) AS units_sold,
+        COALESCE(SUM(oi.total_price), 0) AS revenue
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.id
+      WHERE o.store_id = ${storeId}
+        AND o.state IN ('delivered', 'finished')
+        AND o.created_at >= ${startDate}
+        AND o.created_at <= ${endDate}
+      GROUP BY DATE_TRUNC(${truncSql}, o.created_at)
+      ORDER BY period ASC
+    `;
+
+    const mapped = results.map((r) => ({
+      period: this.formatPeriodFromDate(new Date(r.period), granularity),
+      units_sold: Number(r.units_sold),
+      revenue: Number(r.revenue),
+    }));
+
+    return fillTimeSeries(
+      mapped,
+      startDate,
+      endDate,
+      granularity,
+      { units_sold: 0, revenue: 0 },
+      this.formatPeriodFromDate.bind(this),
+    );
+  }
+
+  private getDateTruncInterval(granularity: Granularity): string {
+    switch (granularity) {
+      case Granularity.HOUR: return 'hour';
+      case Granularity.DAY: return 'day';
+      case Granularity.WEEK: return 'week';
+      case Granularity.MONTH: return 'month';
+      case Granularity.YEAR: return 'year';
+      default: return 'day';
+    }
+  }
+
+  private formatPeriodFromDate(date: Date, granularity: Granularity): string {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+
+    switch (granularity) {
+      case Granularity.HOUR:
+        return `${y}-${m}-${d}T${String(date.getHours()).padStart(2, '0')}:00`;
+      case Granularity.DAY:
+        return `${y}-${m}-${d}`;
+      case Granularity.WEEK:
+        return `${y}-${m}-${d}`;
+      case Granularity.MONTH:
+        return `${y}-${m}`;
+      case Granularity.YEAR:
+        return `${y}`;
+      default:
+        return `${y}-${m}-${d}`;
+    }
   }
 
   // Helper methods (duplicated from SalesAnalyticsService to keep services independent)

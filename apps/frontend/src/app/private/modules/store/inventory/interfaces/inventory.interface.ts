@@ -355,58 +355,73 @@ export interface InventoryBatch {
 // ============================================================
 
 export type MovementType =
-  | 'inbound'
-  | 'outbound'
+  | 'stock_in'
+  | 'stock_out'
   | 'transfer'
   | 'adjustment'
-  | 'return';
+  | 'sale'
+  | 'return'
+  | 'damage'
+  | 'expiration';
+
+export type SourceOrderType = 'purchase' | 'sale' | 'transfer' | 'return';
 
 export interface InventoryMovement {
   id: number;
+  organization_id: number;
   product_id: number;
   product_variant_id?: number;
-  from_location_id: number;
+  from_location_id?: number;
   to_location_id?: number;
   movement_type: MovementType;
   quantity: number;
-  unit_cost?: number;
-  reference_number?: string;
-  reason: string;
+  source_order_type?: SourceOrderType;
+  source_order_id?: number;
+  reason?: string;
   notes?: string;
-  batch_number?: string;
-  serial_number?: string;
-  expiration_date?: string;
+  user_id?: number;
   created_at?: string;
-  // Populated fields
-  product?: {
+  // Populated fields (Prisma relation names)
+  products?: {
     id: number;
     name: string;
     sku?: string;
   };
+  product_variants?: {
+    id: number;
+    sku: string;
+    name?: string;
+  } | null;
   from_location?: InventoryLocation;
   to_location?: InventoryLocation;
+  users?: {
+    id: number;
+    user_name: string;
+    email?: string;
+  } | null;
 }
 
 export interface CreateMovementDto {
   product_id: number;
   product_variant_id?: number;
-  from_location_id: number;
+  from_location_id?: number;
   to_location_id?: number;
   movement_type: MovementType;
   quantity: number;
-  unit_cost?: number;
-  reference_number?: string;
-  reason: string;
+  source_order_type?: SourceOrderType;
+  source_order_id?: number;
+  reason?: string;
   notes?: string;
-  batch_number?: string;
-  serial_number?: string;
-  expiration_date?: string;
 }
 
 export interface MovementQueryDto {
   product_id?: number;
   location_id?: number;
+  from_location_id?: number;
+  to_location_id?: number;
   movement_type?: MovementType;
+  user_id?: number;
+  search?: string;
   start_date?: string;
   end_date?: string;
   limit?: number;
