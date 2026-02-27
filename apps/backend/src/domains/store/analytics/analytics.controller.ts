@@ -9,7 +9,8 @@ import { Response } from 'express';
 import { SalesAnalyticsService } from './services/sales-analytics.service';
 import { InventoryAnalyticsService } from './services/inventory-analytics.service';
 import { ProductsAnalyticsService } from './services/products-analytics.service';
-import { SalesAnalyticsQueryDto, InventoryAnalyticsQueryDto, ProductsAnalyticsQueryDto } from './dto/analytics-query.dto';
+import { OverviewAnalyticsService } from './services/overview-analytics.service';
+import { AnalyticsQueryDto, SalesAnalyticsQueryDto, InventoryAnalyticsQueryDto, ProductsAnalyticsQueryDto } from './dto/analytics-query.dto';
 import { ResponseService } from '../../../common/responses/response.service';
 
 @Controller('store/analytics')
@@ -18,8 +19,23 @@ export class AnalyticsController {
     private readonly sales_analytics_service: SalesAnalyticsService,
     private readonly inventory_analytics_service: InventoryAnalyticsService,
     private readonly products_analytics_service: ProductsAnalyticsService,
+    private readonly overview_analytics_service: OverviewAnalyticsService,
     private readonly response_service: ResponseService,
   ) {}
+
+  // ==================== OVERVIEW ANALYTICS ====================
+
+  @Get('overview/summary')
+  async getOverviewSummary(@Query() query: AnalyticsQueryDto) {
+    const result = await this.overview_analytics_service.getOverviewSummary(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('overview/trends')
+  async getOverviewTrends(@Query() query: AnalyticsQueryDto) {
+    const result = await this.overview_analytics_service.getOverviewTrends(query);
+    return this.response_service.success(result);
+  }
 
   // ==================== SALES ANALYTICS ====================
 
@@ -118,6 +134,12 @@ export class AnalyticsController {
   @Get('products/top-sellers')
   async getTopSellingProducts(@Query() query: ProductsAnalyticsQueryDto) {
     const result = await this.products_analytics_service.getTopSellingProducts(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('products/trends')
+  async getProductsTrends(@Query() query: ProductsAnalyticsQueryDto) {
+    const result = await this.products_analytics_service.getProductsTrends(query);
     return this.response_service.success(result);
   }
 

@@ -1,0 +1,179 @@
+<div class="md:space-y-4">
+  <!-- Stats Cards -->
+  @if (loading$ | async) {
+    <div class="stats-container">
+      @for (i of [1, 2, 3, 4]; track i) {
+        <div class="bg-surface border border-border rounded-xl p-4 animate-pulse">
+          <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+          <div class="h-8 bg-gray-200 rounded w-3/4"></div>
+        </div>
+      }
+    </div>
+  } @else {
+    <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <app-stats
+        title="Ingresos Totales"
+        [value]="(summary$ | async)?.total_income | currency"
+        [smallText]="getGrowthText((summary$ | async)?.income_growth)"
+        iconName="dollar-sign"
+        iconBgColor="bg-green-100"
+        iconColor="text-green-600"
+      ></app-stats>
+
+      <app-stats
+        title="Gastos Totales"
+        [value]="(summary$ | async)?.total_expenses | currency"
+        [smallText]="getGrowthText((summary$ | async)?.expenses_growth)"
+        iconName="trending-down"
+        iconBgColor="bg-red-100"
+        iconColor="text-red-600"
+      ></app-stats>
+
+      <app-stats
+        title="Impuestos Recaudados"
+        [value]="(summary$ | async)?.total_taxes | currency"
+        [smallText]="getGrowthText((summary$ | async)?.taxes_growth)"
+        iconName="landmark"
+        iconBgColor="bg-amber-100"
+        iconColor="text-amber-600"
+      ></app-stats>
+
+      <app-stats
+        title="Ganancia Neta"
+        [value]="(summary$ | async)?.net_profit | currency"
+        [smallText]="getGrowthText((summary$ | async)?.net_profit_growth)"
+        iconName="wallet"
+        iconBgColor="bg-purple-100"
+        iconColor="text-purple-600"
+      ></app-stats>
+
+    </div>
+  }
+
+  <!-- Filter Bar -->
+  <div class="sticky top-[99px] z-10 bg-background px-2 py-0.5 -mt-[11px] md:-mt-2 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border">
+    <div class="flex items-center justify-between gap-2">
+      <div class="min-w-0">
+        <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-base md:font-semibold md:text-text-primary truncate">
+          Resumen General del Negocio
+        </h2>
+        <p class="text-[11px] text-gray-400 md:text-xs md:text-text-secondary truncate">
+          Vision general del equilibrio financiero de tu tienda
+        </p>
+      </div>
+
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <app-options-dropdown
+          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+          [filters]="filterConfigs"
+          [filterValues]="filterValues"
+          title="Filtros"
+          triggerLabel="Filtros"
+          (filterChange)="onFilterChange($event)"
+          (clearAllFilters)="onClearAllFilters()"
+        ></app-options-dropdown>
+      </div>
+    </div>
+  </div>
+
+  <!-- Breakeven Section -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Gauge Chart: Punto de Equilibrio -->
+    <div class="bg-surface border border-border rounded-xl overflow-hidden">
+      <div class="p-4 border-b border-border">
+        <h3 class="font-semibold text-text-primary">Punto de Equilibrio</h3>
+        <p class="text-sm text-text-secondary">Porcentaje de ingresos destinado a gastos</p>
+      </div>
+      <div class="px-4 pt-4 pb-3">
+        @if (loading$ | async) {
+          <div class="h-64 flex items-center justify-center">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+        } @else {
+          <app-chart
+            [options]="gaugeChartOptions"
+            size="medium"
+          ></app-chart>
+
+          <!-- Range Legend -->
+          <div class="space-y-1.5">
+            <div class="flex items-start gap-2">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-green-500 flex-shrink-0"></span>
+              <p class="text-[11px] leading-tight text-text-secondary"><span class="font-semibold text-green-600">0–70%</span> — Saludable. Buena retención de ingresos.</p>
+            </div>
+            <div class="flex items-start gap-2">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-yellow-500 flex-shrink-0"></span>
+              <p class="text-[11px] leading-tight text-text-secondary"><span class="font-semibold text-yellow-600">70–90%</span> — Ajustado. Gastos consumen gran parte.</p>
+            </div>
+            <div class="flex items-start gap-2">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-red-500 flex-shrink-0"></span>
+              <p class="text-[11px] leading-tight text-text-secondary"><span class="font-semibold text-red-600">90–150%</span> — Crítico. Gastos igualan o superan ingresos.</p>
+            </div>
+          </div>
+
+          <!-- Dynamic Status -->
+          <div class="mt-2.5 p-2.5 rounded-lg" [ngClass]="getBreakevenBgColor((summary$ | async)?.breakeven_ratio)">
+            <p class="text-[11px] leading-snug font-semibold" [ngClass]="getBreakevenTextColor((summary$ | async)?.breakeven_ratio)">
+              {{ getBreakevenStatusText((summary$ | async)?.breakeven_ratio) }}
+            </p>
+          </div>
+        }
+      </div>
+    </div>
+
+    <!-- Comparative Line Chart -->
+    <div class="lg:col-span-2 bg-surface border border-border rounded-xl overflow-hidden">
+      <div class="p-4 border-b border-border">
+        <h3 class="font-semibold text-text-primary">Tendencias Comparativas</h3>
+        <p class="text-sm text-text-secondary">Ventas, gastos y rendimiento a lo largo del tiempo</p>
+      </div>
+      <div class="p-4">
+        @if (loadingTrends$ | async) {
+          <div class="h-80 flex items-center justify-center">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+        } @else {
+          <app-chart
+            [options]="comparativeChartOptions"
+            size="large"
+          ></app-chart>
+        }
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick Links -->
+  <div class="bg-surface border border-border rounded-xl p-4">
+    <h3 class="font-semibold text-text-primary mb-4">Reportes Relacionados</h3>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <a
+        routerLink="/admin/analytics/sales/summary"
+        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
+      >
+        <app-icon name="shopping-cart" [size]="18" class="text-text-secondary"></app-icon>
+        <span class="text-text-primary">Ventas</span>
+      </a>
+      <a
+        routerLink="/admin/analytics/expenses/summary"
+        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
+      >
+        <app-icon name="receipt" [size]="18" class="text-text-secondary"></app-icon>
+        <span class="text-text-primary">Gastos</span>
+      </a>
+      <a
+        routerLink="/admin/analytics/financial/profit-loss"
+        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
+      >
+        <app-icon name="bar-chart-3" [size]="18" class="text-text-secondary"></app-icon>
+        <span class="text-text-primary">Financiero</span>
+      </a>
+      <a
+        routerLink="/admin/analytics/products/performance"
+        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
+      >
+        <app-icon name="package" [size]="18" class="text-text-secondary"></app-icon>
+        <span class="text-text-primary">Productos</span>
+      </a>
+    </div>
+  </div>
+</div>

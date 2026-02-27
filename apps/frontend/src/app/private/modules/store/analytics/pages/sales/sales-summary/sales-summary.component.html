@@ -82,7 +82,7 @@
   </div>
 
   <!-- Charts Row -->
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <div class="grid grid-cols-1 gap-6">
     <!-- Revenue Trend Chart -->
     <div class="bg-surface border border-border rounded-xl overflow-hidden">
       <div class="p-4 border-b border-border">
@@ -97,26 +97,6 @@
         } @else {
           <app-chart
             [options]="revenueChartOptions"
-            size="large"
-          ></app-chart>
-        }
-      </div>
-    </div>
-
-    <!-- Orders Trend Chart -->
-    <div class="bg-surface border border-border rounded-xl overflow-hidden">
-      <div class="p-4 border-b border-border">
-        <h3 class="font-semibold text-text-primary">Tendencia de Órdenes</h3>
-        <p class="text-sm text-text-secondary">Número de órdenes en el período</p>
-      </div>
-      <div class="p-4">
-        @if (loadingTrends$ | async) {
-          <div class="h-64 flex items-center justify-center">
-            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-          </div>
-        } @else {
-          <app-chart
-            [options]="ordersChartOptions"
             size="large"
           ></app-chart>
         }

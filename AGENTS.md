@@ -15,12 +15,16 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | "revisar PR", "review PR", "analizar PR", "code review", "revisar pull request" | `pr-code-review` |
 | -- | `git-workflow` |
 | -- | `vendix-monorepo-workspaces` |
+| -- | `vendix-panel-ui` |
 | -- | `vendix-prisma-scopes` |
+| Adding modules or submodules to the sidebar | `vendix-panel-ui` |
+| Adding new menu items to admin layouts | `vendix-panel-ui` |
 | Adding new models to domain scopes | `vendix-prisma-scopes` |
 | Adding/removing workspaces | `vendix-monorepo-workspaces` |
 | After creating/modifying a skill | `skill-sync` |
 | Configuring CI/CD | `vendix-monorepo-workspaces` |
 | Configuring middleware | `vendix-backend-middleware` |
+| Configuring panel_ui visibility | `vendix-panel-ui` |
 | Creating API endpoints | `vendix-backend-api` |
 | Creating API tests (Bruno) | `vendix-bruno-test` |
 | Creating Angular components | `vendix-frontend-component` |
@@ -51,6 +55,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Verifying Build | `buildcheck-dev` |
 | Working on backend domains | `vendix-backend-domain` |
 | Working on frontend domains | `vendix-frontend-domain` |
+| Working with MenuFilterService or menu filtering | `vendix-panel-ui` |
 | Working with Prisma scoped services | `vendix-prisma-scopes` |
 | Working with notifications, SSE, or adding new event-driven alerts | `vendix-notifications-system` |
 | Writing Code (Naming) | `vendix-naming-conventions` |
@@ -84,6 +89,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 
 | Skill                 | Trigger             | Priority     | Description                           |
 | --------------------- | ------------------- | ------------ | ------------------------------------- |
+| **`how-to-dev`**      | **ALWAYS**          | **CRITICAL** | Mandatory ultra-obligatory dev flow   |
 | **`Vendix-core`**     | **ALWAYS**          | **CRITICAL** | Core patterns and conventions         |
 | **`git-workflow`**    | **ALWAYS**          | **CRITICAL** | Git commit, PR, branching and conflict rules |
 | **`knowledge-gap`**   | **UNKNOWN PATTERN** | **HIGH**     | Protocol for new/undefined patterns   |

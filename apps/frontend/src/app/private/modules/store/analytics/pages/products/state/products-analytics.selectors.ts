@@ -14,6 +14,21 @@ export const selectTopSellers = createSelector(
   (state) => state.topSellers,
 );
 
+export const selectTrends = createSelector(
+  selectProductsAnalyticsState,
+  (state) => state.trends,
+);
+
+export const selectGranularity = createSelector(
+  selectProductsAnalyticsState,
+  (state) => state.granularity,
+);
+
+export const selectLoadingTrends = createSelector(
+  selectProductsAnalyticsState,
+  (state) => state.loadingTrends,
+);
+
 export const selectProducts = createSelector(
   selectProductsAnalyticsState,
   (state) => state.products,

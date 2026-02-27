@@ -195,6 +195,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           route: '/admin/inventory/adjustments',
         },
         {
+          label: 'Movimientos',
+          icon: 'circle',
+          route: '/admin/inventory/movements',
+        },
+        {
           label: 'Ubicaciones',
           icon: 'circle',
           route: '/admin/inventory/locations',
@@ -248,6 +253,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       icon: 'chart-line',
       children: [
         {
+          label: 'Resumen',
+          icon: 'circle',
+          route: '/admin/analytics/overview',
+        },
+        {
           label: 'Centro de Analíticas',
           icon: 'circle',
           route: '/admin/analytics',
@@ -260,7 +270,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
         {
           label: 'Inventario',
           icon: 'circle',
-          route: '/admin/analytics/inventory/stock-levels',
+          route: '/admin/analytics/inventory/overview',
         },
         {
           label: 'Productos',
@@ -349,9 +359,9 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     this.storeType$ = this.authFacade.userStoreType$;
     this.storeLogo$ = this.authFacade.userStore$.pipe(
       map(store => {
-        if (store?.logo_url) return store.logo_url;
-        const isVendix = this.configFacade.getCurrentConfig()?.domainConfig?.isVendixDomain;
-        return isVendix ? 'vlogo.png' : null;
+        const domainConfig = this.configFacade.getCurrentConfig()?.domainConfig;
+        if (domainConfig?.isMainVendixDomain) return 'vlogo.png';
+        return store?.logo_url || null;
       })
     );
   }

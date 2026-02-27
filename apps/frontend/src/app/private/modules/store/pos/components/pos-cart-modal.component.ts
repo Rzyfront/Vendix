@@ -144,22 +144,24 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
         <!-- Action Buttons -->
         <div class="modal-actions">
-          <button
-            class="action-btn save-btn"
-            (click)="saveDraft.emit()"
-            [disabled]="!cartState?.items?.length"
-          >
-            <app-icon name="save" [size]="18"></app-icon>
-            <span>Guardar</span>
-          </button>
-          <button
-            class="action-btn shipping-btn"
-            (click)="shipping.emit()"
-            [disabled]="!cartState?.items?.length"
-          >
-            <app-icon name="truck" [size]="18"></app-icon>
-            <span>Envío</span>
-          </button>
+          <div class="modal-actions-row">
+            <button
+              class="action-btn save-btn"
+              (click)="saveDraft.emit()"
+              [disabled]="!cartState?.items?.length"
+            >
+              <app-icon name="save" [size]="18"></app-icon>
+              <span>Guardar</span>
+            </button>
+            <button
+              class="action-btn shipping-btn"
+              (click)="shipping.emit()"
+              [disabled]="!cartState?.items?.length"
+            >
+              <app-icon name="truck" [size]="18"></app-icon>
+              <span>Envío</span>
+            </button>
+          </div>
           <button
             class="action-btn checkout-btn"
             (click)="checkout.emit()"
@@ -474,6 +476,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       /* Action Buttons */
       .modal-actions {
         display: flex;
+        flex-direction: column;
         gap: 10px;
         padding: 16px 20px;
         padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
@@ -482,8 +485,13 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         flex-shrink: 0;
       }
 
+      .modal-actions-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
       .action-btn {
-        flex: 1;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -495,6 +503,12 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         font-weight: 600;
         cursor: pointer;
         transition: all 0.2s ease;
+        width: 100%;
+      }
+
+      .modal-actions-row > .action-btn {
+        height: 42px;
+        font-size: 13px;
       }
 
       .action-btn:active:not(:disabled) {
@@ -530,7 +544,8 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       .checkout-btn {
         background: var(--color-primary);
         color: white;
-        flex: 1.5;
+        font-weight: 700;
+        box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
       }
 
       .checkout-btn:hover:not(:disabled) {

@@ -337,7 +337,11 @@
     left: 0;
     top: 0;
     height: 100vh;
+    /* Safe area support for notched phones */
+    height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    top: env(safe-area-inset-top);
     width: min(var(--sidebar-width-mobile), 320px);
+    width: calc(min(var(--sidebar-width-mobile), 320px) + env(safe-area-inset-left));
     background-color: var(--color-surface);
     border-right: 1px solid var(--color-border);
     z-index: var(--sidebar-mobile-z-index); /* 55 - above header */
@@ -346,6 +350,8 @@
     box-shadow: var(--shadow-lg);
     opacity: 1;
     visibility: visible;
+    padding-left: env(safe-area-inset-left);
+    padding-top: env(safe-area-inset-top);
   }
 
   /* Show mobile sidebar when active */
@@ -353,27 +359,34 @@
     transform: translateX(0);
   }
 
-  /* Mobile backdrop */
+  /* Mobile backdrop - extend to safe areas */
   .sidebar-backdrop {
     position: fixed;
     top: 0;
     left: 0;
     width: 100vw;
     height: 100vh;
+    /* Safe area support */
+    top: env(safe-area-inset-top);
+    left: env(safe-area-inset-left);
+    width: calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right));
+    height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     background-color: rgba(0, 0, 0, var(--sidebar-backdrop-opacity));
     z-index: 54; /* Just below sidebar mobile (55) */
     opacity: 1;
     visibility: visible;
   }
 
-  /* Mobile close button */
+  /* Mobile close button - better touch target with safe area */
   .sidebar-mobile-close {
     position: absolute;
-    top: 1rem;
-    right: 1rem;
+    top: calc(1rem + env(safe-area-inset-top));
+    right: calc(1rem + env(safe-area-inset-right));
     background: none;
     border: none;
     padding: 0.5rem;
+    min-width: 44px; /* Touch target minimum */
+    min-height: 44px; /* Touch target minimum */
     border-radius: 0.75rem; /* 12px - consistent with system */
     color: var(--color-text-secondary);
     cursor: pointer;
@@ -394,6 +407,8 @@
   /* Prevent body scroll when sidebar is open */
   body.sidebar-mobile-open {
     overflow: hidden;
+    position: fixed;
+    width: 100%;
   }
 
   /* Mobile-specific menu adjustments */
@@ -436,10 +451,29 @@
     }
   }
 
-  /* Mobile menu item adjustments */
+  /* Mobile menu item adjustments - improved touch targets */
   .sidebar.sidebar-mobile .menu-item {
     min-height: 44px; /* Touch-friendly size */
     padding: 0.75rem;
+  }
+
+  /* Submenu items - improved touch targets */
+  .sidebar.sidebar-mobile .submenu-item a,
+  .sidebar.sidebar-mobile .submenu-item-button {
+    min-height: 44px; /* Touch target minimum */
+    padding: 0.75rem;
+  }
+
+  /* Submenu with better mobile animation */
+  .sidebar.sidebar-mobile .submenu {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease-out;
+  }
+
+  .sidebar.sidebar-mobile .submenu.open {
+    max-height: 1000px; /* Allow full content to show */
+    transition: max-height 0.4s ease-in;
   }
 
   /* Ensure mobile close button doesn't interfere with collapsed state */

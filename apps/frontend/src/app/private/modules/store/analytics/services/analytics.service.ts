@@ -33,8 +33,14 @@ import {
   ProductsSummary,
   TopSellingProduct,
   ProductAnalyticsRow,
+  ProductTrend,
   ProductsAnalyticsQueryDto,
 } from '../interfaces/products-analytics.interface';
+import {
+  OverviewSummary,
+  OverviewTrend,
+  OverviewAnalyticsQueryDto,
+} from '../interfaces/overview-analytics.interface';
 import { PaginatedResponse } from '../interfaces/analytics.interface';
 
 // Cache entry interface
@@ -103,6 +109,28 @@ export class AnalyticsService {
 
     analyticsCache.set(key, { observable: observable$, lastFetch: now });
     return observable$;
+  }
+
+  // ==================== OVERVIEW ANALYTICS ====================
+
+  getOverviewSummary(
+    query: OverviewAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<OverviewSummary>> {
+    const cacheKey = `overview-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<OverviewSummary>>(this.getApiUrl('overview/summary'), {
+        params: this.buildParams(query),
+      }),
+    );
+  }
+
+  getOverviewTrends(
+    query: OverviewAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<OverviewTrend[]>> {
+    return this.http.get<ApiResponse<OverviewTrend[]>>(
+      this.getApiUrl('overview/trends'),
+      { params: this.buildParams(query) },
+    );
   }
 
   // ==================== SALES ANALYTICS ====================
@@ -197,6 +225,15 @@ export class AnalyticsService {
   ): Observable<ApiResponse<TopSellingProduct[]>> {
     return this.http.get<ApiResponse<TopSellingProduct[]>>(
       this.getApiUrl('products/top-sellers'),
+      { params: this.buildParams(query) },
+    );
+  }
+
+  getProductsTrends(
+    query: ProductsAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<ProductTrend[]>> {
+    return this.http.get<ApiResponse<ProductTrend[]>>(
+      this.getApiUrl('products/trends'),
       { params: this.buildParams(query) },
     );
   }

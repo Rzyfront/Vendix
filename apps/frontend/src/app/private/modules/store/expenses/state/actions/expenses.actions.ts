@@ -2,6 +2,7 @@ import { createAction, props } from '@ngrx/store';
 import {
   Expense,
   ExpenseCategory,
+  ExpenseSummary,
   CreateExpenseDto,
   UpdateExpenseDto,
 } from '../../interfaces/expense.interface';
@@ -73,7 +74,7 @@ export const deleteExpenseFailure = createAction(
   props<{ error: string }>(),
 );
 
-// Approve/Reject Expense
+// State Transitions (via ExpenseFlowService)
 export const approveExpense = createAction(
   '[Expenses] Approve Expense',
   props<{ id: number }>(),
@@ -99,6 +100,70 @@ export const rejectExpenseFailure = createAction(
   '[Expenses] Reject Expense Failure',
   props<{ error: string }>(),
 );
+
+export const payExpense = createAction(
+  '[Expenses] Pay Expense',
+  props<{ id: number }>(),
+);
+export const payExpenseSuccess = createAction(
+  '[Expenses] Pay Expense Success',
+  props<{ expense: Expense }>(),
+);
+export const payExpenseFailure = createAction(
+  '[Expenses] Pay Expense Failure',
+  props<{ error: string }>(),
+);
+
+export const cancelExpense = createAction(
+  '[Expenses] Cancel Expense',
+  props<{ id: number }>(),
+);
+export const cancelExpenseSuccess = createAction(
+  '[Expenses] Cancel Expense Success',
+  props<{ expense: Expense }>(),
+);
+export const cancelExpenseFailure = createAction(
+  '[Expenses] Cancel Expense Failure',
+  props<{ error: string }>(),
+);
+
+// Summary
+export const loadExpensesSummary = createAction('[Expenses] Load Summary');
+export const loadExpensesSummarySuccess = createAction(
+  '[Expenses] Load Summary Success',
+  props<{ summary: ExpenseSummary }>(),
+);
+export const loadExpensesSummaryFailure = createAction(
+  '[Expenses] Load Summary Failure',
+  props<{ error: string }>(),
+);
+
+// Filter setters (filter-as-state pattern)
+export const setSearch = createAction(
+  '[Expenses] Set Search',
+  props<{ search: string }>(),
+);
+export const setPage = createAction(
+  '[Expenses] Set Page',
+  props<{ page: number }>(),
+);
+export const setSort = createAction(
+  '[Expenses] Set Sort',
+  props<{ sortBy: string; sortOrder: 'asc' | 'desc' }>(),
+);
+export const setStateFilter = createAction(
+  '[Expenses] Set State Filter',
+  props<{ stateFilter: string }>(),
+);
+export const setCategoryFilter = createAction(
+  '[Expenses] Set Category Filter',
+  props<{ categoryFilter: number | null }>(),
+);
+export const setDateRange = createAction(
+  '[Expenses] Set Date Range',
+  props<{ dateFrom: string; dateTo: string }>(),
+);
+export const clearFilters = createAction('[Expenses] Clear Filters');
 
 // Expense Categories
 export const loadExpenseCategories = createAction(

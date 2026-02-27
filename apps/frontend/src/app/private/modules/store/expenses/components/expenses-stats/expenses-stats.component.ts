@@ -2,8 +2,8 @@ import { Component, inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable, map } from 'rxjs';
-import { selectExpenses } from '../../state/selectors/expenses.selectors';
-import { Expense } from '../../interfaces/expense.interface';
+import { selectSummary, selectLoadingSummary } from '../../state/selectors/expenses.selectors';
+import { ExpenseSummary } from '../../interfaces/expense.interface';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
@@ -57,19 +57,17 @@ export class ExpensesStatsComponent implements OnInit {
   private currencyService = inject(CurrencyFormatService);
 
   ngOnInit(): void {
-    // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
   }
 
-  expenses$: Observable<Expense[]> = this.store.select(selectExpenses);
+  // All stats derived from backend summary (NOT from client-side array)
+  summary$: Observable<ExpenseSummary | null> = this.store.select(selectSummary);
 
-  totalCount$ = this.expenses$.pipe(map(e => e.length));
-  totalAmount$ = this.expenses$.pipe(
-    map(expenses => expenses.reduce((acc, curr) => acc + Number(curr.amount), 0))
-  );
-  pendingCount$ = this.expenses$.pipe(map(e => e.filter(i => i.state === 'pending').length));
-  approvedCount$ = this.expenses$.pipe(map(e => e.filter(i => i.state === 'approved').length));
-  paidCount$ = this.expenses$.pipe(map(e => e.filter(i => i.state === 'paid').length));
+  totalAmount$ = this.summary$.pipe(map(s => s?.total_amount || 0));
+  totalCount$ = this.summary$.pipe(map(s => s?.total_count || 0));
+  pendingCount$ = this.summary$.pipe(map(s => s?.counts_by_state?.pending || 0));
+  approvedCount$ = this.summary$.pipe(map(s => s?.counts_by_state?.approved || 0));
+  paidCount$ = this.summary$.pipe(map(s => s?.counts_by_state?.paid || 0));
 
   formatCurrency(value: number): string {
     return this.currencyService.format(value || 0);

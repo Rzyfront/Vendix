@@ -43,14 +43,14 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         </button>
       </div>
 
-      <!-- Row 2: Action Buttons -->
+      <!-- Row 2: Secondary Action Buttons -->
       <div class="actions-row">
         <button
           class="action-btn save-btn"
           (click)="saveDraft.emit()"
           [disabled]="itemCount === 0"
         >
-          <app-icon name="save" [size]="18"></app-icon>
+          <app-icon name="save" [size]="16"></app-icon>
           <span>Guardar</span>
         </button>
         <button
@@ -58,18 +58,19 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
           (click)="shipping.emit()"
           [disabled]="itemCount === 0"
         >
-          <app-icon name="truck" [size]="18"></app-icon>
+          <app-icon name="truck" [size]="16"></app-icon>
           <span>Envío</span>
         </button>
-        <button
-          class="action-btn checkout-btn"
-          (click)="checkout.emit()"
-          [disabled]="itemCount === 0"
-        >
-          <app-icon name="credit-card" [size]="18"></app-icon>
-          <span>Cobrar</span>
-        </button>
       </div>
+      <!-- Row 3: Primary CTA -->
+      <button
+        class="action-btn checkout-btn checkout-btn-full"
+        (click)="checkout.emit()"
+        [disabled]="itemCount === 0"
+      >
+        <app-icon name="credit-card" [size]="18"></app-icon>
+        <span>Cobrar</span>
+      </button>
     </div>
   `,
   styles: [
@@ -200,23 +201,31 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
       /* Row 2: Actions */
       .actions-row {
-        display: flex;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
         gap: 10px;
       }
 
       .action-btn {
-        flex: 1;
         display: flex;
         align-items: center;
         justify-content: center;
         gap: 8px;
-        height: 44px;
+        height: 38px;
         border: none;
         border-radius: 12px;
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 600;
         cursor: pointer;
         transition: all 0.2s ease;
+      }
+
+      .checkout-btn-full {
+        width: 100%;
+        height: 46px;
+        font-size: 15px;
+        font-weight: 700;
+        box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
       }
 
       .action-btn:active:not(:disabled) {
@@ -252,7 +261,6 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       .checkout-btn {
         background: var(--color-primary);
         color: white;
-        flex: 1.5;
       }
 
       .checkout-btn:hover:not(:disabled) {

@@ -53,7 +53,6 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
 
   // Chart options (updated when trends change)
   revenueChartOptions: EChartsOption = {};
-  ordersChartOptions: EChartsOption = {};
 
   // Options dropdown config
   filterConfigs: FilterConfig[] = [
@@ -61,11 +60,13 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
       key: 'date_from',
       label: 'Desde',
       type: 'date',
+      defaultValue: this.getDefaultStartDate(),
     },
     {
       key: 'date_to',
       label: 'Hasta',
       type: 'date',
+      defaultValue: this.getDefaultEndDate(),
     },
     {
       key: 'granularity',
@@ -79,6 +80,7 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
         { value: 'year', label: 'Por Año' },
       ],
       placeholder: 'Seleccionar',
+      defaultValue: 'day',
     },
     {
       key: 'channel',
@@ -197,14 +199,12 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
 
     // Read theme-aware colors from CSS custom properties
     const style = getComputedStyle(document.documentElement);
-    const primaryColor = style.getPropertyValue('--color-primary').trim() || '#3b82f6';
     const successColor = '#22c55e';
     const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
     const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
     const labels = trends.map((t) => this.formatPeriodLabel(t.period, granularity));
     const revenues = trends.map((t) => t.revenue);
-    const orders = trends.map((t) => t.orders);
 
     this.revenueChartOptions = {
       tooltip: {
@@ -257,44 +257,6 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
       ],
     };
 
-    this.ordersChartOptions = {
-      tooltip: {
-        trigger: 'axis',
-        formatter: (params: any) => {
-          const data = params[0];
-          return `${data.name}<br/>Órdenes: ${data.value}`;
-        },
-      },
-      grid: {
-        left: '3%',
-        right: '4%',
-        bottom: '3%',
-        containLabel: true,
-      },
-      xAxis: {
-        type: 'category',
-        data: labels,
-        axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary },
-      },
-      yAxis: {
-        type: 'value',
-        axisLine: { show: false },
-        axisLabel: { color: textSecondary },
-        splitLine: { lineStyle: { color: borderColor } },
-      },
-      series: [
-        {
-          name: 'Órdenes',
-          type: 'bar',
-          data: orders,
-          itemStyle: {
-            color: primaryColor,
-            borderRadius: [4, 4, 0, 0],
-          },
-        },
-      ],
-    };
   }
 
   private formatPeriodLabel(period: string, granularity: string): string {

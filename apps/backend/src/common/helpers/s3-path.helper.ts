@@ -107,4 +107,12 @@ export class S3PathHelper {
     buildSupportPath(org: S3OrgContext, ticketId: number): string {
         return `${this.buildOrgPath(org)}/support/${ticketId}`;
     }
+
+    /**
+     * Builds the path for expense receipt uploads
+     * @returns organizations/{org_slug}-{org_id}/stores/{store_slug}-{store_id}/receipts
+     */
+    buildReceiptPath(org: S3OrgContext, store: S3StoreContext): string {
+        return `${this.buildStorePath(org, store)}/receipts`;
+    }
 }

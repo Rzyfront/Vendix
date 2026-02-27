@@ -8,6 +8,7 @@ import { ToastService } from '../../../../../../../shared/components/toast/toast
 import * as ProductsActions from './products-analytics.actions';
 import {
   selectDateRange,
+  selectGranularity,
   selectSearch,
   selectPage,
   selectLimit,
@@ -66,6 +67,32 @@ export class ProductsAnalyticsEffects {
     ),
   );
 
+  loadTrends$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(ProductsActions.loadProductsTrends),
+      withLatestFrom(
+        this.store.select(selectDateRange),
+        this.store.select(selectGranularity),
+      ),
+      mergeMap(([, dateRange, granularity]) => {
+        const query: ProductsAnalyticsQueryDto = {
+          date_range: dateRange,
+          granularity,
+        };
+        return this.analyticsService.getProductsTrends(query).pipe(
+          map((response) =>
+            ProductsActions.loadProductsTrendsSuccess({ trends: response.data }),
+          ),
+          catchError((error) =>
+            of(ProductsActions.loadProductsTrendsFailure({
+              error: error.error?.message || error.message || 'Error al cargar tendencias de productos',
+            })),
+          ),
+        );
+      }),
+    ),
+  );
+
   loadTable$ = createEffect(() =>
     this.actions$.pipe(
       ofType(ProductsActions.loadProductsTable),
@@ -105,10 +132,11 @@ export class ProductsAnalyticsEffects {
 
   filterChanged$ = createEffect(() =>
     this.actions$.pipe(
-      ofType(ProductsActions.setDateRange),
+      ofType(ProductsActions.setDateRange, ProductsActions.setGranularity),
       mergeMap(() => [
         ProductsActions.loadProductsSummary(),
         ProductsActions.loadTopSellers(),
+        ProductsActions.loadProductsTrends(),
         ProductsActions.loadProductsTable(),
       ]),
     ),
@@ -168,6 +196,7 @@ export class ProductsAnalyticsEffects {
         ofType(
           ProductsActions.loadProductsSummaryFailure,
           ProductsActions.loadTopSellersFailure,
+          ProductsActions.loadProductsTrendsFailure,
           ProductsActions.loadProductsTableFailure,
           ProductsActions.exportProductsReportFailure,
         ),

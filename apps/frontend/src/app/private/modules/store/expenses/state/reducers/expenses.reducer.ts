@@ -48,9 +48,8 @@ export const expensesReducer = createReducer(
     loading: true,
     error: null,
   })),
-  on(ExpensesActions.createExpenseSuccess, (state, { expense }) => ({
+  on(ExpensesActions.createExpenseSuccess, (state) => ({
     ...state,
-    expenses: [...state.expenses, expense],
     loading: false,
     error: null,
   })),
@@ -68,9 +67,6 @@ export const expensesReducer = createReducer(
   })),
   on(ExpensesActions.updateExpenseSuccess, (state, { expense }) => ({
     ...state,
-    expenses: state.expenses.map((e: any) =>
-      e.id === expense.id ? expense : e,
-    ),
     currentExpense: expense,
     loading: false,
     error: null,
@@ -89,7 +85,6 @@ export const expensesReducer = createReducer(
   })),
   on(ExpensesActions.deleteExpenseSuccess, (state, { id }) => ({
     ...state,
-    expenses: state.expenses.filter((e: any) => e.id !== id),
     currentExpense:
       state.currentExpense?.id === id ? null : state.currentExpense,
     loading: false,
@@ -101,45 +96,97 @@ export const expensesReducer = createReducer(
     error,
   })),
 
-  // Approve/Reject Expense
-  on(ExpensesActions.approveExpense, (state) => ({
+  // State Transitions (approve/reject/pay/cancel) — all reload via effects
+  on(
+    ExpensesActions.approveExpense,
+    ExpensesActions.rejectExpense,
+    ExpensesActions.payExpense,
+    ExpensesActions.cancelExpense,
+    (state) => ({
+      ...state,
+      loading: true,
+      error: null,
+    }),
+  ),
+  on(
+    ExpensesActions.approveExpenseSuccess,
+    ExpensesActions.rejectExpenseSuccess,
+    ExpensesActions.payExpenseSuccess,
+    ExpensesActions.cancelExpenseSuccess,
+    (state, { expense }) => ({
+      ...state,
+      currentExpense: expense,
+      loading: false,
+      error: null,
+    }),
+  ),
+  on(
+    ExpensesActions.approveExpenseFailure,
+    ExpensesActions.rejectExpenseFailure,
+    ExpensesActions.payExpenseFailure,
+    ExpensesActions.cancelExpenseFailure,
+    (state, { error }) => ({
+      ...state,
+      loading: false,
+      error,
+    }),
+  ),
+
+  // Summary
+  on(ExpensesActions.loadExpensesSummary, (state) => ({
     ...state,
-    loading: true,
-    error: null,
+    loadingSummary: true,
   })),
-  on(ExpensesActions.approveExpenseSuccess, (state, { expense }) => ({
+  on(ExpensesActions.loadExpensesSummarySuccess, (state, { summary }) => ({
     ...state,
-    expenses: state.expenses.map((e: any) =>
-      e.id === expense.id ? expense : e,
-    ),
-    currentExpense: expense,
-    loading: false,
-    error: null,
+    summary,
+    loadingSummary: false,
   })),
-  on(ExpensesActions.approveExpenseFailure, (state, { error }) => ({
+  on(ExpensesActions.loadExpensesSummaryFailure, (state) => ({
     ...state,
-    loading: false,
-    error,
+    loadingSummary: false,
   })),
 
-  on(ExpensesActions.rejectExpense, (state) => ({
+  // Filter setters — each resets page to 1 (except setPage itself)
+  on(ExpensesActions.setSearch, (state, { search }) => ({
     ...state,
-    loading: true,
-    error: null,
+    search,
+    page: 1,
   })),
-  on(ExpensesActions.rejectExpenseSuccess, (state, { expense }) => ({
+  on(ExpensesActions.setPage, (state, { page }) => ({
     ...state,
-    expenses: state.expenses.map((e: any) =>
-      e.id === expense.id ? expense : e,
-    ),
-    currentExpense: expense,
-    loading: false,
-    error: null,
+    page,
   })),
-  on(ExpensesActions.rejectExpenseFailure, (state, { error }) => ({
+  on(ExpensesActions.setSort, (state, { sortBy, sortOrder }) => ({
     ...state,
-    loading: false,
-    error,
+    sortBy,
+    sortOrder,
+    page: 1,
+  })),
+  on(ExpensesActions.setStateFilter, (state, { stateFilter }) => ({
+    ...state,
+    stateFilter,
+    page: 1,
+  })),
+  on(ExpensesActions.setCategoryFilter, (state, { categoryFilter }) => ({
+    ...state,
+    categoryFilter,
+    page: 1,
+  })),
+  on(ExpensesActions.setDateRange, (state, { dateFrom, dateTo }) => ({
+    ...state,
+    dateFrom,
+    dateTo,
+    page: 1,
+  })),
+  on(ExpensesActions.clearFilters, (state) => ({
+    ...state,
+    search: '',
+    page: 1,
+    stateFilter: '',
+    categoryFilter: null,
+    dateFrom: '',
+    dateTo: '',
   })),
 
   // Expense Categories
@@ -167,14 +214,14 @@ export const expensesReducer = createReducer(
 
   on(ExpensesActions.updateExpenseCategorySuccess, (state, { category }) => ({
     ...state,
-    categories: state.categories.map((c: any) =>
+    categories: state.categories.map((c) =>
       c.id === category.id ? category : c,
     ),
   })),
 
   on(ExpensesActions.deleteExpenseCategorySuccess, (state, { id }) => ({
     ...state,
-    categories: state.categories.filter((c: any) => c.id !== id),
+    categories: state.categories.filter((c) => c.id !== id),
   })),
 
   // Clear State

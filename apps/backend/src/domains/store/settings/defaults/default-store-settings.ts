@@ -112,6 +112,7 @@ export function getDefaultStoreSettings(): StoreSettings {
         inventory_adjustments: true,
         inventory_locations: true,
         inventory_suppliers: true,
+        inventory_movements: true,
 
         // Clientes
         customers: true,
@@ -128,6 +129,7 @@ export function getDefaultStoreSettings(): StoreSettings {
         analytics_sales: true,
         analytics_traffic: true,
         analytics_performance: true,
+        analytics_overview: true,
 
         // Gastos
         expenses: true,

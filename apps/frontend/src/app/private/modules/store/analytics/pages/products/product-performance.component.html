@@ -1,4 +1,4 @@
-<div class="space-y-6 w-full max-w-[1600px] mx-auto md:py-4">
+<div class="md:space-y-4">
   <!-- Stats Cards -->
   @if (loading$ | async) {
     <div class="stats-container">
@@ -50,99 +50,81 @@
   }
 
   <!-- Filter Bar -->
-  <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
-    <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-      <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
-        Rendimiento de Productos
-      </h2>
+  <div class="sticky top-[99px] z-10 bg-background px-2 py-0.5 -mt-[11px] md:-mt-2 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border">
+    <div class="flex items-center justify-between gap-2">
+      <div class="min-w-0">
+        <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-base md:font-semibold md:text-text-primary truncate">
+          Rendimiento de Productos
+        </h2>
+        <p class="text-[11px] text-gray-400 md:text-xs md:text-text-secondary truncate">
+          Filtra, analiza y exporta reportes de productos
+        </p>
+      </div>
 
-      <div class="flex items-center gap-2 flex-wrap">
-        <vendix-date-range-filter
-          [value]="(dateRange$ | async) ?? undefined"
-          (valueChange)="onDateRangeChange($event)"
-        ></vendix-date-range-filter>
-
-        <app-inputsearch
-          placeholder="Buscar producto..."
-          size="sm"
-          (searchChange)="onSearchChange($event)"
-        ></app-inputsearch>
-
+      <div class="flex items-center gap-2 flex-shrink-0">
         <vendix-export-button
+          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
           [loading]="(exporting$ | async) ?? false"
           (export)="exportReport()"
         ></vendix-export-button>
+
+        <app-options-dropdown
+          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+          [filters]="filterConfigs"
+          [filterValues]="filterValues"
+          title="Filtros"
+          triggerLabel="Filtros"
+          (filterChange)="onFilterChange($event)"
+          (clearAllFilters)="onClearAllFilters()"
+        ></app-options-dropdown>
       </div>
     </div>
   </div>
 
-  <!-- Top Sellers Chart -->
-  <div class="bg-surface border border-border rounded-xl overflow-hidden">
-    <div class="p-4 border-b border-border flex items-center justify-between">
-      <div>
-        <h3 class="font-semibold text-text-primary">Top 10 Productos Más Vendidos</h3>
-        <p class="text-sm text-text-secondary">Por ingresos en el período seleccionado</p>
+  <!-- Charts Grid -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Units Trend Chart -->
+    <div class="bg-surface border border-border rounded-xl overflow-hidden">
+      <div class="p-4 border-b border-border">
+        <h3 class="font-semibold text-text-primary">Tendencia de Unidades Vendidas</h3>
+        <p class="text-sm text-text-secondary">Evolución de unidades en el período</p>
       </div>
-      <a routerLink="../top-sellers" class="text-sm text-primary hover:underline">Ver detalle</a>
-    </div>
-    <div class="p-4">
-      @if (loadingTopSellers$ | async) {
-        <div class="h-80 flex items-center justify-center">
-          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-        </div>
-      } @else {
-        <app-chart
-          [options]="topSellersChartOptions"
-          size="large"
-        ></app-chart>
-      }
-    </div>
-  </div>
-
-  <!-- Products Table -->
-  <div class="bg-surface border border-border rounded-xl overflow-hidden">
-    <div class="p-4 border-b border-border">
-      <h3 class="font-semibold text-text-primary">Listado de Productos</h3>
-      <p class="text-sm text-text-secondary">Métricas de venta por producto en el período</p>
-    </div>
-
-    <app-responsive-data-view
-      [data]="(products$ | async) ?? []"
-      [columns]="tableColumns"
-      [cardConfig]="cardConfig"
-      [loading]="(loadingTable$ | async) ?? false"
-      [sortable]="true"
-      emptyMessage="No se encontraron productos"
-      emptyIcon="package"
-      (sort)="onSort($event)"
-    ></app-responsive-data-view>
-
-    <!-- Pagination -->
-    @if (totalProducts$ | async; as total) {
-      @if (total > currentLimit) {
-        <div class="flex items-center justify-between p-4 border-t border-border">
-          <span class="text-sm text-text-secondary">
-            Mostrando {{ (currentPage - 1) * currentLimit + 1 }} - {{ min(currentPage * currentLimit, total) }} de {{ total }}
-          </span>
-          <div class="flex gap-2">
-            <button
-              class="px-3 py-1.5 text-sm border border-border rounded-lg hover:bg-background disabled:opacity-50"
-              [disabled]="currentPage === 1"
-              (click)="onPageChange(currentPage - 1)"
-            >
-              Anterior
-            </button>
-            <button
-              class="px-3 py-1.5 text-sm border border-border rounded-lg hover:bg-background disabled:opacity-50"
-              [disabled]="currentPage * currentLimit >= total"
-              (click)="onPageChange(currentPage + 1)"
-            >
-              Siguiente
-            </button>
+      <div class="p-4">
+        @if (loadingTrends$ | async) {
+          <div class="h-64 flex items-center justify-center">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           </div>
+        } @else {
+          <app-chart
+            [options]="unitsTrendChartOptions"
+            size="large"
+          ></app-chart>
+        }
+      </div>
+    </div>
+
+    <!-- Top 5 by Units Chart -->
+    <div class="bg-surface border border-border rounded-xl overflow-hidden">
+      <div class="p-4 border-b border-border flex items-center justify-between">
+        <div>
+          <h3 class="font-semibold text-text-primary">Top 5 por Unidades Vendidas</h3>
+          <p class="text-sm text-text-secondary">Productos más vendidos en el período</p>
         </div>
-      }
-    }
+        <a routerLink="../top-sellers" class="text-sm text-primary hover:underline">Ver detalle</a>
+      </div>
+      <div class="p-4">
+        @if (loadingTopSellers$ | async) {
+          <div class="h-64 flex items-center justify-center">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+        } @else {
+          <app-chart
+            [options]="topSellersChartOptions"
+            size="large"
+          ></app-chart>
+        }
+      </div>
+    </div>
   </div>
 
   <!-- Quick Links -->

@@ -23,6 +23,8 @@ export interface FilterConfig {
   disabled?: boolean;
   /** Help text shown below the filter */
   helpText?: string;
+  /** Default value to restore when filters are cleared (instead of null) */
+  defaultValue?: string | string[];
 }
 
 /**

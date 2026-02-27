@@ -39,6 +39,13 @@ export interface ProductAnalyticsRow {
   last_sold_at: string | null;
 }
 
+// Product Trend (time series)
+export interface ProductTrend {
+  period: string;
+  units_sold: number;
+  revenue: number;
+}
+
 // Query DTO for Products Analytics
 export interface ProductsAnalyticsQueryDto {
   date_range?: DateRangeFilter;
@@ -49,4 +56,5 @@ export interface ProductsAnalyticsQueryDto {
   limit?: number;
   sort_by?: string;
   sort_order?: 'asc' | 'desc';
+  granularity?: string;
 }

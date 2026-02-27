@@ -22,6 +22,8 @@ import {
   FilterConfig,
   DropdownAction,
   FilterValues,
+  ButtonComponent,
+  IconComponent,
 } from '../../../../../../shared/components/index';
 
 import { ProductEmptyStateComponent } from '../product-empty-state.component';
@@ -41,6 +43,8 @@ import './product-list.component.css';
     OptionsDropdownComponent,
     ProductEmptyStateComponent,
     ResponsiveDataViewComponent,
+    ButtonComponent,
+    IconComponent,
   ],
   templateUrl: './product-list.component.html',
 })

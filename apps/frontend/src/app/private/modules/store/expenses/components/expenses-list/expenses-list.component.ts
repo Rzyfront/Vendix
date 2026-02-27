@@ -1,8 +1,17 @@
-import { Component, Input, Output, EventEmitter, computed, signal } from '@angular/core';
+import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Store } from '@ngrx/store';
+import { Observable } from 'rxjs';
 
 import { Expense } from '../../interfaces/expense.interface';
+import * as ExpensesActions from '../../state/actions/expenses.actions';
+import {
+  selectSearch,
+  selectStateFilter,
+  selectExpensesMeta,
+  selectPage,
+} from '../../state/selectors/expenses.selectors';
 
 import {
   InputsearchComponent,
@@ -15,6 +24,7 @@ import {
   FilterConfig,
   DropdownAction,
   FilterValues,
+  IconComponent,
 } from '../../../../../../shared/components/index';
 
 @Component({
@@ -27,13 +37,12 @@ import {
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     ButtonComponent,
+    IconComponent,
   ],
   templateUrl: './expenses-list.component.html',
 })
 export class ExpensesListComponent {
-  @Input() set expenses(value: Expense[]) {
-    this._expenses.set(value);
-  }
+  @Input() expenses: Expense[] = [];
   @Input() loading = false;
 
   @Output() create = new EventEmitter<void>();
@@ -41,33 +50,17 @@ export class ExpensesListComponent {
   @Output() categories = new EventEmitter<void>();
   @Output() refresh = new EventEmitter<void>();
 
-  // Internal state
-  private _expenses = signal<Expense[]>([]);
+  private store = inject(Store);
+
+  // Observables from store for current filter values
+  search$: Observable<string> = this.store.select(selectSearch);
+  stateFilter$: Observable<string> = this.store.select(selectStateFilter);
+  meta$ = this.store.select(selectExpensesMeta);
+  page$ = this.store.select(selectPage);
+
+  // Local tracking for template binding
   searchTerm = '';
   filterValues: FilterValues = {};
-
-  // Computed filtered expenses
-  filteredExpenses = computed(() => {
-    let filtered = this._expenses();
-    const searchLower = this.searchTerm.toLowerCase();
-    const stateFilter = (this.filterValues['state'] as string) || '';
-
-    // Apply search filter
-    if (searchLower) {
-      filtered = filtered.filter(
-        (e) =>
-          e.description?.toLowerCase().includes(searchLower) ||
-          e.amount.toString().includes(searchLower)
-      );
-    }
-
-    // Apply state filter
-    if (stateFilter) {
-      filtered = filtered.filter((e) => e.state === stateFilter);
-    }
-
-    return filtered;
-  });
 
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
@@ -104,7 +97,6 @@ export class ExpensesListComponent {
 
   // Table columns
   columns: TableColumn[] = [
-    { key: 'id', label: 'ID', width: '80px', priority: 2 },
     { key: 'description', label: 'Descripción', sortable: true, priority: 1 },
     {
       key: 'amount',
@@ -147,11 +139,9 @@ export class ExpensesListComponent {
     },
   ];
 
-  // Card Config for mobile - optimized with prominent footer
-  // Note: No avatar needed for expenses (unlike products/users)
+  // Card Config for mobile
   cardConfig: ItemListCardConfig = {
     titleKey: 'description',
-    // subtitleTransform receives the FULL item, not the subtitleKey value
     subtitleTransform: (item: any) => item?.expense_categories?.name || 'Sin categoría',
     badgeKey: 'state',
     badgeConfig: {
@@ -179,18 +169,22 @@ export class ExpensesListComponent {
     ],
   };
 
-  // Event handlers
+  // Event handlers — dispatch NgRx actions instead of local state
   onSearchChange(term: string): void {
     this.searchTerm = term;
+    this.store.dispatch(ExpensesActions.setSearch({ search: term }));
   }
 
   onFilterChange(values: FilterValues): void {
     this.filterValues = { ...values };
+    const stateFilter = (values['state'] as string) || '';
+    this.store.dispatch(ExpensesActions.setStateFilter({ stateFilter }));
   }
 
   onClearFilters(): void {
     this.searchTerm = '';
     this.filterValues = {};
+    this.store.dispatch(ExpensesActions.clearFilters());
   }
 
   onActionClick(action: string): void {
@@ -206,6 +200,10 @@ export class ExpensesListComponent {
 
   onRowClick(expense: Expense): void {
     this.edit.emit(expense);
+  }
+
+  onPageChange(page: number): void {
+    this.store.dispatch(ExpensesActions.setPage({ page }));
   }
 
   // Helpers

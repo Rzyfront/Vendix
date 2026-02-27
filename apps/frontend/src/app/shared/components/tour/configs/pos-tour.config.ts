@@ -84,23 +84,60 @@ export const POS_TOUR_CONFIG: TourConfig = {
       title: 'Agrega Productos al Carrito',
       description: 'Haz clic en cualquier producto de la lista para agregarlo al carrito. Verás cómo se actualiza el total automáticamente.',
       action: 'Haz clic en un producto para agregarlo',
-      // Target the first product card in the POS product selection
-      target: 'app-pos-product-selection .product-card:first-of-type',
+      // Desktop: Target the first product card in the POS product selection
+      targetDesktop: 'app-pos-product-selection .product-card:first-of-type',
+      // Mobile: Precise selectors based on actual component structure
+      // The product cards in pos-product-selection.component.ts have:
+      // - class="product-card group relative bg-surface border border-border rounded-2xl"
+      // Priority:
+      // 1. Most specific: product-card class inside POS component
+      // 2. Fallback: rounded-2xl with group class (all product cards have both)
+      // 3. Fallback: any product-card on page
+      // 4. Fallback: grid items (child of grid with rounded-2xl)
+      targetMobile: 'app-pos-product-selection .product-card, app-pos-product-selection .group.rounded-2xl, .product-card, app-pos-product-selection .grid > div > div.rounded-2xl',
+      // Fallback for older configs
+      target: 'app-pos-product-selection .product-card',
+      // Click detection targets - same for both desktop and mobile
+      autoAdvanceTargetDesktop: 'app-pos-product-selection .product-card:first-of-type',
+      autoAdvanceTargetMobile: 'app-pos-product-selection .product-card, .product-card, .group.rounded-2xl',
       beforeNext: async () => {
+        console.log('[POS Tour] Validating product added to cart, isMobile:', window.innerWidth < 1024);
+
         // Wait a moment for the cart to update
         await new Promise(resolve => setTimeout(resolve, 800));
 
-        // Check if cart has items by looking for the quantity control or cart content
-        // The cart items have a "group" class and contain quantity controls
-        const cartItems = document.querySelectorAll('app-pos-cart .group, app-pos-cart app-quantity-control');
-        const hasCartContent = cartItems.length > 0;
+        // Check if cart has items by looking for the cart badge or cart modal trigger
+        const isDesktop = window.innerWidth >= 1024;
+        console.log('[POS Tour] Device is desktop:', isDesktop);
 
-        // Also check if the total has changed (not 0)
-        const totalElement = document.querySelector('app-pos-cart .text-2xl, app-pos-cart .font-extrabold');
-        const totalText = totalElement?.textContent ?? '';
-        const hasNonZeroTotal = totalText.length > 0 && !totalText.includes('0.00');
+        if (isDesktop) {
+          const cartItems = document.querySelectorAll('app-pos-cart .group, app-pos-cart app-quantity-control');
+          console.log('[POS Tour] Desktop cart items found:', cartItems.length);
+          if (cartItems.length > 0) return true;
+        }
 
-        return hasCartContent || hasNonZeroTotal;
+        // Mobile: Check for cart badge in footer or non-zero total
+        const cartBadge = document.querySelector('.pos-mobile-footer .cart-badge');
+        console.log('[POS Tour] Mobile cart badge:', cartBadge?.textContent);
+        if (cartBadge) {
+          const badgeText = cartBadge?.textContent ?? '';
+          const hasItems = badgeText.trim() !== '' && badgeText !== '0' && badgeText !== '99+';
+          if (hasItems) return true;
+        }
+
+        // Check total amount (works on both)
+        const totalElements = document.querySelectorAll('.total-amount, .font-extrabold, .text-2xl');
+        console.log('[POS Tour] Total elements found:', totalElements.length);
+        for (const el of Array.from(totalElements)) {
+          const text = el?.textContent ?? '';
+          console.log('[POS Tour] Total text:', text);
+          if (text.length > 0 && !text.includes('0.00') && !text.includes('0') && !text.includes('Total')) {
+            return true;
+          }
+        }
+
+        console.log('[POS Tour] Cart validation failed');
+        return false;
       },
     },
     {
@@ -108,8 +145,15 @@ export const POS_TOUR_CONFIG: TourConfig = {
       title: 'Procesa el Pago',
       description: 'Cuando estés listo, haz clic en el botón "Cobrar" para procesar el pago y completar la venta.',
       action: 'Haz clic en el botón "Cobrar"',
-      // Target the "Cobrar" button in the cart component
+      // Desktop: Target the "Cobrar" button in the cart component
+      targetDesktop: 'app-pos-cart button.checkout-btn',
+      // Mobile: Target the "Cobrar" button in the mobile footer
+      targetMobile: 'app-pos-mobile-footer button.checkout-btn',
+      // Fallback for older configs
       target: 'app-pos-cart button.checkout-btn',
+      // Click detection targets
+      autoAdvanceTargetDesktop: 'app-pos-cart button.checkout-btn',
+      autoAdvanceTargetMobile: 'app-pos-mobile-footer button.checkout-btn',
       beforeNext: async () => {
         // Allow proceeding - payment modal will open
         await new Promise(resolve => setTimeout(resolve, 500));

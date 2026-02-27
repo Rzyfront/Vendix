@@ -22,6 +22,7 @@ Estos skills contienen las reglas más críticas que **SIEMPRE** deben respetars
 
 | Skill | Descripción | Trigger |
 |-------|-------------|---------|
+| `how-to-dev` | Flujo de desarrollo mandatorio y ultra-obligatorio | **SIEMPRE ACTIVO** |
 | `vendix-development-rules` | Reglas críticas de desarrollo, uso de Task tools | **SIEMPRE ACTIVO** |
 | `vendix-naming-conventions` | Convenciones de nombres (snake_case, CamelCase, PascalCase) | **SIEMPRE ACTIVO** |
 | `buildcheck-dev` | Verificación con Docker logs antes de completar tareas | **SIEMPRE ACTIVO** |

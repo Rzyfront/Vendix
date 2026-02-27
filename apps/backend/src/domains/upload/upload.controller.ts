@@ -38,7 +38,7 @@ export class UploadController {
                 },
                 entityType: {
                     type: 'string',
-                    enum: ['products', 'avatars', 'brands', 'categories', 'logos', 'store_logos'],
+                    enum: ['products', 'avatars', 'brands', 'categories', 'logos', 'store_logos', 'receipts'],
                     description: 'Entity type for path organization',
                 },
                 entityId: {
@@ -104,6 +104,12 @@ export class UploadController {
                 const userId = context?.user_id;
                 if (!userId) throw new BadRequestException('User context required for avatar uploads');
                 path = this.s3PathHelper.buildAvatarPath(org, userId);
+                break;
+            }
+            case 'receipts': {
+                if (!storeId) throw new BadRequestException('Store context required for receipt uploads');
+                const store = await this.getStoreWithSlug(storeId);
+                path = this.s3PathHelper.buildReceiptPath(org, store);
                 break;
             }
             case 'brands':

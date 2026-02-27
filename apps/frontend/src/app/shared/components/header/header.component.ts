@@ -18,6 +18,7 @@ import { NotificationsDropdownComponent } from '../notifications-dropdown/notifi
 import { BreadcrumbService } from '../../../core/services/breadcrumb.service';
 import { BreadcrumbItem } from '../../../core/services/breadcrumb.service';
 import { GlobalFacade } from '../../../core/store/global.facade';
+import { ConfigFacade } from '../../../core/store/config';
 
 @Component({
   selector: 'app-header',
@@ -185,6 +186,7 @@ export class HeaderComponent implements OnInit, OnDestroy {
   @Output() toggleSidebar = new EventEmitter<void>();
 
   private globalFacade = inject(GlobalFacade);
+  private configFacade = inject(ConfigFacade);
 
   breadcrumb$: Observable<{
     parent?: BreadcrumbItem;
@@ -221,8 +223,8 @@ export class HeaderComponent implements OnInit, OnDestroy {
     if (brandingContext?.logo?.url) {
       this.storeLogo = brandingContext.logo.url;
     } else {
-      const navContext = this.globalFacade.getNavigationContext();
-      if (navContext?.isVendixDomain) {
+      const domainConfig = this.configFacade.getCurrentConfig()?.domainConfig;
+      if (domainConfig?.isMainVendixDomain) {
         this.storeLogo = 'vlogo.png';
       }
     }

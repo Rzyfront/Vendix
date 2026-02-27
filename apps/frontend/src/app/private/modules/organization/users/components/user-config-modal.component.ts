@@ -297,6 +297,7 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
         marketing_promotions: false,
         marketing_coupons: false,
         analytics: true,
+        analytics_overview: true,
         analytics_sales: true,
         analytics_traffic: false,
         analytics_performance: false,

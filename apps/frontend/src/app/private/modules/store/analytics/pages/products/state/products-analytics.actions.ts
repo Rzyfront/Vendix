@@ -1,11 +1,15 @@
 import { createAction, props } from '@ngrx/store';
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
-import { ProductsSummary, TopSellingProduct, ProductAnalyticsRow } from '../../../interfaces/products-analytics.interface';
+import { ProductsSummary, TopSellingProduct, ProductAnalyticsRow, ProductTrend } from '../../../interfaces/products-analytics.interface';
 
 // Filters
 export const setDateRange = createAction(
   '[Products Analytics] Set Date Range',
   props<{ dateRange: DateRangeFilter }>(),
+);
+export const setGranularity = createAction(
+  '[Products Analytics] Set Granularity',
+  props<{ granularity: string }>(),
 );
 export const setSearch = createAction(
   '[Products Analytics] Set Search',
@@ -39,6 +43,17 @@ export const loadTopSellersSuccess = createAction(
 );
 export const loadTopSellersFailure = createAction(
   '[Products Analytics] Load Top Sellers Failure',
+  props<{ error: string }>(),
+);
+
+// Load Trends
+export const loadProductsTrends = createAction('[Products Analytics] Load Trends');
+export const loadProductsTrendsSuccess = createAction(
+  '[Products Analytics] Load Trends Success',
+  props<{ trends: ProductTrend[] }>(),
+);
+export const loadProductsTrendsFailure = createAction(
+  '[Products Analytics] Load Trends Failure',
   props<{ error: string }>(),
 );
 
