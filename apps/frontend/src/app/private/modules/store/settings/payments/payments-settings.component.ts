@@ -1,53 +1,44 @@
 import { Component, OnInit, OnDestroy, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
 import { PaymentMethodsService } from './services/payment-methods.service';
 import {
   PaymentMethodStats,
   StorePaymentMethod,
   SystemPaymentMethod,
+  CombinedPaymentMethod,
 } from './interfaces/payment-methods.interface';
 import {
   ToastService,
   StatsComponent,
   DialogService,
-  TableComponent,
-  TableColumn,
-  TableAction,
   ButtonComponent,
   ModalComponent,
-  BadgeComponent,
   InputsearchComponent,
-} from '../../../../shared/components/index';
-
-interface CombinedPaymentMethod {
-  id: string;
-  display_name: string;
-  type: string;
-  provider: string;
-  state: string;
-  is_system: boolean;
-  is_store_method: boolean;
-  system_payment_method_id?: string;
-  store_payment_method?: StorePaymentMethod;
-  created_at?: string;
-}
+  IconComponent,
+  ResponsiveDataViewComponent,
+  TableColumn,
+  TableAction,
+  ItemListCardConfig,
+} from '../../../../../../app/shared/components/index';
 
 @Component({
   selector: 'app-payments-settings',
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     StatsComponent,
-    TableComponent,
     ButtonComponent,
     ModalComponent,
-    BadgeComponent,
     InputsearchComponent,
+    IconComponent,
+    ResponsiveDataViewComponent,
   ],
   template: `
-    <div class="w-full">
-      <!-- Stats Cards: Sticky on mobile, static on desktop -->
+    <div class="w-full md:space-y-4">
+      <!-- Stats: Sticky on mobile, static on desktop -->
       <div class="stats-container !mb-0 md:!mb-6 sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Total Métodos"
@@ -79,55 +70,69 @@ interface CombinedPaymentMethod {
         ></app-stats>
       </div>
 
-      <!-- Unified Payment Methods Table -->
-      <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden">
-        <!-- Header with Add Button -->
-        <div class="px-4 py-3 border-b border-border flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-          <div>
-            <h2 class="text-lg font-semibold text-text-primary">Métodos de Pago</h2>
-            <p class="text-sm text-text-secondary">
-              {{ filteredMethods().length }} método(s) configurados
-            </p>
+      <!-- Content Container: Transparent on mobile, surface on desktop -->
+      <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
+                  md:border md:border-border md:min-h-[600px] md:overflow-hidden">
+        <!-- Search Section: Sticky on mobile, static on desktop -->
+        <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                    md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
+          <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
+            <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
+                       md:text-lg md:font-semibold md:text-text-primary">
+              Métodos de Pago ({{ filtered_methods().length }})
+            </h2>
+            <div class="flex items-center gap-2 w-full md:w-auto">
+              <app-inputsearch
+                class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                size="sm"
+                placeholder="Buscar métodos..."
+                [debounceTime]="300"
+                [ngModel]="search_term()"
+                (ngModelChange)="onSearchChange($event)"
+              ></app-inputsearch>
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="openAddModal()"
+                customClasses="w-9 h-9 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
+                title="Agregar Método"
+              >
+                <app-icon slot="icon" name="plus" [size]="18"></app-icon>
+              </app-button>
+            </div>
           </div>
-          <app-button
-            variant="primary"
-            size="sm"
-            iconName="plus"
-            (onClick)="openAddModal()"
-          >
-            Agregar Método
-          </app-button>
         </div>
 
-        <!-- Search -->
-        <div class="px-4 py-2 border-b border-border bg-gray-50/50">
-          <app-inputsearch
-            class="w-full sm:w-72"
-            size="sm"
-            placeholder="Buscar métodos..."
-            [debounceTime]="300"
-            [ngModel]="searchTerm()"
-            (ngModelChange)="onSearchChange($event)"
-          ></app-inputsearch>
-        </div>
+        <!-- Data View -->
+        @if (!is_loading() && filtered_methods().length > 0) {
+          <div class="px-2 pb-2 pt-3 md:p-4">
+            <app-responsive-data-view
+              [data]="filtered_methods()"
+              [columns]="table_columns"
+              [cardConfig]="card_config"
+              [actions]="table_actions"
+              [loading]="is_loading()"
+              emptyMessage="No hay métodos de pago"
+              emptyIcon="credit-card"
+            ></app-responsive-data-view>
+          </div>
+        }
 
         <!-- Loading State -->
-        @if (isLoading()) {
-          <div class="p-8 text-center">
+        @if (is_loading()) {
+          <div class="p-4 md:p-6 text-center">
             <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-            <p class="mt-2 text-text-secondary text-sm">Cargando métodos de pago...</p>
+            <p class="mt-2 text-text-secondary">Cargando métodos de pago...</p>
           </div>
         }
 
         <!-- Empty State -->
-        @if (!isLoading() && filteredMethods().length === 0) {
+        @if (!is_loading() && filtered_methods().length === 0) {
           <div class="p-8 text-center">
             <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
-              <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
-              </svg>
+              <app-icon name="credit-card" [size]="24" class="text-gray-400"></app-icon>
             </div>
-            @if (searchTerm()) {
+            @if (search_term()) {
               <p class="text-sm text-text-secondary">No se encontraron métodos con ese criterio</p>
             } @else {
               <p class="text-sm text-text-secondary">No hay métodos de pago configurados</p>
@@ -135,285 +140,70 @@ interface CombinedPaymentMethod {
             }
           </div>
         }
-
-        <!-- Table -->
-        @if (!isLoading() && filteredMethods().length > 0) {
-          <div class="overflow-x-auto">
-            <table class="w-full">
-              <thead class="bg-gray-50 border-b border-border">
-                <tr>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
-                    Método
-                  </th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
-                    Tipo
-                  </th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
-                    Origen
-                  </th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
-                    Estado
-                  </th>
-                  <th class="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase tracking-wider">
-                    Acciones
-                  </th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-border">
-                @for (method of filteredMethods(); track method.id) {
-                  <tr class="hover:bg-gray-50 transition-colors">
-                    <!-- Method Name -->
-                    <td class="px-4 py-3">
-                      <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                          <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            @switch (method.type) {
-                              @case ('cash') {
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path>
-                              }
-                              @case ('card') {
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
-                              }
-                              @case ('paypal') {
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path>
-                              }
-                              @case ('bank_transfer') {
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
-                              }
-                              @default {
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
-                              }
-                            }
-                          </svg>
-                        </div>
-                        <div>
-                          <p class="font-medium text-text-primary">{{ method.display_name }}</p>
-                          <p class="text-xs text-text-secondary">
-                            @if (method.is_store_method) {
-                              {{ method.store_payment_method?.system_payment_method?.provider || 'Personalizado' }}
-                            } @else {
-                              {{ method.provider }}
-                            }
-                          </p>
-                        </div>
-                      </div>
-                    </td>
-
-                    <!-- Type -->
-                    <td class="px-4 py-3">
-                      <span class="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-700">
-                        {{ getTypeLabel(method.type) }}
-                      </span>
-                    </td>
-
-                    <!-- Origin (System vs Store) -->
-                    <td class="px-4 py-3">
-                      @if (method.is_store_method) {
-                        <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-purple-100 text-purple-700">
-                          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
-                          </svg>
-                          Tienda
-                        </span>
-                      } @else {
-                        <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-700">
-                          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
-                          </svg>
-                          Sistema
-                        </span>
-                      }
-                    </td>
-
-                    <!-- State -->
-                    <td class="px-4 py-3">
-                      @switch (method.state) {
-                        @case ('enabled') {
-                          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                            <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                            Activo
-                          </span>
-                        }
-                        @case ('disabled') {
-                          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                            <span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
-                            Inactivo
-                          </span>
-                        }
-                        @case ('requires_configuration') {
-                          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
-                            <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                            Requiere Config
-                          </span>
-                        }
-                        @default {
-                          <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                            {{ method.state }}
-                          </span>
-                        }
-                      }
-                    </td>
-
-                    <!-- Actions -->
-                    <td class="px-4 py-3 text-right">
-                      <div class="flex items-center justify-end gap-1">
-                        @if (method.is_store_method) {
-                          @if (method.state === 'enabled') {
-                            <button
-                              (click)="toggleMethod(method)"
-                              class="p-2 text-gray-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
-                              title="Desactivar"
-                            >
-                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                              </svg>
-                            </button>
-                          } @else {
-                            <button
-                              (click)="toggleMethod(method)"
-                              class="p-2 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                              title="Activar"
-                            >
-                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                              </svg>
-                            </button>
-                          }
-                          <button
-                            (click)="editMethod(method)"
-                            class="p-2 text-gray-500 hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
-                            title="Editar"
-                          >
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
-                            </svg>
-                          </button>
-                        }
-                      </div>
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-        }
       </div>
     </div>
 
     <!-- Add Payment Method Modal -->
     <app-modal
-      [isOpen]="showAddModal()"
+      [isOpen]="show_add_modal()"
       title="Agregar Método de Pago"
+      subtitle="Selecciona los métodos disponibles para tu tienda"
       size="lg"
       (closed)="closeAddModal()"
     >
-      <div class="space-y-4">
-        <p class="text-sm text-text-secondary">
-          Selecciona los métodos de pago disponibles que deseas agregar a tu tienda.
-        </p>
+      <div slot="header">
+        <div class="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center border border-blue-100">
+          <app-icon name="credit-card" [size]="20" class="text-blue-600"></app-icon>
+        </div>
+      </div>
 
-        <!-- Available Methods Search -->
+      <div class="mb-4">
         <app-inputsearch
           class="w-full"
           size="sm"
           placeholder="Buscar métodos disponibles..."
           [debounceTime]="300"
-          [ngModel]="modalSearchTerm()"
+          [ngModel]="modal_search_term()"
           (ngModelChange)="onModalSearchChange($event)"
         ></app-inputsearch>
-
-        <!-- Loading Available Methods -->
-        @if (isLoadingAvailable()) {
-          <div class="p-4 text-center">
-            <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-            <p class="mt-2 text-sm text-text-secondary">Cargando métodos disponibles...</p>
-          </div>
-        }
-
-        <!-- Available Methods List -->
-        @if (!isLoadingAvailable() && filteredAvailableMethods().length > 0) {
-          <div class="max-h-96 overflow-y-auto border border-border rounded-lg">
-            <table class="w-full">
-              <thead class="bg-gray-50 sticky top-0">
-                <tr>
-                  <th class="px-4 py-2 text-left text-xs font-medium text-text-secondary uppercase">
-                    Método
-                  </th>
-                  <th class="px-4 py-2 text-left text-xs font-medium text-text-secondary uppercase">
-                    Tipo
-                  </th>
-                  <th class="px-4 py-2 text-left text-xs font-medium text-text-secondary uppercase">
-                    Origen
-                  </th>
-                  <th class="px-4 py-2 text-right text-xs font-medium text-text-secondary uppercase">
-                    Acción
-                  </th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-border">
-                @for (method of filteredAvailableMethods(); track method.id) {
-                  <tr class="hover:bg-gray-50">
-                    <td class="px-4 py-3">
-                      <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center">
-                          <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-                          </svg>
-                        </div>
-                        <div>
-                          <p class="font-medium text-text-primary text-sm">{{ method.display_name }}</p>
-                          <p class="text-xs text-text-secondary">{{ method.description }}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td class="px-4 py-3">
-                      <span class="text-xs text-text-secondary">{{ getTypeLabel(method.type) }}</span>
-                    </td>
-                    <td class="px-4 py-3">
-                      @if (method.provider !== 'system') {
-                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
-                          Organización
-                        </span>
-                      } @else {
-                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
-                          Sistema
-                        </span>
-                      }
-                    </td>
-                    <td class="px-4 py-3 text-right">
-                      <app-button
-                        variant="primary"
-                        size="xs"
-                        (onClick)="enableMethod(method)"
-                        [loading]="enablingMethodId() === method.id"
-                      >
-                        Agregar
-                      </app-button>
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-        }
-
-        <!-- Empty Available -->
-        @if (!isLoadingAvailable() && filteredAvailableMethods().length === 0) {
-          <div class="p-6 text-center">
-            <p class="text-sm text-text-secondary">
-              @if (modalSearchTerm()) {
-                No hay métodos disponibles con ese criterio
-              } @else {
-                No hay más métodos disponibles para agregar
-              }
-            </p>
-          </div>
-        }
       </div>
 
-      <div class="flex justify-end gap-2 mt-4 pt-4 border-t border-border">
-        <app-button variant="ghost" (onClick)="closeAddModal()">
+      @if (is_loading_available()) {
+        <div class="p-4 text-center">
+          <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+          <p class="mt-2 text-sm text-text-secondary">Cargando métodos disponibles...</p>
+        </div>
+      }
+
+      @if (!is_loading_available() && filtered_available_methods().length > 0) {
+        <app-responsive-data-view
+          [data]="filtered_available_methods()"
+          [columns]="modal_columns"
+          [cardConfig]="modal_card_config"
+          [actions]="modal_actions"
+          [loading]="is_loading_available()"
+          emptyMessage="No hay métodos disponibles"
+          emptyIcon="credit-card"
+        ></app-responsive-data-view>
+      }
+
+      @if (!is_loading_available() && filtered_available_methods().length === 0) {
+        <div class="p-6 text-center">
+          <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-green-50 flex items-center justify-center">
+            <app-icon name="check-circle" [size]="24" class="text-green-500"></app-icon>
+          </div>
+          <p class="text-sm text-text-secondary">
+            @if (modal_search_term()) {
+              No hay métodos disponibles con ese criterio
+            } @else {
+              ¡Todos los métodos están activados!
+            }
+          </p>
+        </div>
+      }
+
+      <div slot="footer" class="flex justify-end gap-3">
+        <app-button variant="ghost" (clicked)="closeAddModal()">
           Cerrar
         </app-button>
       </div>
@@ -450,64 +240,165 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
   payment_method_stats = signal<PaymentMethodStats | null>(null);
   store_payment_method_ids = signal<Set<string>>(new Set());
 
-  isLoading = signal(false);
-  isLoadingStats = signal(false);
-  isLoadingAvailable = signal(false);
-  isEnabling = signal(false);
-  enablingMethodId = signal<string | null>(null);
+  is_loading = signal(false);
+  is_loading_stats = signal(false);
+  is_loading_available = signal(false);
+  is_enabling = signal(false);
+  enabling_method_id = signal<string | null>(null);
 
   // UI State
-  searchTerm = signal('');
-  modalSearchTerm = signal('');
-  showAddModal = signal(false);
+  search_term = signal('');
+  modal_search_term = signal('');
+  show_add_modal = signal(false);
+
+  // Main table columns (desktop)
+  table_columns: TableColumn[] = [
+    { key: 'display_name', label: 'Método', sortable: true, priority: 1 },
+    {
+      key: 'type', label: 'Tipo', badge: true, priority: 2,
+      badgeConfig: {
+        type: 'custom',
+        colorMap: { cash: '#64748b', card: '#3b82f6', paypal: '#7c3aed', bank_transfer: '#f59e0b' },
+      },
+      transform: (v: string) => this.getTypeLabel(v),
+    },
+    {
+      key: 'state', label: 'Estado', badge: true, priority: 2,
+      badgeConfig: {
+        type: 'custom',
+        colorMap: { enabled: '#22c55e', disabled: '#6b7280', requires_configuration: '#f59e0b', available: '#3b82f6' },
+      },
+      transform: (v: string) => this.getStateLabel(v),
+    },
+  ];
+
+  // Mobile card config
+  card_config: ItemListCardConfig = {
+    titleKey: 'display_name',
+    subtitleKey: 'provider',
+    subtitleTransform: (item: CombinedPaymentMethod) =>
+      item.is_store_method
+        ? (item.store_payment_method?.system_payment_method?.provider || 'Personalizado')
+        : (item.provider || 'Sistema'),
+    avatarFallbackIcon: 'credit-card',
+    avatarShape: 'square',
+    badgeKey: 'state',
+    badgeConfig: {
+      type: 'custom',
+      size: 'sm',
+      colorMap: { enabled: '#22c55e', disabled: '#6b7280', requires_configuration: '#f59e0b', available: '#3b82f6' },
+    },
+    badgeTransform: (v: string) => this.getStateLabel(v),
+    detailKeys: [
+      { key: 'type', label: 'Tipo', transform: (v: string) => this.getTypeLabel(v) },
+      { key: 'is_store_method', label: 'Origen', transform: (v: boolean) => v ? 'Tienda' : 'Sistema' },
+    ],
+  };
+
+  // Shared actions for main list
+  table_actions: TableAction[] = [
+    {
+      label: (item: CombinedPaymentMethod) => item.state === 'enabled' ? 'Desactivar' : 'Activar',
+      icon: (item: CombinedPaymentMethod) => item.state === 'enabled' ? 'pause' : 'check-circle',
+      action: (item: CombinedPaymentMethod) => this.toggleMethod(item),
+      show: (item: CombinedPaymentMethod) => item.is_store_method,
+    },
+    {
+      label: 'Editar',
+      icon: 'edit',
+      action: (item: CombinedPaymentMethod) => this.editMethod(item),
+      show: (item: CombinedPaymentMethod) => item.is_store_method,
+      variant: 'primary',
+    },
+  ];
+
+  // Modal table columns (desktop)
+  modal_columns: TableColumn[] = [
+    { key: 'display_name', label: 'Método', priority: 1 },
+    {
+      key: 'type', label: 'Tipo', badge: true, priority: 2,
+      badgeConfig: {
+        type: 'custom',
+        colorMap: { cash: '#64748b', card: '#3b82f6', paypal: '#7c3aed', bank_transfer: '#f59e0b' },
+      },
+      transform: (v: string) => this.getTypeLabel(v),
+    },
+  ];
+
+  // Modal mobile card config
+  modal_card_config: ItemListCardConfig = {
+    titleKey: 'display_name',
+    subtitleKey: 'description',
+    subtitleTransform: (item: SystemPaymentMethod) => item.description || 'Sin descripción',
+    avatarFallbackIcon: 'plus-circle',
+    avatarShape: 'square',
+    badgeKey: 'type',
+    badgeConfig: {
+      type: 'custom',
+      size: 'sm',
+      colorMap: { cash: '#64748b', card: '#3b82f6', paypal: '#7c3aed', bank_transfer: '#f59e0b' },
+    },
+    badgeTransform: (v: string) => this.getTypeLabel(v),
+  };
+
+  // Modal actions
+  modal_actions: TableAction[] = [
+    {
+      label: 'Agregar',
+      icon: 'plus',
+      action: (method: SystemPaymentMethod) => this.enableMethod(method),
+      variant: 'primary',
+      disabled: () => this.is_enabling(),
+    },
+  ];
 
   // Computed
-  readonly allMethods = computed<CombinedPaymentMethod[]>(() => {
-    const storeMethods = this.payment_methods();
-    const availableMethods = this.available_payment_methods();
-    const enabledIds = new Set(storeMethods.map(m => m.system_payment_method_id));
+  readonly all_methods = computed<CombinedPaymentMethod[]>(() => {
+    const store_methods = this.payment_methods();
+    const available_methods = this.available_payment_methods();
+    const enabled_ids = new Set(store_methods.map(m => m.system_payment_method_id));
 
     const combined: CombinedPaymentMethod[] = [];
 
     // Add store payment methods
-    storeMethods.forEach(storeMethod => {
+    store_methods.forEach(store_method => {
       combined.push({
-        id: storeMethod.id,
-        display_name: storeMethod.display_name,
-        type: storeMethod.system_payment_method?.type || 'unknown',
-        provider: storeMethod.system_payment_method?.provider || 'unknown',
-        state: storeMethod.state,
+        id: store_method.id,
+        display_name: store_method.display_name,
+        type: store_method.system_payment_method?.type || 'unknown',
+        provider: store_method.system_payment_method?.provider || 'unknown',
+        state: store_method.state,
         is_system: false,
         is_store_method: true,
-        system_payment_method_id: storeMethod.system_payment_method_id,
-        store_payment_method: storeMethod,
-        created_at: storeMethod.created_at,
+        system_payment_method_id: store_method.system_payment_method_id,
+        store_payment_method: store_method,
+        created_at: store_method.created_at,
       });
     });
 
     // Add available methods that are NOT yet added to store
-    availableMethods
-      .filter(m => !enabledIds.has(m.id))
-      .forEach(availableMethod => {
+    available_methods
+      .filter(m => !enabled_ids.has(m.id))
+      .forEach(available_method => {
         combined.push({
-          id: availableMethod.id,
-          display_name: availableMethod.display_name,
-          type: availableMethod.type,
-          provider: availableMethod.provider,
+          id: available_method.id,
+          display_name: available_method.display_name,
+          type: available_method.type,
+          provider: available_method.provider,
           state: 'available',
-          is_system: availableMethod.provider === 'system',
+          is_system: available_method.provider === 'system',
           is_store_method: false,
-          system_payment_method_id: availableMethod.id,
-          created_at: availableMethod.created_at,
+          system_payment_method_id: available_method.id,
+          created_at: available_method.created_at,
         });
       });
 
     return combined;
   });
 
-  readonly filteredMethods = computed(() => {
-    const term = this.searchTerm().toLowerCase();
-    const methods = this.allMethods();
+  readonly filtered_methods = computed(() => {
+    const term = this.search_term().toLowerCase();
+    const methods = this.all_methods();
     if (!term) return methods;
     return methods.filter(m =>
       m.display_name?.toLowerCase().includes(term) ||
@@ -516,8 +407,8 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     );
   });
 
-  readonly filteredAvailableMethods = computed(() => {
-    const term = this.modalSearchTerm().toLowerCase();
+  readonly filtered_available_methods = computed(() => {
+    const term = this.modal_search_term().toLowerCase();
     const methods = this.available_payment_methods();
     if (!term) return methods;
     return methods.filter(m =>
@@ -529,9 +420,9 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
   });
 
   constructor(
-    private paymentMethodsService: PaymentMethodsService,
-    private toastService: ToastService,
-    private dialogService: DialogService
+    private payment_methods_service: PaymentMethodsService,
+    private toast_service: ToastService,
+    private dialog_service: DialogService
   ) {}
 
   ngOnInit(): void {
@@ -546,159 +437,181 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
   }
 
   onSearchChange(term: string): void {
-    this.searchTerm.set(term);
+    this.search_term.set(term);
   }
 
   onModalSearchChange(term: string): void {
-    this.modalSearchTerm.set(term);
+    this.modal_search_term.set(term);
   }
 
   openAddModal(): void {
-    this.modalSearchTerm.set('');
-    this.showAddModal.set(true);
+    this.modal_search_term.set('');
+    this.show_add_modal.set(true);
   }
 
   closeAddModal(): void {
-    this.showAddModal.set(false);
+    this.show_add_modal.set(false);
   }
 
   loadPaymentMethods(): void {
-    this.isLoading.set(true);
-    this.paymentMethodsService
+    this.is_loading.set(true);
+    this.payment_methods_service
       .getStorePaymentMethods()
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response: any) => {
           const methods = response.data || response;
           this.payment_methods.set(methods || []);
-          this.isLoading.set(false);
+          this.is_loading.set(false);
         },
         error: (error: any) => {
-          this.toastService.error('Error al cargar métodos de pago: ' + error.message);
+          this.toast_service.error('Error al cargar métodos de pago: ' + error.message);
           this.payment_methods.set([]);
-          this.isLoading.set(false);
+          this.is_loading.set(false);
         },
       });
   }
 
   loadPaymentMethodStats(): void {
-    this.isLoadingStats.set(true);
-    this.paymentMethodsService
+    this.is_loading_stats.set(true);
+    this.payment_methods_service
       .getPaymentMethodStats()
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (stats: any) => {
           this.payment_method_stats.set(stats.data || stats);
-          this.isLoadingStats.set(false);
+          this.is_loading_stats.set(false);
         },
         error: (error: any) => {
-          this.toastService.error('Error al cargar estadísticas: ' + error.message);
+          this.toast_service.error('Error al cargar estadísticas: ' + error.message);
           this.payment_method_stats.set(null);
-          this.isLoadingStats.set(false);
+          this.is_loading_stats.set(false);
         },
       });
   }
 
   loadAvailablePaymentMethods(): void {
-    this.isLoadingAvailable.set(true);
-    this.paymentMethodsService
+    this.is_loading_available.set(true);
+    this.payment_methods_service
       .getAvailablePaymentMethods()
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (methods: any) => {
-          const methodsData = methods.data || methods;
-          this.available_payment_methods.set(methodsData || []);
-          this.isLoadingAvailable.set(false);
+          const methods_data = methods.data || methods;
+          this.available_payment_methods.set(methods_data || []);
+          this.is_loading_available.set(false);
         },
         error: (error: any) => {
-          this.toastService.error('Error al cargar métodos disponibles: ' + error.message);
+          this.toast_service.error('Error al cargar métodos disponibles: ' + error.message);
           this.available_payment_methods.set([]);
-          this.isLoadingAvailable.set(false);
+          this.is_loading_available.set(false);
         },
       });
   }
 
   enableMethod(method: SystemPaymentMethod): void {
-    this.enablingMethodId.set(method.id);
-    this.paymentMethodsService
-      .enablePaymentMethod(method.id, {
-        display_name: method.display_name,
+    this.dialog_service
+      .confirm({
+        title: 'Agregar Método de Pago',
+        message: `¿Deseas agregar "${method.display_name}" como método de pago?`,
+        confirmText: 'Agregar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'primary',
       })
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: () => {
-          this.toastService.success('Método de pago agregado correctamente');
-          this.enablingMethodId.set(null);
-          this.loadPaymentMethods();
-          this.loadPaymentMethodStats();
-          this.loadAvailablePaymentMethods();
-        },
-        error: (error: any) => {
-          this.toastService.error('Error al agregar método de pago: ' + error.message);
-          this.enablingMethodId.set(null);
-        },
+      .then((confirmed: boolean) => {
+        if (confirmed) {
+          this.enabling_method_id.set(method.id);
+          this.payment_methods_service
+            .enablePaymentMethod(method.id, {
+              display_name: method.display_name,
+            })
+            .pipe(takeUntil(this.destroy$))
+            .subscribe({
+              next: () => {
+                this.toast_service.success('Método de pago agregado correctamente');
+                this.enabling_method_id.set(null);
+                this.loadPaymentMethods();
+                this.loadPaymentMethodStats();
+                this.loadAvailablePaymentMethods();
+              },
+              error: (error: any) => {
+                this.toast_service.error('Error al agregar método de pago: ' + error.message);
+                this.enabling_method_id.set(null);
+              },
+            });
+        }
       });
   }
 
   toggleMethod(method: CombinedPaymentMethod): void {
     if (!method.is_store_method || !method.store_payment_method) return;
 
-    const storeMethod = method.store_payment_method;
+    const store_method = method.store_payment_method;
 
-    if (storeMethod.state === 'enabled') {
-      this.dialogService
+    if (store_method.state === 'enabled') {
+      this.dialog_service
         .confirm({
           title: 'Desactivar Método de Pago',
           message: `¿Deseas desactivar "${method.display_name}"?`,
           confirmText: 'Desactivar',
           cancelText: 'Cancelar',
-          confirmVariant: 'warning',
+          confirmVariant: 'danger',
         })
-        .then((confirmed) => {
+        .then((confirmed: boolean) => {
           if (confirmed) {
-            this.paymentMethodsService
-              .disablePaymentMethod(storeMethod.id)
+            this.payment_methods_service
+              .disablePaymentMethod(store_method.id)
               .pipe(takeUntil(this.destroy$))
               .subscribe({
                 next: () => {
-                  this.toastService.success('Método de pago desactivado');
+                  this.toast_service.success('Método de pago desactivado');
                   this.loadPaymentMethods();
                   this.loadPaymentMethodStats();
                 },
                 error: (error: any) => {
-                  this.toastService.error('Error al desactivar método: ' + error.message);
+                  this.toast_service.error('Error al desactivar método: ' + error.message);
                 },
               });
           }
         });
     } else {
-      this.paymentMethodsService
-        .enableStorePaymentMethod(storeMethod.id)
+      this.payment_methods_service
+        .enableStorePaymentMethod(store_method.id)
         .pipe(takeUntil(this.destroy$))
         .subscribe({
           next: () => {
-            this.toastService.success('Método de pago activado');
+            this.toast_service.success('Método de pago activado');
             this.loadPaymentMethods();
             this.loadPaymentMethodStats();
           },
           error: (error: any) => {
-            this.toastService.error('Error al activar método: ' + error.message);
+            this.toast_service.error('Error al activar método: ' + error.message);
           },
         });
     }
   }
 
   editMethod(method: CombinedPaymentMethod): void {
-    this.toastService.info('Funcionalidad de edición próximamente');
+    this.toast_service.info('Funcionalidad de edición próximamente');
+  }
+
+  getStateLabel(state: string): string {
+    const state_map: Record<string, string> = {
+      enabled: 'Activo',
+      disabled: 'Inactivo',
+      requires_configuration: 'Config. Requerida',
+      available: 'Disponible',
+    };
+    return state_map[state] || state;
   }
 
   getTypeLabel(type: string): string {
-    const typeMap: Record<string, string> = {
+    const type_map: Record<string, string> = {
       cash: 'Efectivo',
       card: 'Tarjeta',
       paypal: 'PayPal',
       bank_transfer: 'Transferencia',
     };
-    return typeMap[type] || type;
+    return type_map[type] || type;
   }
 }

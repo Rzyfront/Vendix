@@ -106,6 +106,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
           [(ngModel)]="form.base_price"
           name="base_price"
           step="0.01"
+          [min]="0"
           placeholder="$ 0.00"
         ></app-input>
 

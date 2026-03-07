@@ -185,15 +185,16 @@ import {
       }
 
       <!-- Modal para agregar métodos disponibles -->
-      <app-shipping-methods-modal
-        *ngIf="show_methods_modal"
-        [available_methods]="available_shipping_methods"
-        [is_loading]="is_loading_available"
-        [is_enabling]="is_enabling"
-        (enable)="enableShippingMethod($event)"
-        (close)="closeMethodsModal()"
-        (refresh)="loadAvailableShippingMethods()"
-      ></app-shipping-methods-modal>
+      @if (show_methods_modal) {
+        <app-shipping-methods-modal
+          [available_methods]="available_shipping_methods"
+          [is_loading]="is_loading_available"
+          [is_enabling]="is_enabling"
+          (enable)="enableShippingMethod($event)"
+          (close)="closeMethodsModal()"
+          (refresh)="loadAvailableShippingMethods()"
+        ></app-shipping-methods-modal>
+      }
     </div>
   `,
   styles: [

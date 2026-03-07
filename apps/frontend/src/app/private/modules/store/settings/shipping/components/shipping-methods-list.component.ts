@@ -8,7 +8,7 @@ import {
   TableAction,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
-} from '../../../../shared/components/index';
+} from '../../../../../../shared/components/index';
 
 @Component({
   selector: 'app-shipping-methods-list',
@@ -162,7 +162,7 @@ export class ShippingMethodsListComponent {
   }
 
   private formatDeliveryTime(min_days?: number, max_days?: number): string {
-    if (!min_days && !max_days) return 'Sin definir';
+    if (min_days == null && max_days == null) return 'Sin definir';
     if (min_days === max_days) return `${min_days} días`;
     if (!max_days) return `${min_days}+ días`;
     return `${min_days}-${max_days} días`;

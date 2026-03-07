@@ -120,3 +120,16 @@ export interface PaymentMethodConfiguration {
   fields: PaymentMethodConfigField[];
   validation_schema: Record<string, any>;
 }
+
+export interface CombinedPaymentMethod {
+  id: string;
+  display_name: string;
+  type: string;
+  provider: string;
+  state: string;
+  is_system: boolean;
+  is_store_method: boolean;
+  system_payment_method_id?: string;
+  store_payment_method?: StorePaymentMethod;
+  created_at?: string;
+}

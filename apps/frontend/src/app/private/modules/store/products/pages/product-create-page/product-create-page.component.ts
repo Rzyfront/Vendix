@@ -905,7 +905,6 @@ export class ProductCreatePageComponent implements OnInit {
       };
 
       reader.onerror = () => {
-        console.error('Error reading file:', file.name);
         this.toastService.error(`Error al cargar la imagen: ${file.name}`);
         // Continue with next image even if this one failed
         this.processImagesSequentially(files, index + 1).then(resolve);
