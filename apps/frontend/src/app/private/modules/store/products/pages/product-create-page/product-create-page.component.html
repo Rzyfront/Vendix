@@ -164,11 +164,17 @@
                         <!-- Horizontal Thumbnails Carousel -->
                         <div class="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
                             <!-- Upload Button -->
-                            <button *ngIf="imageUrls.length < 5" type="button" (click)="triggerFileUpload()"
+                            <button *ngIf="imageUrls.length < 5 && !isLoadingImages" type="button" (click)="triggerFileUpload()"
                                 class="flex-shrink-0 w-16 h-16 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:bg-white hover:border-primary-400 transition-all">
                                 <app-icon name="plus" size="20" class="text-gray-400"></app-icon>
                                 <span class="text-[9px] text-gray-400 mt-0.5">Subir</span>
                             </button>
+
+                            <!-- Loading Indicator Mobile -->
+                            <div *ngIf="isLoadingImages" class="flex-shrink-0 w-16 h-16 bg-primary-50 rounded-xl border-2 border-dashed border-primary-300 flex flex-col items-center justify-center">
+                                <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-600"></div>
+                                <span class="text-[9px] text-primary-600 mt-1">{{ loadingProgress }}%</span>
+                            </div>
 
                             <!-- Thumbnails -->
                             <div *ngFor="let url of imageUrls; let i = index" (click)="setActiveImage(i)"
@@ -462,8 +468,16 @@
 
                         <!-- Drag & Drop Indicative Box -->
                         <div *ngIf="imageUrls.length < 5" class="group mt-4 relative">
+                            <!-- Loading Indicator -->
+                            <div *ngIf="isLoadingImages" class="w-full py-4 border-2 border-dashed border-primary-300 rounded-xl bg-primary-50/50 flex flex-col items-center justify-center mb-2">
+                                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mb-2"></div>
+                                <p class="text-[13px] font-semibold text-primary-700">Cargando imágenes...</p>
+                                <p class="text-xs text-primary-600 mt-1">{{ loadingProgress }}%</p>
+                            </div>
                             <div (click)="triggerFileUpload()"
-                                class="w-full py-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-white hover:border-primary-300 hover:shadow-md">
+                                class="w-full py-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-white hover:border-primary-300 hover:shadow-md"
+                                [class.opacity-50]="isLoadingImages"
+                                [class.pointer-events-none]="isLoadingImages">
                                 <div class="p-2 bg-white rounded-full shadow-sm mb-2 group-hover:scale-110 transition-transform">
                                     <app-icon name="upload-cloud" size="24" class="text-primary-500"></app-icon>
                                 </div>
