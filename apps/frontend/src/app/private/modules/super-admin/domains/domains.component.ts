@@ -177,6 +177,11 @@ import './domains.component.css';
                 ></app-icon>
                 Anterior
               </app-button>
+              <div class="flex items-center gap-1 px-2 text-sm text-text-secondary">
+                <span class="font-medium">{{ pagination.page }}</span>
+                <span>/</span>
+                <span>{{ pagination.totalPages }}</span>
+              </div>
               <app-button
                 variant="outline"
                 size="sm"
