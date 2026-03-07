@@ -60,7 +60,6 @@
       </div>
 
       <!-- Table Section -->
-      <!-- Table Section -->
       <app-responsive-data-view
         [data]="users"
         [columns]="tableColumns"
@@ -78,6 +77,46 @@
           </app-user-empty-state>
         </div>
       </app-responsive-data-view>
+
+      <!-- Pagination -->
+      <div class="mt-6 flex justify-between items-center" *ngIf="pagination.totalPages > 0">
+        <div class="text-sm text-text-secondary">
+          Mostrando {{ users.length }} de {{ pagination.total }} usuarios
+        </div>
+        <div class="flex gap-2">
+          <app-button
+            variant="outline"
+            size="sm"
+            (clicked)="onPageChange(pagination.page - 1)"
+            [disabled]="pagination.page <= 1"
+          >
+            <app-icon
+              name="chevron-left"
+              [size]="16"
+              slot="icon"
+            ></app-icon>
+            Anterior
+          </app-button>
+          <div class="flex items-center gap-1 px-2 text-sm text-text-secondary">
+            <span class="font-medium">{{ pagination.page }}</span>
+            <span>/</span>
+            <span>{{ pagination.totalPages }}</span>
+          </div>
+          <app-button
+            variant="outline"
+            size="sm"
+            (clicked)="onPageChange(pagination.page + 1)"
+            [disabled]="pagination.page >= pagination.totalPages"
+          >
+            Siguiente
+            <app-icon
+              name="chevron-right"
+              [size]="16"
+              slot="icon"
+            ></app-icon>
+          </app-button>
+        </div>
+      </div>
     </div>
 
     <!-- Create User Modal -->
