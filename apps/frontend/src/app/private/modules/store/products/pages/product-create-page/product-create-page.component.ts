@@ -1,4 +1,4 @@
-import { Component, OnInit, computed, signal, inject } from '@angular/core';
+import { Component, OnInit, computed, signal, inject, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterModule, ActivatedRoute, Router, Params } from '@angular/router';
@@ -106,6 +106,11 @@ export class ProductCreatePageComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private dialogService = inject(DialogService);
   private currencyService = inject(CurrencyFormatService);
+  private cdr = inject(ChangeDetectorRef);
+
+  // Image loading state for feedback visual
+  isLoadingImages = false;
+  loadingProgress = 0;
 
   productForm: FormGroup = this.createForm();
   isSubmitting = signal(false);
@@ -846,22 +851,68 @@ export class ProductCreatePageComponent implements OnInit {
         return;
       }
 
-      filesArray.slice(0, remainingSlots).forEach((file) => {
-        if (file.type.startsWith('image/')) {
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            const result = e.target?.result as string;
-            this.imageUrls.push(result);
-            this.imageIds.push(null); // New image, no DB ID yet
-            if (this.imageUrls.length === 1) {
-              this.activeImageIndex = 0;
-            }
-          };
-          reader.readAsDataURL(file);
+      const filesToProcess = filesArray.slice(0, remainingSlots).filter((file) => 
+        file.type.startsWith('image/')
+      );
+
+      if (filesToProcess.length === 0) {
+        this.toastService.warning('Por favor selecciona archivos de imagen válidos');
+        input.value = '';
+        return;
+      }
+
+      // Show loading feedback
+      this.isLoadingImages = true;
+      this.loadingProgress = 0;
+      this.cdr.detectChanges();
+
+      // Process images sequentially to avoid race conditions
+      this.processImagesSequentially(filesToProcess, 0).then(() => {
+        this.isLoadingImages = false;
+        this.loadingProgress = 0;
+        if (this.imageUrls.length === 1) {
+          this.activeImageIndex = 0;
         }
+        this.cdr.detectChanges();
+        this.toastService.success(`${filesToProcess.length} imagen(es) cargada(s) correctamente`);
       });
+
       input.value = '';
     }
+  }
+
+  private processImagesSequentially(files: File[], index: number): Promise<void> {
+    return new Promise((resolve) => {
+      if (index >= files.length) {
+        resolve();
+        return;
+      }
+
+      const file = files[index];
+      const reader = new FileReader();
+
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        this.imageUrls.push(result);
+        this.imageIds.push(null);
+        
+        // Update progress
+        this.loadingProgress = Math.round(((index + 1) / files.length) * 100);
+        this.cdr.detectChanges();
+
+        // Process next image
+        this.processImagesSequentially(files, index + 1).then(resolve);
+      };
+
+      reader.onerror = () => {
+        console.error('Error reading file:', file.name);
+        this.toastService.error(`Error al cargar la imagen: ${file.name}`);
+        // Continue with next image even if this one failed
+        this.processImagesSequentially(files, index + 1).then(resolve);
+      };
+
+      reader.readAsDataURL(file);
+    });
   }
 
   async removeImage(index: number): Promise<void> {
