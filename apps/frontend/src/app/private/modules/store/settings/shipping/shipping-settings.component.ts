@@ -15,9 +15,12 @@ import {
   ToastService,
   StatsComponent,
   DialogService,
+  ButtonComponent,
+  IconComponent,
 } from '../../../../../../app/shared/components/index';
-import { EnabledShippingMethodsListComponent } from './components/enabled-shipping-methods-list/enabled-shipping-methods-list.component';
-import { AvailableShippingMethodsListComponent } from './components/available-shipping-methods-list/available-shipping-methods-list.component';
+import { ShippingMethodsListComponent } from './components/shipping-methods-list.component';
+import { ShippingMethodsEmptyStateComponent } from './components/shipping-methods-empty-state.component';
+import { ShippingMethodsModalComponent } from './components/shipping-methods-modal.component';
 import {
   ShippingZonesListComponent,
   ZoneModalComponent,
@@ -34,9 +37,12 @@ import {
   imports: [
     CommonModule,
     StatsComponent,
+    ButtonComponent,
+    IconComponent,
     DashboardTabsComponent,
-    EnabledShippingMethodsListComponent,
-    AvailableShippingMethodsListComponent,
+    ShippingMethodsListComponent,
+    ShippingMethodsEmptyStateComponent,
+    ShippingMethodsModalComponent,
     ShippingZonesListComponent,
     ZoneModalComponent,
     RatesModalComponent,
@@ -84,28 +90,38 @@ import {
         (tabChange)="onTabChange($event)"
       />
 
-      <!-- Tab: Methods -->
+      <!-- Tab: Methods - Nueva UI con tabla única -->
       @if (active_tab() === 'methods') {
-        <!-- Shipping Methods Tables - 2 columnas lado a lado -->
-        <div class="flex flex-col gap-4 lg:flex-row lg:gap-6">
-          <div class="w-full lg:w-1/2">
-            <app-enabled-shipping-methods-list
+        <div class="flex flex-col gap-4">
+          <!-- Header con botón para agregar -->
+          <div class="flex justify-between items-center">
+            <div>
+              <h2 class="text-lg font-semibold text-text-primary">Métodos de Envío</h2>
+              <p class="text-sm text-text-secondary">Gestiona los métodos de envío de tu tienda</p>
+            </div>
+            <app-button
+              variant="primary"
+              (clicked)="openAddMethodModal()"
+            >
+              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+              Agregar Método
+            </app-button>
+          </div>
+
+          <!-- Tabla única o Empty State -->
+          @if (shipping_methods.length > 0) {
+            <app-shipping-methods-list
               [shipping_methods]="shipping_methods"
               [is_loading]="is_loading"
               (edit)="openEditShippingMethodModal($event)"
               (toggle)="toggleShippingMethod($event)"
-              (refresh)="loadShippingMethods()"
-            ></app-enabled-shipping-methods-list>
-          </div>
-          <div class="w-full lg:w-1/2">
-            <app-available-shipping-methods-list
-              [shipping_methods]="available_shipping_methods"
-              [is_loading]="is_loading_available"
-              [is_enabling]="is_enabling"
-              (enable)="enableShippingMethod($event)"
-              (refresh)="loadAvailableShippingMethods()"
-            ></app-available-shipping-methods-list>
-          </div>
+              (delete)="confirmDeleteShippingMethod($event)"
+            ></app-shipping-methods-list>
+          } @else {
+            <app-shipping-methods-empty-state
+              (addShippingMethod)="openAddMethodModal()"
+            ></app-shipping-methods-empty-state>
+          }
         </div>
       }
 
@@ -167,6 +183,17 @@ import {
           (rates_changed)="onRatesChanged()"
         ></app-rates-modal>
       }
+
+      <!-- Modal para agregar métodos disponibles -->
+      <app-shipping-methods-modal
+        *ngIf="show_methods_modal"
+        [available_methods]="available_shipping_methods"
+        [is_loading]="is_loading_available"
+        [is_enabling]="is_enabling"
+        (enable)="enableShippingMethod($event)"
+        (close)="closeMethodsModal()"
+        (refresh)="loadAvailableShippingMethods()"
+      ></app-shipping-methods-modal>
     </div>
   `,
   styles: [
@@ -199,6 +226,9 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
   is_loading_stats = false;
   is_loading_available = false;
   is_enabling = false;
+
+  // Modal state
+  show_methods_modal = false;
 
   // Zones state (signals)
   readonly zone_stats = signal<ZoneStats | null>(null);
@@ -305,6 +335,17 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
       });
   }
 
+  // ========== MODAL METHODS ==========
+
+  openAddMethodModal(): void {
+    this.loadAvailableShippingMethods();
+    this.show_methods_modal = true;
+  }
+
+  closeMethodsModal(): void {
+    this.show_methods_modal = false;
+  }
+
   enableShippingMethod(method: SystemShippingMethod): void {
     this.dialog_service
       .confirm({
@@ -341,6 +382,11 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
                 this.loadStoreZones();
                 this.loadZoneStats();
                 this.is_enabling = false;
+
+                // Close modal if no more available methods
+                if (this.available_shipping_methods.length === 0) {
+                  this.closeMethodsModal();
+                }
               },
               error: (error: any) => {
                 this.toast_service.error(
@@ -407,9 +453,38 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
     }
   }
 
-  deleteShippingMethod(method: StoreShippingMethod): void {
-    // TODO: Implement confirmation dialog
-    this.toast_service.info('Funcionalidad de eliminación próximamente');
+  confirmDeleteShippingMethod(method: StoreShippingMethod): void {
+    this.dialog_service
+      .confirm({
+        title: 'Eliminar Método de Envío',
+        message: `¿Estás seguro de eliminar "${method.name}"? Se eliminarán también todas sus zonas y tarifas.`,
+        confirmText: 'Eliminar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed) => {
+        if (confirmed) {
+          this.shipping_methods_service
+            .deleteShippingMethod(method.id)
+            .pipe(takeUntil(this.destroy$))
+            .subscribe({
+              next: () => {
+                this.toast_service.success('Método de envío eliminado correctamente');
+                this.loadShippingMethods();
+                this.loadShippingMethodStats();
+                this.loadAvailableShippingMethods();
+                // Also reload zones since they may have been deleted
+                this.loadStoreZones();
+                this.loadZoneStats();
+              },
+              error: (error: any) => {
+                this.toast_service.error(
+                  'Error al eliminar método: ' + error.message
+                );
+              },
+            });
+        }
+      });
   }
 
   // ========== ZONES MANAGEMENT ==========
