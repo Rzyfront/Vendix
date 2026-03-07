@@ -195,9 +195,29 @@ export class UsersService {
       updateData.password = await bcrypt.hash(updateUserDto.password, 10);
     }
 
+    // Filter out fields that don't exist in the users model
+    const allowedFields = [
+      'first_name',
+      'last_name',
+      'username',
+      'email',
+      'password',
+      'organization_id',
+      'state',
+      'failed_login_attempts',
+      'locked_until',
+    ];
+
+    const sanitizedData: any = {};
+    for (const field of allowedFields) {
+      if (updateData[field] !== undefined) {
+        sanitizedData[field] = updateData[field];
+      }
+    }
+
     const updatedUser = await this.prisma.users.update({
       where: { id },
-      data: updateData,
+      data: sanitizedData,
       include: {
         organizations: true,
         user_roles: {
