@@ -1,0 +1,14 @@
+info:
+  name: Países
+  type: folder
+  seq: 12
+
+request:
+  auth: inherit
+
+docs:
+  content: |-
+    Aquí encontraras la lista de los países.
+
+    Por el momento se usa para el campo `provider.country_code` de el endpoint **Crear y validar** de documentos soporte.
+  type: text/markdown

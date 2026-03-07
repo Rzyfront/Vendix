@@ -10,7 +10,7 @@ import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
-import { PosSettings, BusinessHours } from '../../../../../../../core/models/store-settings.interface';
+import { PosSettings, BusinessHours, ScaleSettings } from '../../../../../../../core/models/store-settings.interface';
 
 
 @Component({
@@ -36,6 +36,11 @@ export class PosSettingsForm implements OnInit, OnChanges {
     allow_discount: new FormControl(true),
     max_discount_percentage: new FormControl(15),
     allow_refund_without_approval: new FormControl(false),
+    scale: new FormGroup({
+      enabled: new FormControl(false),
+      allow_manual_weight_entry: new FormControl(true),
+      default_weight_unit: new FormControl('kg'),
+    }),
   });
 
   daysOfWeek = [
@@ -89,6 +94,14 @@ export class PosSettingsForm implements OnInit, OnChanges {
 
   get enableScheduleValidationControl(): FormControl<boolean> {
     return this.form.get('enable_schedule_validation') as FormControl<boolean>;
+  }
+
+  get scaleEnabledControl(): FormControl<boolean> {
+    return this.form.get('scale.enabled') as FormControl<boolean>;
+  }
+
+  get allowManualWeightEntryControl(): FormControl<boolean> {
+    return this.form.get('scale.allow_manual_weight_entry') as FormControl<boolean>;
   }
 
   ngOnInit() {

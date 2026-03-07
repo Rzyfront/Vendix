@@ -35,7 +35,7 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
           }
         } @else {
           <div class="stock-badge stock-badge--on-demand">
-            Bajo pedido
+            Disponible
           </div>
         }
 

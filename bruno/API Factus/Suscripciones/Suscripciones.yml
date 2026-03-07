@@ -1,0 +1,101 @@
+info:
+  name: Suscripciones
+  type: http
+  seq: 2
+
+http:
+  method: GET
+  url: "{{url_api}}/v1/subscriptions"
+  headers:
+    - name: Accept
+      value: application/json
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+examples:
+  - name: 200 - Suscripciones
+    request:
+      url: "{{url_api}}/v1/subscriptions"
+      method: GET
+    response:
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "OK",
+              "message": "Solicitud exitosa",
+              "data": [
+                  {
+                      "name": "Facturación",
+                      "supported_document_types": [
+                          "Factura de Venta",
+                          "Nota Crédito",
+                          "Nota Débito",
+                          "Documento Soporte",
+                          "Nota de Ajuste Documento Soporte"
+                      ],
+                      "documents_quota": 0,
+                      "documents_consumed": 0,
+                      "documents_available": "Ilimitado",
+                      "days_until_expiration": 365,
+                      "activated_at": "2025-12-10T00:00:00Z",
+                      "expires_at": "2026-12-10T00:00:00Z",
+                      "has_expired": false,
+                      "is_active": true,
+                      "has_unlimited_quota": true
+                  },
+                  {
+                      "name": "Nómina",
+                      "supported_document_types": [
+                          "Nómina",
+                          "Nota de Ajuste Nómina",
+                          "Nota de eliminación de nómina"
+                      ],
+                      "documents_quota": 100,
+                      "documents_consumed": 0,
+                      "documents_available": 100,
+                      "days_until_expiration": 365,
+                      "activated_at": "2025-12-10T00:00:00Z",
+                      "expires_at": "2026-12-10T00:00:00Z",
+                      "has_expired": false,
+                      "is_active": true,
+                      "has_unlimited_quota": false
+                  }
+              ]
+          }
+
+docs: |-
+  **Obtener Suscripciones de Usuario**
+
+  Este endpoint permite consultar todas las suscripciones activas de un usuario autenticado. Devuelve información detallada sobre cada suscripción incluyendo:
+
+  - **Información del grupo de documentos:** Nombre y tipos de documentos soportados
+      
+  - **Cuota de documentos:** Total asignado, consumidos y disponibles
+      
+  - **Estado de la suscripción:** Fechas de activación y expiración, días restantes
+      
+  - **Configuración:** Si está activa y si tiene cuota ilimitada
+      
+
+  | Campo | Descripción |
+  | --- | --- |
+  | `name` | Nombre del grupo de documentos asociado a la suscripción |
+  | `supported_document_types` | Es un array/lista de tipos de documentos soportados por esta suscripción |
+  | `documents_quota` | Cuota total de documentos disponibles en la suscripción |
+  | `documents_consumed` | Número de documentos ya utilizados/consumidos |
+  | `documents_available` | Cantidad de documentos restantes disponibles |
+  | `days_until_expiration` | Días restantes hasta que expire la suscripción |
+  | `activated_at` | Fecha y hora de activación de la suscripción (UTC) |
+  | `expires_at` | Fecha y hora de expiración de la suscripción (UTC) |
+  | `has_expired` | Indica si la suscripción ha expirado (true) o no (false) |
+  | `is_active` | Indica si la suscripción está activa (true) o inactiva (false) |
+  | `has_unlimited_quota` | Indica si la suscripción tiene cuota ilimitada (true) o limitada (false) |

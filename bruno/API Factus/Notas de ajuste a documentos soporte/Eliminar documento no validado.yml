@@ -1,0 +1,89 @@
+info:
+  name: Eliminar documento no validado
+  type: http
+  seq: 4
+
+http:
+  method: DELETE
+  url: "{{url_api}}/v1/adjustment-notes/reference/:reference_code"
+  headers:
+    - name: Accept
+      value: application/json
+  params:
+    - name: reference_code
+      value: REF008
+      type: path
+      description: Codigo de referencia que se uso para crear la nota de ajuste
+  body:
+    type: json
+    data: ""
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+examples:
+  - name: 200-Eliminar documento no validado
+    request:
+      url: "{{url_api}}/v1/adjustment-notes/reference/:reference_code"
+      method: DELETE
+      headers:
+        - name: Accept
+          value: application/json
+      params:
+        - name: reference_code
+          value: REF007
+          type: path
+          description: Codigo de referencia que se uso para crear la nota de ajuste
+      body:
+        type: json
+        data: ""
+    response:
+      statusText: "200"
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "OK",
+              "message": "Documento con código de referencia REF007 eliminado con éxito"
+          }
+  - name: 404-Eliminar documento no validado
+    request:
+      url: "{{url_api}}/v1/adjustment-notes/reference/:reference_code"
+      method: DELETE
+      headers:
+        - name: Accept
+          value: application/json
+      params:
+        - name: reference_code
+          value: REF008
+          type: path
+          description: Codigo de referencia que se uso para crear la nota de ajuste
+      body:
+        type: json
+        data: ""
+    response:
+      statusText: "404"
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "Not Found",
+              "message": "No se encontró el documento con código de referencia REF008"
+          }
+
+docs: |-
+  Elimina la nota de ajuste que esta pendiente por validar con la DIAN.
+
+  #### **Nota:**
+
+  - Esta peticion es sincrona, eso quiere decir que en la misma solicitud recibe el mesaje de si se ha eliminado la nota de ajuste.

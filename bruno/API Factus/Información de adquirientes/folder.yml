@@ -1,0 +1,17 @@
+info:
+  name: Información de adquirientes
+  type: folder
+  seq: 6
+
+request:
+  auth: inherit
+
+docs:
+  content: |-
+    La DIAN ha implementado un nuevo servicio de consulta para completar la información  
+    de adquirientes con el objetivo de facilitar y agilizar la generación de facturas electrónicas.
+
+    Un comprador solo tendrá que indicar su tipo y número de documento y, con esta  
+    información, el servicio completará automáticamente los datos necesarios para generar la  
+    factura, como su nombre y correo electrónico, sin necesidad de ingresarlos manualmente.
+  type: text/markdown

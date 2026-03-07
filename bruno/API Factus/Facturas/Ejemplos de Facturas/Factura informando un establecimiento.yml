@@ -1,0 +1,61 @@
+info:
+  name: Factura informando un establecimiento
+  type: http
+  seq: 3
+
+http:
+  method: POST
+  url: "{{url_api}}/v1/bills/validate"
+  headers:
+    - name: Accept
+      value: application/json
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+          "numbering_range_id": 4,
+          "reference_code": "REF20251308",
+          "payment_form": "1",
+          "payment_method_code": "10",
+          "establishment": { // datos del establecimiento
+              "name": "Nombre del establecimiento",
+              "address": "cra 01 # 223 - 22",
+              "phone_number": "0987654321",
+              "email": "correodelestablecimiento@tudominio.co",
+              "municipality_id": "980"
+          },
+          "customer": {
+              "identification": "123456789",
+              "names": "Alan Turing",
+              "address": "calle 1 # 2-68",
+              "email": "alanturing@enigmasas.com",
+              "phone": "1234567890",
+              "legal_organization_id": "2",
+              "tribute_id": "21",
+              "identification_document_id": "3",
+              "municipality_id": "980"
+          },
+          "items": [
+              {
+                  "code_reference": "12345",
+                  "name": "producto de prueba",
+                  "quantity": 1,
+                  "discount_rate": 0,
+                  "price": 50000,
+                  "tax_rate": "19.00",
+                  "unit_measure_id": 70,
+                  "standard_code_id": 1,
+                  "is_excluded": 0,
+                  "tribute_id": 1
+              }
+          ]
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

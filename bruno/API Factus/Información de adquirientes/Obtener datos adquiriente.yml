@@ -1,0 +1,151 @@
+info:
+  name: Obtener datos adquiriente
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: "{{url_api}}/v1/dian/acquirer?identification_document_id=3&identification_number=1399991"
+  params:
+    - name: identification_document_id
+      value: "3"
+      type: query
+    - name: identification_number
+      value: "1399991"
+      type: query
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+examples:
+  - name: Obtener datos adquiriente
+    request:
+      url: "{{url_api}}/v1/dian/acquirer?identification_document_id=3&identification_number=1399995"
+      method: GET
+      params:
+        - name: identification_document_id
+          value: "3"
+          type: query
+        - name: identification_number
+          value: "1399995"
+          type: query
+    response:
+      statusText: "200"
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "OK",
+              "message": "Solicitud exitosa",
+              "data": {
+                  "name": "Nombre Cédula de ciudadanía 5",
+                  "email": "Mail_Cédula de ciudadanía_5@mail.com"
+              }
+          }
+  - name: 404-Obtener datos adquiriente
+    request:
+      url: "{{url_api}}/v1/dian/acquirer?identification_document_id=3&identification_number=1399994dd"
+      method: GET
+      params:
+        - name: identification_document_id
+          value: "3"
+          type: query
+        - name: identification_number
+          value: 1399994dd
+          type: query
+    response:
+      statusText: "404"
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "Not Found",
+              "message": "No se encontró el adquirente"
+          }
+  - name: 422-Obtener datos adquiriente
+    request:
+      url: "{{url_api}}/v1/dian/acquirer?identification_document_id=131&identification_number=1399994"
+      method: GET
+      params:
+        - name: identification_document_id
+          value: "131"
+          type: query
+        - name: identification_number
+          value: "1399994"
+          type: query
+    response:
+      statusText: "422"
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "Validation error",
+              "message": "Error de validación",
+              "data": {
+                  "message": "Error de validación",
+                  "errors": {
+                      "identification_document_code": [
+                          "El campo código del tipo de documento es inválido."
+                      ]
+                  }
+              }
+          }
+  - name: Obtener datos adquiriente
+    request:
+      url: "{{url_api}}/v1/dian/acquirer?identification_document_id=3&identification_number=1399991"
+      method: GET
+      params:
+        - name: identification_document_id
+          value: "3"
+          type: query
+        - name: identification_number
+          value: "1399991"
+          type: query
+    response:
+      statusText: "422"
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "Validation error",
+              "message": "Error de validación",
+              "data": {
+                  "message": "Error de validación",
+                  "errors": {
+                      "identification_document_code": [
+                          "El campo código del tipo de documento es obligatorio."
+                      ],
+                      "identification_number": [
+                          "El campo número de identificación es obligatorio."
+                      ]
+                  }
+              }
+          }
+
+docs: |-
+  ### GET /v1/dian/acquirer
+
+  Este endpoint recupera información sobre un adquiriente basándose en ID y el número del documento de identificación proporcionados.
+
+  ### Descripción de los parametros
+
+  | **Parametro** | Descripción |
+  | --- | --- |
+  | identificacion_document_id | ID que corresponda al tipo de identificacion. Para saber cual ID corresponde al tipo de identificación consulte la siguiente tabla [IDs tipos de documentos](https://developers.factus.com.co/tablas-de-referencia/tablas/#ids-de-tipos-de-documentos-de-identidad). |
+  | identification_number | Número de identificación del comprador |

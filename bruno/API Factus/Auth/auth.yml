@@ -1,0 +1,106 @@
+info:
+  name: auth
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{url_api}}/oauth/token"
+  headers:
+    - name: Accept
+      value: application/json
+  body:
+    type: multipart-form
+    data:
+      - name: grant_type
+        type: text
+        value: password
+      - name: client_id
+        type: text
+        value: "{{client_id}}"
+      - name: client_secret
+        type: text
+        value: "{{client_secret}}"
+      - name: username
+        type: text
+        value: "{{email}}"
+      - name: password
+        type: text
+        value: "{{password}}"
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+examples:
+  - name: 200 - autenticacion
+    request:
+      url: "{{url_api}}/oauth/token"
+      method: POST
+      headers:
+        - name: Accept
+          value: application/json
+      body:
+        type: multipart-form
+        data:
+          - name: grant_type
+            type: text
+            value: password
+          - name: client_id
+            type: text
+            value: "{{client_id}}"
+          - name: client_secret
+            type: text
+            value: "{{client_secret}}"
+          - name: username
+            type: text
+            value: "{{email}}"
+          - name: password
+            type: text
+            value: "{{password}}"
+    response:
+      statusText: "200"
+      headers:
+        - name: Date
+          value: Wed, 03 Apr 2024 20:13:07 GMT
+        - name: Server
+          value: Apache/2.4.41 (Ubuntu)
+        - name: pragma
+          value: no-cache
+        - name: Cache-Control
+          value: no-store, private
+        - name: X-RateLimit-Limit
+          value: "60"
+        - name: X-RateLimit-Remaining
+          value: "59"
+        - name: Keep-Alive
+          value: timeout=5, max=100
+        - name: Connection
+          value: Keep-Alive
+        - name: Transfer-Encoding
+          value: chunked
+        - name: Content-Type
+          value: application/json; charset=UTF-8
+      body:
+        type: json
+        data: |-
+          {
+              "token_type": "Bearer",
+              "expires_in": 600,
+              "access_token": "tu access token",
+              "refresh_token": "tu refresh token"
+          }
+
+docs: |-
+  Obtener un token de acceso.
+
+  Agrega las credenciales de acceso al sistema.
+
+  #### _**Para obtener las credenciales de acceso comunicate con el administrador de la API.**_
+
+  #### **Nota:**
+
+  - El token expira en 1 hora, despues de ese tiempo hay que renovar el token de acceso.

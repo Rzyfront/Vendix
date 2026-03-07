@@ -158,7 +158,7 @@ import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
                 </div>
               } @else {
                 <div class="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold shadow-sm backdrop-blur-sm bg-blue-100/90 text-blue-700">
-                  Bajo pedido
+                  Disponible
                 </div>
               }
             </div>

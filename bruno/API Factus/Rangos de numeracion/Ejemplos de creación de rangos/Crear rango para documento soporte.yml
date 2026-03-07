@@ -1,0 +1,29 @@
+info:
+  name: Crear rango para documento soporte
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: "{{url_api}}/v1/numbering-ranges"
+  headers:
+    - name: Accept
+      value: application/json
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+          "document": "24", // 24 para crear un rango de documento soporte
+          "prefix": "SETP", // Prefijo alfanumérico del rango de numeración (máx. 4 caracteres)
+          "resolution_number": "18760000009", // número de resolución
+          "current": 1 // número del consecutivo (es el número de la siguiente documento soporte)
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

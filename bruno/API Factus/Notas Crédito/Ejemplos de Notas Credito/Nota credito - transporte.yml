@@ -1,0 +1,74 @@
+info:
+  name: Nota credito - transporte
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{url_api}}/v1/credit-notes/validate"
+  headers:
+    - name: Accept
+      value: application/json
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+          "numbering_range_id": 5,
+          "correction_concept_code": 1,
+          "customization_id": 20,
+          "reference_code": "REF2025060",
+          "observation": "observacion general de la nota credito",
+          "payment_method_code": "10",
+          "bill_id": "483",
+          "customer": {
+              "identification": "123456789",
+              "names": "Alan Turing",
+              "address": "calle 1 # 2-68",
+              "email": "alanturing@enigmasas.com",
+              "phone": "1234567890",
+              "legal_organization_id": "2",
+              "tribute_id": "21",
+              "identification_document_id": "3",
+              "municipality_id": "980"
+          },
+          "items": [
+              {
+                  "note": "Nota del item de la nota credito",
+                  "code_reference": "182340008",
+                  "name": "Pantalones",
+                  "quantity": 10,
+                  "discount_rate": 0,
+                  "price": 250000,
+                  "tax_rate": "19.00",
+                  "unit_measure_id": 414,
+                  "standard_code_id": 1,
+                  "is_excluded": 0,
+                  "tribute_id": 1,
+                  "additional_properties": [
+                      {
+                          "code": "01",
+                          "value": "13456"
+                      },
+                      {
+                          "code": "02",
+                          "value": "REM0001"
+                      },
+                      {
+                          "code": "03",
+                          "value": 250000,
+                          "quantity": 10,
+                          "unit_measure_id": 414
+                      }
+                  ]
+              }
+          ]
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

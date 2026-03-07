@@ -77,6 +77,8 @@ export class OrdersService {
                 total_price: item.total_price,
                 tax_rate: item.tax_rate,
                 tax_amount_item: item.tax_amount_item,
+                weight: item.weight,
+                weight_unit: item.weight_unit,
                 cost_price: await resolveCostPrice(this.prisma, item.product_id, item.product_variant_id),
                 updated_at: new Date(),
               }))),
@@ -338,6 +340,8 @@ export class OrdersService {
           total_price: item.total_price,
           tax_rate: item.tax_rate,
           tax_amount_item: item.tax_amount_item,
+          weight: item.weight,
+          weight_unit: item.weight_unit,
           updated_at: new Date(),
         })),
       });

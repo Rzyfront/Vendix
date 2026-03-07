@@ -1,0 +1,56 @@
+info:
+  name: Actualizar logo de la empresa
+  type: http
+  seq: 3
+
+http:
+  method: POST
+  url: "{{url_api}}/v1/company/logo"
+  body:
+    type: multipart-form
+    data:
+      - name: image
+        type: file
+        value:
+          - zmGfATXlA/tu logo.png
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+examples:
+  - name: 200 - Actualizar logo de la empresa
+    request:
+      url: "{{url_api}}/v1/company/logo"
+      method: POST
+      body:
+        type: multipart-form
+        data:
+          - name: image
+            type: file
+            value:
+              - zmGfATXlA/tu logo.png
+    response:
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "OK",
+              "message": "Solicitud exitosa",
+              "data": {
+                  "url_logo": "images/logos/Z9YTux0jqEfj0JJtwK8E2LLn9FVUiGDwcJNKFQp9.png"
+              }
+          }
+
+docs: |-
+  Actualiza el logo de la empresa.
+
+  | **ID** | **Valor** |
+  | --- | --- |
+  | `image` | Archivo de tipo png, jpg o jpeg por el cual desee actualizar el logo. |

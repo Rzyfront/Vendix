@@ -1,0 +1,53 @@
+info:
+  name: Eliminar rango
+  type: http
+  seq: 4
+
+http:
+  method: DELETE
+  url: "{{url_api}}/v1/numbering-ranges/:numbering_range_id"
+  headers:
+    - name: Accept
+      value: application/json
+  params:
+    - name: numbering_range_id
+      value: ""
+      type: path
+      description: ID del rango de numeración
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+examples:
+  - name: Eliminar rango
+    request:
+      url: "{{url_api}}/v1/numbering-ranges/:numbering_range_id"
+      method: DELETE
+      headers:
+        - name: Accept
+          value: application/json
+      params:
+        - name: numbering_range_id
+          value: "50"
+          type: path
+          description: ID del rango de numeracion
+    response:
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "OK",
+              "message": "Rango de numeración eliminado con éxito"
+          }
+
+docs: |-
+  **Descripción:** Elimina el rango de numeración por su ID.
+
+  **Nota:** Si el rango de numeracion no se ha usado en algun documento este se eliminara permanentemente, si el rango se ha usado en algun documento solo se le agregara un estado de eliminado. Para ver los documentos con un estado de eliminado consulte el endpoint [Rangos](https://www.postman.com/martian-spaceship-418933/api-factus/request/7xrlff1/rangos?action=share&source=copy-link&creator=22150862&ctx=documentation)

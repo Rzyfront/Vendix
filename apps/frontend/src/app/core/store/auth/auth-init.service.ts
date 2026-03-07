@@ -72,6 +72,7 @@ export class AuthInitService {
         AuthActions.restoreAuthState({
           user: parsed.user,
           user_settings: parsed.user_settings,
+          store_settings: parsed.store_settings,
           tokens: parsed.tokens,
           permissions: parsed.permissions || [],
           roles: parsed.roles || [],

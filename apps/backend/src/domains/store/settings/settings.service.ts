@@ -93,6 +93,7 @@ export class SettingsService {
     }
 
     // Merge existing settings with store data
+    // Use branding as the single source of truth for colors (same as onboarding)
     return {
       ...settings,
       general: {
@@ -103,11 +104,12 @@ export class SettingsService {
         timezone: store?.timezone || settings.general?.timezone,
       },
       app: {
+        // Use branding as the single source of truth for colors
         name: branding.name || store?.name || 'Vendix',
         primary_color: primaryColor,
         secondary_color: secondaryColor,
         accent_color: accentColor,
-        theme: 'default',
+        theme: settings.app?.theme || 'default',
         logo_url: signedBrandingLogoUrl || signedStoreLogoUrl,
         favicon_url: signedFaviconUrl,
       }
@@ -125,7 +127,7 @@ export class SettingsService {
 
     // Read raw DB settings (without signed URLs) to avoid leaking temporary URLs into stored JSON
     const storeSettings = await this.prisma.store_settings.findUnique({ where: { store_id } });
-    const currentSettings = (storeSettings?.settings || getDefaultStoreSettings()) as StoreSettings;
+    let currentSettings = (storeSettings?.settings || getDefaultStoreSettings()) as StoreSettings;
 
     // Guardar valores antiguos para auditoría
     const oldValues = { ...currentSettings };
@@ -175,7 +177,10 @@ export class SettingsService {
 
       // Update branding in store_settings.settings.branding (source of truth)
       await this.updateStoreBranding(store_id, dto.app);
-      delete (dto as any).app; // Remove from dto to not save again in store_settings
+
+      // Delete app from dto - branding is the single source of truth
+      // App will be built from branding in getSettings()
+      delete (dto as any).app;
     }
 
     // Merge solo las secciones enviadas
@@ -248,12 +253,10 @@ export class SettingsService {
     if (updatedSettings.general?.logo_url) {
       updatedSettings.general.logo_url = extractS3KeyFromUrl(updatedSettings.general.logo_url) ?? undefined;
     }
-    if (updatedSettings.app?.logo_url) {
-      updatedSettings.app.logo_url = extractS3KeyFromUrl(updatedSettings.app.logo_url) ?? undefined;
-    }
-    if (updatedSettings.app?.favicon_url) {
-      updatedSettings.app.favicon_url = extractS3KeyFromUrl(updatedSettings.app.favicon_url) ?? undefined;
-    }
+
+    // Remove app from settings - branding is the single source of truth
+    // App will be built from branding in getSettings()
+    delete (updatedSettings as any).app;
 
     const result = await this.prisma.store_settings.upsert({
       where: { store_id },

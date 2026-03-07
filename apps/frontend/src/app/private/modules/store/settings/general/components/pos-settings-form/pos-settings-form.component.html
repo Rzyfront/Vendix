@@ -16,6 +16,18 @@
       </div>
     </div>
 
+    <!-- Scale / Weight Products -->
+    <div>
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Ventas por Peso</h4>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <app-setting-toggle [formControl]="scaleEnabledControl" label="Habilitar Ventas por Peso"
+          description="Productos weighing (frutas, carnes, etc.)" (changed)="onFieldChange()"></app-setting-toggle>
+        <app-setting-toggle [formControl]="allowManualWeightEntryControl" label="Entrada Manual de Peso"
+          description="Ingresar peso manualmente sin báscula" [disabled]="!scaleEnabledControl.value"
+          (changed)="onFieldChange()"></app-setting-toggle>
+      </div>
+    </div>
+
     <!-- Business Hours -->
     <div>
       <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Horarios de Atención</h4>

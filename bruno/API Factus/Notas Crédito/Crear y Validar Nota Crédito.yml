@@ -1,0 +1,485 @@
+info:
+  name: Crear y Validar Nota Crédito
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: "{{url_api}}/v1/credit-notes/validate"
+  headers:
+    - name: Accept
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+          "numbering_range_id": 5,
+          "correction_concept_code": 2,
+          "customization_id": 20,
+          "bill_id": 514,
+          "reference_code": "5",
+          "send_email": true,
+          "observation": "",
+          "payment_method_code": "10",
+          "billing_period": {
+              "start_date": "2025-04-28",
+              "start_time": "00:00:00",
+              "end_date": "2025-04-29",
+              "end_time": "23:59:59"
+          },
+          "establishment": {
+              "name": "Factus pro",
+              "address": "cra 01 # 223 - 22",
+              "phone_number": "123456789",
+              "email": "fatuspro@factus.co",
+              "municipality_id": "980"
+          },
+           "customer": {
+              "identification": "123456789",
+              "dv": "3",
+              "company": "",
+              "trade_name": "",
+              "names": "Alan Turing",
+              "address": "calle 1 # 2-68",
+              "email": "alanturing@enigmasas.com",
+              "phone": "1234567890",
+              "legal_organization_id": "2",
+              "tribute_id": "21",
+              "identification_document_id": "3",
+              "municipality_id": "980"
+          },
+          "items": [
+              {
+                  "note": "",
+                  "code_reference": "123456",
+                  "name": "Aspirina",
+                  "quantity": 1,
+                  "discount_rate": 0,
+                  "price": 80000,
+                  "tax_rate": "19.00",
+                  "unit_measure_id": 70,
+                  "standard_code_id": 1,
+                  "is_excluded": 0,
+                  "tribute_id": 1,
+                  "withholding_taxes": []
+              }
+          ]
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+examples:
+  - name: 201 - Crear y Validar Nota Credito
+    request:
+      url: "{{url_api}}/v1/credit-notes/validate"
+      method: POST
+      headers:
+        - name: Accept
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "numbering_range_id": 5,
+              "correction_concept_code": 2,
+              "customization_id": 20,
+              "bill_id": 514,
+              "reference_code": "5",
+              "observation": "",
+              "payment_method_code": "10",
+              "customer": {
+                  "identification": "123456789",
+                  "dv": "3",
+                  "company": "",
+                  "trade_name": "",
+                  "names": "Alan Turing",
+                  "address": "calle 1 # 2-68",
+                  "email": "alanturing@enigmasas.com",
+                  "phone": "1234567890",
+                  "legal_organization_id": "2",
+                  "tribute_id": "21",
+                  "identification_document_id": "3",
+                  "municipality_id": "980"
+              },
+              "items": [
+                  {
+                      "code_reference": "123456",
+                      "name": "Aspirina",
+                      "quantity": 1,
+                      "discount_rate": 0,
+                      "price": 80000,
+                      "tax_rate": "19.00",
+                      "unit_measure_id": 70,
+                      "standard_code_id": 1,
+                      "is_excluded": 0,
+                      "tribute_id": 1,
+                      "withholding_taxes": []
+                  }
+              ]
+          }
+    response:
+      statusText: "201"
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "Created",
+              "message": "Documento con el código de referencia 5 registrado y validado con éxito",
+              "data": {
+                  "company": {
+                      "url_logo": "http://api.test/storage/images/logos/uKWIKmmwxeELNzmrxyKoGgbCtimDV1zInzQqgNin.png",
+                      "nit": "900825759",
+                      "dv": "7",
+                      "company": "HALLTEC S.A.S.",
+                      "name": "HALLTEC",
+                      "registration_code": "3FJ3253427",
+                      "economic_activity": "6311",
+                      "phone": "3165584659",
+                      "email": "yocahe5@gmail.com",
+                      "direction": "cra 10 # 9 - 04",
+                      "municipality": "San Gil"
+                  },
+                  "establishment": {
+                      "name": "HALLTEC S.A.S.",
+                      "address": "cra 10 # 9 - 04",
+                      "phone_number": "3165584659",
+                      "email": "yocahe5@gmail.com",
+                      "municipality": {
+                          "id": 980,
+                          "code": "68679",
+                          "name": "San Gil",
+                          "department": {
+                              "id": 28,
+                              "code": "68",
+                              "name": "Santander"
+                          }
+                      }
+                  },
+                  "customer": {
+                      "identification": "123456789",
+                      "dv": null,
+                      "graphic_representation_name": "Alan Turing",
+                      "trade_name": "",
+                      "company": "",
+                      "names": "Alan Turing",
+                      "address": "calle 1 # 2-68",
+                      "email": "alanturing@enigmasas.com",
+                      "phone": "1234567890",
+                      "legal_organization": {
+                          "id": 2,
+                          "code": "2",
+                          "name": "Persona Natural"
+                      },
+                      "tribute": {
+                          "id": 21,
+                          "code": "ZZ",
+                          "name": "No aplica"
+                      },
+                      "municipality": {
+                          "id": 980,
+                          "code": "68679",
+                          "name": "San Gil"
+                      }
+                  },
+                  "credit_note": {
+                      "id": 132,
+                      "number": "NC76",
+                      "reference_code": "5",
+                      "status": 1,
+                      "send_email": 0,
+                      "qr": "https://catalogo-vpfe-hab.dian.gov.co/document/searchqr?documentkey=eee1fc09684c19aaa7cee1b97d3923e286b1ccf12bdd0d185b4ddcbbab87bcbe9d589a9daf9eee9f55132c782c1b8bc0",
+                      "cude": "eee1fc09684c19aaa7cee1b97d3923e286b1ccf12bdd0d185b4ddcbbab87bcbe9d589a9daf9eee9f55132c782c1b8bc0",
+                      "validated": "20-09-2024 09:13:43 AM",
+                      "discount_rate": "0.00",
+                      "discount": "0.00",
+                      "gross_value": "67226.89",
+                      "taxable_amount": "67226.89",
+                      "tax_amount": "12773.11",
+                      "total": "80000.00",
+                      "observation": null,
+                      "errors": [
+                          "Regla: CBF02, Notificación: No se informo el numero de la factura referenciada",
+                          "Regla: CAK55, Notificación: Correo electrónico no informado"
+                      ],
+                      "created_at": "20-09-2024 09:13:42 AM",
+                      "qr_image": "data:image/png;base64, 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",
+                      "bill_id": 514,
+                      "cufe": "025972ce686eb5fc89a78ab8e9de34c3dea87d23982694ff25843b7f3046b0ac42815f9bb7a1f7469062ef0c11f2eac0",
+                      "number_bill": "SETP990000302",
+                      "payment_method": {
+                          "name": "Efectivo",
+                          "code": "10"
+                      },
+                      "customization_id": {
+                          "code": "20",
+                          "name": "Nota Crédito que referencia una factura electrónica."
+                      },
+                      "correction_concept": {
+                          "code": "2",
+                          "name": "Anulación de factura electrónica"
+                      }
+                  },
+                  "items": [
+                      {
+                          "note": null,
+                          "code_reference": "123456",
+                          "name": "Aspirina",
+                          "quantity": 1,
+                          "discount_rate": "0.00",
+                          "discount": "0.00",
+                          "gross_value": "67226.89",
+                          "tax_rate": "19.00",
+                          "taxable_amount": "67226.89",
+                          "tax_amount": "12773.11",
+                          "price": "80000.00",
+                          "is_excluded": 0,
+                          "unit_measure": {
+                              "id": 70,
+                              "code": "94",
+                              "name": "unidad"
+                          },
+                          "standard_code": {
+                              "id": 1,
+                              "code": "999",
+                              "name": "Estándar de adopción del contribuyente"
+                          },
+                          "tribute": {
+                              "id": 1,
+                              "code": "01",
+                              "name": "IVA"
+                          },
+                          "total": 80000,
+                          "withholding_taxes": []
+                      }
+                  ],
+                  "withholding_taxes": []
+              }
+          }
+  - name: 409 - Crear y Validar Nota Credito
+    request:
+      url: "{{url_api}}/v1/credit-notes/validate"
+      method: POST
+      headers:
+        - name: Accept
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "numbering_range_id": 5,
+              "correction_concept_code": 2,
+              "customization_id": 20,
+              "bill_id": 514,
+              "reference_code": "5",
+              "observation": "",
+              "payment_method_code": "10",
+              "customer": {
+                  "identification": "123456789",
+                  "dv": "3",
+                  "company": "",
+                  "trade_name": "",
+                  "names": "Alan Turing",
+                  "address": "calle 1 # 2-68",
+                  "email": "alanturing@enigmasas.com",
+                  "phone": "1234567890",
+                  "legal_organization_id": "2",
+                  "tribute_id": "21",
+                  "identification_document_id": "3",
+                  "municipality_id": "980"
+              },
+              "items": [
+                  {
+                      "code_reference": "123456",
+                      "name": "Aspirina",
+                      "quantity": 1,
+                      "discount_rate": 0,
+                      "price": 80000,
+                      "tax_rate": "19.00",
+                      "unit_measure_id": 70,
+                      "standard_code_id": 1,
+                      "is_excluded": 0,
+                      "tribute_id": 1,
+                      "withholding_taxes": []
+                  }
+              ]
+          }
+    response:
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "Conflict",
+              "errors": [
+                  {
+                      "code": 409,
+                      "message": "Se encontró una nota crédito pendiente por enviar a la DIAN",
+                      "params": [],
+                      "detail": "Conflict",
+                      "api_version": "v1"
+                  }
+              ]
+          }
+  - name: 422 - Crear y Validar Nota Credito
+    request:
+      url: "{{url_api}}/v1/credit-notes/validate"
+      method: POST
+      headers:
+        - name: Accept
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "numbering_range_id": 5,
+              "correction_concept_code": 2,
+              "customization_id": 20,
+              "bill_id": 514,
+              "reference_code": "5",
+              "observation": "",
+              "payment_method_code": "10",
+              "customer": {
+                  "identification": "123456789",
+                  "dv": "3",
+                  "company": "",
+                  "trade_name": "",
+                  "names": "Alan Turing",
+                  "address": "calle 1 # 2-68",
+                  "email": "alanturing@enigmasas.com",
+                  "phone": "1234567890",
+                  "legal_organization_id": "2",
+                  "tribute_id": "21",
+                  "identification_document_id": "3",
+                  "municipality_id": "980"
+              },
+              "items": [
+                  {
+                      "code_reference": "123456",
+                      "name": "Aspirina",
+                      "quantity": 1,
+                      "discount_rate": 0,
+                      "price": 80000,
+                      "tax_rate": "19.00",
+                      "unit_measure_id": 70,
+                      "standard_code_id": 1,
+                      "is_excluded": 0,
+                      "tribute_id": 1,
+                      "withholding_taxes": []
+                  }
+              ]
+          }
+    response:
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "message": "El campo id rango de numeración es inválido. (and 4 more errors)",
+              "errors": {
+                  "numbering_range_id": [
+                      "El campo id rango de numeración es inválido."
+                  ],
+                  "customization_id": [
+                      "El campo Tipo de nota crédito es inválido."
+                  ],
+                  "bill_id": [
+                      "La factura seleccionada no existe."
+                  ],
+                  "payment_method_code": [
+                      "El campo payment method code es inválido."
+                  ],
+                  "items.0.code_reference": [
+                      "El campo items.0.code_reference es obligatorio."
+                  ]
+              }
+          }
+
+docs: |-
+  Permite crear una nota credito y validarla.
+
+  **Nota:** Es necesario el envio del (access_token) token de acceso en la creacion de la factura.  
+  para ver como generar el token. use el siguiente link. [Auth endpoint](https://www.postman.com/martian-spaceship-418933/api-factus/folder/1crsnhy/auth?action=share&source=copy-link&creator=22150862&ctx=documentation)
+
+  Recuerde que el token de acceso caduca cada hora.
+
+  Para una mirada más amplia de los datos enviados, revisar el body raw enviado en la peticion de **Crear y Validar Nota Credito**, si tiene dudas con algún campo revise siguientes tablas.
+
+  **Datos para envío en body hacia el endpoint de creación de la nota crédito.**
+
+  **Method:** POST  
+  **Content-Type:** application/json
+
+  # Descripción de campos
+
+  | **Campo** | **Descripción** |
+  | --- | --- |
+  | `numbering_range_id` | ID del rango de numeración. Para saber cual es el ID de cada rango de numeración consulte el siguiente endpoint: [Rangos de numeración ](https://developers.factus.com.co/rangos-de-numeracion/obtener-rangos/) Si tienes en la API solo un rango de numeración activo para la notas crédito, este campo puede ser opcional. Si no envías el rango de numeración la API tomara el único rango de numeración que este activo. Si hay más de un rango de numeración para la facturación, este campo es obligatorio. |
+  | `correction_concept_code` | Código de corrección. Código del concepto por el cual se general la nota crédito. Para saber los códigos aceptados revisar la tabla [códigos de corrección](https://developers.factus.com.co/tablas-de-referencia/tablas/#c%C3%B3digos-de-correcci%C3%B3n) |
+  | `customization_id` | Código del tipo de operación. Para saber los códigos aceptados revisar la tabla [códigos de tipos de operación](https://developers.factus.com.co/tablas-de-referencia/tablas/#c%C3%B3digos-de-tipos-de-operaci%C3%B3n-notas-cr%C3%A9dito) |
+  | `bill_id` | ID de la factura a la que se le generara la nota crédito. Este campo es opcional si el campo customization_id = 22 (Nota credito sin referencia a una factura electrónica). |
+  | `reference_code` | El código de referencia es un identificador único y obligatorio que se utiliza para distinguir de manera exclusiva cada registro. |
+  | `payment_method_code` | Código del medio de pago. |
+  | `send_email` | (Opcional) Booleano que indica si el sistema debe enviar el correo electrónico al cliente. Útil cuando el envío del correo se gestiona de forma externa o personalizada por el integrador. Por defecto, este campo tiene un valor de true, lo que implica que el correo electrónico será enviado al cliente. Si se establece en false, el correo no será enviado. |
+  | `observation` | (Opcional) Agrega una observación en caso de requerirlo. |
+  | `billing_period{}` | (opcional) Este es un objeto que contendra la información del periodo de facturación. Para utilizar en los servicios públicos, contratos de arrendamiento, matriculas en educación, etc. . Este campo es requerido si el campo customization_id = 22 (Nota credito sin referencia a una factura electrónica). |
+  | `billing_period.start_date` | Fecha de inicio del periodo de facturación en formato `YYYY-MM-DD`. |
+  | `billing_period.start_time` | (opcional) Hora de inicio del periodo de facturación en formato `HH:mm:ss`. |
+  | `billing_period.end_date` | Fecha de fin del periodo de facturación en formato `YYYY-MM-DD`. |
+  | `billing_period.start_time` | (opcional) Hora del fin del periodo de facturación en formato `HH:mm:ss`. |
+  | `establishment {}` | (Opcional) Objeto que contendrá la información sobre el establecimiento. Úsalo cuando manejes más de un establecimiento y necesites que los datos correspondientes se reflejen en la factura. |
+  | `establishment.name` | Nombre del establecimiento. |
+  | `establishment.address` | Dirección del establecimiento. |
+  | `establishment.phone_number` | Número telefónico del establecimiento. |
+  | `establishment.email` | Correo electrónico del establecimiento. |
+  | `establishment.municipality_id` | ID que corresponda al Municipio donde se encuentra el establecimiento. Para saber cual ID corresponde al municipio consulte el endpoint [Municipios](https://developers.factus.com.co/municipios/obtener-municipios/) |
+
+  ### **Clientes**
+
+  | **Campo** | **Descripción** |
+  | --- | --- |
+  | `customer{}` | (Opcional) Este es un objeto que contendra la información del cliente de la nota crédito. Si no se envian los datos del cliente, la API tomara los datos del cliente de la factura relacionada al campo bill_id. |
+  | `customer.identification_document_id` | ID que corresponda al tipo de identificacion. Para saber cual ID corresponde al tipo de identificación consulte la siguiente tabla [IDs tipos de documentos](https://developers.factus.com.co/tablas-de-referencia/tablas/#ids-de-tipos-de-documentos-de-identidad). |
+  | `customer.identification` | Número de identificación del cliente. |
+  | `customer.dv` | (opcional) Digíto de verificación del cliente. Requerido si el cliente se identifica con NIT. |
+  | customer.company | (opcional) Razon social. Obligatorio si el cliente es persona juridica. |
+  | customer.trade_name | (opcional) Nombre comercial |
+  | customer.names | (opcional) Nombre del cliente. Solo aplica para los clientes que son personas naturales. |
+  | `customer.address` | (opcional) Dirección del cliente. |
+  | `customer.email` | (opcional) Dirección del correo electrónico del cliente. |
+  | `customer.phone` | (opcional) Número de teléfono del cliente. |
+  | `customer.legal_organization_id` | ID que corresponsa al tipo de organizacion. Para saber cual id corresponde al tipo de organizacion consulte la siguiente tabla [IDs tipos de organizaciones](https://developers.factus.com.co/tablas-de-referencia/tablas/#ids-de-tipos-de-organizaciones). |
+  | `customer.tribute_id` | ID del tributo. Para saber cual id corresponde al tributo consulte la siguiente tabla [IDs tipos de tributos](https://developers.factus.com.co/tablas-de-referencia/tablas/#ids-de-tributos-clientes). |
+  | `customer.municipality_id` | (opcional) ID que corresponda al municipio donde vive el cliente. Para saber cual ID corresponde al municipio consulte el siguiente endpoint: [Municipios<br>](https://developers.factus.com.co/municipios/obtener-municipios/)**Nota:** Se debe enviar ID del municipio únicamente si el municipio es de Colombia, si es extranjero el campo es opcional. |
+
+  ### **Items**
+
+  El objeto items, corresponde a los productos de la nota credito, se debe enviar un objeto por cada producto.
+
+  | **ID** | **Value** |
+  | --- | --- |
+  | `note` | (opcional) Añade información adicional del producto o servicio. |
+  | `code_reference` | Código de referencia del producto o servicio. |
+  | `name` | Nombre del item. |
+  | `quantity` | Cantidad del producto. Debe ser un número entero. |
+  | `discount_rate` | Porcentaje del descuento. |
+  | `price` | Valor del item con impuestos incluidos. |
+  | `tax_rate` | Porcentaje del impuesto aplicado al item. |
+  | `unit_measure_id` | ID que corresponda a la unidad de medida de item. Para saber que ID corresponde a cada unidad de medida consulte el siguiente endpoint: [Unidades de medida](https://developers.factus.com.co/unidades-de-medida/obtener-unidades/) |
+  | `standard_code_id` | ID que corresponde al codigo de estandar de identificacion que se adopto para los productos o servicios. Para saber que IDs son aceptados consulte la tabla _**Códigos de estandar de identificación del productos**_ |
+  | `is_excluded` | 1 si el producto o servicio esta excluido del impuesto IVA y 0 cuando no esta excluido de IVA. |
+  | `tribute_id` | ID que corresponde al tributo aplicado al item. Para saber que IDs son aceptados consulte la en endpoint [Tributos de productos](https://developers.factus.com.co/tributos/tributos-de-productos/) |
+  | `withholding_taxes[]` | (opcional) Array de objetos (autorretenciones) Este campo sirve para informar las retenciones en la fuente que se aplican al producto o servicio.  <br>No son retenciones que otra persona o empresa te hace a ti, sino retenciones que tú mismo te aplicas como contribuyente.  <br>Por cada retención que te apliques a ti mismo, debes enviar un objeto. |
+  | `code` | Código de la retención aplicada al item.  <br>Para saber el código de la retención consulte el siguiente endpoint: [Tributos de productos](https://developers.factus.com.co/tributos/tributos-de-productos/) |
+  | `withhoding_tax_rate` | Porcentaje de la retención aplicada al item. |

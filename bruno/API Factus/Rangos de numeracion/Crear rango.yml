@@ -1,0 +1,110 @@
+info:
+  name: Crear rango
+  type: http
+  seq: 5
+
+http:
+  method: POST
+  url: "{{url_api}}/v1/numbering-ranges"
+  headers:
+    - name: Accept
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+          "document": "21", 
+          "prefix": "SETP",
+          "resolution_number": "18760000009", 
+          "current": 984000000
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+examples:
+  - name: 200 - Crear rango
+    request:
+      url: "{{url_api}}/v1/numbering-ranges"
+      method: POST
+      headers:
+        - name: Accept
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "document": 21,
+              "prefix": "FV",
+              "from": 1,
+              "to": 1000,
+              "current": 1,
+              "resolution_number": "d3kd93kd39jd92",
+              "start_date": "2024-10-01",
+              "end_date": "2024-04-01",
+              "technical_key": "dfs3dfs334d8d8s96s8d"
+          }
+    response:
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "Created",
+              "message": "Rango de numeración creado con éxito",
+              "data": {
+                  "id": 51,
+                  "document": "21",
+                  "document_name": "Factura de Venta",
+                  "prefix": "SETP",
+                  "from": 990000000,
+                  "to": 995000000,
+                  "current": 990000000,
+                  "resolution_number": "18760000009",
+                  "start_date": "01-10-2024",
+                  "end_date": "01-04-2025",
+                  "technical_key": "dfs3dfs334d8d8s96s8d",
+                  "is_expired": false,
+                  "is_active": true,
+                  "created_at": "2024-09-10T15:30:26Z",
+                  "updated_at": "2024-09-10T15:30:26Z"
+              }
+          }
+
+docs: |-
+  **Descripción:** Crea rangos de numeración para los documentos electrónicos.
+
+  | ID | Value |
+  | --- | --- |
+  | `document` | Código de documento, use uno de estos codigos seleccionar el documento:  <br>21=Factura de Venta  <br>22=Nota Crédito  <br>23=Nota Débito  <br>24=Documento Soporte  <br>25=Nota de Ajuste Documento Soporte  <br>26=Nómina  <br>27=Nota de Ajuste Nómina  <br>28=Nota de eliminación de nómina  <br>30=Factura de talonario o de papel |
+  | `prefix` | Prefijo del rango de numeración |
+  | `current` | Número actual del consecutivo.  <br>Este numero es el numero de del siguiente documento. |
+  | `resolution_number` | Número de resolución del rango.  <br>Solo es opcional si el campo `document` contiene el codigo 21 o 24. |
+
+  **RESPONSE**
+
+  #### **Response**
+
+  | Valor | Descripción |
+  | --- | --- |
+  | `id` | id del rango de numeracion |
+  | `document` | Código del documento |
+  | `document_name` | Nombre del documento |
+  | `prefix` | Prefijo del rango de numeración |
+  | `from` | Número de incio del rango de numeración |
+  | `to` | Número del final del rango de numeración |
+  | `current` | Siguiente número del rango de numeración |
+  | `resolution_number` | Numero de resolución |
+  | `start_date` | Fecha en la que se expidio el rango de numeración |
+  | `end_date` | Fecha de vencimiento del rango de numeración |
+  | `technical_key` | Clave tecnica |
+  | `is_expired` | El valor es 1 cuando el rango de numeracion esta vencido y 0 cuando esta vigente |
+  | `is_active` | El valor es 1 cuando el rango de numeración esta activo y 0 cuando no esta activo |
+  | `craated_at` | Fecha de creación |
+  | `updated_at` | Fecha de actualización |

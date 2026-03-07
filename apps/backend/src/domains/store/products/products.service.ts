@@ -616,6 +616,7 @@ export class ProductsService {
             cost_price: product.cost_price,
             stock_quantity: product.stock_quantity,
             state: product.state,
+            pricing_type: String(product.pricing_type),
             track_inventory: product.track_inventory,
             image_url: signed_image_url || null,
             brand: product.brands,
@@ -832,6 +833,7 @@ export class ProductsService {
       sku: product.sku,
       cost_price: product.cost_price,
       state: product.state,
+      pricing_type: String(product.pricing_type),
       track_inventory: product.track_inventory,
       image_url: await this.signProductImage(product),
       brand: product.brands,
@@ -884,6 +886,7 @@ export class ProductsService {
 
     return {
       ...product,
+      pricing_type: String(product.pricing_type),
       image_url: await this.signProductImage(product),
     };
   }
@@ -1414,6 +1417,7 @@ export class ProductsService {
 
         return {
           ...product,
+          pricing_type: String(product.pricing_type),
           image_url: await this.signProductImage(product, true),
           // Mantener compatibilidad con el campo existente pero basado en stock_levels
           stock_quantity: totalStockAvailable,

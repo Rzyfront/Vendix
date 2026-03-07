@@ -288,12 +288,18 @@ export class PosCartService {
   private processAddToCart(request: AddToCartRequest): CartState {
     const currentState = this.cartState$.value;
 
-    // Identity: product.id + variant_id (null-safe comparison)
-    const existingItemIndex = currentState.items.findIndex(
-      (item) =>
-        item.product.id === request.product.id &&
-        (item.variant_id || null) === (request.variant?.id || null),
-    );
+    // Check if this is a weight product
+    const isWeightProduct = !!request.weight && request.weight > 0;
+
+    // For weight products, we don't combine with existing items (different weights)
+    // Identity: product.id + variant_id + weight (for weight products)
+    const existingItemIndex = isWeightProduct
+      ? -1 // Don't combine weight items
+      : currentState.items.findIndex(
+          (item) =>
+            item.product.id === request.product.id &&
+            (item.variant_id || null) === (request.variant?.id || null),
+        );
 
     // Variant-aware pricing
     const basePrice = request.variant?.price_override ?? request.product.price;
@@ -322,14 +328,21 @@ export class PosCartService {
         ? this.calculateItemFinalPriceWithBase(request.product, basePrice)
         : (request.product.final_price || this.calculateItemFinalPrice(request.product));
 
+      // Calculate total price for weight products
+      const weight = request.weight || 1;
+      const quantity = isWeightProduct ? 1 : request.quantity;
+      const itemTotalPrice = isWeightProduct
+        ? finalUnitPrice * weight
+        : request.quantity * finalUnitPrice;
+
       const newItem: CartItem = {
         id: this.generateItemId(),
         product: request.product,
-        quantity: request.quantity,
+        quantity: quantity,
         unitPrice: basePrice,
-        taxAmount: this.calculateItemTaxWithBase(request.product, basePrice, request.quantity),
+        taxAmount: this.calculateItemTaxWithBase(request.product, basePrice, quantity),
         finalPrice: finalUnitPrice,
-        totalPrice: request.quantity * finalUnitPrice,
+        totalPrice: itemTotalPrice,
         addedAt: new Date(),
         notes: request.notes,
         variant_id: request.variant?.id,
@@ -338,6 +351,10 @@ export class PosCartService {
           ?.map(a => `${a.attribute_name}: ${a.attribute_value}`).join(', '),
         variant_display_name: request.variant?.attributes
           ?.map(a => a.attribute_value).join(' / '),
+        // Weight product fields
+        weight: isWeightProduct ? weight : undefined,
+        weight_unit: isWeightProduct ? (request.weight_unit || 'kg') : undefined,
+        is_weight_product: isWeightProduct,
       };
       updatedItems = [newItem, ...currentState.items];
     }

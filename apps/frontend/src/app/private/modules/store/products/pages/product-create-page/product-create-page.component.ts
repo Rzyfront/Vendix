@@ -126,6 +126,11 @@ export class ProductCreatePageComponent implements OnInit {
     { value: ProductState.ARCHIVED, label: 'Archivado' },
   ];
 
+  pricingTypeOptions: { value: string; label: string }[] = [
+    { value: 'unit', label: 'Venta por unidad' },
+    { value: 'weight', label: 'Venta por peso (kg)' },
+  ];
+
   // Variants State
   hasVariants = false;
   variantAttributes: VariantAttribute[] = [];
@@ -217,6 +222,7 @@ export class ProductCreatePageComponent implements OnInit {
         height: [0, [Validators.min(0)]]
       }),
       state: [ProductState.ACTIVE],
+      pricing_type: ['unit' as const],
     });
 
     this.setupPriceCalculations(form);
@@ -324,6 +330,7 @@ export class ProductCreatePageComponent implements OnInit {
       brand_id: product.brand?.id ?? product.brand_id,
       tax_category_ids: taxCategoryIds,
       state: product.state,
+      pricing_type: (product.pricing_type as any)?.value || product.pricing_type || 'unit',
       weight: product.weight || 0,
       dimensions: {
         length: product.dimensions?.length || 0,
@@ -910,7 +917,10 @@ export class ProductCreatePageComponent implements OnInit {
   }
 
   onCancel(): void {
-    this.router.navigate(['/admin/products']);
+    const returnPage = this.route.snapshot.queryParams['fromPage'] || 1;
+    this.router.navigate(['/admin/products'], {
+      queryParams: { page: returnPage }
+    });
   }
 
   onHeaderAction(actionId: string): void {
@@ -957,6 +967,7 @@ export class ProductCreatePageComponent implements OnInit {
       tax_category_ids: formValue.tax_category_ids || [],
       brand_id: formValue.brand_id ? Number(formValue.brand_id) : null,
       state: formValue.state || ProductState.ACTIVE,
+      pricing_type: typeof formValue.pricing_type === 'object' ? formValue.pricing_type.value : (formValue.pricing_type || 'unit'),
       images: images.length > 0 ? images : undefined,
       weight: formValue.weight > 0 ? Number(formValue.weight) : undefined,
       dimensions: formValue.dimensions && (
@@ -1006,7 +1017,10 @@ export class ProductCreatePageComponent implements OnInit {
             ? 'Producto actualizado correctamente'
             : 'Producto creado correctamente',
         );
-        this.router.navigate(['/admin/products']);
+        const returnPage = this.route.snapshot.queryParams['fromPage'] || 1;
+        this.router.navigate(['/admin/products'], {
+          queryParams: { page: returnPage }
+        });
       },
       error: (err: any) => {
         console.error('Error saving product:', err);

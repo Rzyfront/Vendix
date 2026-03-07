@@ -1,0 +1,11 @@
+info:
+  name: Tributos
+  type: folder
+  seq: 9
+
+request:
+  auth: inherit
+
+docs:
+  content: Busca en todos tributos de productos
+  type: text/markdown

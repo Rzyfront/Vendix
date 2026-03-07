@@ -16,6 +16,10 @@ export interface CartItem {
   variant_sku?: string;
   variant_attributes?: string;
   variant_display_name?: string;
+  // Weight product fields
+  weight?: number;
+  weight_unit?: 'kg' | 'g' | 'lb';
+  is_weight_product?: boolean;
 }
 
 export interface CartDiscount {
@@ -50,6 +54,9 @@ export interface AddToCartRequest {
   quantity: number;
   notes?: string;
   variant?: PosProductVariant;
+  // Weight product fields
+  weight?: number;
+  weight_unit?: 'kg' | 'g' | 'lb';
 }
 
 export interface UpdateCartItemRequest {

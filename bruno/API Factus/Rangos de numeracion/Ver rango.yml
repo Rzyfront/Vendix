@@ -1,0 +1,83 @@
+info:
+  name: Ver rango
+  type: http
+  seq: 3
+
+http:
+  method: GET
+  url: "{{url_api}}/v1/numbering-ranges/:numbering_range_id"
+  headers:
+    - name: Accept
+      value: application/json
+  params:
+    - name: numbering_range_id
+      value: ""
+      type: path
+      description: ID del rango de numeracion
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+examples:
+  - name: Ver rango
+    request:
+      url: "{{url_api}}/v1/numbering-ranges/:numbering_range_id"
+      method: GET
+      headers:
+        - name: Accept
+          value: application/json
+      params:
+        - name: numbering_range_id
+          value: "4"
+          type: path
+          description: ID del rango de numeracion
+    response:
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "OK",
+              "message": "Solicitud exitosa",
+              "data": {
+                  "id": 4,
+                  "document": "21",
+                  "document_name": "Factura de Venta",
+                  "prefix": "SETP",
+                  "from": 990000000,
+                  "to": 995000000,
+                  "current": 990000295,
+                  "resolution_number": "18760000001",
+                  "start_date": "19-01-2019",
+                  "end_date": "19-01-2030",
+                  "technical_key": "fc8eac422eba16e22ffd8c6f94b3f40a6e38162c",
+                  "is_expired": false,
+                  "is_active": 1,
+                  "created_at": "2023-06-01T08:00:38Z",
+                  "updated_at": "2024-09-10T10:31:50Z"
+              }
+          }
+
+docs: |-
+  #### **Response**
+
+  | Valor | Descripción |
+  | --- | --- |
+  | id | id del rango de numeracion |
+  | document | Nombre del documento |
+  | prefix | prefijo del rango de numeración |
+  | from | Número de incio del rango de numeración |
+  | to | Número del final del rango de numeración |
+  | current | Siguiente número del rango de numeración |
+  | resolution_number | Numero de resolución |
+  | start_date | Fecha en la que se expidio el rango de numeración |
+  | end_date | Fecha de vencimiento del rango de numeración |
+  | technical_key | Clave tecnica |
+  | is_expired | El valor es 1 cuando el rango de numeracion esta vencido y 0 cuando esta vigente |
+  | is_active | El valor es 1 cuando el rango de numeración esta activo y 0 cuando no esta activo |

@@ -11,6 +11,7 @@ export enum DatePreset {
   LAST_MONTH = 'lastMonth',
   THIS_YEAR = 'thisYear',
   LAST_YEAR = 'lastYear',
+  CUSTOM = 'custom',
 }
 
 export enum Granularity {

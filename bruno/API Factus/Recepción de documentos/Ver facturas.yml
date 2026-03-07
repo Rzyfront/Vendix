@@ -1,0 +1,288 @@
+info:
+  name: Ver facturas
+  type: http
+  seq: 2
+
+http:
+  method: GET
+  url: "{{url_api}}/v1/receptions/bills?filter[id]=&filter[number]=&filter[issue_date]&filter[cufe]&filter[company_nit]&filter[company_name]&filter[completed_events]="
+  headers:
+    - name: Accept
+      value: application/json
+  params:
+    - name: filter[id]
+      value: ""
+      type: query
+      description: ID de la factura
+    - name: filter[number]
+      value: ""
+      type: query
+      description: Número de la factura
+    - name: filter[issue_date]
+      value: ""
+      type: query
+      description: Fecha de emisión de la factura
+    - name: filter[cufe]
+      value: ""
+      type: query
+      description: CUFE de la factura
+    - name: filter[company_nit]
+      value: ""
+      type: query
+      description: NIT de la empresa o persona que te emitio la factura
+    - name: filter[company_name]
+      value: ""
+      type: query
+      description: Nombre de la persona o empresa que te emitio la factura
+    - name: filter[completed_events]
+      value: ""
+      type: query
+      description: Usa 1 para listar las facturas que no tienen eventos pendientes por emitir y 0 para mostrar las facturas que tienen eventos pendientes por emitir.
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+examples:
+  - name: 200 - Ver facturas
+    request:
+      url: "{{url_api}}/v1/receptions/bills?filter[id]=&filter[number]=&filter[issue_date]&filter[cufe]&filter[company_nit]&filter[company_name]&filter[completed_events]="
+      method: GET
+      headers:
+        - name: Accept
+          value: application/json
+      params:
+        - name: filter[id]
+          value: ""
+          type: query
+          description: ID de la factura
+        - name: filter[number]
+          value: ""
+          type: query
+          description: Número de la factura
+        - name: filter[issue_date]
+          value: ""
+          type: query
+          description: Fecha de emisión de la factura
+        - name: filter[cufe]
+          value: ""
+          type: query
+          description: CUFE de la factura
+        - name: filter[company_nit]
+          value: ""
+          type: query
+          description: NIT de la empresa o persona que te emitio la factura
+        - name: filter[company_name]
+          value: ""
+          type: query
+          description: Nombre de la persona o empresa que te emitio la factura
+        - name: filter[completed_events]
+          value: ""
+          type: query
+          description: Usa 1 para listar las facturas que no tienen eventos pendientes por emitir y 0 para mostrar las facturas que tienen eventos pendientes por emitir.
+    response:
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "OK",
+              "message": "Solicitud exitosa",
+              "data": {
+                  "data": [
+                      {
+                          "id": "9d893376-a0d0-47cd-b61d-118e0ff5356d",
+                          "number": "SETP990000438",
+                          "issue_date": "2024-11-20",
+                          "issue_time": "13:04:52",
+                          "cufe": "59a861949db5869a7de61bbd7147b072229289f508323535efad81352665191797f25b7880cfc24e527617606494d872",
+                          "company_nit": "900825759",
+                          "company_name": "HALLTEC",
+                          "payment_form": {
+                              "code": "2",
+                              "name": "Pago a crédito"
+                          },
+                          "claim_concept": [],
+                          "payment_due_date": "2024-11-30",
+                          "is_negotiable_instrument": 0,
+                          "has_claim": 0,
+                          "total": "80000.00",
+                          "created_at": "2024-11-20T18:06:34.000000Z"
+                      },
+                      {
+                          "id": "9d88e734-d27b-4b2d-8468-0a9ff6e672e5",
+                          "number": "SETP990000435",
+                          "issue_date": "2024-11-20",
+                          "issue_time": "09:30:38",
+                          "cufe": "b541f592d5b07469e6a4208f66a16612fab0bec38f2eb97193edc11ffab25ea6a7243e859fdb50a0c66b73b8a07e9758",
+                          "company_nit": "900825759",
+                          "company_name": "HALLTEC",
+                          "payment_form": {
+                              "code": "2",
+                              "name": "Pago a crédito"
+                          },
+                          "claim_concept": [],
+                          "payment_due_date": "2024-11-30",
+                          "is_negotiable_instrument": 1,
+                          "has_claim": 0,
+                          "total": "80000.00",
+                          "created_at": "2024-11-20T14:33:21.000000Z"
+                      },
+                      {
+                          "id": "9d8553dd-fc59-4f3c-8a94-9a099de0d62c",
+                          "number": "SETP990000434",
+                          "issue_date": "2024-11-18",
+                          "issue_time": "14:53:17",
+                          "cufe": "27c12f7b2dedf1005150ab2702d4a85aab29f816ec497f50746a01352491633a435eb55244e647a81fa39cebe366752c",
+                          "company_nit": "900825759",
+                          "company_name": "HALLTEC",
+                          "payment_form": {
+                              "code": "2",
+                              "name": "Pago a crédito"
+                          },
+                          "claim_concept": [],
+                          "payment_due_date": "2024-11-30",
+                          "is_negotiable_instrument": 1,
+                          "has_claim": 0,
+                          "total": "80000.00",
+                          "created_at": "2024-11-18T19:53:52.000000Z"
+                      },
+                      {
+                          "id": "9d8541db-aa87-4965-8397-c8c640d3707e",
+                          "number": "SETP990000433",
+                          "issue_date": "2024-11-18",
+                          "issue_time": "14:03:07",
+                          "cufe": "e5e4377dd7656b1be8a366595eeb65f154d1d7888648d80bf394e0e53a65a33a9aa9b3e86adc72884a409727f6b2b8e0",
+                          "company_nit": "900825759",
+                          "company_name": "HALLTEC",
+                          "payment_form": {
+                              "code": "2",
+                              "name": "Pago a crédito"
+                          },
+                          "claim_concept": {
+                              "code": "1",
+                              "name": "Documento con inconsistencias"
+                          },
+                          "payment_due_date": "2024-11-30",
+                          "is_negotiable_instrument": 0,
+                          "has_claim": 1,
+                          "total": "50000.00",
+                          "created_at": "2024-11-18T19:03:31.000000Z"
+                      },
+                      {
+                          "id": "9d853bbf-d86c-4996-8f4a-6da4c411f874",
+                          "number": "SETP990000431",
+                          "issue_date": "2024-11-18",
+                          "issue_time": "13:46:01",
+                          "cufe": "3f832608881779f99e426481dd7e7881e82ae8ae96af26086d1b12c596620be56d3eef83799523e2f435d54149333d46",
+                          "company_nit": "900825759",
+                          "company_name": "HALLTEC",
+                          "payment_form": {
+                              "code": "2",
+                              "name": "Pago a crédito"
+                          },
+                          "claim_concept": [],
+                          "payment_due_date": "2024-11-30",
+                          "is_negotiable_instrument": 1,
+                          "has_claim": 0,
+                          "total": "80000.00",
+                          "created_at": "2024-11-18T18:46:26.000000Z"
+                      },
+                      {
+                          "id": "9d84ec28-72c7-4fb6-a48e-b9612d09b493",
+                          "number": "SETP990000430",
+                          "issue_date": "2024-11-18",
+                          "issue_time": "10:03:20",
+                          "cufe": "ccab33da4692c28d92c153b6fe7afd74275a5c220d5d72220a0dfa60fcbf9ffa39163aa444386c67b4617d5751ee4f36",
+                          "company_nit": "900825759",
+                          "company_name": "HALLTEC",
+                          "payment_form": {
+                              "code": "2",
+                              "name": "Pago a crédito"
+                          },
+                          "claim_concept": {
+                              "code": "1",
+                              "name": "Documento con inconsistencias"
+                          },
+                          "payment_due_date": "2024-11-30",
+                          "is_negotiable_instrument": 0,
+                          "has_claim": 1,
+                          "total": "80000.00",
+                          "created_at": "2024-11-18T15:03:53.000000Z"
+                      },
+                      {
+                          "id": "9d84ddf6-2f07-45c0-a2cf-6cce47e79d96",
+                          "number": "SETP990000428",
+                          "issue_date": "2024-11-18",
+                          "issue_time": "08:49:49",
+                          "cufe": "75f55408f9441f5bf19b59451d27f38f1f3fda3bcce007b03b1321b348c348db1a42886aad3bd90377f274108c67b999",
+                          "company_nit": "900825759",
+                          "company_name": "HALLTEC",
+                          "payment_form": {
+                              "code": "2",
+                              "name": "Pago a crédito"
+                          },
+                          "claim_concept": [],
+                          "payment_due_date": "2024-11-30",
+                          "is_negotiable_instrument": 1,
+                          "has_claim": 0,
+                          "total": "80000.00",
+                          "created_at": "2024-11-18T14:24:11.000000Z"
+                      }
+                  ],
+                  "pagination": {
+                      "total": 7,
+                      "per_page": 10,
+                      "current_page": 1,
+                      "last_page": 1,
+                      "from": 1,
+                      "to": 7,
+                      "links": [
+                          {
+                              "url": null,
+                              "label": "&laquo; Anterior",
+                              "active": false
+                          },
+                          {
+                              "url": "http://api.test/v1/receptions/bills?page=1",
+                              "label": 1,
+                              "active": true,
+                              "page": 1
+                          },
+                          {
+                              "url": null,
+                              "label": "Siguiente &raquo;",
+                              "active": false
+                          }
+                      ]
+                  }
+              }
+          }
+
+docs: |-
+  Obtiene y filtra las facturas electrónicas.
+
+  | **ID** | **Descripción** |
+  | --- | --- |
+  | `ID` | ID del registro. |
+  | `number` | Número de la factura. |
+  | `issue_date` | Fecha en la que se emitió de la factura. |
+  | `Issute_time` | Hora en la que se emitió la factura. |
+  | `cufe` | CUFE de la factura. |
+  | `company_nit` | NIT de la persona o empresa (emisor/facturador). |
+  | `company_name` | Nombre o razíón social de la persona o empresa (emisor/facturador). |
+  | `payment_form[code]` | Código de la forma de pago. |
+  | `payment_form[name]` | Nombre de la forma de pago. |
+  | `claim_concept` | Array que contiene la informacion del motivo del reclamo, en el caso de que se haya generado el evento de raclamo en la factura. |
+  | claim_concept\[code\] | Código del mótivo del reclamo. |
+  | claim_concept\[name\] | Nombre del mótivo del reclamo. |
+  | `payment_due_date` | Fecha de vencimiento del la factura. |
+  | `is_negotiable_instrument` | Booleano que me indica si la factura se encutra como título valor o no. |
+  | `has_claim` | Booleano que me indica si se ha generado un evento de reclamo a la factura. |
+  | `total` | Total de la factura. |
+  | `created_at` | Fecha en la que se cargo el documento a la API de Factus. |

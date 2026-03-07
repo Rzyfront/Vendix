@@ -159,6 +159,23 @@ export class NotificationsSettingsDto {
   new_order_alerts_phone?: string;
 }
 
+export class ScaleSettingsDto {
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @ApiProperty({ example: true, required: false })
+  @IsOptional()
+  @IsBoolean()
+  allow_manual_weight_entry?: boolean;
+
+  @ApiProperty({ example: 'kg', required: false, enum: ['kg', 'g', 'lb'] })
+  @IsOptional()
+  @IsIn(['kg', 'g', 'lb'])
+  default_weight_unit?: 'kg' | 'g' | 'lb';
+}
+
 export class PosSettingsDto {
   @ApiProperty({ example: false, required: false })
   @IsOptional()
@@ -222,6 +239,12 @@ export class PosSettingsDto {
   @IsOptional()
   @IsBoolean()
   allow_refund_without_approval?: boolean;
+
+  @ApiProperty({ type: ScaleSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ScaleSettingsDto)
+  scale?: ScaleSettingsDto;
 }
 
 export class ReceiptsSettingsDto {

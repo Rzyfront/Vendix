@@ -1,7 +1,7 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Subscription } from 'rxjs';
-import { Router } from '@angular/router';
+import { Router, ActivatedRoute } from '@angular/router';
 
 // Services
 import { ProductsService } from './services/products.service';
@@ -168,11 +168,21 @@ export class ProductsComponent implements OnInit, OnDestroy {
     private dialogService: DialogService,
     private authFacade: AuthFacade,
     private router: Router,
+    private route: ActivatedRoute,
   ) { }
 
   ngOnInit(): void {
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
+
+    // Subscribe to queryParams for pagination persistence
+    const queryParamsSub = this.route.queryParams.subscribe((params) => {
+      const page = params['page'];
+      if (page) {
+        this.pagination.page = parseInt(page, 10) || 1;
+      }
+    });
+    this.subscriptions.push(queryParamsSub);
 
     // Subscribe to userStore$ observable to get the store ID
     const storeSub = this.authFacade.userStore$.subscribe((store: any) => {
@@ -285,7 +295,9 @@ export class ProductsComponent implements OnInit, OnDestroy {
   }
 
   navigateToEditPage(product: Product): void {
-    this.router.navigate(['/admin/products/edit', product.id]);
+    this.router.navigate(['/admin/products/edit', product.id], {
+      queryParams: { fromPage: this.pagination.page }
+    });
   }
 
   onModalClose(): void {

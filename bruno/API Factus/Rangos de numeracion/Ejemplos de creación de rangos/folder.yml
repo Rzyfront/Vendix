@@ -1,0 +1,11 @@
+info:
+  name: Ejemplos de creación de rangos
+  type: folder
+  seq: 1
+
+request:
+  auth: inherit
+
+docs:
+  content: Aquí encontrarás varios ejemplos de cómo crear rangos de numeración para los diferentes documentos electrónicos.
+  type: text/markdown

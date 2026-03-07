@@ -1,0 +1,33 @@
+info:
+  name: Municipios
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: "{{url_api}}/v1/municipalities?name="
+  headers:
+    - name: Accept
+      value: application/json
+  params:
+    - name: name
+      value: ""
+      type: query
+      description: nombre del municipio
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+docs: |-
+  #### **Response**
+
+  | Valor | Descripción |
+  | --- | --- |
+  | id | id del municipio |
+  | code | Código del municipio |
+  | name | Nombre del municipio |
+  | department | Nombre del departamento al que pertenece el municipio |

@@ -57,6 +57,17 @@
                         <h2 class="text-base font-bold text-gray-900">Precios y Rentabilidad</h2>
                     </div>
 
+                    <!-- Pricing Type Selector -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="md:col-span-2">
+                            <app-selector label="Tipo de Venta" [options]="pricingTypeOptions"
+                                formControlName="pricing_type"
+                                placeholder="Seleccionar tipo de venta"
+                                helpText="Define si el producto se vende por unidad o por peso (kg)">
+                            </app-selector>
+                        </div>
+                    </div>
+
                     <!-- First Row: Core pricing -->
                     <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
                         <!-- Cost Price -->
@@ -751,7 +762,7 @@
                               <div class="flex flex-col justify-end">
                                 <label class="block text-xs font-medium text-text-secondary mb-1">Stock</label>
                                 <div class="h-[34px] px-2 flex items-center bg-blue-50 border border-blue-200 rounded-lg text-xs font-medium text-blue-600">
-                                  Bajo pedido
+                                  Disponible
                                 </div>
                               </div>
                             }

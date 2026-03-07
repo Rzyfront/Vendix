@@ -26,6 +26,11 @@ export enum ProductState {
   ARCHIVED = 'archived',
 }
 
+export enum PricingType {
+  UNIT = 'unit',
+  WEIGHT = 'weight',
+}
+
 // DTO para especificar stock por ubicación
 export class StockByLocationDto {
   @IsInt()
@@ -275,6 +280,10 @@ export class CreateProductDto {
   state?: ProductState = ProductState.ACTIVE;
 
   @IsOptional()
+  @IsEnum(PricingType)
+  pricing_type?: PricingType = PricingType.UNIT;
+
+  @IsOptional()
   @IsArray()
   @IsInt({ each: true })
   category_ids?: number[];
@@ -402,6 +411,10 @@ export class UpdateProductDto {
   @IsOptional()
   @IsEnum(ProductState)
   state?: ProductState;
+
+  @IsOptional()
+  @IsEnum(PricingType)
+  pricing_type?: PricingType;
 
   @IsOptional()
   @IsArray()
@@ -750,6 +763,10 @@ export class UpdateProductWithVariantsDto {
   @IsOptional()
   @IsEnum(ProductState)
   state?: ProductState;
+
+  @IsOptional()
+  @IsEnum(PricingType)
+  pricing_type?: PricingType;
 
   @IsOptional()
   @IsArray()

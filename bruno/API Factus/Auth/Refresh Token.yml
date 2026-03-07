@@ -1,0 +1,91 @@
+info:
+  name: Refresh Token
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: "{{url_api}}/oauth/token"
+  headers:
+    - name: Accept
+      value: application/json
+  body:
+    type: multipart-form
+    data:
+      - name: grant_type
+        type: text
+        value: refresh_token
+      - name: client_id
+        type: text
+        value: "{{client_id}}"
+      - name: client_secret
+        type: text
+        value: "{{client_secret}}"
+      - name: refresh_token
+        type: text
+        value: def50200325e90a72ad378d704c108cefa75c5c4a513ca6992fdce87b805b5aff2210857f63e4c0863284f6cfe38dbaa8c9f6dc50b9cb6d0bf8bcca29d5df22a8a7aa0b8efbe44c00cbeb05796d9a1f17fc9850b748e5ec64c8157ea5026dac9943ef3bfebbf1c7c9b0f44d300d7dd20fc27dcbf1791970dc29dc2232afac3fab3d6a253a12e51bcd590c62d5b3ce41d7957ba469b168fc5b557795be11455e22e242cc2f821c923ae7d42b7620a2d37d24ea64a72740c5617e54bd97c20b5be47a3a8d2a06c3de634a5a03cea1640653389ba1e517c63fdcee6a829e09c416d2250d860da6b964a1eed521b142203b3bbf2c139bd16cca0cb343e63bc9e377920dc6ce328219413c9da329de5cd2283d2b423aaf971096e0b1565689fb39bb7d99a94955385bf7ee6ba66949543e18a7c7abb880f8fd7ad376bd1bb07a1cdbf5588071c7e55816a1d14bf84530e316ad2eefd3913c2118e57a19e624869401912357954a20d9694559151b7c1a687e106d405076703f3a0c3002ff0c12b81586c8d8bbd
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+examples:
+  - name: 200 - Actualizar token
+    request:
+      url: "{{url_api}}/oauth/token"
+      method: POST
+      headers:
+        - name: Accept
+          value: application/json
+      body:
+        type: multipart-form
+        data:
+          - name: grant_type
+            type: text
+            value: refresh_token
+          - name: client_id
+            type: text
+            value: "{{client_id}}"
+          - name: client_secret
+            type: text
+            value: "{{client_secret}}"
+          - name: refresh_token
+            type: text
+            value: def50200325e90a72ad378d704c108cefa75c5c4a513ca6992fdce87b805b5aff2210857f63e4c0863284f6cfe38dbaa8c9f6dc50b9cb6d0bf8bcca29d5df22a8a7aa0b8efbe44c00cbeb05796d9a1f17fc9850b748e5ec64c8157ea5026dac9943ef3bfebbf1c7c9b0f44d300d7dd20fc27dcbf1791970dc29dc2232afac3fab3d6a253a12e51bcd590c62d5b3ce41d7957ba469b168fc5b557795be11455e22e242cc2f821c923ae7d42b7620a2d37d24ea64a72740c5617e54bd97c20b5be47a3a8d2a06c3de634a5a03cea1640653389ba1e517c63fdcee6a829e09c416d2250d860da6b964a1eed521b142203b3bbf2c139bd16cca0cb343e63bc9e377920dc6ce328219413c9da329de5cd2283d2b423aaf971096e0b1565689fb39bb7d99a94955385bf7ee6ba66949543e18a7c7abb880f8fd7ad376bd1bb07a1cdbf5588071c7e55816a1d14bf84530e316ad2eefd3913c2118e57a19e624869401912357954a20d9694559151b7c1a687e106d405076703f3a0c3002ff0c12b81586c8d8bbd
+    response:
+      statusText: "200"
+      headers:
+        - name: Date
+          value: Wed, 03 Apr 2024 20:58:37 GMT
+        - name: Server
+          value: Apache/2.4.41 (Ubuntu)
+        - name: pragma
+          value: no-cache
+        - name: Cache-Control
+          value: no-store, private
+        - name: X-RateLimit-Limit
+          value: "60"
+        - name: X-RateLimit-Remaining
+          value: "59"
+        - name: Keep-Alive
+          value: timeout=5, max=100
+        - name: Connection
+          value: Keep-Alive
+        - name: Transfer-Encoding
+          value: chunked
+        - name: Content-Type
+          value: application/json; charset=UTF-8
+      body:
+        type: json
+        data: |-
+          {
+              "token_type": "Bearer",
+              "expires_in": 3600,
+              "access_token": "tu access token",
+              "refresh_token": "tu refresh token"
+          }
+
+docs: Actualizar el token de acceso.

@@ -195,7 +195,7 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
                 </div>
               } @else {
                 <div class="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold shadow-sm backdrop-blur-sm bg-blue-100/90 text-blue-700">
-                  Bajo pedido
+                  Disponible
                 </div>
               }
 
@@ -250,7 +250,7 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
                     </span>
                   } @else {
                     <span *ngIf="!product.has_variants" class="text-[10px] sm:text-xs leading-tight text-blue-600 font-medium">
-                      Bajo pedido
+                      Disponible
                     </span>
                   }
                 </div>
@@ -684,7 +684,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
     this.productSelected.emit(product);
   }
 
-  onAddToCart(product: any): void {
+  async onAddToCart(product: any): Promise<void> {
     if (product.price <= 0) {
       this.dialogService
         .confirm({
@@ -709,7 +709,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
       return;
     }
 
-    this.addToCartNormal(product);
+    await this.addToCartNormal(product);
   }
 
   onVariantSelected(variant: PosProductVariant): void {
@@ -747,7 +747,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
     this.selectedProductForVariant = null;
   }
 
-  private addToCartNormal(product: any): void {
+  private async addToCartNormal(product: any): Promise<void> {
     if (product.track_inventory !== false) {
       if (product.stock > 0 && product.stock <= 5) {
         this.toastService.warning(
@@ -761,6 +761,39 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
       }
     }
 
+    // Check if product is sold by weight
+    const isWeightProduct = product.pricing_type === 'weight';
+
+    // For weight products, require weight input
+    if (isWeightProduct) {
+      const weightStr = await this.dialogService.prompt(
+        {
+          title: 'Ingresar Peso',
+          message: `${product.name}\nPrecio: $${product.final_price}/kg`,
+          placeholder: 'Peso en kg',
+          defaultValue: '1.0',
+          confirmText: 'Agregar',
+          cancelText: 'Cancelar',
+        },
+        { size: 'sm' }
+      );
+
+      if (!weightStr) {
+        return; // User cancelled
+      }
+
+      const weight = parseFloat(weightStr.replace(',', '.'));
+
+      if (isNaN(weight) || weight <= 0) {
+        this.toastService.warning('El peso debe ser mayor a 0');
+        return;
+      }
+
+      this.addWeightProductToCart(product, weight);
+      return;
+    }
+
+    // Regular unit product
     this.addingToCart.add(product.id);
 
     this.cartService
@@ -773,6 +806,34 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
         next: () => {
           this.addingToCart.delete(product.id);
           this.toastService.success(`${product.name} agregado al carrito`);
+          this.productAddedToCart.emit({ product, quantity: 1 });
+        },
+        error: (error) => {
+          this.addingToCart.delete(product.id);
+          this.toastService.warning(error.message || 'Error al agregar producto al carrito');
+        },
+      });
+  }
+
+  private addWeightProductToCart(product: any, weight: number): void {
+    this.addingToCart.add(product.id);
+
+    const totalPrice = product.final_price * weight;
+
+    this.cartService
+      .addToCart({
+        product: product,
+        quantity: 1,
+        weight: weight,
+        weight_unit: 'kg',
+      })
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.addingToCart.delete(product.id);
+          this.toastService.success(
+            `${product.name} (${weight} kg) agregado al carrito - $${totalPrice.toFixed(2)}`
+          );
           this.productAddedToCart.emit({ product, quantity: 1 });
         },
         error: (error) => {
