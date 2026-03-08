@@ -1,7 +1,7 @@
 import { Injectable, ForbiddenException, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { BusinessHours } from '../interfaces/store-settings.interface';
+import { BusinessHours } from './interfaces/store-settings.interface';
 
 export interface ScheduleValidationResult {
   isWithinBusinessHours: boolean;
@@ -25,7 +25,7 @@ export class ScheduleValidationService {
    */
   async canBypassScheduleCheck(): Promise<boolean> {
     const context = RequestContextService.getContext();
-    const userId = context?.user?.id;
+    const userId = context?.user_id;
     const storeId = context?.store_id;
 
     if (!userId || !storeId) {

@@ -432,7 +432,7 @@ export class PosComponent implements OnInit, OnDestroy {
           }
           // Si está fuera de horario pero es admin, mostrar warning info
           else if (!status.isWithinBusinessHours && this.canBypassSchedule) {
-            this.showAdminScheduleWarning(status.message);
+            this.showAdminScheduleWarning(status.message ?? '');
           }
         }
       },
