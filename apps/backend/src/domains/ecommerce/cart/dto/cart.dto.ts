@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 
 export class AddToCartDto {
     @IsInt()
+    @Min(1)
     product_id: number;
 
     @IsOptional()
