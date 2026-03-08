@@ -14,6 +14,7 @@ import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { resolveCostPrice } from './utils/resolve-cost-price';
 import { SettingsService } from '../settings/settings.service';
+import { ScheduleValidationService } from '../settings/schedule-validation.service';
 
 @Injectable()
 export class OrdersService {
@@ -22,6 +23,7 @@ export class OrdersService {
     private s3Service: S3Service,
     private eventEmitter: EventEmitter2,
     private settingsService: SettingsService,
+    private scheduleValidationService: ScheduleValidationService,
   ) {}
 
   async create(createOrderDto: CreateOrderDto, creatingUser: any) {
@@ -32,6 +34,9 @@ export class OrdersService {
     if (!store_id) {
       throw new ForbiddenException('Store context required for this operation');
     }
+
+    // Validar horario de atención antes de crear la orden
+    await this.scheduleValidationService.validateOrThrow(store_id, true);
 
     const user = await this.prisma.users.findUnique({
       where: { id: createOrderDto.customer_id },

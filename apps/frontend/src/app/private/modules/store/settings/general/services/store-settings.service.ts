@@ -98,6 +98,29 @@ export class StoreSettingsService {
       );
   }
 
+  /**
+   * Obtiene el estado de validación del horario del POS
+   * Incluye información sobre si el usuario es admin
+   */
+  getScheduleStatus(): Observable<ApiResponse<{
+    isWithinBusinessHours: boolean;
+    currentDay: string;
+    currentTime: string;
+    openTime?: string;
+    closeTime?: string;
+    nextOpenTime?: string;
+    message?: string;
+    isAdmin: boolean;
+    canBypass: boolean;
+  }>> {
+    return this.http
+      .get<ApiResponse<any>>(`${this.api_base_url}/settings/schedule-status`)
+      .pipe(
+        map((response) => response || { success: true, data: null }),
+        catchError(this.handleError)
+      );
+  }
+
   private update_settings_api(
     settings: Partial<StoreSettings>,
   ): Observable<ApiResponse<StoreSettings>> {

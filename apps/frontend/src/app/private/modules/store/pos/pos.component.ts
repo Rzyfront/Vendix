@@ -44,6 +44,7 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
 import { PosMobileFooterComponent } from './components/pos-mobile-footer.component';
 import { PosCartModalComponent } from './components/pos-cart-modal.component';
 import { PosShippingModalComponent } from './components/pos-shipping-modal/pos-shipping-modal.component';
+import { StoreSettingsService } from '../settings/general/services/store-settings.service';
 
 @Component({
   selector: 'app-pos',
@@ -370,6 +371,11 @@ export class PosComponent implements OnInit, OnDestroy {
   storeSettingsSubscription: any;
   enableScheduleValidation = false;
   businessHours: Record<string, { open: string; close: string }> = {};
+  
+  // Admin bypass for schedule validation
+  isAdmin = false;
+  canBypassSchedule = false;
+  scheduleStatusChecked = false;
 
   private destroy$ = new Subject<void>();
 
@@ -385,6 +391,7 @@ export class PosComponent implements OnInit, OnDestroy {
     private route: ActivatedRoute,
     private posOrderService: PosOrderService,
     private ordersService: StoreOrdersService,
+    private settingsService: StoreSettingsService,
   ) {}
 
   @HostListener('window:resize')
@@ -401,6 +408,72 @@ export class PosComponent implements OnInit, OnDestroy {
     this.setupSubscriptions();
     this.loadStoreSettings();
     this.checkEditMode();
+    this.validateScheduleOnInit();
+  }
+
+  /**
+   * Valida el horario de atención al iniciar el componente
+   * Usa el endpoint del backend para obtener el estado con info de admin
+   */
+  private validateScheduleOnInit(): void {
+    this.settingsService.getScheduleStatus().pipe(
+      takeUntil(this.destroy$)
+    ).subscribe({
+      next: (response) => {
+        if (response?.success && response?.data) {
+          const status = response.data;
+          this.isAdmin = status.isAdmin || false;
+          this.canBypassSchedule = status.canBypass || false;
+          this.scheduleStatusChecked = true;
+
+          // Si está fuera de horario y no es admin, mostrar modal
+          if (!status.isWithinBusinessHours && !this.canBypassSchedule) {
+            this.showScheduleWarningModal(status.message, status.nextOpenTime);
+          }
+          // Si está fuera de horario pero es admin, mostrar warning info
+          else if (!status.isWithinBusinessHours && this.canBypassSchedule) {
+            this.showAdminScheduleWarning(status.message);
+          }
+        }
+      },
+      error: (err) => {
+        console.error('Error validating schedule:', err);
+        // En caso de error, permitir acceso pero usar validación local
+        this.scheduleStatusChecked = true;
+      }
+    });
+  }
+
+  /**
+   * Muestra warning para admins (info nada más)
+   */
+  private showAdminScheduleWarning(message: string): void {
+    this.toastService.info(
+      message || 'Fuera de horario de atención.Tienes acceso de administrador.',
+      'Horario de Atención',
+      8000
+    );
+  }
+
+  /**
+   * Muestra el modal de restricción fuera de horario
+   */
+  private showScheduleWarningModal(message?: string, nextOpen?: string): void {
+    const fullMessage = message 
+      ? `${message}${nextOpen ? `<br/><br/>Próxima apertura: <strong>${nextOpen}</strong>` : ''}`
+      : `El punto de venta está fuera del horario de atención configurado. No se podrán realizar ventas hasta dentro del horario establecido.`;
+
+    this.dialogService.confirm({
+      title: 'POS Fuera de Horario',
+      message: fullMessage,
+      confirmText: 'Ir a Configuración',
+      cancelText: 'Cerrar',
+      confirmVariant: 'primary',
+    }).then((confirmed) => {
+      if (confirmed) {
+        this.router.navigate(['/admin/settings/general']);
+      }
+    });
   }
 
   ngOnDestroy(): void {
@@ -862,9 +935,10 @@ export class PosComponent implements OnInit, OnDestroy {
         this.enableScheduleValidation = settings.pos.enable_schedule_validation || false;
         this.businessHours = settings.pos.business_hours || {};
 
-        // Check if outside business hours and show modal
-        if (this.enableScheduleValidation && !this.isWithinBusinessHours()) {
-          this.showScheduleWarningModal();
+        // Validation is now handled by validateScheduleOnInit using backend endpoint
+        // Keep local validation as fallback if endpoint fails
+        if (this.scheduleStatusChecked && this.enableScheduleValidation && !this.isWithinBusinessHours() && !this.canBypassSchedule) {
+          this.showScheduleWarningModal('Validación local: fuera de horario');
         }
       }
     });
@@ -898,22 +972,5 @@ export class PosComponent implements OnInit, OnDestroy {
     const closeTime = closeHour * 60 + closeMinute;
 
     return currentTime >= openTime && currentTime <= closeTime;
-  }
-
-  private showScheduleWarningModal(): void {
-    const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-    const today = dayNames[new Date().getDay()];
-
-    this.dialogService.confirm({
-      title: 'POS Fuera de Horario',
-      message: `El punto de venta está fuera del horario de atención configurado para hoy <strong>${today}</strong>. No se podrán realizar ventas hasta dentro del horario establecido.`,
-      confirmText: 'Ir a Configuración',
-      cancelText: 'Cerrar',
-      confirmVariant: 'primary',
-    }).then((confirmed) => {
-      if (confirmed) {
-        this.router.navigate(['/admin/settings/general']);
-      }
-    });
   }
 }
