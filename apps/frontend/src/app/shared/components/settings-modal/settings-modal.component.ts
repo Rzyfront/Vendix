@@ -410,19 +410,23 @@ const APP_MODULES = {
               
               <!-- SECTION A: Modules WITH Children (larger cards/areas) -->
               <div class="compact-modules-grid">
-                <div *ngFor="let module of getModulesWithChildren(currentAppType)" class="module-group is-parent">
-                  <app-setting-toggle
-                    [formControlName]="module.key"
-                    [label]="module.label"
-                    [description]="module.description"
-                    (changed)="onParentToggle($event, module)"
-                  ></app-setting-toggle>
-                  
+                <div *ngFor="let module of getModulesWithChildren(currentAppType)" class="module-group is-parent" [class.new-module]="isNewModule(module.key)">
+                  <div class="toggle-wrapper">
+                    <app-setting-toggle
+                      [formControlName]="module.key"
+                      [label]="module.label"
+                      [description]="module.description"
+                      [isNew]="isNewModule(module.key)"
+                      (changed)="onParentToggle($event, module)"
+                    ></app-setting-toggle>
+                  </div>
+
                   <div class="children-grid">
-                    <div *ngFor="let child of module.children" class="child-item">
+                    <div *ngFor="let child of module.children" class="child-item" [class.new-module]="isNewModule(child.key)">
                       <app-setting-toggle
                         [formControlName]="child.key"
                         [label]="child.label"
+                        [isNew]="isNewModule(child.key)"
                         [disabled]="!isParentModuleEnabled(module.key)"
                       ></app-setting-toggle>
                     </div>
@@ -434,11 +438,12 @@ const APP_MODULES = {
               <div class="standalone-container mt-2">
                 <h5 class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">Herramientas Directas</h5>
                 <div class="compact-modules-grid">
-                  <div *ngFor="let module of getStandaloneModules(currentAppType)" class="module-group">
+                  <div *ngFor="let module of getStandaloneModules(currentAppType)" class="module-group" [class.new-module]="isNewModule(module.key)">
                     <app-setting-toggle
                       [formControlName]="module.key"
                       [label]="module.label"
                       [description]="module.description"
+                      [isNew]="isNewModule(module.key)"
                     ></app-setting-toggle>
                   </div>
                 </div>
@@ -524,6 +529,8 @@ export class SettingsModalComponent implements OnInit {
   isSingleStore = false;
   isOwner = false;
   upgrading = false;
+  defaultPanelUi: Record<string, Record<string, boolean>> | null = null;
+  newModuleKeys = new Set<string>();
 
   constructor() {
     // Initialize panel_ui controls for ORG_ADMIN
@@ -693,6 +700,28 @@ export class SettingsModalComponent implements OnInit {
     return this.getParentModules(appType).filter(m => !m.isParent || !m.children || m.children.length === 0);
   }
 
+  /**
+   * Compute which module keys are new (exist in defaults but not in user config)
+   */
+  private computeNewModuleKeys(config: any): void {
+    this.newModuleKeys.clear();
+    if (!this.defaultPanelUi) return;
+
+    for (const appType of Object.keys(this.defaultPanelUi)) {
+      const userKeys = config.panel_ui?.[appType] || {};
+      const defaultKeys = this.defaultPanelUi[appType] || {};
+      for (const key of Object.keys(defaultKeys)) {
+        if (!userKeys.hasOwnProperty(key)) {
+          this.newModuleKeys.add(key);
+        }
+      }
+    }
+  }
+
+  isNewModule(key: string): boolean {
+    return this.newModuleKeys.has(key);
+  }
+
   loadSettings() {
     this.loading = true;
     this.authService
@@ -704,9 +733,12 @@ export class SettingsModalComponent implements OnInit {
           this.currentSettings = settings;
           this.currentAppType = settings.app_type || 'ORG_ADMIN';
 
-          console.log('🔍 Settings loaded:', settings);
-          console.log('🔍 Config:', settings.config);
-          console.log('🔍 Panel UI:', settings.config?.panel_ui);
+          // Extract and dispatch default_panel_ui for new module detection
+          if (settings.default_panel_ui) {
+            this.defaultPanelUi = settings.default_panel_ui;
+            this.authFacade.setDefaultPanelUi(settings.default_panel_ui);
+            this.computeNewModuleKeys(settings.config || {});
+          }
 
           this.initializeForm(settings.config || {});
         },
@@ -736,29 +768,34 @@ export class SettingsModalComponent implements OnInit {
     };
 
     // Update ORG_ADMIN modules
+    const orgDefaults = this.defaultPanelUi?.['ORG_ADMIN'] || {};
     APP_MODULES.ORG_ADMIN.forEach((module) => {
-      const currentValue =
-        config.panel_ui?.ORG_ADMIN?.[module.key] ??
-        config.panel_ui?.[module.key] ??
-        false;
+      const isNewKey = !config.panel_ui?.ORG_ADMIN?.hasOwnProperty(module.key) && !config.panel_ui?.hasOwnProperty(module.key);
+      const defaultValue = orgDefaults[module.key] ?? false;
+      const currentValue = isNewKey
+        ? defaultValue
+        : (config.panel_ui?.ORG_ADMIN?.[module.key] ?? config.panel_ui?.[module.key] ?? false);
       patchObj.panel_ui.ORG_ADMIN[module.key] = currentValue;
     });
 
     // Update STORE_ADMIN modules (including children)
+    const storeDefaults = this.defaultPanelUi?.['STORE_ADMIN'] || {};
     APP_MODULES.STORE_ADMIN.forEach((module: any) => {
-      const currentValue =
-        config.panel_ui?.STORE_ADMIN?.[module.key] ??
-        config.panel_ui?.[module.key] ??
-        false;
+      const isNewKey = !config.panel_ui?.STORE_ADMIN?.hasOwnProperty(module.key) && !config.panel_ui?.hasOwnProperty(module.key);
+      const defaultValue = storeDefaults[module.key] ?? false;
+      const currentValue = isNewKey
+        ? defaultValue
+        : (config.panel_ui?.STORE_ADMIN?.[module.key] ?? config.panel_ui?.[module.key] ?? false);
       patchObj.panel_ui.STORE_ADMIN[module.key] = currentValue;
 
       // Also handle children if they exist
       if (module.isParent && module.children) {
         module.children.forEach((child: any) => {
-          const childValue =
-            config.panel_ui?.STORE_ADMIN?.[child.key] ??
-            config.panel_ui?.[child.key] ??
-            false;
+          const isChildNew = !config.panel_ui?.STORE_ADMIN?.hasOwnProperty(child.key) && !config.panel_ui?.hasOwnProperty(child.key);
+          const childDefault = storeDefaults[child.key] ?? false;
+          const childValue = isChildNew
+            ? childDefault
+            : (config.panel_ui?.STORE_ADMIN?.[child.key] ?? config.panel_ui?.[child.key] ?? false);
           patchObj.panel_ui.STORE_ADMIN[child.key] = childValue;
         });
       }

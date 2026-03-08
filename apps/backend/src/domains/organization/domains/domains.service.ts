@@ -16,6 +16,7 @@ import {
   VerifyDomainDto,
   VerifyDomainResult,
 } from './dto/domain-settings.dto';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 interface DomainStats {
   total: number;
@@ -35,9 +36,9 @@ export class DomainsService implements OnModuleInit {
   constructor(
     private prisma: OrganizationPrismaService,
     private eventEmitter: EventEmitter2,
-  ) { }
+  ) {}
 
-  async onModuleInit() { }
+  async onModuleInit() {}
 
   // ==================== VALIDATION METHODS ====================
 
@@ -215,7 +216,7 @@ export class DomainsService implements OnModuleInit {
     });
 
     if (!domain) {
-      throw new NotFoundException(`Domain ${hostname} not found`);
+      throw new VendixHttpException(ErrorCodes.ORG_DOMAIN_001);
     }
 
     return {
@@ -283,7 +284,9 @@ export class DomainsService implements OnModuleInit {
     // Primary domains are also set to active
     const isVendixSubdomain = inferred_ownership === 'vendix_subdomain';
     const status =
-      isVendixSubdomain || is_primary ? ('active' as any) : ('pending_dns' as any);
+      isVendixSubdomain || is_primary
+        ? ('active' as any)
+        : ('pending_dns' as any);
 
     if (is_primary || status === 'active') {
       await this.ensureSingleActiveType(
@@ -297,7 +300,9 @@ export class DomainsService implements OnModuleInit {
     const verification_token = this.generateVerificationToken();
 
     // Vendix subdomains have SSL automatically issued (managed by Vendix)
-    const ssl_status = isVendixSubdomain ? ('issued' as any) : ('pending' as any);
+    const ssl_status = isVendixSubdomain
+      ? ('issued' as any)
+      : ('pending' as any);
 
     // Create domain setting
     const domainSetting = await this.prisma.domain_settings.create({
@@ -435,7 +440,7 @@ export class DomainsService implements OnModuleInit {
     });
 
     if (!domain_setting) {
-      throw new NotFoundException(`Domain ${hostname} not found`);
+      throw new VendixHttpException(ErrorCodes.ORG_DOMAIN_001);
     }
 
     return domain_setting;
@@ -450,7 +455,7 @@ export class DomainsService implements OnModuleInit {
     });
 
     if (!domain_setting) {
-      throw new NotFoundException(`Domain with ID ${id} not found`);
+      throw new VendixHttpException(ErrorCodes.ORG_DOMAIN_001);
     }
 
     return domain_setting;
@@ -485,7 +490,11 @@ export class DomainsService implements OnModuleInit {
 
     // Si se está actualizando la configuración, sincronizar con otros dominios del mismo tipo
     if (updateData.config) {
-      const { organization_id, store_id, domain_type: record_type } = existing_record;
+      const {
+        organization_id,
+        store_id,
+        domain_type: record_type,
+      } = existing_record;
 
       // Actualizar TODOS los dominios del mismo tipo para esta organización/tienda
       await this.prisma.domain_settings.updateMany({
@@ -501,7 +510,8 @@ export class DomainsService implements OnModuleInit {
       });
 
       this.logger.log(
-        `Configuration synchronized across all ${record_type} domains for ${store_id ? 'store ' + store_id : 'org ' + organization_id
+        `Configuration synchronized across all ${record_type} domains for ${
+          store_id ? 'store ' + store_id : 'org ' + organization_id
         }`,
       );
     }

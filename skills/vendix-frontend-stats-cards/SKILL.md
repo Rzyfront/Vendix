@@ -7,7 +7,7 @@ description: >
   Trigger: When implementing stats cards, dashboard metrics, or KPI displays in admin modules.
 license: Apache-2.0
 metadata:
-  author: gentleman-programming
+  author: rzyfront
   version: "2.0"
   scope: [root, frontend]
   auto_invoke: "Implementing stats cards or dashboard metrics with mobile scroll"
@@ -25,6 +25,7 @@ metadata:
 ### 1. Stats Container Structure
 
 The container uses `stats-container` class which enables:
+
 - **Desktop (>=640px)**: CSS Grid with 4 columns, gap 16px (24px in lg)
 - **Mobile (<640px)**: Flexbox with horizontal scroll, fixed 160px cards, gap 12px
 
@@ -63,7 +64,9 @@ In standard admin modules, stats cards should be sticky on mobile:
 
 ```html
 <!-- In parent component (e.g., products.component.html) -->
-<div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+<div
+  class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent"
+>
   <app-stats ...></app-stats>
   <app-stats ...></app-stats>
   <app-stats ...></app-stats>
@@ -73,15 +76,15 @@ In standard admin modules, stats cards should be sticky on mobile:
 
 **Sticky Properties Explained:**
 
-| Property | Purpose |
-|----------|---------|
-| `sticky top-0` | Sticks to viewport top on scroll |
-| `z-20` | Above search section (z-10) and content (z-0) |
-| `bg-background` | Solid background prevents transparency issues |
-| `!mb-0` | Override margin-bottom on mobile |
-| `md:static` | Normal flow on desktop |
-| `md:bg-transparent` | Transparent background on desktop |
-| `md:!mb-8` | Restore margin on desktop |
+| Property            | Purpose                                       |
+| ------------------- | --------------------------------------------- |
+| `sticky top-0`      | Sticks to viewport top on scroll              |
+| `z-20`              | Above search section (z-10) and content (z-0) |
+| `bg-background`     | Solid background prevents transparency issues |
+| `!mb-0`             | Override margin-bottom on mobile              |
+| `md:static`         | Normal flow on desktop                        |
+| `md:bg-transparent` | Transparent background on desktop             |
+| `md:!mb-8`          | Restore margin on desktop                     |
 
 ### 3. Integration with Search Section
 
@@ -101,38 +104,38 @@ In standard admin modules, stats cards should be sticky on mobile:
 
 **Z-Index Convention:**
 
-| Layer | Element | Z-Index |
-|-------|---------|---------|
-| Top | Stats Container | 20 |
-| Middle | Search Section | 10 |
-| Bottom | Content/Items | 0 |
+| Layer  | Element         | Z-Index |
+| ------ | --------------- | ------- |
+| Top    | Stats Container | 20      |
+| Middle | Search Section  | 10      |
+| Bottom | Content/Items   | 0       |
 
 **Important:** The `top-[99px]` value in the search section should approximately match the stats container height (~104px minus margin adjustments).
 
 ### 4. StatsComponent Props
 
-| Prop | Type | Default | Description |
-|------|------|---------|-------------|
-| `title` | `string` | required | Card title (e.g., "Órdenes") |
-| `value` | `string \| number` | `''` | Main value (formatted) |
-| `smallText` | `string` | optional | Secondary text (e.g., growth rate) |
-| `iconName` | `string` | `'info'` | Lucide icon name |
-| `iconBgColor` | `string` | `'bg-primary/10'` | Tailwind bg class |
-| `iconColor` | `string` | `'text-primary'` | Tailwind text class |
-| `clickable` | `boolean` | `true` | Enable hover effects |
+| Prop          | Type               | Default           | Description                        |
+| ------------- | ------------------ | ----------------- | ---------------------------------- |
+| `title`       | `string`           | required          | Card title (e.g., "Órdenes")       |
+| `value`       | `string \| number` | `''`              | Main value (formatted)             |
+| `smallText`   | `string`           | optional          | Secondary text (e.g., growth rate) |
+| `iconName`    | `string`           | `'info'`          | Lucide icon name                   |
+| `iconBgColor` | `string`           | `'bg-primary/10'` | Tailwind bg class                  |
+| `iconColor`   | `string`           | `'text-primary'`  | Tailwind text class                |
+| `clickable`   | `boolean`          | `true`            | Enable hover effects               |
 
 ### 5. Color Palette (Standard)
 
 Use these consistent color combinations:
 
-| Stat Type | iconBgColor | iconColor | Icon |
-|-----------|-------------|-----------|------|
-| Primary/Total | `bg-blue-100` | `text-blue-500` | `shopping-cart`, `users`, `box` |
-| Warning/Pending | `bg-amber-100` | `text-amber-500` | `clock`, `alert-circle` |
-| Success/Complete | `bg-emerald-100` | `text-emerald-500` | `check-circle`, `check` |
-| Revenue/Money | `bg-purple-100` | `text-purple-500` | `dollar-sign`, `credit-card` |
-| Danger/Critical | `bg-red-100` | `text-red-500` | `x-circle`, `alert-triangle` |
-| Info/Secondary | `bg-gray-100` | `text-gray-500` | `info`, `help-circle` |
+| Stat Type        | iconBgColor      | iconColor          | Icon                            |
+| ---------------- | ---------------- | ------------------ | ------------------------------- |
+| Primary/Total    | `bg-blue-100`    | `text-blue-500`    | `shopping-cart`, `users`, `box` |
+| Warning/Pending  | `bg-amber-100`   | `text-amber-500`   | `clock`, `alert-circle`         |
+| Success/Complete | `bg-emerald-100` | `text-emerald-500` | `check-circle`, `check`         |
+| Revenue/Money    | `bg-purple-100`  | `text-purple-500`  | `dollar-sign`, `credit-card`    |
+| Danger/Critical  | `bg-red-100`     | `text-red-500`     | `x-circle`, `alert-triangle`    |
+| Info/Secondary   | `bg-gray-100`    | `text-gray-500`    | `info`, `help-circle`           |
 
 ### 6. Mobile Layout Details
 
@@ -143,8 +146,8 @@ Each `<app-stats>` card has these mobile styles (in `stats.component.scss`):
   display: block;
 
   @media (max-width: 639px) {
-    width: 160px;      // Fixed width for scroll
-    flex-shrink: 0;    // Prevent shrinking
+    width: 160px; // Fixed width for scroll
+    flex-shrink: 0; // Prevent shrinking
   }
 }
 
@@ -195,9 +198,9 @@ Each `<app-stats>` card has these mobile styles (in `stats.component.scss`):
 
 ```typescript
 // order-stats.component.ts
-import { Component, Input } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { StatsComponent } from '@shared/components';
+import { Component, Input } from "@angular/core";
+import { CommonModule } from "@angular/common";
+import { StatsComponent } from "@shared/components";
 
 interface OrderStats {
   total_orders: number;
@@ -212,7 +215,7 @@ interface OrderStats {
 }
 
 @Component({
-  selector: 'app-order-stats',
+  selector: "app-order-stats",
   standalone: true,
   imports: [CommonModule, StatsComponent],
   template: `
@@ -264,20 +267,20 @@ export class OrderStatsComponent {
   };
 
   formatNumber(num: number): string {
-    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + "M";
+    if (num >= 1000) return (num / 1000).toFixed(1) + "K";
     return num.toString();
   }
 
   formatCurrency(value: number): string {
-    if (value >= 1000000) return '$' + (value / 1000000).toFixed(1) + 'M';
-    if (value >= 1000) return '$' + (value / 1000).toFixed(1) + 'K';
-    return '$' + value.toFixed(0);
+    if (value >= 1000000) return "$" + (value / 1000000).toFixed(1) + "M";
+    if (value >= 1000) return "$" + (value / 1000).toFixed(1) + "K";
+    return "$" + value.toFixed(0);
   }
 
   getGrowthText(rate?: number): string {
-    if (rate === undefined) return '';
-    const sign = rate >= 0 ? '+' : '';
+    if (rate === undefined) return "";
+    const sign = rate >= 0 ? "+" : "";
     return `${sign}${rate.toFixed(1)}% vs mes ant.`;
   }
 }
@@ -289,7 +292,7 @@ export class OrderStatsComponent {
 // orders.component.ts
 @Component({
   standalone: true,
-  imports: [OrderStatsComponent, /* ... */],
+  imports: [OrderStatsComponent /* ... */],
   template: `
     <div class="space-y-4">
       <!-- Stats Cards (scroll on mobile, grid on desktop) -->
@@ -303,7 +306,9 @@ export class OrderStatsComponent {
   `,
 })
 export class OrdersComponent {
-  orderStats = signal<OrderStats>({ /* ... */ });
+  orderStats = signal<OrderStats>({
+    /* ... */
+  });
 
   constructor(private ordersService: OrdersService) {
     this.loadStats();
@@ -385,12 +390,12 @@ getGrowthText(rate?: number): string {
 
 **NEVER use these classes for stats containers:**
 
-| ❌ Incorrect Class | ✅ Correct Class |
-|-------------------|-----------------|
-| `grid grid-cols-4 gap-2 md:gap-4 lg:gap-6` | `stats-container` |
+| ❌ Incorrect Class                                     | ✅ Correct Class  |
+| ------------------------------------------------------ | ----------------- |
+| `grid grid-cols-4 gap-2 md:gap-4 lg:gap-6`             | `stats-container` |
 | `grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4` | `stats-container` |
-| `grid grid-cols-2 md:grid-cols-4 gap-4` | `stats-container` |
-| `flex flex-wrap gap-4` | `stats-container` |
+| `grid grid-cols-2 md:grid-cols-4 gap-4`                | `stats-container` |
+| `flex flex-wrap gap-4`                                 | `stats-container` |
 
 ### Why These Are Wrong
 

@@ -5,7 +5,7 @@ description: >
   Trigger: When working with notifications, SSE connections, event listeners, or adding new notification types.
 license: Apache-2.0
 metadata:
-  author: gentleman-programming
+  author: rzyfront
   version: "1.0"
   scope: [root]
   auto_invoke: "Working with notifications, SSE, or adding new event-driven alerts"
@@ -172,13 +172,13 @@ enum notification_type_enum {
 }
 ```
 
-| Type | Event | Emitted From | Icon (Frontend) |
-|------|-------|-------------|-----------------|
-| `new_order` | `order.created` | `checkout.service.ts`, `payments.service.ts`, `orders.service.ts` | `shopping-cart` |
-| `order_status_change` | `order.status_changed` | `order-flow.service.ts` | `refresh-cw` |
-| `low_stock` | `stock.low` | `stock-level-manager.service.ts` (when `qty <= reorder_point`) | `alert-triangle` |
-| `new_customer` | `customer.created` | `customers.service.ts` | `user-plus` |
-| `payment_received` | `payment.received` | `payments.service.ts` | `credit-card` |
+| Type                  | Event                  | Emitted From                                                      | Icon (Frontend)  |
+| --------------------- | ---------------------- | ----------------------------------------------------------------- | ---------------- |
+| `new_order`           | `order.created`        | `checkout.service.ts`, `payments.service.ts`, `orders.service.ts` | `shopping-cart`  |
+| `order_status_change` | `order.status_changed` | `order-flow.service.ts`                                           | `refresh-cw`     |
+| `low_stock`           | `stock.low`            | `stock-level-manager.service.ts` (when `qty <= reorder_point`)    | `alert-triangle` |
+| `new_customer`        | `customer.created`     | `customers.service.ts`                                            | `user-plus`      |
+| `payment_received`    | `payment.received`     | `payments.service.ts`                                             | `credit-card`    |
 
 ---
 
@@ -225,15 +225,15 @@ apps/frontend/src/app/
 
 ## API Endpoints
 
-| Method | Endpoint | Description | Auth |
-|--------|----------|-------------|------|
-| `GET` | `/store/notifications` | List notifications (paginated, filterable) | JWT |
-| `GET` | `/store/notifications/unread-count` | Get unread count | JWT |
-| `PATCH` | `/store/notifications/:id/read` | Mark single as read | JWT |
-| `PATCH` | `/store/notifications/read-all` | Mark all as read | JWT |
-| `GET` | `/store/notifications/subscriptions` | Get user subscriptions (init defaults) | JWT |
-| `PATCH` | `/store/notifications/subscriptions` | Toggle subscription per type | JWT |
-| `GET (SSE)` | `/store/notifications/stream?token=JWT` | SSE real-time stream | JWT (query param) |
+| Method      | Endpoint                                | Description                                | Auth              |
+| ----------- | --------------------------------------- | ------------------------------------------ | ----------------- |
+| `GET`       | `/store/notifications`                  | List notifications (paginated, filterable) | JWT               |
+| `GET`       | `/store/notifications/unread-count`     | Get unread count                           | JWT               |
+| `PATCH`     | `/store/notifications/:id/read`         | Mark single as read                        | JWT               |
+| `PATCH`     | `/store/notifications/read-all`         | Mark all as read                           | JWT               |
+| `GET`       | `/store/notifications/subscriptions`    | Get user subscriptions (init defaults)     | JWT               |
+| `PATCH`     | `/store/notifications/subscriptions`    | Toggle subscription per type               | JWT               |
+| `GET (SSE)` | `/store/notifications/stream?token=JWT` | SSE real-time stream                       | JWT (query param) |
 
 ---
 
@@ -243,7 +243,7 @@ apps/frontend/src/app/
 
 ```typescript
 interface NotificationsState {
-  items: AppNotification[];  // Max 50 in memory
+  items: AppNotification[]; // Max 50 in memory
   unread_count: number;
   loading: boolean;
   error: string | null;
@@ -253,25 +253,25 @@ interface NotificationsState {
 
 ### Effects Lifecycle
 
-| Effect | Trigger | Action |
-|--------|---------|--------|
-| `init$` | `ROOT_EFFECTS_INIT` (page reload) | If authenticated → `loadNotifications` + `connectSse` |
-| `initAfterLogin$` | `loginSuccess`, `loginCustomerSuccess`, `restoreAuthState` | `loadNotifications` + `connectSse` |
-| `connectSse$` | `connectSse` | Opens `EventSource`, maps SSE events to NgRx actions |
-| `disconnectSse$` | `disconnectSse`, `logoutSuccess` | Closes `EventSource` |
-| `load$` | `loadNotifications` | HTTP GET → `loadNotificationsSuccess` |
-| `markRead$` | `markRead` | HTTP PATCH → `markReadSuccess` |
-| `markAllRead$` | `markAllRead` | HTTP PATCH → `markAllReadSuccess` |
+| Effect            | Trigger                                                    | Action                                                |
+| ----------------- | ---------------------------------------------------------- | ----------------------------------------------------- |
+| `init$`           | `ROOT_EFFECTS_INIT` (page reload)                          | If authenticated → `loadNotifications` + `connectSse` |
+| `initAfterLogin$` | `loginSuccess`, `loginCustomerSuccess`, `restoreAuthState` | `loadNotifications` + `connectSse`                    |
+| `connectSse$`     | `connectSse`                                               | Opens `EventSource`, maps SSE events to NgRx actions  |
+| `disconnectSse$`  | `disconnectSse`, `logoutSuccess`                           | Closes `EventSource`                                  |
+| `load$`           | `loadNotifications`                                        | HTTP GET → `loadNotificationsSuccess`                 |
+| `markRead$`       | `markRead`                                                 | HTTP PATCH → `markReadSuccess`                        |
+| `markAllRead$`    | `markAllRead`                                              | HTTP PATCH → `markAllReadSuccess`                     |
 
 ### Selectors
 
-| Selector | Returns |
-|----------|---------|
-| `selectNotifications` | `AppNotification[]` |
-| `selectUnreadCount` | `number` |
-| `selectNotificationsLoading` | `boolean` |
-| `selectSseConnected` | `boolean` |
-| `selectUnreadNotifications` | Filtered unread items |
+| Selector                     | Returns               |
+| ---------------------------- | --------------------- |
+| `selectNotifications`        | `AppNotification[]`   |
+| `selectUnreadCount`          | `number`              |
+| `selectNotificationsLoading` | `boolean`             |
+| `selectSseConnected`         | `boolean`             |
+| `selectUnreadNotifications`  | Filtered unread items |
 
 ### Facade (Recommended for Components)
 
@@ -370,12 +370,12 @@ async handleRefundIssued(event: RefundIssuedEvent) {
 ```typescript
 // dto/update-subscription.dto.ts
 const NOTIFICATION_TYPES = [
-  'new_order',
-  'order_status_change',
-  'low_stock',
-  'new_customer',
-  'payment_received',
-  'refund_issued',          // <-- ADD
+  "new_order",
+  "order_status_change",
+  "low_stock",
+  "new_customer",
+  "payment_received",
+  "refund_issued", // <-- ADD
 ] as const;
 ```
 
@@ -384,12 +384,12 @@ const NOTIFICATION_TYPES = [
 ```typescript
 // notifications.service.ts → initDefaultSubscriptions()
 const types = [
-  'new_order',
-  'order_status_change',
-  'low_stock',
-  'new_customer',
-  'payment_received',
-  'refund_issued',          // <-- ADD
+  "new_order",
+  "order_status_change",
+  "low_stock",
+  "new_customer",
+  "payment_received",
+  "refund_issued", // <-- ADD
 ];
 ```
 
@@ -507,24 +507,24 @@ location / {
 
 ### SSE vs WebSocket — Why Different Config
 
-| | SSE | WebSocket |
-|--|-----|-----------|
-| Protocol | Plain HTTP | Upgraded HTTP |
-| `Connection` header | `''` (empty — keep-alive) | `$connection_upgrade` (upgrade) |
-| `Upgrade` header | Not needed | Required |
-| `proxy_read_timeout` | Long (86400s) — no data may flow for minutes | Default (60s) — pings keep it alive |
-| `chunked_transfer_encoding` | `off` — prevents buffering artifacts | Default |
+|                             | SSE                                          | WebSocket                           |
+| --------------------------- | -------------------------------------------- | ----------------------------------- |
+| Protocol                    | Plain HTTP                                   | Upgraded HTTP                       |
+| `Connection` header         | `''` (empty — keep-alive)                    | `$connection_upgrade` (upgrade)     |
+| `Upgrade` header            | Not needed                                   | Required                            |
+| `proxy_read_timeout`        | Long (86400s) — no data may flow for minutes | Default (60s) — pings keep it alive |
+| `chunked_transfer_encoding` | `off` — prevents buffering artifacts         | Default                             |
 
 ### Why Each SSE Directive Matters
 
-| Directive | Why it's needed |
-|-----------|----------------|
-| `proxy_buffering off` | Without this, Nginx accumulates SSE events in a buffer and sends them in batches instead of streaming |
-| `proxy_cache off` | Cached SSE responses would deliver stale events |
-| `Connection ''` | Tells Nginx to use plain HTTP keep-alive. Using `$connection_upgrade` would attempt WebSocket upgrade which SSE does not use |
-| `chunked_transfer_encoding off` | Prevents Nginx from wrapping SSE in chunked encoding, which can cause `ERR_INCOMPLETE_CHUNKED_ENCODING` |
-| `proxy_read_timeout 86400s` | Default is 60s — Nginx sends 504 if no SSE event arrives within that window |
-| `proxy_send_timeout 86400s` | Matches read timeout for the send direction |
+| Directive                       | Why it's needed                                                                                                              |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `proxy_buffering off`           | Without this, Nginx accumulates SSE events in a buffer and sends them in batches instead of streaming                        |
+| `proxy_cache off`               | Cached SSE responses would deliver stale events                                                                              |
+| `Connection ''`                 | Tells Nginx to use plain HTTP keep-alive. Using `$connection_upgrade` would attempt WebSocket upgrade which SSE does not use |
+| `chunked_transfer_encoding off` | Prevents Nginx from wrapping SSE in chunked encoding, which can cause `ERR_INCOMPLETE_CHUNKED_ENCODING`                      |
+| `proxy_read_timeout 86400s`     | Default is 60s — Nginx sends 504 if no SSE event arrives within that window                                                  |
+| `proxy_send_timeout 86400s`     | Matches read timeout for the send direction                                                                                  |
 
 ### Common Errors
 
@@ -544,14 +544,14 @@ Cause: `proxy_buffering` is on (default) or `chunked_transfer_encoding` is not d
 
 ## Known Limitations & Gaps
 
-| Item | Status | Notes |
-|------|--------|-------|
-| `notification_subscriptions` enforcement | **Not implemented** | Preferences saved but ignored during delivery |
-| Email delivery | **Not implemented** | `email` boolean stored, no transport configured |
-| SMS delivery | **Not implemented** | Phone fields in store settings, no provider |
-| Per-user targeting | **Not implemented** | All store users receive all notifications |
-| Notification persistence limit | 50 in-memory (frontend) | Older items dropped from NgRx state, still in DB |
-| SSE reconnection | **Auto (EventSource)** | Native auto-reconnect; effect does not complete observable on error |
+| Item                                     | Status                  | Notes                                                               |
+| ---------------------------------------- | ----------------------- | ------------------------------------------------------------------- |
+| `notification_subscriptions` enforcement | **Not implemented**     | Preferences saved but ignored during delivery                       |
+| Email delivery                           | **Not implemented**     | `email` boolean stored, no transport configured                     |
+| SMS delivery                             | **Not implemented**     | Phone fields in store settings, no provider                         |
+| Per-user targeting                       | **Not implemented**     | All store users receive all notifications                           |
+| Notification persistence limit           | 50 in-memory (frontend) | Older items dropped from NgRx state, still in DB                    |
+| SSE reconnection                         | **Auto (EventSource)**  | Native auto-reconnect; effect does not complete observable on error |
 
 ---
 

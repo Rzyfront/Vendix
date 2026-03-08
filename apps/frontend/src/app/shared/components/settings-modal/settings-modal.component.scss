@@ -163,6 +163,16 @@
   border-left: 1px dashed var(--color-border);
 }
 
+// ==================== New Module Highlight ====================
+.new-module {
+  app-setting-toggle {
+    ::ng-deep > div {
+      border-color: #f97316 !important;
+      background: rgba(249, 115, 22, 0.05) !important;
+    }
+  }
+}
+
 // ==================== Upgrade Banner ====================
 .upgrade-banner {
   background: linear-gradient(to right, var(--color-primary-light), transparent);

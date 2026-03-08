@@ -28,6 +28,7 @@ import {
   ToastService,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  PaginationComponent,
 } from '../../../../shared/components/index';
 
 import {
@@ -52,6 +53,7 @@ import {
     ButtonComponent,
     StatsComponent,
     SelectorComponent,
+    PaginationComponent,
   ],
   templateUrl: './currencies.component.html',
   styleUrls: ['./currencies.component.css'],
@@ -73,6 +75,9 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
   showCreateModal = signal<boolean>(false);
   showEditModal = signal<boolean>(false);
   isSubmitting = signal<boolean>(false);
+
+  // Pagination
+  pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
 
   private destroy$ = new Subject<void>();
 
@@ -147,6 +152,7 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
     this.filterForm.valueChanges
       .pipe(takeUntil(this.destroy$))
       .subscribe(() => {
+        this.pagination.page = 1;
         this.loadCurrencies();
       });
   }
@@ -160,6 +166,8 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
     this.isLoading.set(true);
     const filters = this.filterForm.value;
     const query: CurrencyQueryDto = {
+      page: this.pagination.page,
+      limit: this.pagination.limit,
       search: filters.search || undefined,
       state: filters.state || undefined,
     };
@@ -170,6 +178,10 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (response) => {
           this.currencies.set(response.data || []);
+          if (response.meta) {
+            this.pagination.total = response.meta.total || 0;
+            this.pagination.totalPages = response.meta.total_pages || Math.ceil(this.pagination.total / this.pagination.limit);
+          }
         },
         error: (error) => {
           console.error('Error loading currencies:', error);
@@ -200,6 +212,11 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
 
   onSearchChange(searchTerm: string): void {
     this.filterForm.patchValue({ search: searchTerm });
+  }
+
+  onPageChange(page: number): void {
+    this.pagination.page = page;
+    this.loadCurrencies();
   }
 
   onSortChange(column: string, direction: 'asc' | 'desc' | null): void {

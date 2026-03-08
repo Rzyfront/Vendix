@@ -14,6 +14,7 @@ import {
 } from './dto';
 import { Prisma } from '@prisma/client';
 import slugify from 'slugify';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class OrganizationsService {
@@ -156,7 +157,7 @@ export class OrganizationsService {
     });
 
     if (!organization) {
-      throw new NotFoundException('Organization not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_ORG_001);
     }
 
     return organization;
@@ -173,7 +174,7 @@ export class OrganizationsService {
     });
 
     if (!organization) {
-      throw new NotFoundException('Organization not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_ORG_001);
     }
 
     return organization;
@@ -185,7 +186,7 @@ export class OrganizationsService {
     });
 
     if (!existingOrg) {
-      throw new NotFoundException('Organization not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_ORG_001);
     }
 
     let slug = existingOrg.slug;
@@ -253,7 +254,7 @@ export class OrganizationsService {
     });
 
     if (!existingOrg) {
-      throw new NotFoundException('Organization not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_ORG_001);
     }
 
     if (existingOrg._count.stores > 0 || existingOrg._count.users > 0) {

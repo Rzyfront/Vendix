@@ -2,8 +2,13 @@ import { Injectable, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { AnalyticsQueryDto, DatePreset, Granularity } from '../dto/analytics-query.dto';
+import {
+  AnalyticsQueryDto,
+  DatePreset,
+  Granularity,
+} from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class OverviewAnalyticsService {
@@ -14,7 +19,10 @@ export class OverviewAnalyticsService {
 
   async getOverviewSummary(query: AnalyticsQueryDto) {
     const { startDate, endDate } = this.parseDateRange(query);
-    const { previousStartDate, previousEndDate } = this.getPreviousPeriod(startDate, endDate);
+    const { previousStartDate, previousEndDate } = this.getPreviousPeriod(
+      startDate,
+      endDate,
+    );
 
     // Current period income (completed orders)
     const currentIncome = await this.prisma.orders.aggregate({
@@ -52,30 +60,35 @@ export class OverviewAnalyticsService {
       _sum: { amount: true },
     });
 
-    const totalIncome = Number(currentIncome._sum.grand_total || 0) - Number(currentIncome._sum.tax_amount || 0);
+    const totalIncome =
+      Number(currentIncome._sum.grand_total || 0) -
+      Number(currentIncome._sum.tax_amount || 0);
     const totalExpenses = Number(currentExpenses._sum.amount || 0);
     const netProfit = totalIncome - totalExpenses;
-    const breakevenRatio = totalIncome > 0 ? (totalExpenses / totalIncome) * 100 : 0;
+    const breakevenRatio =
+      totalIncome > 0 ? (totalExpenses / totalIncome) * 100 : 0;
 
-    const prevIncome = Number(previousIncome._sum.grand_total || 0) - Number(previousIncome._sum.tax_amount || 0);
+    const prevIncome =
+      Number(previousIncome._sum.grand_total || 0) -
+      Number(previousIncome._sum.tax_amount || 0);
     const prevExpensesVal = Number(previousExpenses._sum.amount || 0);
     const prevNetProfit = prevIncome - prevExpensesVal;
 
     const totalTaxes = Number(currentIncome._sum.tax_amount || 0);
     const prevTaxes = Number(previousIncome._sum.tax_amount || 0);
 
-    const incomeGrowth = prevIncome > 0
-      ? ((totalIncome - prevIncome) / prevIncome) * 100
-      : 0;
-    const expensesGrowth = prevExpensesVal > 0
-      ? ((totalExpenses - prevExpensesVal) / prevExpensesVal) * 100
-      : 0;
-    const netProfitGrowth = prevNetProfit !== 0
-      ? ((netProfit - prevNetProfit) / Math.abs(prevNetProfit)) * 100
-      : 0;
-    const taxesGrowth = prevTaxes > 0
-      ? ((totalTaxes - prevTaxes) / prevTaxes) * 100
-      : 0;
+    const incomeGrowth =
+      prevIncome > 0 ? ((totalIncome - prevIncome) / prevIncome) * 100 : 0;
+    const expensesGrowth =
+      prevExpensesVal > 0
+        ? ((totalExpenses - prevExpensesVal) / prevExpensesVal) * 100
+        : 0;
+    const netProfitGrowth =
+      prevNetProfit !== 0
+        ? ((netProfit - prevNetProfit) / Math.abs(prevNetProfit)) * 100
+        : 0;
+    const taxesGrowth =
+      prevTaxes > 0 ? ((totalTaxes - prevTaxes) / prevTaxes) * 100 : 0;
 
     return {
       total_income: totalIncome,
@@ -96,7 +109,7 @@ export class OverviewAnalyticsService {
     const context = RequestContextService.getContext();
 
     if (!context?.store_id) {
-      throw new ForbiddenException('Store context required for overview trends');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const storeId = context.store_id;
 
@@ -198,12 +211,18 @@ export class OverviewAnalyticsService {
 
   private getDateTruncInterval(granularity: Granularity): string {
     switch (granularity) {
-      case Granularity.HOUR: return 'hour';
-      case Granularity.DAY: return 'day';
-      case Granularity.WEEK: return 'week';
-      case Granularity.MONTH: return 'month';
-      case Granularity.YEAR: return 'year';
-      default: return 'day';
+      case Granularity.HOUR:
+        return 'hour';
+      case Granularity.DAY:
+        return 'day';
+      case Granularity.WEEK:
+        return 'week';
+      case Granularity.MONTH:
+        return 'month';
+      case Granularity.YEAR:
+        return 'year';
+      default:
+        return 'day';
     }
   }
 
@@ -228,7 +247,10 @@ export class OverviewAnalyticsService {
     }
   }
 
-  private parseDateRange(query: AnalyticsQueryDto): { startDate: Date; endDate: Date } {
+  private parseDateRange(query: AnalyticsQueryDto): {
+    startDate: Date;
+    endDate: Date;
+  } {
     if (query.date_from && query.date_to) {
       const endDate = new Date(query.date_to);
       endDate.setUTCHours(23, 59, 59, 999);
@@ -260,7 +282,11 @@ export class OverviewAnalyticsService {
         return { startDate: lastWeekStart, endDate: lastWeekEnd };
       case DatePreset.LAST_MONTH:
         const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
-        const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const lastMonthStart = new Date(
+          today.getFullYear(),
+          today.getMonth() - 1,
+          1,
+        );
         return { startDate: lastMonthStart, endDate: lastMonthEnd };
       case DatePreset.THIS_YEAR:
         return { startDate: new Date(today.getFullYear(), 0, 1), endDate: now };
@@ -271,11 +297,17 @@ export class OverviewAnalyticsService {
         };
       case DatePreset.THIS_MONTH:
       default:
-        return { startDate: new Date(today.getFullYear(), today.getMonth(), 1), endDate: now };
+        return {
+          startDate: new Date(today.getFullYear(), today.getMonth(), 1),
+          endDate: now,
+        };
     }
   }
 
-  private getPreviousPeriod(startDate: Date, endDate: Date): { previousStartDate: Date; previousEndDate: Date } {
+  private getPreviousPeriod(
+    startDate: Date,
+    endDate: Date,
+  ): { previousStartDate: Date; previousEndDate: Date } {
     const duration = endDate.getTime() - startDate.getTime();
     const previousEndDate = new Date(startDate.getTime() - 1);
     const previousStartDate = new Date(previousEndDate.getTime() - duration);

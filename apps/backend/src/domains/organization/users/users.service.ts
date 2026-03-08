@@ -17,6 +17,7 @@ import * as bcrypt from 'bcryptjs';
 import { EmailService } from '../../../email/email.service';
 import * as crypto from 'crypto';
 import { RequestContextService } from '@common/context/request-context.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   AuditService,
   AuditAction,
@@ -227,7 +228,7 @@ export class UsersService {
       },
     });
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new VendixHttpException(ErrorCodes.ORG_USER_001);
     }
     return {
       ...user,
@@ -244,7 +245,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new VendixHttpException(ErrorCodes.ORG_USER_001);
     }
 
     return {
@@ -291,7 +292,7 @@ export class UsersService {
       where: { id },
     });
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new VendixHttpException(ErrorCodes.ORG_USER_001);
     }
     if (user.state !== 'suspended' && user.state !== 'archived') {
       throw new ConflictException('User is not suspended or archived');
@@ -390,7 +391,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new VendixHttpException(ErrorCodes.ORG_USER_001);
     }
 
     const old_state = user.state;
@@ -449,7 +450,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new VendixHttpException(ErrorCodes.ORG_USER_001);
     }
 
     // Hash the new password
@@ -495,7 +496,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new VendixHttpException(ErrorCodes.ORG_USER_001);
     }
 
     const config: UserConfigDto = {

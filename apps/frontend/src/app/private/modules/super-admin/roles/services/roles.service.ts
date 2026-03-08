@@ -98,7 +98,6 @@ export class RolesService {
       .get<any>(`${this.apiUrl}/superadmin/roles`, { params })
       .pipe(
         map((response) => {
-          // Mapear los datos para asegurar que tengan la estructura correcta
           const mappedData = (response.data || []).map((role: any) => ({
             ...role,
             permissions: role.permissions || [],
@@ -107,10 +106,10 @@ export class RolesService {
           return {
             data: mappedData,
             pagination: {
-              page: 1, // La respuesta no incluye paginación, usamos valores por defecto
-              limit: 10,
-              total: mappedData.length,
-              total_pages: 1,
+              page: response.meta?.page || query.page || 1,
+              limit: response.meta?.limit || query.limit || 10,
+              total: response.meta?.total || mappedData.length,
+              total_pages: response.meta?.totalPages || 1,
             },
           } as PaginatedRolesResponse;
         }),

@@ -45,19 +45,21 @@ export class AuthEffects {
           .pipe(
             map((response) => {
               if (!response.data) throw new Error('Invalid response data');
+              const data = response.data as any;
               return AuthActions.loginSuccess({
-                user: response.data.user,
-                user_settings: response.data.user_settings,
-                store_settings: response.data.store_settings,
+                user: data.user,
+                user_settings: data.user_settings,
+                store_settings: data.store_settings,
+                default_panel_ui: data.default_panel_ui,
                 tokens: {
-                  access_token: response.data.access_token,
-                  refresh_token: response.data.refresh_token,
+                  access_token: data.access_token,
+                  refresh_token: data.refresh_token,
                 },
-                permissions: response.data.permissions || [],
-                roles: response.data.user.roles || [],
+                permissions: data.permissions || [],
+                roles: data.user.roles || [],
                 message: response.message,
                 updated_environment: response.updatedEnvironment,
-                expires_in: response.data.expires_in,
+                expires_in: data.expires_in,
               });
             }),
             catchError((error) =>
@@ -77,19 +79,21 @@ export class AuthEffects {
         this.authService.loginCustomer(loginData).pipe(
           map((response) => {
             if (!response.data) throw new Error('Invalid response data');
+            const data = response.data as any;
             return AuthActions.loginCustomerSuccess({
-              user: response.data.user,
-              user_settings: response.data.user_settings,
-              store_settings: response.data.store_settings,
+              user: data.user,
+              user_settings: data.user_settings,
+              store_settings: data.store_settings,
+              default_panel_ui: data.default_panel_ui,
               tokens: {
-                access_token: response.data.access_token,
-                refresh_token: response.data.refresh_token,
+                access_token: data.access_token,
+                refresh_token: data.refresh_token,
               },
-              permissions: response.data.permissions || [],
-              roles: response.data.user.roles || [],
+              permissions: data.permissions || [],
+              roles: data.user.roles || [],
               message: response.message,
               updated_environment: response.updatedEnvironment,
-              expires_in: response.data.expires_in,
+              expires_in: data.expires_in,
             });
           }),
           catchError((error) =>

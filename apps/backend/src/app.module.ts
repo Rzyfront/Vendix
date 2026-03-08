@@ -28,6 +28,7 @@ import { SecretsModule } from './common/config/secrets.module';
 import { DefaultPanelUIModule } from './common/services/default-panel-ui.module';
 import { HelpersModule } from './common/helpers/helpers.module';
 import { DomainResolverMiddleware } from './common/middleware/domain-resolver.middleware';
+import { AIEngineModule } from './ai-engine/ai-engine.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { DomainResolverMiddleware } from './common/middleware/domain-resolver.mi
     DefaultPanelUIModule,
     HelpersModule,
     JobsModule,
+    AIEngineModule,
   ],
   controllers: [AppController],
   providers: [

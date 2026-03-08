@@ -27,6 +27,7 @@ import {
   SelectorComponent,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  PaginationComponent,
 } from '../../../../shared/components/index';
 
 import {
@@ -52,6 +53,7 @@ import {
     StatsComponent,
     SelectorComponent,
     ResponsiveDataViewComponent,
+    PaginationComponent,
   ],
   templateUrl: './roles.component.html',
   styleUrls: ['./roles.component.css'],
@@ -75,6 +77,9 @@ export class RolesComponent implements OnInit, OnDestroy {
   isCreatingRole = false;
   isUpdatingRole = false;
   isUpdatingPermissions = false;
+
+  // Pagination
+  pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
 
   // Filter states
   filterForm: FormGroup;
@@ -199,6 +204,7 @@ export class RolesComponent implements OnInit, OnDestroy {
           { search: searchTerm },
           { emitEvent: false },
         );
+        this.pagination.page = 1;
         this.loadRoles();
       });
   }
@@ -211,6 +217,7 @@ export class RolesComponent implements OnInit, OnDestroy {
     this.filterForm.get('is_system_role')?.valueChanges
       .pipe(takeUntil(this.destroy$))
       .subscribe(() => {
+        this.pagination.page = 1;
         this.loadRoles();
       });
 
@@ -237,6 +244,8 @@ export class RolesComponent implements OnInit, OnDestroy {
     this.isLoading = true;
     const filters = this.filterForm.value;
     const query: RoleQueryDto = {
+      page: this.pagination.page,
+      limit: this.pagination.limit,
       search: filters.search || undefined,
       is_system_role: filters.is_system_role && filters.is_system_role !== ''
         ? filters.is_system_role === 'true'
@@ -249,6 +258,10 @@ export class RolesComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (response: PaginatedRolesResponse) => {
           this.roles = response.data || [];
+          if (response.pagination) {
+            this.pagination.total = response.pagination.total || 0;
+            this.pagination.totalPages = response.pagination.total_pages || Math.ceil(this.pagination.total / this.pagination.limit);
+          }
         },
         error: (error) => {
           console.error('Error loading roles:', error);
@@ -276,6 +289,11 @@ export class RolesComponent implements OnInit, OnDestroy {
 
   onSearchChange(searchTerm: string): void {
     this.searchSubject.next(searchTerm);
+  }
+
+  onPageChange(page: number): void {
+    this.pagination.page = page;
+    this.loadRoles();
   }
 
   onSortChange(event: {

@@ -41,11 +41,35 @@
                                 [error]="getErrorMessage('slug')"></app-input>
                         </div>
 
-                        <!-- Description -->
-                        <div class="md:col-span-2">
-                            <app-textarea label="Descripción" formControlName="description"
-                                placeholder="Describe tu producto..." [rows]="3"
-                                [control]="$any(productForm).get('description')"></app-textarea>
+                        <!-- Description + AI Generator -->
+                        <div class="md:col-span-2 ai-description-wrapper"
+                            [class.ai-generating]="isGeneratingDescription()">
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="block text-sm font-medium text-text-secondary ai-label">Descripción</label>
+                                <button type="button" (click)="generateAIDescription()"
+                                    [disabled]="isGeneratingDescription() || aiDescriptionLimitReached()"
+                                    class="ai-generate-btn group relative">
+                                    <span class="ai-tooltip">
+                                        @if (aiDescriptionLimitReached()) {
+                                            Límite alcanzado (0/3)
+                                        } @else {
+                                            Generar con IA ({{ aiDescriptionUsesLeft() }}/3)
+                                        }
+                                    </span>
+                                    @if (isGeneratingDescription()) {
+                                        <app-icon name="loader-2" [size]="11" class="animate-spin" />
+                                    } @else {
+                                        <app-icon name="sparkles" [size]="11" />
+                                    }
+                                    <span class="text-xs font-medium hidden sm:inline ml-1">IA</span>
+                                </button>
+                            </div>
+                            <div class="ai-textarea-wrapper">
+                                <app-textarea formControlName="description"
+                                    placeholder="Describe tu producto..." [rows]="3"
+                                    [control]="$any(productForm).get('description')">
+                                </app-textarea>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -68,12 +92,22 @@
                         </div>
                     </div>
 
+                    <!-- Weight pricing info banner -->
+                    <div *ngIf="productForm.get('pricing_type')?.value === 'weight'"
+                        class="flex items-center gap-2 p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 text-sm">
+                        <app-icon name="info" size="16" class="text-blue-600 shrink-0"></app-icon>
+                        <span>Los precios se interpretan <strong>por unidad de peso (kg)</strong>. El precio base es el precio por kilogramo.</span>
+                    </div>
+
                     <!-- First Row: Core pricing -->
                     <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
                         <!-- Cost Price -->
-                        <app-input label="Precio de Costo" type="number" formControlName="cost_price"
+                        <app-input
+                            [label]="productForm.get('pricing_type')?.value === 'weight' ? 'Costo por kg' : 'Precio de Costo'"
+                            type="number" formControlName="cost_price"
                             [error]="getErrorMessage('cost_price')" prefix="$" placeholder="0.00"
-                            helperText="Inversión por unidad" customWrapperClass="!mt-0"></app-input>
+                            [helperText]="productForm.get('pricing_type')?.value === 'weight' ? 'Costo por kilogramo' : 'Inversión por unidad'"
+                            customWrapperClass="!mt-0"></app-input>
 
                         <!-- Margin -->
                         <app-input label="Margen (%)" type="number" formControlName="profit_margin"
@@ -81,9 +115,12 @@
                             helperText="Rentabilidad deseada" customWrapperClass="!mt-0"></app-input>
 
                         <!-- Base Price (Sale Price before tax) -->
-                        <app-input label="Precio Base (PVP)" type="number" formControlName="base_price"
+                        <app-input
+                            [label]="productForm.get('pricing_type')?.value === 'weight' ? 'Precio por kg (PVP)' : 'Precio Base (PVP)'"
+                            type="number" formControlName="base_price"
                             [error]="getErrorMessage('base_price')" prefix="$" placeholder="0.00"
-                            helperText="Precio antes de impuestos" [required]="true"
+                            [helperText]="productForm.get('pricing_type')?.value === 'weight' ? 'Precio por kilogramo antes de impuestos' : 'Precio antes de impuestos'"
+                            [required]="true"
                             customWrapperClass="!mt-0"></app-input>
                     </div>
 

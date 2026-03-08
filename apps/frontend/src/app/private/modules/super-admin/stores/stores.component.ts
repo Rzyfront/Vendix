@@ -43,6 +43,7 @@ import {
   ItemListCardConfig,
   TableColumn,
   TableAction,
+  PaginationComponent,
 } from '../../../../shared/components/index';
 
 // Import styles (CSS instead of SCSS to avoid loader issues)
@@ -66,6 +67,7 @@ import './stores.component.css';
     IconComponent,
     ResponsiveDataViewComponent,
     ButtonComponent,
+    PaginationComponent,
   ],
   providers: [StoresService],
   templateUrl: './stores.component.html',
@@ -83,6 +85,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
   isLoading = false;
   searchTerm = '';
   selectedOrganization = '';
+  pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
 
   // Filter states
   filterForm: FormGroup;
@@ -278,6 +281,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
       .subscribe((searchTerm) => {
         this.searchTerm = searchTerm;
+        this.pagination.page = 1;
         this.loadStores();
       });
 
@@ -301,6 +305,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
     this.filterForm.valueChanges
       .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
       .subscribe(() => {
+        this.pagination.page = 1;
         this.loadStores();
       });
   }
@@ -416,6 +421,8 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
   loadStores(): void {
     const filters = this.filterForm.value;
     const query = {
+      page: this.pagination.page,
+      limit: this.pagination.limit,
       ...(filters.search && { search: filters.search }),
       ...(filters.is_active && {
         is_active: filters.is_active === 'true',
@@ -432,7 +439,11 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       .getStores(query)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: (response) => {
+        next: (response: any) => {
+          if (response.meta) {
+            this.pagination.total = response.meta.total || 0;
+            this.pagination.totalPages = response.meta.totalPages || Math.ceil(this.pagination.total / this.pagination.limit);
+          }
           if (response.success && response.data) {
             this.stores = response.data.map((store: any) => ({
               id: store.id,
@@ -568,6 +579,11 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
 
   onSearchChange(searchTerm: string): void {
     this.filterForm.patchValue({ search: searchTerm });
+  }
+
+  onPageChange(page: number): void {
+    this.pagination.page = page;
+    this.loadStores();
   }
 
   onTableSort(sortEvent: {

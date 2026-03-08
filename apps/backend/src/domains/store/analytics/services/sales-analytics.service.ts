@@ -2,8 +2,13 @@ import { Injectable, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { SalesAnalyticsQueryDto, DatePreset, Granularity } from '../dto/analytics-query.dto';
+import {
+  SalesAnalyticsQueryDto,
+  DatePreset,
+  Granularity,
+} from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class SalesAnalyticsService {
@@ -14,7 +19,10 @@ export class SalesAnalyticsService {
 
   async getSalesSummary(query: SalesAnalyticsQueryDto) {
     const { startDate, endDate } = this.parseDateRange(query);
-    const { previousStartDate, previousEndDate } = this.getPreviousPeriod(startDate, endDate);
+    const { previousStartDate, previousEndDate } = this.getPreviousPeriod(
+      startDate,
+      endDate,
+    );
 
     // Current period metrics (store scoping is automatic)
     const currentPeriod = await this.prisma.orders.aggregate({
@@ -90,12 +98,14 @@ export class SalesAnalyticsService {
     const previousRevenue = Number(previousPeriod._sum.grand_total || 0);
     const previousOrders = previousPeriod._count.id || 0;
 
-    const revenueGrowth = previousRevenue > 0
-      ? ((totalRevenue - previousRevenue) / previousRevenue) * 100
-      : 0;
-    const ordersGrowth = previousOrders > 0
-      ? ((totalOrders - previousOrders) / previousOrders) * 100
-      : 0;
+    const revenueGrowth =
+      previousRevenue > 0
+        ? ((totalRevenue - previousRevenue) / previousRevenue) * 100
+        : 0;
+    const ordersGrowth =
+      previousOrders > 0
+        ? ((totalOrders - previousOrders) / previousOrders) * 100
+        : 0;
 
     return {
       total_revenue: totalRevenue,
@@ -145,8 +155,10 @@ export class SalesAnalyticsService {
     });
 
     // Get product details
-    const productIds = results.map((r) => r.product_id).filter(Boolean) as number[];
-    const products = await this.prisma.products.findMany({
+    const productIds = results
+      .map((r) => r.product_id)
+      .filter(Boolean) as number[];
+    const products = (await this.prisma.products.findMany({
       where: {
         id: {
           in: productIds,
@@ -163,7 +175,14 @@ export class SalesAnalyticsService {
         base_price: true,
         cost_price: true,
       },
-    }) as { id: number; name: string; sku: string | null; product_images: { image_url: string }[]; base_price: any; cost_price: any }[];
+    })) as {
+      id: number;
+      name: string;
+      sku: string | null;
+      product_images: { image_url: string }[];
+      base_price: any;
+      cost_price: any;
+    }[];
 
     const productMap = new Map(products.map((p) => [p.id, p]));
 
@@ -173,9 +192,10 @@ export class SalesAnalyticsService {
       const units = Number(r._sum.quantity || 0);
       const costPrice = product ? Number(product.cost_price || 0) : 0;
       const avgPrice = units > 0 ? revenue / units : 0;
-      const profitMargin = costPrice > 0 && avgPrice > 0
-        ? ((avgPrice - costPrice) / avgPrice) * 100
-        : null;
+      const profitMargin =
+        costPrice > 0 && avgPrice > 0
+          ? ((avgPrice - costPrice) / avgPrice) * 100
+          : null;
 
       return {
         product_id: r.product_id,
@@ -211,7 +231,9 @@ export class SalesAnalyticsService {
       },
     });
 
-    const productIds = productAggregates.map((r) => r.product_id).filter(Boolean) as number[];
+    const productIds = productAggregates
+      .map((r) => r.product_id)
+      .filter(Boolean) as number[];
 
     // Step 2: Get product->category mappings with a lightweight select
     const productCategories = await this.prisma.product_categories.findMany({
@@ -228,7 +250,10 @@ export class SalesAnalyticsService {
     });
 
     // Build product -> categories map
-    const productCategoryMap = new Map<number, { id: number; name: string }[]>();
+    const productCategoryMap = new Map<
+      number,
+      { id: number; name: string }[]
+    >();
     for (const pc of productCategories) {
       const cats = productCategoryMap.get(pc.product_id) || [];
       if (pc.categories) {
@@ -238,7 +263,10 @@ export class SalesAnalyticsService {
     }
 
     // Step 3: Aggregate by category in memory (iterating over product aggregates, not all order_items)
-    const categoryMap = new Map<number, { name: string; units: number; revenue: number }>();
+    const categoryMap = new Map<
+      number,
+      { name: string; units: number; revenue: number }
+    >();
     let totalRevenue = 0;
 
     for (const agg of productAggregates) {
@@ -249,13 +277,21 @@ export class SalesAnalyticsService {
       const categories = productCategoryMap.get(agg.product_id as number) || [];
       if (categories.length > 0) {
         for (const cat of categories) {
-          const existing = categoryMap.get(cat.id) || { name: cat.name, units: 0, revenue: 0 };
+          const existing = categoryMap.get(cat.id) || {
+            name: cat.name,
+            units: 0,
+            revenue: 0,
+          };
           existing.units += units;
           existing.revenue += revenue;
           categoryMap.set(cat.id, existing);
         }
       } else {
-        const existing = categoryMap.get(0) || { name: 'Sin categoría', units: 0, revenue: 0 };
+        const existing = categoryMap.get(0) || {
+          name: 'Sin categoría',
+          units: 0,
+          revenue: 0,
+        };
         existing.units += units;
         existing.revenue += revenue;
         categoryMap.set(0, existing);
@@ -268,7 +304,8 @@ export class SalesAnalyticsService {
         category_name: data.name,
         units_sold: data.units,
         revenue: data.revenue,
-        percentage_of_total: totalRevenue > 0 ? (data.revenue / totalRevenue) * 100 : 0,
+        percentage_of_total:
+          totalRevenue > 0 ? (data.revenue / totalRevenue) * 100 : 0,
       }))
       .sort((a, b) => b.revenue - a.revenue);
   }
@@ -296,18 +333,29 @@ export class SalesAnalyticsService {
       },
     });
 
-    const methodMap = new Map<string, { displayName: string; count: number; amount: number }>();
+    const methodMap = new Map<
+      string,
+      { displayName: string; count: number; amount: number }
+    >();
     let totalAmount = 0;
 
     for (const payment of payments) {
       const amount = Number(payment.amount || 0);
       totalAmount += amount;
 
-      const methodName = payment.store_payment_methods?.system_payment_methods?.name || 'unknown';
-      const displayName = payment.store_payment_methods?.display_name ||
-        payment.store_payment_methods?.system_payment_methods?.display_name || 'Desconocido';
+      const methodName =
+        payment.store_payment_methods?.system_payment_methods?.name ||
+        'unknown';
+      const displayName =
+        payment.store_payment_methods?.display_name ||
+        payment.store_payment_methods?.system_payment_methods?.display_name ||
+        'Desconocido';
 
-      const existing = methodMap.get(methodName) || { displayName, count: 0, amount: 0 };
+      const existing = methodMap.get(methodName) || {
+        displayName,
+        count: 0,
+        amount: 0,
+      };
       existing.count += 1;
       existing.amount += amount;
       methodMap.set(methodName, existing);
@@ -330,7 +378,7 @@ export class SalesAnalyticsService {
     const context = RequestContextService.getContext();
 
     if (!context?.store_id) {
-      throw new ForbiddenException('Store context required for sales trends');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const storeId = context.store_id;
 
@@ -389,12 +437,18 @@ export class SalesAnalyticsService {
 
   private getDateTruncInterval(granularity: Granularity): string {
     switch (granularity) {
-      case Granularity.HOUR: return 'hour';
-      case Granularity.DAY: return 'day';
-      case Granularity.WEEK: return 'week';
-      case Granularity.MONTH: return 'month';
-      case Granularity.YEAR: return 'year';
-      default: return 'day';
+      case Granularity.HOUR:
+        return 'hour';
+      case Granularity.DAY:
+        return 'day';
+      case Granularity.WEEK:
+        return 'week';
+      case Granularity.MONTH:
+        return 'month';
+      case Granularity.YEAR:
+        return 'year';
+      default:
+        return 'day';
     }
   }
 
@@ -451,7 +505,9 @@ export class SalesAnalyticsService {
       take: query.limit || 50,
     });
 
-    const customerIds = results.map((r) => r.customer_id).filter(Boolean) as number[];
+    const customerIds = results
+      .map((r) => r.customer_id)
+      .filter(Boolean) as number[];
     const customers = await this.prisma.users.findMany({
       where: {
         id: {
@@ -476,7 +532,9 @@ export class SalesAnalyticsService {
 
       // Build customer display name: prefer "First Last", fallback to username, then default
       const customerName = customer
-        ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || customer.username || 'Cliente'
+        ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() ||
+          customer.username ||
+          'Cliente'
         : 'Cliente';
 
       return {
@@ -519,7 +577,10 @@ export class SalesAnalyticsService {
       marketplace: 'Marketplace',
     };
 
-    const total = results.reduce((sum, r) => sum + Number(r._sum.grand_total || 0), 0);
+    const total = results.reduce(
+      (sum, r) => sum + Number(r._sum.grand_total || 0),
+      0,
+    );
 
     return results
       .map((r) => ({
@@ -527,7 +588,8 @@ export class SalesAnalyticsService {
         display_name: labels[r.channel] || r.channel,
         order_count: r._count.id,
         revenue: Number(r._sum.grand_total || 0),
-        percentage: total > 0 ? (Number(r._sum.grand_total || 0) / total) * 100 : 0,
+        percentage:
+          total > 0 ? (Number(r._sum.grand_total || 0) / total) * 100 : 0,
       }))
       .sort((a, b) => b.revenue - a.revenue);
   }
@@ -554,7 +616,9 @@ export class SalesAnalyticsService {
           where: { state: 'succeeded' },
           include: {
             store_payment_method: {
-              include: { system_payment_method: { select: { display_name: true } } },
+              include: {
+                system_payment_method: { select: { display_name: true } },
+              },
             },
           },
           take: 1,
@@ -565,15 +629,17 @@ export class SalesAnalyticsService {
     });
 
     // Flatten: one row per order_item
-    return orders.flatMap(order => {
+    return orders.flatMap((order) => {
       const customer = order.users;
       const customerName = customer
-        ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'Cliente'
+        ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() ||
+          'Cliente'
         : 'Anónimo';
-      const paymentMethod = order.payments?.[0]?.store_payment_method
-        ?.system_payment_method?.display_name || 'N/A';
+      const paymentMethod =
+        order.payments?.[0]?.store_payment_method?.system_payment_method
+          ?.display_name || 'N/A';
 
-      return order.order_items.map(item => ({
+      return order.order_items.map((item) => ({
         order_number: order.order_number,
         date: order.created_at?.toISOString().split('T')[0] || '',
         customer_name: customerName,
@@ -596,7 +662,10 @@ export class SalesAnalyticsService {
   }
 
   // Helper methods
-  private parseDateRange(query: SalesAnalyticsQueryDto): { startDate: Date; endDate: Date } {
+  private parseDateRange(query: SalesAnalyticsQueryDto): {
+    startDate: Date;
+    endDate: Date;
+  } {
     if (query.date_from && query.date_to) {
       // date_to comes as 'YYYY-MM-DD' which parses to midnight UTC.
       // Set to end-of-day so orders created during that day are included.
@@ -630,7 +699,11 @@ export class SalesAnalyticsService {
         return { startDate: lastWeekStart, endDate: lastWeekEnd };
       case DatePreset.LAST_MONTH:
         const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
-        const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const lastMonthStart = new Date(
+          today.getFullYear(),
+          today.getMonth() - 1,
+          1,
+        );
         return { startDate: lastMonthStart, endDate: lastMonthEnd };
       case DatePreset.THIS_YEAR:
         return { startDate: new Date(today.getFullYear(), 0, 1), endDate: now };
@@ -641,11 +714,17 @@ export class SalesAnalyticsService {
         };
       case DatePreset.THIS_MONTH:
       default:
-        return { startDate: new Date(today.getFullYear(), today.getMonth(), 1), endDate: now };
+        return {
+          startDate: new Date(today.getFullYear(), today.getMonth(), 1),
+          endDate: now,
+        };
     }
   }
 
-  private getPreviousPeriod(startDate: Date, endDate: Date): { previousStartDate: Date; previousEndDate: Date } {
+  private getPreviousPeriod(
+    startDate: Date,
+    endDate: Date,
+  ): { previousStartDate: Date; previousEndDate: Date } {
     const duration = endDate.getTime() - startDate.getTime();
     const previousEndDate = new Date(startDate.getTime() - 1);
     const previousStartDate = new Date(previousEndDate.getTime() - duration);
@@ -665,7 +744,14 @@ export class SalesAnalyticsService {
         const target = new Date(d.valueOf());
         target.setDate(target.getDate() + 3 - ((target.getDay() + 6) % 7));
         const yearStart = new Date(target.getFullYear(), 0, 4);
-        const weekNo = 1 + Math.round(((target.getTime() - yearStart.getTime()) / 86400000 - 3 + ((yearStart.getDay() + 6) % 7)) / 7);
+        const weekNo =
+          1 +
+          Math.round(
+            ((target.getTime() - yearStart.getTime()) / 86400000 -
+              3 +
+              ((yearStart.getDay() + 6) % 7)) /
+              7,
+          );
         return `${target.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
       case Granularity.MONTH:
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;

@@ -2,8 +2,13 @@ import { Injectable, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { ProductsAnalyticsQueryDto, DatePreset, Granularity } from '../dto/analytics-query.dto';
+import {
+  ProductsAnalyticsQueryDto,
+  DatePreset,
+  Granularity,
+} from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class ProductsAnalyticsService {
@@ -13,7 +18,10 @@ export class ProductsAnalyticsService {
 
   async getProductsSummary(query: ProductsAnalyticsQueryDto) {
     const { startDate, endDate } = this.parseDateRange(query);
-    const { previousStartDate, previousEndDate } = this.getPreviousPeriod(startDate, endDate);
+    const { previousStartDate, previousEndDate } = this.getPreviousPeriod(
+      startDate,
+      endDate,
+    );
 
     // Total and active products in the store
     const [totalProducts, activeProducts] = await Promise.all([
@@ -54,19 +62,22 @@ export class ProductsAnalyticsService {
     const previousRevenue = Number(previousItems._sum.total_price || 0);
     const previousUnits = Number(previousItems._sum.quantity || 0);
 
-    const revenueGrowth = previousRevenue > 0
-      ? ((totalRevenue - previousRevenue) / previousRevenue) * 100
-      : 0;
-    const unitsGrowth = previousUnits > 0
-      ? ((totalUnitsSold - previousUnits) / previousUnits) * 100
-      : 0;
+    const revenueGrowth =
+      previousRevenue > 0
+        ? ((totalRevenue - previousRevenue) / previousRevenue) * 100
+        : 0;
+    const unitsGrowth =
+      previousUnits > 0
+        ? ((totalUnitsSold - previousUnits) / previousUnits) * 100
+        : 0;
 
     return {
       total_products: totalProducts,
       active_products: activeProducts,
       total_revenue: totalRevenue,
       total_units_sold: totalUnitsSold,
-      avg_revenue_per_product: activeProducts > 0 ? totalRevenue / activeProducts : 0,
+      avg_revenue_per_product:
+        activeProducts > 0 ? totalRevenue / activeProducts : 0,
       revenue_growth: revenueGrowth,
       units_growth: unitsGrowth,
     };
@@ -100,8 +111,10 @@ export class ProductsAnalyticsService {
       take: query.limit || 10,
     });
 
-    const productIds = results.map((r) => r.product_id).filter(Boolean) as number[];
-    const products = await this.prisma.products.findMany({
+    const productIds = results
+      .map((r) => r.product_id)
+      .filter(Boolean) as number[];
+    const products = (await this.prisma.products.findMany({
       where: { id: { in: productIds } },
       select: {
         id: true,
@@ -114,7 +127,14 @@ export class ProductsAnalyticsService {
           take: 1,
         },
       },
-    }) as { id: number; name: string; sku: string | null; base_price: any; cost_price: any; product_images: { image_url: string }[] }[];
+    })) as {
+      id: number;
+      name: string;
+      sku: string | null;
+      base_price: any;
+      cost_price: any;
+      product_images: { image_url: string }[];
+    }[];
 
     const productMap = new Map(products.map((p) => [p.id, p]));
 
@@ -124,9 +144,10 @@ export class ProductsAnalyticsService {
       const units = Number(r._sum.quantity || 0);
       const costPrice = product ? Number(product.cost_price || 0) : 0;
       const avgPrice = units > 0 ? revenue / units : 0;
-      const profitMargin = costPrice > 0 && avgPrice > 0
-        ? ((avgPrice - costPrice) / avgPrice) * 100
-        : null;
+      const profitMargin =
+        costPrice > 0 && avgPrice > 0
+          ? ((avgPrice - costPrice) / avgPrice) * 100
+          : null;
 
       return {
         product_id: r.product_id,
@@ -165,7 +186,9 @@ export class ProductsAnalyticsService {
     };
 
     // Get total count
-    const totalCount = await this.prisma.products.count({ where: productWhere });
+    const totalCount = await this.prisma.products.count({
+      where: productWhere,
+    });
 
     // Get paginated products
     const products = await this.prisma.products.findMany({
@@ -182,13 +205,14 @@ export class ProductsAnalyticsService {
           take: 1,
         },
       },
-      orderBy: query.sort_by === 'name'
-        ? { name: query.sort_order || 'asc' }
-        : query.sort_by === 'base_price'
-          ? { base_price: query.sort_order || 'desc' }
-          : query.sort_by === 'stock_quantity'
-            ? { stock_quantity: query.sort_order || 'desc' }
-            : { name: 'asc' },
+      orderBy:
+        query.sort_by === 'name'
+          ? { name: query.sort_order || 'asc' }
+          : query.sort_by === 'base_price'
+            ? { base_price: query.sort_order || 'desc' }
+            : query.sort_by === 'stock_quantity'
+              ? { stock_quantity: query.sort_order || 'desc' }
+              : { name: 'asc' },
       skip: (page - 1) * limit,
       take: limit,
     });
@@ -228,12 +252,18 @@ export class ProductsAnalyticsService {
       },
     });
 
-    const salesMap = new Map<number | null, { quantity: number; totalPrice: number; count: number }>(
-      salesData.map((s) => [s.product_id, {
-        quantity: Number(s._sum.quantity || 0),
-        totalPrice: Number(s._sum.total_price || 0),
-        count: s._count.id || 0,
-      }]),
+    const salesMap = new Map<
+      number | null,
+      { quantity: number; totalPrice: number; count: number }
+    >(
+      salesData.map((s) => [
+        s.product_id,
+        {
+          quantity: Number(s._sum.quantity || 0),
+          totalPrice: Number(s._sum.total_price || 0),
+          count: s._count.id || 0,
+        },
+      ]),
     );
     const lastSoldMap = new Map<number | null, Date | null>(
       lastSoldData.map((s) => [s.product_id, s._max.created_at]),
@@ -246,9 +276,10 @@ export class ProductsAnalyticsService {
       const orderCount = sales?.count || 0;
       const basePrice = Number(p.base_price || 0);
       const costPrice = Number(p.cost_price || 0);
-      const profitMargin = costPrice > 0 && basePrice > 0
-        ? ((basePrice - costPrice) / basePrice) * 100
-        : null;
+      const profitMargin =
+        costPrice > 0 && basePrice > 0
+          ? ((basePrice - costPrice) / basePrice) * 100
+          : null;
       const lastSold = lastSoldMap.get(p.id);
 
       return {
@@ -270,7 +301,10 @@ export class ProductsAnalyticsService {
     // Sort by sales-derived fields if requested
     if (query.sort_by === 'units_sold' || query.sort_by === 'revenue') {
       const dir = query.sort_order === 'asc' ? 1 : -1;
-      data.sort((a, b) => ((a as any)[query.sort_by!] - (b as any)[query.sort_by!]) * dir);
+      data.sort(
+        (a, b) =>
+          ((a as any)[query.sort_by!] - (b as any)[query.sort_by!]) * dir,
+      );
     }
 
     return {
@@ -330,11 +364,17 @@ export class ProductsAnalyticsService {
       },
     });
 
-    const salesMap = new Map<number | null, { quantity: number; totalPrice: number }>(
-      salesData.map((s) => [s.product_id, {
-        quantity: Number(s._sum.quantity || 0),
-        totalPrice: Number(s._sum.total_price || 0),
-      }]),
+    const salesMap = new Map<
+      number | null,
+      { quantity: number; totalPrice: number }
+    >(
+      salesData.map((s) => [
+        s.product_id,
+        {
+          quantity: Number(s._sum.quantity || 0),
+          totalPrice: Number(s._sum.total_price || 0),
+        },
+      ]),
     );
 
     return products.map((p) => {
@@ -343,9 +383,10 @@ export class ProductsAnalyticsService {
       const revenue = sales?.totalPrice || 0;
       const basePrice = Number(p.base_price || 0);
       const costPrice = Number(p.cost_price || 0);
-      const profitMargin = costPrice > 0 && basePrice > 0
-        ? ((basePrice - costPrice) / basePrice) * 100
-        : null;
+      const profitMargin =
+        costPrice > 0 && basePrice > 0
+          ? ((basePrice - costPrice) / basePrice) * 100
+          : null;
 
       return {
         name: p.name,
@@ -355,7 +396,8 @@ export class ProductsAnalyticsService {
         stock_quantity: p.stock_quantity || 0,
         units_sold: unitsSold,
         revenue,
-        profit_margin: profitMargin !== null ? Number(profitMargin.toFixed(2)) : null,
+        profit_margin:
+          profitMargin !== null ? Number(profitMargin.toFixed(2)) : null,
       };
     });
   }
@@ -366,7 +408,7 @@ export class ProductsAnalyticsService {
     const context = RequestContextService.getContext();
 
     if (!context?.store_id) {
-      throw new ForbiddenException('Store context required for product trends');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const storeId = context.store_id;
 
@@ -411,12 +453,18 @@ export class ProductsAnalyticsService {
 
   private getDateTruncInterval(granularity: Granularity): string {
     switch (granularity) {
-      case Granularity.HOUR: return 'hour';
-      case Granularity.DAY: return 'day';
-      case Granularity.WEEK: return 'week';
-      case Granularity.MONTH: return 'month';
-      case Granularity.YEAR: return 'year';
-      default: return 'day';
+      case Granularity.HOUR:
+        return 'hour';
+      case Granularity.DAY:
+        return 'day';
+      case Granularity.WEEK:
+        return 'week';
+      case Granularity.MONTH:
+        return 'month';
+      case Granularity.YEAR:
+        return 'year';
+      default:
+        return 'day';
     }
   }
 
@@ -442,7 +490,10 @@ export class ProductsAnalyticsService {
   }
 
   // Helper methods (duplicated from SalesAnalyticsService to keep services independent)
-  private parseDateRange(query: ProductsAnalyticsQueryDto): { startDate: Date; endDate: Date } {
+  private parseDateRange(query: ProductsAnalyticsQueryDto): {
+    startDate: Date;
+    endDate: Date;
+  } {
     if (query.date_from && query.date_to) {
       const endDate = new Date(query.date_to);
       endDate.setUTCHours(23, 59, 59, 999);
@@ -474,7 +525,11 @@ export class ProductsAnalyticsService {
         return { startDate: lastWeekStart, endDate: lastWeekEnd };
       case DatePreset.LAST_MONTH:
         const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
-        const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const lastMonthStart = new Date(
+          today.getFullYear(),
+          today.getMonth() - 1,
+          1,
+        );
         return { startDate: lastMonthStart, endDate: lastMonthEnd };
       case DatePreset.THIS_YEAR:
         return { startDate: new Date(today.getFullYear(), 0, 1), endDate: now };
@@ -485,11 +540,17 @@ export class ProductsAnalyticsService {
         };
       case DatePreset.THIS_MONTH:
       default:
-        return { startDate: new Date(today.getFullYear(), today.getMonth(), 1), endDate: now };
+        return {
+          startDate: new Date(today.getFullYear(), today.getMonth(), 1),
+          endDate: now,
+        };
     }
   }
 
-  private getPreviousPeriod(startDate: Date, endDate: Date): { previousStartDate: Date; previousEndDate: Date } {
+  private getPreviousPeriod(
+    startDate: Date,
+    endDate: Date,
+  ): { previousStartDate: Date; previousEndDate: Date } {
     const duration = endDate.getTime() - startDate.getTime();
     const previousEndDate = new Date(startDate.getTime() - 1);
     const previousStartDate = new Date(previousEndDate.getTime() - duration);

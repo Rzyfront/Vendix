@@ -65,9 +65,7 @@ import {
       @if (!is_loading && filtered_methods().length === 0) {
         <div class="p-8 text-center">
           <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-green-50 flex items-center justify-center">
-            <svg class="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
+            <app-icon name="check-circle" [size]="24" class="text-green-500"></app-icon>
           </div>
           <p class="text-sm text-text-secondary">¡Todos los métodos están activados!</p>
           <p class="text-xs text-gray-400 mt-1">No hay más métodos disponibles para agregar</p>

@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { debounceTime, distinctUntilChanged, Subject, takeUntil, finalize } from 'rxjs';
 import {
@@ -27,6 +27,7 @@ import {
   ToastService,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  PaginationComponent,
 } from '../../../../shared/components/index';
 import {
   FormsModule,
@@ -50,6 +51,7 @@ import {
     IconComponent,
     ButtonComponent,
     SelectorComponent,
+    PaginationComponent,
   ],
   templateUrl: './audit.component.html',
 })
@@ -69,11 +71,8 @@ export class AuditComponent implements OnInit, OnDestroy {
   private readonly destroy$ = new Subject<void>();
   filterForm: FormGroup;
 
-  // Pagination state (Signals)
-  currentPage = signal<number>(1);
-  pageSize = signal<number>(20);
-  totalItems = signal<number>(0);
-  totalPages = computed(() => Math.ceil(this.totalItems() / this.pageSize()));
+  // Pagination state
+  pagination = { page: 1, limit: 20, total: 0, totalPages: 0 };
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -214,7 +213,7 @@ export class AuditComponent implements OnInit, OnDestroy {
     this.filterForm.valueChanges
       .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
       .subscribe(() => {
-        this.currentPage.set(1);
+        this.pagination.page = 1;
         this.loadAuditLogs();
       });
 
@@ -232,8 +231,8 @@ export class AuditComponent implements OnInit, OnDestroy {
   loadAuditLogs(): void {
     const filters = this.filterForm.value;
     const query: AuditQueryDto = {
-      limit: this.pageSize(),
-      offset: (this.currentPage() - 1) * this.pageSize(),
+      limit: this.pagination.limit,
+      offset: (this.pagination.page - 1) * this.pagination.limit,
       action: filters.action || undefined,
       resource: filters.resource || undefined,
       fromDate: filters.fromDate || undefined,
@@ -245,7 +244,8 @@ export class AuditComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (response: AuditLogsResponse) => {
           this.auditLogs.set(response.logs || []);
-          this.totalItems.set(response.total || 0);
+          this.pagination.total = response.total || 0;
+          this.pagination.totalPages = Math.ceil(this.pagination.total / this.pagination.limit);
         },
         error: () => {
           this.auditLogs.set([]);
@@ -269,7 +269,7 @@ export class AuditComponent implements OnInit, OnDestroy {
   }
 
   onPageChange(page: number): void {
-    this.currentPage.set(page);
+    this.pagination.page = page;
     this.loadAuditLogs();
   }
 

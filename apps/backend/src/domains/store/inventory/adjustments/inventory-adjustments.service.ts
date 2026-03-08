@@ -13,6 +13,7 @@ import {
   AdjustmentResponse,
   AdjustmentType,
 } from './interfaces/inventory-adjustment.interface';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { InventoryTransactionsService } from '../transactions/inventory-transactions.service';
 import { StockLevelManager } from '../shared/services/stock-level-manager.service';
 
@@ -100,7 +101,7 @@ export class InventoryAdjustmentsService {
     const userIdRaw = RequestContextService.getUserId();
 
     if (!orgIdRaw) {
-      throw new BadRequestException('Organization context is required');
+      throw new VendixHttpException(ErrorCodes.INV_CONTEXT_001);
     }
 
     const organizationId = Number(orgIdRaw);
@@ -144,19 +145,15 @@ export class InventoryAdjustmentsService {
         });
 
         if (!batch) {
-          throw new NotFoundException(`Batch with ID ${batchId} not found`);
+          throw new VendixHttpException(ErrorCodes.INV_ADJ_001);
         }
 
         if (batch.product_id !== productId) {
-          throw new BadRequestException(
-            'Batch does not belong to the specified product',
-          );
+          throw new VendixHttpException(ErrorCodes.INV_VALIDATE_001);
         }
 
         if (batch.location_id !== locationId) {
-          throw new BadRequestException(
-            'Batch does not belong to the specified location',
-          );
+          throw new VendixHttpException(ErrorCodes.INV_VALIDATE_001);
         }
 
         // Cantidad actual del lote (quantity - quantity_used)
@@ -190,9 +187,7 @@ export class InventoryAdjustmentsService {
         });
 
         if (!currentStockLevel) {
-          throw new NotFoundException(
-            'Stock level not found for this product/location combination',
-          );
+          throw new VendixHttpException(ErrorCodes.INV_FIND_001);
         }
 
         quantityBefore = currentStockLevel.quantity_on_hand;
@@ -291,9 +286,7 @@ export class InventoryAdjustmentsService {
     });
 
     if (!adjustment) {
-      throw new NotFoundException(
-        `Adjustment with ID ${adjustmentId} not found`,
-      );
+      throw new VendixHttpException(ErrorCodes.INV_ADJ_001);
     }
 
     if (adjustment.approved_by_user_id) {
@@ -369,7 +362,7 @@ export class InventoryAdjustmentsService {
     });
 
     if (!adjustment) {
-      throw new NotFoundException(`Adjustment with ID ${id} not found`);
+      throw new VendixHttpException(ErrorCodes.INV_ADJ_001);
     }
 
     return this.mapAdjustmentResponse(adjustment);
@@ -421,7 +414,7 @@ export class InventoryAdjustmentsService {
     });
 
     if (!adjustment) {
-      throw new NotFoundException(`Adjustment with ID ${id} not found`);
+      throw new VendixHttpException(ErrorCodes.INV_ADJ_001);
     }
 
     if (adjustment.approved_by_user_id) {

@@ -73,6 +73,7 @@ export class AuthInitService {
           user: parsed.user,
           user_settings: parsed.user_settings,
           store_settings: parsed.store_settings,
+          default_panel_ui: parsed.default_panel_ui,
           tokens: parsed.tokens,
           permissions: parsed.permissions || [],
           roles: parsed.roles || [],

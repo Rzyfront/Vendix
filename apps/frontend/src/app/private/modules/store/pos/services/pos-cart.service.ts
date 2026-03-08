@@ -335,12 +335,14 @@ export class PosCartService {
         ? finalUnitPrice * weight
         : request.quantity * finalUnitPrice;
 
+      // For weight products, tax is calculated on the total (price * weight), not just price * quantity
+      const taxMultiplier = isWeightProduct ? weight : quantity;
       const newItem: CartItem = {
         id: this.generateItemId(),
         product: request.product,
         quantity: quantity,
         unitPrice: basePrice,
-        taxAmount: this.calculateItemTaxWithBase(request.product, basePrice, quantity),
+        taxAmount: this.calculateItemTaxWithBase(request.product, basePrice, taxMultiplier),
         finalPrice: finalUnitPrice,
         totalPrice: itemTotalPrice,
         addedAt: new Date(),
@@ -391,11 +393,18 @@ export class PosCartService {
 
     const updatedItems = [...currentState.items];
     const finalUnitPrice = item.finalPrice;
-    const newTotalPrice = request.quantity * finalUnitPrice;
+
+    // For weight products, total is based on weight, not quantity
+    const isWeightItem = item.is_weight_product && item.weight;
+    const newTotalPrice = isWeightItem
+      ? item.weight! * finalUnitPrice
+      : request.quantity * finalUnitPrice;
+    const taxMultiplier = isWeightItem ? item.weight! : request.quantity;
+
     updatedItems[itemIndex] = {
       ...item,
       quantity: request.quantity,
-      taxAmount: this.calculateItemTax(item.product, request.quantity),
+      taxAmount: this.calculateItemTaxWithBase(item.product, item.unitPrice, taxMultiplier),
       finalPrice: finalUnitPrice,
       totalPrice: newTotalPrice,
       notes: request.notes || item.notes,

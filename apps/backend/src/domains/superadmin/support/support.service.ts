@@ -1,18 +1,15 @@
-import {
-  Injectable,
-  NotFoundException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { SuperadminTicketQueryDto } from './dto/superadmin-ticket-query.dto';
-import { UpdateTicketStatusDto, CloseTicketDto } from '../../support/tickets/dto/ticket-status.dto';
-import { AssignTicketDto } from '../../support/tickets/dto/ticket-assignment.dto';
 import {
-  ticket_status_enum,
-  ticket_priority_enum,
-} from '@prisma/client';
+  UpdateTicketStatusDto,
+  CloseTicketDto,
+} from '../../support/tickets/dto/ticket-status.dto';
+import { AssignTicketDto } from '../../support/tickets/dto/ticket-assignment.dto';
+import { ticket_status_enum, ticket_priority_enum } from '@prisma/client';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 /**
  * Superadmin Support Service
@@ -248,7 +245,7 @@ export class SuperadminSupportService {
       });
 
       if (!ticket) {
-        throw new NotFoundException('Ticket not found');
+        throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
       }
 
       // Sign URLs for attachments
@@ -285,7 +282,7 @@ export class SuperadminSupportService {
       });
 
       if (!ticket) {
-        throw new NotFoundException('Ticket not found');
+        throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
       }
 
       const updated = await this.prisma.support_tickets.update({
@@ -324,7 +321,7 @@ export class SuperadminSupportService {
       });
 
       if (!ticket) {
-        throw new NotFoundException('Ticket not found');
+        throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
       }
 
       // Update ticket
@@ -388,7 +385,7 @@ export class SuperadminSupportService {
       });
 
       if (!ticket) {
-        throw new NotFoundException('Ticket not found');
+        throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
       }
 
       const updateData: any = {
@@ -440,18 +437,14 @@ export class SuperadminSupportService {
   /**
    * Close a ticket
    */
-  async close(
-    ticketId: number,
-    closeDto: CloseTicketDto,
-    userId: number,
-  ) {
+  async close(ticketId: number, closeDto: CloseTicketDto, userId: number) {
     try {
       const ticket = await this.prisma.support_tickets.findUnique({
         where: { id: ticketId },
       });
 
       if (!ticket) {
-        throw new NotFoundException('Ticket not found');
+        throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
       }
 
       const resolutionTime = this.calculateResolutionTime(ticket.created_at);
@@ -506,7 +499,7 @@ export class SuperadminSupportService {
       });
 
       if (!ticket) {
-        throw new NotFoundException('Ticket not found');
+        throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
       }
 
       const reopened = await this.prisma.support_tickets.update({
@@ -571,7 +564,9 @@ export class SuperadminSupportService {
         this.prisma.support_tickets.count({
           where: {
             sla_deadline: { lt: new Date() },
-            status: { notIn: [ticket_status_enum.RESOLVED, ticket_status_enum.CLOSED] },
+            status: {
+              notIn: [ticket_status_enum.RESOLVED, ticket_status_enum.CLOSED],
+            },
           },
         }),
 
@@ -587,7 +582,12 @@ export class SuperadminSupportService {
         this.prisma.support_tickets.count({
           where: {
             status: {
-              in: [ticket_status_enum.NEW, ticket_status_enum.OPEN, ticket_status_enum.IN_PROGRESS, ticket_status_enum.WAITING_RESPONSE],
+              in: [
+                ticket_status_enum.NEW,
+                ticket_status_enum.OPEN,
+                ticket_status_enum.IN_PROGRESS,
+                ticket_status_enum.WAITING_RESPONSE,
+              ],
             },
           },
         }),
@@ -631,7 +631,12 @@ export class SuperadminSupportService {
   /**
    * Add a comment to a ticket
    */
-  async addComment(ticketId: number, userId: number, content: string, isInternal: boolean = false) {
+  async addComment(
+    ticketId: number,
+    userId: number,
+    content: string,
+    isInternal: boolean = false,
+  ) {
     try {
       // Verify ticket exists
       const ticket = await this.prisma.support_tickets.findUnique({
@@ -644,7 +649,7 @@ export class SuperadminSupportService {
       });
 
       if (!ticket) {
-        throw new NotFoundException('Ticket not found');
+        throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
       }
 
       // Get user info
@@ -654,7 +659,7 @@ export class SuperadminSupportService {
       });
 
       if (!user) {
-        throw new NotFoundException('User not found');
+        throw new VendixHttpException(ErrorCodes.SUP_ADMIN_USER_001);
       }
 
       // Create comment
@@ -691,7 +696,9 @@ export class SuperadminSupportService {
         is_internal: isInternal,
       });
 
-      this.logger.log(`Comment created for ticket ${ticket.ticket_number} by superadmin`);
+      this.logger.log(
+        `Comment created for ticket ${ticket.ticket_number} by superadmin`,
+      );
       return { success: true, data: comment };
     } catch (error) {
       this.logger.error(`Error creating comment: ${error.message}`);

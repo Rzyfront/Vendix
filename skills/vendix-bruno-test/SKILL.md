@@ -5,7 +5,7 @@ description: >
   Trigger: When creating API tests, editing .bru files, or verifying endpoints.
 license: Apache-2.0
 metadata:
-  author: vendix-bot
+  author: rzyfront
   version: "1.1"
   scope: [root]
   auto_invoke: "Creating API tests (Bruno)"

@@ -10,6 +10,7 @@ export interface AuthState {
   user: any | null;
   user_settings: any | null;
   store_settings: any | null;
+  default_panel_ui: Record<string, Record<string, boolean>> | null;
   tokens: { access_token: string; refresh_token: string } | null;
   permissions: string[];
   roles: string[];
@@ -25,6 +26,7 @@ export const initialAuthState: AuthState = {
   user: null,
   user_settings: null,
   store_settings: null,
+  default_panel_ui: null,
   tokens: null,
   permissions: [],
   roles: [],
@@ -47,12 +49,13 @@ export const authReducer = createReducer(
   on(
     AuthActions.loginSuccess,
     AuthActions.loginCustomerSuccess,
-    (state, { user, user_settings, store_settings, tokens, permissions, roles }) => {
+    (state, { user, user_settings, store_settings, default_panel_ui, tokens, permissions, roles }) => {
       const newState = {
         ...state,
         user,
         user_settings,
         store_settings,
+        default_panel_ui: default_panel_ui || state.default_panel_ui,
         tokens,
         permissions: permissions || [],
         roles: roles || [],
@@ -174,12 +177,13 @@ export const authReducer = createReducer(
 
   on(
     AuthActions.restoreAuthState,
-    (state, { user, user_settings, store_settings, tokens, permissions, roles }) => {
+    (state, { user, user_settings, store_settings, default_panel_ui, tokens, permissions, roles }) => {
       const newState = {
         ...state,
         user,
         user_settings,
         store_settings,
+        default_panel_ui: default_panel_ui || state.default_panel_ui,
         tokens,
         permissions: permissions || [],
         roles: roles || [],
@@ -377,6 +381,12 @@ export const authReducer = createReducer(
       typeof error === 'string'
         ? error
         : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
+  })),
+
+  // Default Panel UI (new module detection)
+  on(AuthActions.setDefaultPanelUi, (state, { default_panel_ui }) => ({
+    ...state,
+    default_panel_ui,
   })),
 
   // Update Store Settings

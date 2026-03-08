@@ -228,6 +228,19 @@ export class ProductsService {
       );
   }
 
+  // Generación de descripción con IA
+  generateDescription(data: Record<string, any>): Observable<any> {
+    return this.http
+      .post<ApiResponse<any>>(
+        `${this.apiUrl}/store/products/generate-description`,
+        data,
+      )
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
   // Estadísticas
   getProductStats(storeId: number): Observable<ProductStats> {
     const now = Date.now();

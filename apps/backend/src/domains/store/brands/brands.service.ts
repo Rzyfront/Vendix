@@ -8,13 +8,14 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { CreateBrandDto, UpdateBrandDto, BrandQueryDto } from './dto';
 import { S3Service } from '@common/services/s3.service';
 import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class BrandsService {
   constructor(
     private prisma: StorePrismaService,
     private s3Service: S3Service,
-  ) { }
+  ) {}
   async create(createBrandDto: CreateBrandDto, user: any) {
     try {
       // CRITICAL: Sanitize logo_url to extract S3 key before storing
@@ -76,10 +77,12 @@ export class BrandsService {
       this.prisma.brands.count({ where }),
     ]);
 
-    const signedBrands = await Promise.all(brands.map(async (brand) => ({
-      ...brand,
-      logo_url: await this.s3Service.signUrl(brand.logo_url),
-    })));
+    const signedBrands = await Promise.all(
+      brands.map(async (brand) => ({
+        ...brand,
+        logo_url: await this.s3Service.signUrl(brand.logo_url),
+      })),
+    );
 
     return {
       data: signedBrands,
@@ -132,10 +135,12 @@ export class BrandsService {
       this.prisma.brands.count({ where }),
     ]);
 
-    const signedBrands = await Promise.all(brands.map(async (brand) => ({
-      ...brand,
-      logo_url: await this.s3Service.signUrl(brand.logo_url, true),
-    })));
+    const signedBrands = await Promise.all(
+      brands.map(async (brand) => ({
+        ...brand,
+        logo_url: await this.s3Service.signUrl(brand.logo_url, true),
+      })),
+    );
 
     return {
       data: signedBrands,
@@ -159,7 +164,7 @@ export class BrandsService {
     });
 
     if (!brand) {
-      throw new NotFoundException('Brand not found');
+      throw new VendixHttpException(ErrorCodes.BRAND_FIND_001);
     }
 
     return {

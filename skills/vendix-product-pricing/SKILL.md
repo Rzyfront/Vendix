@@ -5,7 +5,7 @@ description: >
   Trigger: When editing product schemas, pricing logic, or advanced product forms.
 license: Apache-2.0
 metadata:
-  author: gentleman-programming
+  author: rzyfront
   version: "1.0"
 ---
 

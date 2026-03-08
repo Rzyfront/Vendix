@@ -8,6 +8,7 @@ import { GlobalPrismaService } from '../../../prisma/services/global-prisma.serv
 import { CreateTemplateDto, UpdateTemplateDto, TemplateQueryDto } from './dto';
 import { Prisma, template_config_type_enum } from '@prisma/client';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class TemplatesService {
@@ -105,7 +106,7 @@ export class TemplatesService {
     });
 
     if (!template) {
-      throw new NotFoundException('Template not found');
+      throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
     }
 
     return template;
@@ -117,12 +118,15 @@ export class TemplatesService {
     });
 
     if (!existingTemplate) {
-      throw new NotFoundException('Template not found');
+      throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
     }
 
     // Check if template_name is being changed and if it conflicts
-    if ((updateTemplateDto as any).template_name &&
-        (updateTemplateDto as any).template_name !== existingTemplate.template_name) {
+    if (
+      (updateTemplateDto as any).template_name &&
+      (updateTemplateDto as any).template_name !==
+        existingTemplate.template_name
+    ) {
       const nameConflict = await this.prisma.default_templates.findUnique({
         where: { template_name: (updateTemplateDto as any).template_name },
       });
@@ -137,7 +141,8 @@ export class TemplatesService {
     // Validate template_data if provided
     if ((updateTemplateDto as any).template_data) {
       this.validateTemplateData(
-        (updateTemplateDto as any).configuration_type || existingTemplate.configuration_type,
+        (updateTemplateDto as any).configuration_type ||
+          existingTemplate.configuration_type,
         (updateTemplateDto as any).template_data,
       );
     }
@@ -166,7 +171,7 @@ export class TemplatesService {
     });
 
     if (!existingTemplate) {
-      throw new NotFoundException('Template not found');
+      throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
     }
 
     return this.prisma.default_templates.delete({
@@ -225,7 +230,9 @@ export class TemplatesService {
   ): void {
     // Basic JSON validation
     if (!templateData || typeof templateData !== 'object') {
-      throw new BadRequestException('template_data must be a valid JSON object');
+      throw new BadRequestException(
+        'template_data must be a valid JSON object',
+      );
     }
 
     // Type-specific validation can be added here

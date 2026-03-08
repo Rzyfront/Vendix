@@ -106,6 +106,18 @@ export class AuthFacade {
     AuthSelectors.selectVisibleModules,
   );
 
+  // New module detection observables
+  readonly defaultPanelUi$ = this.store.select(
+    AuthSelectors.selectDefaultPanelUi,
+  );
+  readonly hasNewModules$ = this.store.select(AuthSelectors.selectHasNewModules);
+  readonly newModuleCount$ = this.store.select(
+    AuthSelectors.selectAllNewModuleCount,
+  );
+  readonly newModuleKeys$ = this.store.select(
+    AuthSelectors.selectNewModuleKeys,
+  );
+
   // Domain settings observables
   readonly userDomainSettings$ = this.store.select(
     AuthSelectors.selectUserDomainSettings,
@@ -402,6 +414,10 @@ export class AuthFacade {
     let result: any = null;
     this.storeSettings$.pipe(take(1)).subscribe((settings) => (result = settings));
     return result;
+  }
+
+  setDefaultPanelUi(default_panel_ui: Record<string, Record<string, boolean>>): void {
+    this.store.dispatch(AuthActions.setDefaultPanelUi({ default_panel_ui }));
   }
 
   getUserId(): number | null {

@@ -5,13 +5,14 @@ description: >
   Trigger: When editing files in apps/backend/, creating modules, or working with Prisma.
 license: MIT
 metadata:
-  author: vendix
+  author: rzyfront
   version: "1.0"
 ---
 
 ## When to Use
 
 Use this skill when:
+
 - Creating NestJS modules, controllers, or services
 - Adding API endpoints
 - Working with Prisma in the backend
@@ -41,11 +42,11 @@ apps/backend/src/features/
 Controllers handle HTTP requests and delegate to services:
 
 ```typescript
-import { Controller, Get, Post, Body, Param, HttpStatus } from '@nestjs/common';
-import { MyFeatureService } from './my-feature.service';
-import { CreateMyFeatureDto } from './dto/create-my-feature.dto';
+import { Controller, Get, Post, Body, Param, HttpStatus } from "@nestjs/common";
+import { MyFeatureService } from "./my-feature.service";
+import { CreateMyFeatureDto } from "./dto/create-my-feature.dto";
 
-@Controller('my-feature')
+@Controller("my-feature")
 export class MyFeatureController {
   constructor(private readonly myFeatureService: MyFeatureService) {}
 
@@ -54,8 +55,8 @@ export class MyFeatureController {
     return this.myFeatureService.findAll();
   }
 
-  @Get(':id')
-  async findOne(@Param('id') id: string) {
+  @Get(":id")
+  async findOne(@Param("id") id: string) {
     return this.myFeatureService.findOne(id);
   }
 
@@ -70,17 +71,17 @@ export class MyFeatureController {
 
 Services use the **domain-appropriate scoped Prisma service** (see `vendix-prisma-scopes`):
 
-| Domain | Inject |
-|---|---|
-| `domains/store/` | `StorePrismaService` |
+| Domain                  | Inject                      |
+| ----------------------- | --------------------------- |
+| `domains/store/`        | `StorePrismaService`        |
 | `domains/organization/` | `OrganizationPrismaService` |
-| `domains/ecommerce/` | `EcommercePrismaService` |
-| `domains/superadmin/` | `GlobalPrismaService` |
+| `domains/ecommerce/`    | `EcommercePrismaService`    |
+| `domains/superadmin/`   | `GlobalPrismaService`       |
 
 ```typescript
-import { Injectable } from '@nestjs/common';
-import { StorePrismaService } from '@/prisma/services/store-prisma.service';
-import { CreateMyFeatureDto } from './dto/create-my-feature.dto';
+import { Injectable } from "@nestjs/common";
+import { StorePrismaService } from "@/prisma/services/store-prisma.service";
+import { CreateMyFeatureDto } from "./dto/create-my-feature.dto";
 
 @Injectable()
 export class MyFeatureService {
@@ -118,7 +119,7 @@ export class MyFeatureService {
 ### Pattern 4: DTO Validation with class-validator
 
 ```typescript
-import { IsString, IsNotEmpty, IsEmail, MinLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsEmail, MinLength } from "class-validator";
 
 export class CreateUserDto {
   @IsString()
@@ -137,10 +138,10 @@ export class CreateUserDto {
 ### Pattern 5: Module Registration
 
 ```typescript
-import { Module } from '@nestjs/common';
-import { MyFeatureController } from './my-feature.controller';
-import { MyFeatureService } from './my-feature.service';
-import { PrismaModule } from '../../prisma/prisma.module';
+import { Module } from "@nestjs/common";
+import { MyFeatureController } from "./my-feature.controller";
+import { MyFeatureService } from "./my-feature.service";
+import { PrismaModule } from "../../prisma/prisma.module";
 
 @Module({
   imports: [PrismaModule],
@@ -180,10 +181,10 @@ Adding authentication?
 
 ```typescript
 // items.module.ts
-import { Module } from '@nestjs/common';
-import { ItemsController } from './items.controller';
-import { ItemsService } from './items.service';
-import { PrismaModule } from '../prisma/prisma.module';
+import { Module } from "@nestjs/common";
+import { ItemsController } from "./items.controller";
+import { ItemsService } from "./items.service";
+import { PrismaModule } from "../prisma/prisma.module";
 
 @Module({
   imports: [PrismaModule],
@@ -194,11 +195,19 @@ import { PrismaModule } from '../prisma/prisma.module';
 export class ItemsModule {}
 
 // items.controller.ts
-import { Controller, Get, Post, Put, Delete, Param, Body } from '@nestjs/common';
-import { ItemsService } from './items.service';
-import { CreateItemDto } from './dto/create-item.dto';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Param,
+  Body,
+} from "@nestjs/common";
+import { ItemsService } from "./items.service";
+import { CreateItemDto } from "./dto/create-item.dto";
 
-@Controller('items')
+@Controller("items")
 export class ItemsController {
   constructor(private readonly itemsService: ItemsService) {}
 
@@ -207,8 +216,8 @@ export class ItemsController {
     return this.itemsService.findAll();
   }
 
-  @Get(':id')
-  findOne(@Param('id') id: string) {
+  @Get(":id")
+  findOne(@Param("id") id: string) {
     return this.itemsService.findOne(id);
   }
 
@@ -219,8 +228,8 @@ export class ItemsController {
 }
 
 // items.service.ts
-import { Injectable } from '@nestjs/common';
-import { StorePrismaService } from '@/prisma/services/store-prisma.service';
+import { Injectable } from "@nestjs/common";
+import { StorePrismaService } from "@/prisma/services/store-prisma.service";
 
 @Injectable()
 export class ItemsService {

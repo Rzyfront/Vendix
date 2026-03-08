@@ -1,19 +1,23 @@
-import {
-  Injectable,
-  NotFoundException,
-  ConflictException,
-  BadRequestException,
-  ForbiddenException,
-} from '@nestjs/common';
+import { Injectable, ConflictException } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
-import { CreateOrderDto, UpdateOrderDto, OrderQueryDto, UpdateOrderItemsDto } from './dto';
-import { Prisma, order_state_enum, order_delivery_type_enum } from '@prisma/client';
+import {
+  CreateOrderDto,
+  UpdateOrderDto,
+  OrderQueryDto,
+  UpdateOrderItemsDto,
+} from './dto';
+import {
+  Prisma,
+  order_state_enum,
+  order_delivery_type_enum,
+} from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { OrderStatsDto } from './dto/order-stats.dto';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { resolveCostPrice } from './utils/resolve-cost-price';
 import { SettingsService } from '../settings/settings.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class OrdersService {
@@ -30,14 +34,40 @@ export class OrdersService {
     const store_id = context?.store_id;
 
     if (!store_id) {
-      throw new ForbiddenException('Store context required for this operation');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
     const user = await this.prisma.users.findUnique({
       where: { id: createOrderDto.customer_id },
     });
     if (!user) {
-      throw new NotFoundException('User (customer) not found');
+      throw new VendixHttpException(ErrorCodes.CUST_FIND_001);
+    }
+
+    // Validar weight si está presente
+    if (createOrderDto.items) {
+      for (const item of createOrderDto.items) {
+        if (item.weight !== undefined && item.weight !== null) {
+          if (item.weight < 0) {
+            throw new VendixHttpException(ErrorCodes.ORD_VALIDATE_001);
+          }
+          if (!item.weight_unit) {
+            throw new VendixHttpException(ErrorCodes.ORD_VALIDATE_001);
+          }
+        }
+      }
+    }
+
+    // Validate weight product coherence
+    for (const item of createOrderDto.items) {
+      if (item.weight !== undefined && item.weight !== null) {
+        if (item.weight <= 0) {
+          throw new VendixHttpException(ErrorCodes.ORD_VALIDATE_001);
+        }
+        if (!item.weight_unit) {
+          throw new VendixHttpException(ErrorCodes.ORD_VALIDATE_001);
+        }
+      }
     }
 
     let retries = 3;
@@ -60,28 +90,36 @@ export class OrdersService {
             shipping_cost: createOrderDto.shipping_cost || 0,
             discount_amount: createOrderDto.discount_amount || 0,
             grand_total: createOrderDto.total_amount,
-            currency: createOrderDto.currency || await this.settingsService.getStoreCurrency(),
+            currency:
+              createOrderDto.currency ||
+              (await this.settingsService.getStoreCurrency()),
             billing_address_id: createOrderDto.billing_address_id,
             shipping_address_id: createOrderDto.shipping_address_id,
             internal_notes: createOrderDto.internal_notes,
             updated_at: new Date(),
             order_items: {
-              create: await Promise.all(createOrderDto.items.map(async (item) => ({
-                product_id: item.product_id,
-                product_variant_id: item.product_variant_id,
-                product_name: item.product_name,
-                variant_sku: item.variant_sku,
-                variant_attributes: item.variant_attributes,
-                quantity: item.quantity,
-                unit_price: item.unit_price,
-                total_price: item.total_price,
-                tax_rate: item.tax_rate,
-                tax_amount_item: item.tax_amount_item,
-                weight: item.weight,
-                weight_unit: item.weight_unit,
-                cost_price: await resolveCostPrice(this.prisma, item.product_id, item.product_variant_id),
-                updated_at: new Date(),
-              }))),
+              create: await Promise.all(
+                createOrderDto.items.map(async (item) => ({
+                  product_id: item.product_id,
+                  product_variant_id: item.product_variant_id,
+                  product_name: item.product_name,
+                  variant_sku: item.variant_sku,
+                  variant_attributes: item.variant_attributes,
+                  quantity: item.quantity,
+                  unit_price: item.unit_price,
+                  total_price: item.total_price,
+                  tax_rate: item.tax_rate,
+                  tax_amount_item: item.tax_amount_item,
+                  weight: item.weight,
+                  weight_unit: item.weight_unit,
+                  cost_price: await resolveCostPrice(
+                    this.prisma,
+                    item.product_id,
+                    item.product_variant_id,
+                  ),
+                  updated_at: new Date(),
+                })),
+              ),
             },
           },
           include: {
@@ -202,11 +240,21 @@ export class OrdersService {
         addresses_orders_shipping_address_idToaddresses: true,
         payments: true,
         shipping_method: {
-          select: { id: true, name: true, type: true, provider_name: true, min_days: true, max_days: true, logo_url: true },
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            provider_name: true,
+            min_days: true,
+            max_days: true,
+            logo_url: true,
+          },
         },
         shipping_rate: {
           include: {
-            shipping_zone: { select: { id: true, name: true, display_name: true } },
+            shipping_zone: {
+              select: { id: true, name: true, display_name: true },
+            },
           },
         },
         users: {
@@ -223,7 +271,7 @@ export class OrdersService {
     });
 
     if (!order) {
-      throw new NotFoundException('Order not found');
+      throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
     }
 
     // Sign S3 image URLs for order items products
@@ -242,7 +290,9 @@ export class OrdersService {
     await Promise.all(
       order.order_items.map(async (item: any) => {
         if (item.products?.image_url) {
-          item.products.image_url = await this.s3Service.signUrl(item.products.image_url);
+          item.products.image_url = await this.s3Service.signUrl(
+            item.products.image_url,
+          );
         }
       }),
     );
@@ -258,11 +308,12 @@ export class OrdersService {
         select: { type: true },
       });
       if (!method) {
-        throw new NotFoundException('Shipping method not found');
+        throw new VendixHttpException(ErrorCodes.ORD_SHIP_001);
       }
-      updateOrderDto.delivery_type = method.type === 'pickup'
-        ? order_delivery_type_enum.pickup
-        : order_delivery_type_enum.home_delivery;
+      updateOrderDto.delivery_type =
+        method.type === 'pickup'
+          ? order_delivery_type_enum.pickup
+          : order_delivery_type_enum.home_delivery;
     }
 
     // Recalculate grand_total if shipping_cost changes
@@ -271,7 +322,8 @@ export class OrdersService {
       const tax = Number(order.tax_amount);
       const discount = Number(order.discount_amount);
       const shipping = Number(updateOrderDto.shipping_cost);
-      (updateOrderDto as any).grand_total = subtotal + tax - discount + shipping;
+      (updateOrderDto as any).grand_total =
+        subtotal + tax - discount + shipping;
     }
 
     return this.prisma.orders.update({
@@ -284,11 +336,21 @@ export class OrdersService {
         addresses_orders_shipping_address_idToaddresses: true,
         payments: true,
         shipping_method: {
-          select: { id: true, name: true, type: true, provider_name: true, min_days: true, max_days: true, logo_url: true },
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            provider_name: true,
+            min_days: true,
+            max_days: true,
+            logo_url: true,
+          },
         },
         shipping_rate: {
           include: {
-            shipping_zone: { select: { id: true, name: true, display_name: true } },
+            shipping_zone: {
+              select: { id: true, name: true, display_name: true },
+            },
           },
         },
         users: {
@@ -309,16 +371,19 @@ export class OrdersService {
     const order = await this.findOne(id);
 
     if (order.state !== 'created') {
-      throw new BadRequestException(
-        `Cannot modify items for order in state '${order.state}'. Order must be in 'created' state.`
-      );
+      throw new VendixHttpException(ErrorCodes.ORD_STATUS_001);
     }
 
     // Calculate totals from items
-    const subtotal = dto.subtotal ?? dto.items.reduce((sum, item) => sum + item.total_price, 0);
-    const taxAmount = dto.tax_amount ?? dto.items.reduce((sum, item) => sum + (item.tax_amount_item || 0), 0);
+    const subtotal =
+      dto.subtotal ??
+      dto.items.reduce((sum, item) => sum + item.total_price, 0);
+    const taxAmount =
+      dto.tax_amount ??
+      dto.items.reduce((sum, item) => sum + (item.tax_amount_item || 0), 0);
     const discountAmount = dto.discount_amount ?? 0;
-    const grandTotal = dto.total_amount ?? (subtotal + taxAmount - discountAmount);
+    const grandTotal =
+      dto.total_amount ?? subtotal + taxAmount - discountAmount;
 
     return this.prisma.$transaction(async (tx) => {
       // Delete existing items

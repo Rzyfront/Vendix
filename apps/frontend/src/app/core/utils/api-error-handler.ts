@@ -14,6 +14,8 @@
  * }
  */
 
+import { parseApiError } from './parse-api-error';
+
 export interface ApiResponse<T = any> {
   success: boolean;
   message: string;
@@ -29,6 +31,7 @@ export interface NormalizedApiPayload {
   success?: boolean;
   message?: string;
   error?: string;
+  error_code?: string;
   statusCode?: number;
   timestamp?: string;
 }
@@ -39,6 +42,12 @@ export interface NormalizedApiPayload {
  * @returns Mensaje de error formateado
  */
 export function extractApiErrorMessage(response: any): string {
+  // Detectar error_code del nuevo sistema de error codes estandarizado
+  const body = response?.error ?? response;
+  if (body?.error_code) {
+    return parseApiError(response).userMessage;
+  }
+
   // Algunos errores HTTP vienen envueltos en un HttpErrorResponse donde
   // el body real está en `response.error`. Normalizamos ese caso primero.
   if (
@@ -163,6 +172,10 @@ export function normalizeApiPayload(response: any): NormalizedApiPayload {
 
   if (typeof response.timestamp === 'string') {
     payload.timestamp = response.timestamp;
+  }
+
+  if (typeof response.error_code === 'string') {
+    payload.error_code = response.error_code;
   }
 
   return payload;

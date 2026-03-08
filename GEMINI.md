@@ -19,20 +19,28 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 |--------|-------|
 | "revisar PR", "review PR", "analizar PR", "code review", "revisar pull request" | `pr-code-review` |
 | -- | `git-workflow` |
-| -- | `how-to-dev` |
+| -- | `vendix-ai-engine` |
 | -- | `vendix-monorepo-workspaces` |
+| -- | `vendix-panel-ui` |
 | -- | `vendix-prisma-scopes` |
+| Adding modules or submodules to the sidebar | `vendix-panel-ui` |
+| Adding new AI applications | `vendix-ai-engine` |
+| Adding new menu items to admin layouts | `vendix-panel-ui` |
 | Adding new models to domain scopes | `vendix-prisma-scopes` |
 | Adding/removing workspaces | `vendix-monorepo-workspaces` |
 | After creating/modifying a skill | `skill-sync` |
+| Configuring AI providers or applications | `vendix-ai-engine` |
 | Configuring CI/CD | `vendix-monorepo-workspaces` |
 | Configuring middleware | `vendix-backend-middleware` |
+| Configuring panel_ui visibility | `vendix-panel-ui` |
+| Creating AI-powered features | `vendix-ai-engine` |
 | Creating API endpoints | `vendix-backend-api` |
 | Creating API tests (Bruno) | `vendix-bruno-test` |
 | Creating Angular components | `vendix-frontend-component` |
 | Creating Dockerfiles | `vendix-monorepo-workspaces` |
 | Creating Frontend Modules | `vendix-frontend-module` |
 | Creating Seeds | `vendix-prisma-seed` |
+| Creating migrations, editing migration SQL, deploying migrations to production, recovering from P3009, failed migration recovery, ALTER TYPE ADD VALUE | `vendix-prisma-migrations` |
 | Creating or modifying modals in frontend | `vendix-frontend-modal` |
 | Creating or refactoring standard admin modules (stats + table) | `vendix-frontend-standard-module` |
 | Debugging Forbidden errors in Prisma queries | `vendix-prisma-scopes` |
@@ -46,10 +54,12 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Implementing multi-tenant logic | `vendix-multi-tenant-context` |
 | Implementing stats cards or dashboard metrics with mobile scroll | `vendix-frontend-stats-cards` |
 | Installing dependencies | `vendix-monorepo-workspaces` |
+| Integrating AI Engine into a domain | `vendix-ai-engine` |
 | Managing Routes | `vendix-frontend-routing` |
 | Managing State | `vendix-frontend-state` |
 | Modifying package.json | `vendix-monorepo-workspaces` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
+| Styling AI interaction buttons or loading states | `vendix-ai-engine` |
 | Styling and Theming | `vendix-frontend-theme` |
 | Troubleshoot why a skill is missing from AGENTS.md auto-invoke | `skill-sync` |
 | Understanding Public/Private Apps and Domains | `vendix-app-architecture` |
@@ -57,7 +67,9 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Verifying Build | `buildcheck-dev` |
 | Working on backend domains | `vendix-backend-domain` |
 | Working on frontend domains | `vendix-frontend-domain` |
+| Working with MenuFilterService or menu filtering | `vendix-panel-ui` |
 | Working with Prisma scoped services | `vendix-prisma-scopes` |
+| Working with ai_engine service or AIEngineService | `vendix-ai-engine` |
 | Working with notifications, SSE, or adding new event-driven alerts | `vendix-notifications-system` |
 | Writing Code (Naming) | `vendix-naming-conventions` |
 | Writing Validation Logic | `vendix-validation` |

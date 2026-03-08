@@ -8,6 +8,8 @@ import {
   TableAction,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  IconComponent,
+  ButtonComponent,
 } from '../../../../../../../shared/components/index';
 
 @Component({
@@ -18,6 +20,8 @@ import {
     FormsModule,
     InputsearchComponent,
     ResponsiveDataViewComponent,
+    IconComponent,
+    ButtonComponent,
   ],
   template: `
     <div>
@@ -46,25 +50,14 @@ import {
               ></app-inputsearch>
 
               @if (show_create()) {
-                <button
-                  class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-                  (click)="create.emit()"
+                <app-button
+                  variant="primary"
+                  size="sm"
+                  (clicked)="create.emit()"
                 >
-                  <svg
-                    class="h-4 w-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      d="M12 4v16m8-8H4"
-                    />
-                  </svg>
+                  <app-icon slot="icon" name="plus" [size]="16"></app-icon>
                   <span class="hidden sm:inline">Crear Zona</span>
-                </button>
+                </app-button>
               }
             </div>
           </div>
@@ -86,25 +79,7 @@ import {
             <div
               class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center"
             >
-              <svg
-                class="w-6 h-6 text-gray-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-                />
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
-                />
-              </svg>
+              <app-icon name="map-pin" [size]="24" class="text-gray-400"></app-icon>
             </div>
             <p class="text-sm text-text-secondary">{{ empty_message() }}</p>
             <p class="text-xs text-gray-400 mt-1">

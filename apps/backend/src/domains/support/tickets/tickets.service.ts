@@ -1,18 +1,20 @@
-import {
-  Injectable,
-  NotFoundException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketQueryDto } from './dto/ticket-query.dto';
 import { AssignTicketDto } from './dto/ticket-assignment.dto';
 import { UpdateTicketStatusDto, CloseTicketDto } from './dto/ticket-status.dto';
-import { Prisma, ticket_status_enum, ticket_priority_enum, ticket_category_enum } from '@prisma/client';
+import {
+  Prisma,
+  ticket_status_enum,
+  ticket_priority_enum,
+  ticket_category_enum,
+} from '@prisma/client';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class TicketsService {
@@ -39,7 +41,7 @@ export class TicketsService {
       });
 
       if (!organization) {
-        throw new NotFoundException('Organization not found');
+        throw new VendixHttpException(ErrorCodes.SUP_ORG_001);
       }
 
       // Generate ticket number
@@ -83,7 +85,10 @@ export class TicketsService {
       });
 
       // Handle attachments if any
-      if (createTicketDto.attachments && createTicketDto.attachments.length > 0) {
+      if (
+        createTicketDto.attachments &&
+        createTicketDto.attachments.length > 0
+      ) {
         await this.handleAttachments(
           ticket.id,
           organization,
@@ -298,7 +303,7 @@ export class TicketsService {
       });
 
       if (!ticket) {
-        throw new NotFoundException('Ticket not found');
+        throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
       }
 
       // Sign URLs for attachments
@@ -325,14 +330,18 @@ export class TicketsService {
     }
   }
 
-  async update(ticketId: number, updateTicketDto: UpdateTicketDto, userId: number) {
+  async update(
+    ticketId: number,
+    updateTicketDto: UpdateTicketDto,
+    userId: number,
+  ) {
     try {
       const ticket = await this.prisma.support_tickets.findUnique({
         where: { id: ticketId },
       });
 
       if (!ticket) {
-        throw new NotFoundException('Ticket not found');
+        throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
       }
 
       const updated = await this.prisma.support_tickets.update({
@@ -365,7 +374,7 @@ export class TicketsService {
       });
 
       if (!ticket) {
-        throw new NotFoundException('Ticket not found');
+        throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
       }
 
       // Update ticket
@@ -426,7 +435,7 @@ export class TicketsService {
       });
 
       if (!ticket) {
-        throw new NotFoundException('Ticket not found');
+        throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
       }
 
       const updateData: any = {
@@ -475,18 +484,14 @@ export class TicketsService {
     }
   }
 
-  async close(
-    ticketId: number,
-    closeDto: CloseTicketDto,
-    userId: number,
-  ) {
+  async close(ticketId: number, closeDto: CloseTicketDto, userId: number) {
     try {
       const ticket = await this.prisma.support_tickets.findUnique({
         where: { id: ticketId },
       });
 
       if (!ticket) {
-        throw new NotFoundException('Ticket not found');
+        throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
       }
 
       const resolutionTime = this.calculateResolutionTime(ticket.created_at);
@@ -538,7 +543,7 @@ export class TicketsService {
       });
 
       if (!ticket) {
-        throw new NotFoundException('Ticket not found');
+        throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
       }
 
       const reopened = await this.prisma.support_tickets.update({
@@ -607,7 +612,9 @@ export class TicketsService {
           where: {
             ...where,
             sla_deadline: { lt: new Date() },
-            status: { notIn: [ticket_status_enum.RESOLVED, ticket_status_enum.CLOSED] },
+            status: {
+              notIn: [ticket_status_enum.RESOLVED, ticket_status_enum.CLOSED],
+            },
           },
         }),
 
@@ -705,11 +712,16 @@ export class TicketsService {
         );
 
         // Get file size from base64
-        const buffer = Buffer.from(attachment.base64_data.split(',')[1] || attachment.base64_data, 'base64');
+        const buffer = Buffer.from(
+          attachment.base64_data.split(',')[1] || attachment.base64_data,
+          'base64',
+        );
         const fileSize = buffer.length;
 
         // Determine file type
-        const fileType = attachment.mime_type.startsWith('image/') ? 'IMAGE' : 'DOCUMENT';
+        const fileType = attachment.mime_type.startsWith('image/')
+          ? 'IMAGE'
+          : 'DOCUMENT';
 
         // Save attachment record (only store keys, URLs are generated on demand)
         await this.prisma.support_attachments.create({

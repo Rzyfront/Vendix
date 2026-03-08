@@ -18,6 +18,7 @@ export interface EcommerceProduct {
   final_price: number;
   image_url: string | null;
   weight?: number | null;
+  pricing_type?: 'unit' | 'weight';
   brand: { id: number; name: string } | null;
   categories: { id: number; name: string; slug: string }[];
   variant_count?: number;

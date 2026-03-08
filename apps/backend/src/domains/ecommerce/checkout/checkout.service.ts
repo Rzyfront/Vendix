@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { CartService } from '../cart/cart.service';
@@ -9,6 +9,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { payment_processing_mode_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../../store/settings/settings.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class CheckoutService {
@@ -19,7 +20,7 @@ export class CheckoutService {
     private readonly taxes_service: TaxesService,
     private readonly eventEmitter: EventEmitter2,
     private readonly settingsService: SettingsService,
-  ) { }
+  ) {}
 
   async getPaymentMethods(shippingMethodType?: string) {
     // Determine allowed processing modes based on shipping method type
@@ -87,7 +88,7 @@ export class CheckoutService {
     });
 
     if (!cart || cart.cart_items.length === 0) {
-      throw new BadRequestException('Cart is empty');
+      throw new VendixHttpException(ErrorCodes.ECOM_CART_001);
     }
 
     // store_id se aplica automáticamente
@@ -100,7 +101,7 @@ export class CheckoutService {
     });
 
     if (!payment_method) {
-      throw new BadRequestException('Invalid payment method');
+      throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_002);
     }
 
     for (const item of cart.cart_items) {
@@ -110,19 +111,15 @@ export class CheckoutService {
       });
 
       if (productVariantCount > 0 && !item.product_variant_id) {
-        throw new BadRequestException(
-          `El producto "${item.product.name}" requiere selección de variante`,
-        );
+        throw new VendixHttpException(ErrorCodes.ECOM_CART_002);
       }
 
       if (item.product.track_inventory) {
         const available = item.product_variant
-          ? item.product_variant.stock_quantity ?? 0
-          : item.product.stock_quantity ?? 0;
+          ? (item.product_variant.stock_quantity ?? 0)
+          : (item.product.stock_quantity ?? 0);
         if (item.quantity > available) {
-          throw new BadRequestException(
-            `Insufficient stock for ${item.product.name}. Only ${available} available.`,
-          );
+          throw new VendixHttpException(ErrorCodes.ECOM_CART_003);
         }
       }
     }
@@ -168,27 +165,31 @@ export class CheckoutService {
     let shipping_cost = 0;
     let shipping_method_id: number | null = null;
     let shipping_rate_id: number | null = null;
-    let delivery_type: 'pickup' | 'home_delivery' | 'direct_delivery' | 'other' = 'direct_delivery';
+    let delivery_type:
+      | 'pickup'
+      | 'home_delivery'
+      | 'direct_delivery'
+      | 'other' = 'direct_delivery';
 
     if (dto.shipping_rate_id) {
       const rate = await this.store_prisma.shipping_rates.findFirst({
         where: {
           id: dto.shipping_rate_id,
-          is_active: true
+          is_active: true,
         },
         include: {
           shipping_method: true,
-          shipping_zone: true
-        }
+          shipping_zone: true,
+        },
       });
 
       if (!rate) {
-        throw new BadRequestException('Método de envío inválido o no disponible');
+        throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_003);
       }
 
       // Verificar que la zona pertenece a la tienda
       if (rate.shipping_zone.store_id !== store_id) {
-        throw new BadRequestException('Método de envío no disponible para esta tienda');
+        throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_003);
       }
 
       shipping_cost = Number(rate.base_cost);
@@ -208,12 +209,12 @@ export class CheckoutService {
         where: {
           id: dto.shipping_method_id,
           store_id: store_id,
-          is_active: true
-        }
+          is_active: true,
+        },
       });
 
       if (!method) {
-        throw new BadRequestException('Método de envío inválido');
+        throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_003);
       }
 
       shipping_method_id = method.id;
@@ -245,19 +246,24 @@ export class CheckoutService {
         if (item.product_variant?.price_override) {
           netPrice = Number(item.product_variant.price_override);
         } else {
-          netPrice = productWithTaxes.is_on_sale && productWithTaxes.sale_price
-            ? Number(productWithTaxes.sale_price)
-            : Number(productWithTaxes.base_price);
+          netPrice =
+            productWithTaxes.is_on_sale && productWithTaxes.sale_price
+              ? Number(productWithTaxes.sale_price)
+              : Number(productWithTaxes.base_price);
         }
 
-        const taxInfo = await this.taxes_service.calculateProductTaxes(item.product_id, netPrice);
+        const taxInfo = await this.taxes_service.calculateProductTaxes(
+          item.product_id,
+          netPrice,
+        );
 
         // Resolve cost_price: variant takes priority over product
-        const cost_price = item.product_variant?.cost_price != null
-          ? Number(item.product_variant.cost_price)
-          : productWithTaxes.cost_price != null
-            ? Number(productWithTaxes.cost_price)
-            : null;
+        const cost_price =
+          item.product_variant?.cost_price != null
+            ? Number(item.product_variant.cost_price)
+            : productWithTaxes.cost_price != null
+              ? Number(productWithTaxes.cost_price)
+              : null;
 
         return {
           ...item,
@@ -269,11 +275,17 @@ export class CheckoutService {
           total_net: netPrice * item.quantity,
           item_taxes: taxInfo.taxes,
         };
-      })
+      }),
     );
 
-    const subtotal = itemsWithTaxes.reduce((sum, item) => sum + item.total_net, 0);
-    const total_tax = itemsWithTaxes.reduce((sum, item) => sum + item.total_tax, 0);
+    const subtotal = itemsWithTaxes.reduce(
+      (sum, item) => sum + item.total_net,
+      0,
+    );
+    const total_tax = itemsWithTaxes.reduce(
+      (sum, item) => sum + item.total_tax,
+      0,
+    );
     const grand_total = subtotal + total_tax + shipping_cost;
 
     // store_id y customer_id (user_id) se inyectan automáticamente
@@ -310,13 +322,13 @@ export class CheckoutService {
             tax_amount_item: item.tax_amount_item,
             cost_price: item.cost_price,
             order_item_taxes: {
-              create: item.item_taxes.map(t => ({
+              create: item.item_taxes.map((t) => ({
                 tax_rate_id: t.tax_rate_id,
                 tax_name: t.name,
                 tax_rate: t.rate,
                 tax_amount: t.amount * item.quantity,
-              }))
-            }
+              })),
+            },
           })),
         },
       },
@@ -446,7 +458,7 @@ export class CheckoutService {
     // Helper: build cart_items from DTO items (localStorage)
     const buildItemsFromDto = async () => {
       if (!dto.items || dto.items.length === 0) {
-        throw new BadRequestException('Cart is empty');
+        throw new VendixHttpException(ErrorCodes.ECOM_CART_001);
       }
       return Promise.all(
         dto.items.map(async (item) => {
@@ -454,7 +466,7 @@ export class CheckoutService {
             where: { id: item.product_id },
           });
           if (!product) {
-            throw new BadRequestException(`Product with id ${item.product_id} not found`);
+            throw new VendixHttpException(ErrorCodes.ECOM_PRODUCT_001);
           }
 
           let product_variant = null;
@@ -463,7 +475,7 @@ export class CheckoutService {
               where: { id: item.product_variant_id },
             });
             if (!product_variant) {
-              throw new BadRequestException(`Variant with id ${item.product_variant_id} not found`);
+              throw new VendixHttpException(ErrorCodes.ECOM_CART_002);
             }
           }
 
@@ -474,7 +486,7 @@ export class CheckoutService {
             product,
             product_variant,
           };
-        })
+        }),
       );
     };
 
@@ -501,7 +513,7 @@ export class CheckoutService {
         // Fallback: user has items in localStorage but backend cart is empty
         cart_items = await buildItemsFromDto();
       } else {
-        throw new BadRequestException('Cart is empty');
+        throw new VendixHttpException(ErrorCodes.ECOM_CART_001);
       }
     }
 
@@ -511,19 +523,15 @@ export class CheckoutService {
       });
 
       if (productVariantCount > 0 && !item.product_variant_id) {
-        throw new BadRequestException(
-          `El producto "${item.product.name}" requiere selección de variante`,
-        );
+        throw new VendixHttpException(ErrorCodes.ECOM_CART_002);
       }
 
       if (item.product.track_inventory) {
         const available = item.product_variant
-          ? item.product_variant.stock_quantity ?? 0
-          : item.product.stock_quantity ?? 0;
+          ? (item.product_variant.stock_quantity ?? 0)
+          : (item.product.stock_quantity ?? 0);
         if (item.quantity > available) {
-          throw new BadRequestException(
-            `Insufficient stock for ${item.product.name}. Only ${available} available.`,
-          );
+          throw new VendixHttpException(ErrorCodes.ECOM_CART_003);
         }
       }
     }
@@ -551,19 +559,24 @@ export class CheckoutService {
         if (item.product_variant?.price_override) {
           netPrice = Number(item.product_variant.price_override);
         } else {
-          netPrice = productWithTaxes.is_on_sale && productWithTaxes.sale_price
-            ? Number(productWithTaxes.sale_price)
-            : Number(productWithTaxes.base_price);
+          netPrice =
+            productWithTaxes.is_on_sale && productWithTaxes.sale_price
+              ? Number(productWithTaxes.sale_price)
+              : Number(productWithTaxes.base_price);
         }
 
-        const taxInfo = await this.taxes_service.calculateProductTaxes(item.product_id, netPrice);
+        const taxInfo = await this.taxes_service.calculateProductTaxes(
+          item.product_id,
+          netPrice,
+        );
 
         // Resolve cost_price: variant takes priority over product
-        const cost_price = item.product_variant?.cost_price != null
-          ? Number(item.product_variant.cost_price)
-          : productWithTaxes.cost_price != null
-            ? Number(productWithTaxes.cost_price)
-            : null;
+        const cost_price =
+          item.product_variant?.cost_price != null
+            ? Number(item.product_variant.cost_price)
+            : productWithTaxes.cost_price != null
+              ? Number(productWithTaxes.cost_price)
+              : null;
 
         return {
           ...item,
@@ -575,11 +588,17 @@ export class CheckoutService {
           total_net: netPrice * item.quantity,
           item_taxes: taxInfo.taxes,
         };
-      })
+      }),
     );
 
-    const subtotal = itemsWithTaxes.reduce((sum, item) => sum + item.total_net, 0);
-    const total_tax = itemsWithTaxes.reduce((sum, item) => sum + item.total_tax, 0);
+    const subtotal = itemsWithTaxes.reduce(
+      (sum, item) => sum + item.total_net,
+      0,
+    );
+    const total_tax = itemsWithTaxes.reduce(
+      (sum, item) => sum + item.total_tax,
+      0,
+    );
     const grand_total = subtotal + total_tax;
 
     const order = await this.prisma.orders.create({
@@ -613,13 +632,13 @@ export class CheckoutService {
             tax_amount_item: item.tax_amount_item,
             cost_price: item.cost_price,
             order_item_taxes: {
-              create: item.item_taxes.map(t => ({
+              create: item.item_taxes.map((t) => ({
                 tax_rate_id: t.tax_rate_id,
                 tax_name: t.name,
                 tax_rate: t.rate,
                 tax_amount: t.amount * item.quantity,
-              }))
-            }
+              })),
+            },
           })),
         },
       },
@@ -669,7 +688,7 @@ export class CheckoutService {
       subtotal: subtotal,
       tax: total_tax,
       item_count: cart_items.reduce((sum, i) => sum + i.quantity, 0),
-      items: order.order_items.map(oi => ({
+      items: order.order_items.map((oi) => ({
         name: oi.product_name,
         variant_sku: oi.variant_sku,
         quantity: oi.quantity,
@@ -687,7 +706,7 @@ export class CheckoutService {
     const store_id = RequestContextService.getStoreId();
 
     if (!store_id) {
-      throw new BadRequestException('Store context required');
+      throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
     }
 
     const store = await this.prisma.stores.findUnique({
@@ -704,7 +723,7 @@ export class CheckoutService {
     const end_of_day = new Date(date);
     end_of_day.setHours(23, 59, 59, 999);
 
-    // IMPORTANTE: Usar store_prisma para contar TODAS las órdenes de la tienda, 
+    // IMPORTANTE: Usar store_prisma para contar TODAS las órdenes de la tienda,
     // no solo las del usuario actual (que es lo que haría this.prisma.orders.count)
     const count = await this.store_prisma.orders.count({
       where: {

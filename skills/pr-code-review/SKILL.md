@@ -6,15 +6,23 @@ description: >
   Trigger: Cuando el usuario pide revisar PRs, analizar código de un PR, o hacer code review.
 license: Apache-2.0
 metadata:
-  author: vendix
+  author: rzyfront
   version: "1.0"
   scope: [root]
-  auto_invoke: ["revisar PR", "review PR", "analizar PR", "code review", "revisar pull request"]
+  auto_invoke:
+    [
+      "revisar PR",
+      "review PR",
+      "analizar PR",
+      "code review",
+      "revisar pull request",
+    ]
 ---
 
 ## When to Use
 
 Use this skill when:
+
 - El usuario pide revisar PRs abiertos de uno o más repositorios
 - Se necesita analizar código de un PR antes de aprobarlo
 - Se quiere evaluar la calidad y seguridad de cambios propuestos
@@ -62,6 +70,7 @@ El GitHub MCP server se configura en `~/.claude/settings.json` (global) o `.clau
    - Para repos privados es indispensable el scope `repo`
 
 2. **Agregar la config** al archivo de settings:
+
    ```bash
    # Global (funciona en todos los proyectos)
    ~/.claude/settings.json
@@ -76,13 +85,13 @@ El GitHub MCP server se configura en `~/.claude/settings.json` (global) o `.clau
 
 #### Permisos mínimos del token por funcionalidad
 
-| Funcionalidad | Permisos necesarios |
-|---------------|-------------------|
-| Listar PRs / ver diffs | `repo` (read) |
-| Postear reviews / comentarios | `repo` (write) |
-| Buscar repos de una org | `read:org` |
-| Ver info del usuario | `read:user` |
-| Repos privados | `repo` (full control) |
+| Funcionalidad                 | Permisos necesarios   |
+| ----------------------------- | --------------------- |
+| Listar PRs / ver diffs        | `repo` (read)         |
+| Postear reviews / comentarios | `repo` (write)        |
+| Buscar repos de una org       | `read:org`            |
+| Ver info del usuario          | `read:user`           |
+| Repos privados                | `repo` (full control) |
 
 #### Troubleshooting
 
@@ -115,14 +124,14 @@ PASO 7 → Repetir con el siguiente PR
 
 ### Pattern 2: Las 6 Categorías de Análisis (SIEMPRE revisar todas)
 
-| # | Categoría | Qué buscar | Severidad |
-|---|-----------|------------|-----------|
-| 1 | **Seguridad** | XSS (innerHTML sin sanitizar), SQL injection, auth faltante, secrets expuestos, inputs sin validar | ALTA |
-| 2 | **Lógica** | Race conditions, estados inconsistentes, valores falsy (`\|\| 0` vs `?? 0`), memory leaks, llamadas duplicadas a API | ALTA |
-| 3 | **Sintaxis** | Typos, brackets faltantes, imports incorrectos, código que no compila | ALTA |
-| 4 | **Archivos Core** | Cambios en router, store, package.json, configs — evaluar impacto en otros módulos | MEDIA |
-| 5 | **Scope del PR** | Features mezcladas, cambios no relacionados con el título, cambios "sneaky" enterrados | MEDIA |
-| 6 | **Calidad** | Hardcoded values, error handling faltante, console.logs de debug, código duplicado, patrones inconsistentes | BAJA |
+| #   | Categoría         | Qué buscar                                                                                                           | Severidad |
+| --- | ----------------- | -------------------------------------------------------------------------------------------------------------------- | --------- |
+| 1   | **Seguridad**     | XSS (innerHTML sin sanitizar), SQL injection, auth faltante, secrets expuestos, inputs sin validar                   | ALTA      |
+| 2   | **Lógica**        | Race conditions, estados inconsistentes, valores falsy (`\|\| 0` vs `?? 0`), memory leaks, llamadas duplicadas a API | ALTA      |
+| 3   | **Sintaxis**      | Typos, brackets faltantes, imports incorrectos, código que no compila                                                | ALTA      |
+| 4   | **Archivos Core** | Cambios en router, store, package.json, configs — evaluar impacto en otros módulos                                   | MEDIA     |
+| 5   | **Scope del PR**  | Features mezcladas, cambios no relacionados con el título, cambios "sneaky" enterrados                               | MEDIA     |
+| 6   | **Calidad**       | Hardcoded values, error handling faltante, console.logs de debug, código duplicado, patrones inconsistentes          | BAJA      |
 
 ### Pattern 3: Sistema de Calificación
 
@@ -144,16 +153,20 @@ Siempre presentar cada PR en este formato:
 **Autor:** username | **Archivos:** N | **+adds / -dels** | **Branch:** head → base
 
 ## Archivos modificados
+
 (tabla con archivo, cambios, qué hace)
 
 ## Hallazgos
+
 (organizados por severidad: CRITICO > ALTO > MEDIO > BAJO)
 (cada hallazgo con: archivo, línea aproximada, código relevante, explicación, fix sugerido)
 
 ## Archivos Core tocados
+
 (tabla con archivo, nivel de riesgo, nota)
 
 ## Calificación: XX/100
+
 (lo bueno, lo malo, recomendación: APPROVE o REQUEST CHANGES)
 ```
 
@@ -178,6 +191,7 @@ Hay [N] cosas que revisar antes de merge:
 ```
 
 Reglas del mensaje:
+
 - Lenguaje natural, no robótico
 - Empezar con algo positivo del PR
 - Issues ordenados por severidad (crítico primero)

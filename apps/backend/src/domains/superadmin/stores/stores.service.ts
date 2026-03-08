@@ -13,6 +13,7 @@ import {
 } from '../../store/stores/dto';
 import { Prisma } from '@prisma/client';
 import slugify from 'slugify';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class StoresService {
@@ -165,7 +166,7 @@ export class StoresService {
     });
 
     if (!store) {
-      throw new NotFoundException('Store not found');
+      throw new VendixHttpException(ErrorCodes.ORG_STORE_001);
     }
 
     return store;
@@ -177,7 +178,7 @@ export class StoresService {
     });
 
     if (!existingStore) {
-      throw new NotFoundException('Store not found');
+      throw new VendixHttpException(ErrorCodes.ORG_STORE_001);
     }
 
     let slug = existingStore.slug;
@@ -232,7 +233,7 @@ export class StoresService {
     });
 
     if (!existingStore) {
-      throw new NotFoundException('Store not found');
+      throw new VendixHttpException(ErrorCodes.ORG_STORE_001);
     }
 
     if (
