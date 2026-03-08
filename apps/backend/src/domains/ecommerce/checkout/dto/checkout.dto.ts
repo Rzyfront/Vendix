@@ -1,4 +1,35 @@
-import { IsInt, IsOptional, IsString, IsObject } from 'class-validator';
+import { IsInt, IsOptional, IsString, ValidateNested, IsNotEmpty } from 'class-validator';
+import { Type } from 'class-transformer';
+
+class ShippingAddressDto {
+    @IsNotEmpty()
+    @IsString()
+    address_line1: string;
+
+    @IsOptional()
+    @IsString()
+    address_line2?: string;
+
+    @IsNotEmpty()
+    @IsString()
+    city: string;
+
+    @IsOptional()
+    @IsString()
+    state_province?: string;
+
+    @IsNotEmpty()
+    @IsString()
+    country_code: string;
+
+    @IsOptional()
+    @IsString()
+    postal_code?: string;
+
+    @IsOptional()
+    @IsString()
+    phone_number?: string;
+}
 
 export class CheckoutDto {
     @IsOptional()
@@ -14,17 +45,11 @@ export class CheckoutDto {
     shipping_address_id?: number;
 
     @IsOptional()
-    @IsObject()
-    shipping_address?: {
-        address_line1: string;
-        address_line2?: string;
-        city: string;
-        state_province?: string;
-        country_code: string;
-        postal_code?: string;
-        phone_number?: string;
-    };
+    @ValidateNested()
+    @Type(() => ShippingAddressDto)
+    shipping_address?: ShippingAddressDto;
 
+    @IsNotEmpty()
     @IsInt()
     payment_method_id: number;
 
