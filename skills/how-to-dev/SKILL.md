@@ -5,7 +5,7 @@ description: >
   Trigger: SIEMPRE que el usuario solicite cambios, nuevas funcionalidades o desarrollo general.
 license: MIT
 metadata:
-  author: vendix
+  author: rzyfront
   version: "1.0"
 ---
 
@@ -37,7 +37,7 @@ Cuando la petición implica cambios estructurales, flujos completos, amplios, o 
 ## 🚨 REGLAS ULTRA-OBLIGATORIAS
 
 - **NUNCA** se debe crear o iniciar un plan sin referenciar detalladamente las skills requeridas por etapas y por puntos.
-- **NUNCA, ABSOLUTAMENTE NUNCA** debes empezar el desarrollo de un plan que aún no tiene referencias a las skills en sus etapas o puntos. Siempre, *antes* de empezar a planificar o desarrollar, debes verificar qué skills cubren cada etapa o punto y referenciarlas correctamente en cada uno.
+- **NUNCA, ABSOLUTAMENTE NUNCA** debes empezar el desarrollo de un plan que aún no tiene referencias a las skills en sus etapas o puntos. Siempre, _antes_ de empezar a planificar o desarrollar, debes verificar qué skills cubren cada etapa o punto y referenciarlas correctamente en cada uno.
 - **Siempre usar este estándar** pre-diseñado para todos los desarrollos.
 - **Consultar antes de Actuar**: Nunca asumas un patrón ni avances sin mapear la skill pertinente frente a los puntos de cambio.
 

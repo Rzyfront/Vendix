@@ -7,8 +7,10 @@ import {
   OnDestroy,
   ViewChild,
   ElementRef,
+  PLATFORM_ID,
+  Inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { CommonModule, isPlatformBrowser } from '@angular/common';
 
 export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
 
@@ -119,8 +121,13 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
 export class ModalComponent implements OnInit, OnDestroy {
   private _isOpen = false;
   private _isInternalChange = false;
+  private isBrowser: boolean;
 
   @ViewChild('modalContainer') modalContainer!: ElementRef;
+
+  constructor(@Inject(PLATFORM_ID) platformId: object) {
+    this.isBrowser = isPlatformBrowser(platformId);
+  }
 
   @Input()
   set isOpen(value: boolean) {
@@ -139,10 +146,12 @@ export class ModalComponent implements OnInit, OnDestroy {
       }
 
       // Manage body scroll based on modal state
-      if (value) {
-        document.body.style.overflow = 'hidden';
-      } else {
-        document.body.style.overflow = '';
+      if (this.isBrowser) {
+        if (value) {
+          document.body.style.overflow = 'hidden';
+        } else {
+          document.body.style.overflow = '';
+        }
       }
     }
   }
@@ -169,7 +178,7 @@ export class ModalComponent implements OnInit, OnDestroy {
   private escapeListener?: (event: KeyboardEvent) => void;
 
   ngOnInit(): void {
-    if (this.closeOnEscape) {
+    if (this.isBrowser && this.closeOnEscape) {
       this.escapeListener = (event: KeyboardEvent) => {
         if (event.key === 'Escape' && this.isOpen) {
           this.close();
@@ -180,13 +189,15 @@ export class ModalComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    if (this.escapeListener) {
-      document.removeEventListener('keydown', this.escapeListener);
-    }
+    if (this.isBrowser) {
+      if (this.escapeListener) {
+        document.removeEventListener('keydown', this.escapeListener);
+      }
 
-    // Restore body scroll when component is destroyed
-    if (this.isOpen) {
-      document.body.style.overflow = '';
+      // Restore body scroll when component is destroyed
+      if (this.isOpen) {
+        document.body.style.overflow = '';
+      }
     }
   }
 

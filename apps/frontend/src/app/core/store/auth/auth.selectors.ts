@@ -278,6 +278,44 @@ export const selectVisibleModules = createSelector(
   },
 );
 
+// Default Panel UI selectors (new module detection)
+export const selectDefaultPanelUi = createSelector(
+  selectAuthState,
+  (state: AuthState) => state.default_panel_ui,
+);
+
+export const selectNewModuleKeys = createSelector(
+  selectPanelUiConfig,
+  selectDefaultPanelUi,
+  selectSelectedAppType,
+  (panelUi: any, defaults: Record<string, Record<string, boolean>> | null, appType: string) => {
+    if (!defaults) return [];
+    const userKeys = panelUi?.[appType] || {};
+    const defaultKeys = defaults[appType] || {};
+    return Object.keys(defaultKeys).filter((key) => !userKeys.hasOwnProperty(key));
+  },
+);
+
+export const selectAllNewModuleCount = createSelector(
+  selectPanelUiConfig,
+  selectDefaultPanelUi,
+  (panelUi: any, defaults: Record<string, Record<string, boolean>> | null) => {
+    if (!defaults) return 0;
+    let count = 0;
+    for (const appType of Object.keys(defaults)) {
+      const userKeys = panelUi?.[appType] || {};
+      const defaultKeys = defaults[appType] || {};
+      count += Object.keys(defaultKeys).filter((key) => !userKeys.hasOwnProperty(key)).length;
+    }
+    return count;
+  },
+);
+
+export const selectHasNewModules = createSelector(
+  selectAllNewModuleCount,
+  (count: number) => count > 0,
+);
+
 // Domain settings selector
 // Prioridad: 1) dominio de la tienda, 2) dominio de la organización
 export const selectUserDomainSettings = createSelector(

@@ -9,10 +9,11 @@ import { RequestContextService } from '../../../common/context/request-context.s
 import { CreateExpenseDto } from './dto/create-expense.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
 import { QueryExpenseDto } from './dto/query-expense.dto';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class ExpensesService {
-  constructor(private readonly prisma: StorePrismaService) { }
+  constructor(private readonly prisma: StorePrismaService) {}
 
   private getContext() {
     const context = RequestContextService.getContext();
@@ -101,7 +102,7 @@ export class ExpensesService {
     });
 
     if (!expense) {
-      throw new NotFoundException('Expense not found');
+      throw new VendixHttpException(ErrorCodes.INV_FIND_001);
     }
 
     return expense;
@@ -120,7 +121,7 @@ export class ExpensesService {
       });
 
       if (!category) {
-        throw new NotFoundException('Expense category not found');
+        throw new VendixHttpException(ErrorCodes.INV_FIND_001);
       }
     }
 
@@ -166,7 +167,7 @@ export class ExpensesService {
       });
 
       if (!category) {
-        throw new NotFoundException('Expense category not found');
+        throw new VendixHttpException(ErrorCodes.INV_FIND_001);
       }
     }
 
@@ -265,11 +266,11 @@ export class ExpensesService {
     const where: Prisma.expensesWhereInput = {
       ...(dateFrom &&
         dateTo && {
-        expense_date: {
-          gte: dateFrom,
-          lte: dateTo,
-        },
-      }),
+          expense_date: {
+            gte: dateFrom,
+            lte: dateTo,
+          },
+        }),
     };
 
     // Aggregate totals for approved+paid expenses
@@ -372,7 +373,7 @@ export class ExpensesService {
     });
 
     if (!category) {
-      throw new NotFoundException('Category not found');
+      throw new VendixHttpException(ErrorCodes.INV_FIND_001);
     }
 
     return this.prisma.expense_categories.update({
@@ -390,7 +391,7 @@ export class ExpensesService {
     });
 
     if (!category) {
-      throw new NotFoundException('Category not found');
+      throw new VendixHttpException(ErrorCodes.INV_FIND_001);
     }
 
     // Check if used

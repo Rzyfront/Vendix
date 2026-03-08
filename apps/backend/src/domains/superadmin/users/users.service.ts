@@ -1,8 +1,6 @@
 import {
   Injectable,
-  NotFoundException,
   ConflictException,
-  ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
@@ -15,6 +13,7 @@ import { user_state_enum } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
 import { toTitleCase } from '@common/utils/format.util';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class UsersService {
@@ -161,7 +160,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_USER_001);
     }
 
     // Remove password from response
@@ -175,7 +174,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_USER_001);
     }
 
     // Check if email is being changed and if it already exists
@@ -242,7 +241,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_USER_001);
     }
 
     // Check if user is a super admin
@@ -251,7 +250,7 @@ export class UsersService {
     );
 
     if (hasSuperAdminRole) {
-      throw new ForbiddenException('Cannot delete super admin users');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_PERM_001);
     }
 
     // Check if user has important data that shouldn't be deleted
@@ -282,7 +281,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_USER_001);
     }
 
     await this.prisma.users.update({
@@ -299,7 +298,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_USER_001);
     }
 
     await this.prisma.users.update({
@@ -316,7 +315,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_USER_001);
     }
 
     const role = await this.prisma.roles.findUnique({
@@ -324,7 +323,7 @@ export class UsersService {
     });
 
     if (!role) {
-      throw new NotFoundException('Role not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_ROLE_001);
     }
 
     // Check if role is already assigned
@@ -355,7 +354,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_USER_001);
     }
 
     const role = await this.prisma.roles.findUnique({
@@ -363,12 +362,12 @@ export class UsersService {
     });
 
     if (!role) {
-      throw new NotFoundException('Role not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_ROLE_001);
     }
 
     // Check if user is trying to remove super_admin role from themselves
     if (role.name === 'super_admin') {
-      throw new ForbiddenException('Cannot remove super admin role');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_PERM_001);
     }
 
     const userRole = await this.prisma.user_roles.findFirst({
@@ -379,7 +378,7 @@ export class UsersService {
     });
 
     if (!userRole) {
-      throw new NotFoundException('Role not assigned to user');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_ROLE_001);
     }
 
     await this.prisma.user_roles.delete({
@@ -497,7 +496,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_USER_001);
     }
 
     const updatedUser = await this.prisma.users.update({
@@ -530,7 +529,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_USER_001);
     }
 
     const updatedUser = await this.prisma.users.update({
@@ -556,7 +555,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_USER_001);
     }
 
     const updatedUser = await this.prisma.users.update({

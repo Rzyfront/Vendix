@@ -5,6 +5,7 @@ import {
   isDevMode,
 } from '@angular/core';
 import { provideRouter } from '@angular/router';
+import { provideClientHydration } from '@angular/platform-browser';
 import {
   provideHttpClient,
   withFetch,
@@ -41,6 +42,11 @@ export function initializeApp(
   routeManager: RouteManagerService,
 ): () => Promise<boolean> {
   return () => {
+    // SSR: routes are already configured by the server APP_INITIALIZER — skip
+    if (typeof window === 'undefined') {
+      return Promise.resolve(true);
+    }
+
     store.dispatch(ConfigActions.initializeApp());
 
     // Add timeout to prevent infinite blocking
@@ -67,6 +73,7 @@ export const appConfig: ApplicationConfig = {
   providers: [
     provideZoneChangeDetection({ eventCoalescing: true }),
     provideRouter(routes),
+    provideClientHydration(),
     provideHttpClient(withFetch(), withInterceptorsFromDi()),
 
     // NgRx Store Configuration

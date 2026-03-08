@@ -17,6 +17,7 @@ export const loginSuccess = createAction(
     user: any;
     user_settings?: any;
     store_settings?: any;
+    default_panel_ui?: Record<string, Record<string, boolean>>;
     tokens: { access_token: string; refresh_token: string };
     permissions?: string[];
     roles?: string[];
@@ -47,6 +48,7 @@ export const loginCustomerSuccess = createAction(
     user: any;
     user_settings?: any;
     store_settings?: any;
+    default_panel_ui?: Record<string, Record<string, boolean>>;
     tokens: { access_token: string; refresh_token: string };
     permissions?: string[];
     roles?: string[];
@@ -113,6 +115,7 @@ export const restoreAuthState = createAction(
     user: any;
     user_settings?: any;
     store_settings?: any;
+    default_panel_ui?: Record<string, Record<string, boolean>>;
     tokens: { access_token: string; refresh_token: string };
     permissions?: string[];
     roles?: string[];
@@ -263,6 +266,12 @@ export const updateUserSettingsSuccess = createAction(
 export const updateUserSettingsFailure = createAction(
   '[Auth] Update User Settings Failure',
   props<{ error: NormalizedApiPayload | string }>(),
+);
+
+// Default Panel UI (for new module detection)
+export const setDefaultPanelUi = createAction(
+  '[Auth] Set Default Panel UI',
+  props<{ default_panel_ui: Record<string, Record<string, boolean>> }>(),
 );
 
 // Update Store Settings Actions

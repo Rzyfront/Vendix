@@ -72,10 +72,19 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
         <h3 class="product-name">{{ product.name }}</h3>
         <div class="product-price">
           <span class="price">{{ product.final_price | currency }}</span>
+          @if (product.pricing_type === 'weight') {
+            <span class="weight-unit">/kg</span>
+          }
           @if (product.is_on_sale) {
             <span class="original-price">{{ product.base_price | currency }}</span>
           }
         </div>
+        @if (product.pricing_type === 'weight') {
+          <div class="weight-indicator">
+            <app-icon name="scale" [size]="12"></app-icon>
+            <span>Venta por peso</span>
+          </div>
+        }
       </div>
       <div class="actions-container">
         <app-button
@@ -283,6 +292,24 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
         color: var(--color-text-muted);
         text-decoration: line-through;
       }
+
+      .weight-unit {
+        font-size: var(--fs-xs);
+        color: var(--color-text-secondary);
+        font-weight: var(--fw-medium);
+      }
+    }
+
+    .weight-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: var(--radius-sm);
+      background: rgba(59, 130, 246, 0.08);
+      color: rgb(37, 99, 235);
+      font-size: 11px;
+      font-weight: 500;
     }
 
     .actions-container {

@@ -43,11 +43,13 @@ export class ResponseService {
     message: string,
     error: string | Record<string, any> = 'An error occurred',
     statusCode: number = HttpStatus.BAD_REQUEST,
+    errorCode?: string,
   ): ErrorResponse {
     return {
       success: false,
       message,
       error,
+      ...(errorCode && { error_code: errorCode }),
       statusCode,
       timestamp: new Date().toISOString(),
     };

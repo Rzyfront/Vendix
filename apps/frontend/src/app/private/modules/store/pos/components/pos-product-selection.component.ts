@@ -35,6 +35,7 @@ import { environment } from '../../../../../../environments/environment';
 import {
   selectAccessToken,
   selectUser,
+  selectStoreSettings,
 } from '../../../../../core/store/auth/auth.selectors';
 import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfaces';
 
@@ -388,6 +389,10 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   showVariantSelector = false;
   selectedProductForVariant: any = null;
 
+  // Scale/weight settings from store
+  scaleEnabled = true;
+  defaultWeightUnit: 'kg' | 'g' | 'lb' = 'kg';
+
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
     {
@@ -429,6 +434,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.checkAuthState();
+    this.loadScaleSettings();
     this.initializeCategories();
     this.initializeBrands();
     this.setupSearchSubscription();
@@ -761,16 +767,17 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
       }
     }
 
-    // Check if product is sold by weight
-    const isWeightProduct = product.pricing_type === 'weight';
+    // Check if product is sold by weight and scale is enabled
+    const isWeightProduct = product.pricing_type === 'weight' && this.scaleEnabled;
 
     // For weight products, require weight input
     if (isWeightProduct) {
+      const unit = this.defaultWeightUnit;
       const weightStr = await this.dialogService.prompt(
         {
           title: 'Ingresar Peso',
-          message: `${product.name}\nPrecio: $${product.final_price}/kg`,
-          placeholder: 'Peso en kg',
+          message: `${product.name}\nPrecio: $${product.final_price}/${unit}`,
+          placeholder: `Peso en ${unit}`,
           defaultValue: '1.0',
           confirmText: 'Agregar',
           cancelText: 'Cancelar',
@@ -818,6 +825,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   private addWeightProductToCart(product: any, weight: number): void {
     this.addingToCart.add(product.id);
 
+    const unit = this.defaultWeightUnit;
     const totalPrice = product.final_price * weight;
 
     this.cartService
@@ -825,14 +833,14 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
         product: product,
         quantity: 1,
         weight: weight,
-        weight_unit: 'kg',
+        weight_unit: unit,
       })
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
           this.addingToCart.delete(product.id);
           this.toastService.success(
-            `${product.name} (${weight} kg) agregado al carrito - $${totalPrice.toFixed(2)}`
+            `${product.name} (${weight} ${unit}) agregado al carrito - $${totalPrice.toFixed(2)}`
           );
           this.productAddedToCart.emit({ product, quantity: 1 });
         },
@@ -891,6 +899,15 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
       return 'Intenta buscar con otros términos o cambia la categoría.';
     }
     return 'Los productos aparecerán aquí cuando estén disponibles.';
+  }
+
+  private loadScaleSettings(): void {
+    this.store.select(selectStoreSettings).pipe(takeUntil(this.destroy$)).subscribe((storeSettings: any) => {
+      if (storeSettings?.pos?.scale) {
+        this.scaleEnabled = storeSettings.pos.scale.enabled ?? true;
+        this.defaultWeightUnit = storeSettings.pos.scale.default_weight_unit || 'kg';
+      }
+    });
   }
 
   private checkAuthState(): void {

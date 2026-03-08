@@ -32,6 +32,7 @@ import {
   ModalComponent,
   ItemListCardConfig,
   IconComponent,
+  PaginationComponent,
 } from '../../../../shared/components/index';
 
 @Component({
@@ -48,6 +49,7 @@ import {
     ResponsiveDataViewComponent,
     ModalComponent,
     IconComponent,
+    PaginationComponent,
   ],
   templateUrl: './support.component.html',
   styleUrls: ['./support.component.css'],
@@ -83,9 +85,7 @@ export class SupportComponent implements OnInit {
   isLoading = false;
   isDeleting = false;
   searchQuery = '';
-  currentPage = 1;
-  pageSize = 10;
-  totalItems = 0;
+  pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
 
   // Modals
   showAssignModal = false;
@@ -244,7 +244,7 @@ export class SupportComponent implements OnInit {
     this.filterForm.valueChanges
       .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
       .subscribe(() => {
-        this.currentPage = 1;
+        this.pagination.page = 1;
         this.loadTickets();
       });
   }
@@ -286,8 +286,8 @@ export class SupportComponent implements OnInit {
     const filters = this.filterForm.value;
 
     const queryParams: TicketQueryDto = {
-      page: this.currentPage,
-      limit: this.pageSize,
+      page: this.pagination.page,
+      limit: this.pagination.limit,
       search: this.searchQuery || undefined,
       status: filters.status || undefined,
       priority: filters.priority || undefined,
@@ -297,7 +297,8 @@ export class SupportComponent implements OnInit {
     this.supportService.getTickets(queryParams).subscribe({
       next: (response) => {
         this.tickets = response.data;
-        this.totalItems = response.meta.total;
+        this.pagination.total = response.meta.total;
+        this.pagination.totalPages = response.meta.pages || Math.ceil(this.pagination.total / this.pagination.limit);
         this.isLoading = false;
       },
       error: (err) => {
@@ -310,12 +311,12 @@ export class SupportComponent implements OnInit {
 
   onSearch(query: string): void {
     this.searchQuery = query;
-    this.currentPage = 1;
+    this.pagination.page = 1;
     this.loadTickets();
   }
 
   onPageChange(page: number): void {
-    this.currentPage = page;
+    this.pagination.page = page;
     this.loadTickets();
   }
 

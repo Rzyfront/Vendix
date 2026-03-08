@@ -6,7 +6,7 @@ description: >
   Trigger: When creating or refactoring an admin list module in STORE_ADMIN or ORG_ADMIN.
 license: Apache-2.0
 metadata:
-  author: gentleman-programming
+  author: rzyfront
   version: "2.0"
   scope: [root, frontend]
   auto_invoke: "Creating or refactoring standard admin modules (stats + table)"
@@ -26,11 +26,11 @@ The main component uses a mobile-first approach with sticky elements for optimal
 
 **Z-Index Stacking (Mobile):**
 
-| Layer | Element | Z-Index | Top Position |
-|-------|---------|---------|--------------|
-| 1 | Stats Container | z-20 | top-0 |
-| 2 | Search Section | z-10 | top-[99px] |
-| 3 | Items Content | z-0 | (scrolls) |
+| Layer | Element         | Z-Index | Top Position |
+| ----- | --------------- | ------- | ------------ |
+| 1     | Stats Container | z-20    | top-0        |
+| 2     | Search Section  | z-10    | top-[99px]   |
+| 3     | Items Content   | z-0     | (scrolls)    |
 
 ```typescript
 @Component({
@@ -65,6 +65,7 @@ The main component uses a mobile-first approach with sticky elements for optimal
 ### 2. Stats Container Behavior
 
 **Mobile (<640px):**
+
 - Flex horizontal with scroll
 - Fixed card width: 160px
 - Gap: 12px
@@ -72,13 +73,16 @@ The main component uses a mobile-first approach with sticky elements for optimal
 - Solid background: `bg-background`
 
 **Desktop (>=640px):**
+
 - Grid: 4 columns
 - Gap: 16px (24px in lg)
 - Static positioning: `md:static`
 - Transparent background: `md:bg-transparent`
 
 ```html
-<div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+<div
+  class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent"
+>
   <!-- app-stats cards -->
 </div>
 ```
@@ -88,6 +92,7 @@ The main component uses a mobile-first approach with sticky elements for optimal
 The search section is sticky on mobile and positioned below the stats.
 
 **Mobile (<768px):**
+
 - Sticky: `sticky top-[99px] z-10`
 - Title: `text-[13px] font-bold text-gray-600 tracking-wide`
 - Search + Options: Row layout with `gap-2`
@@ -95,6 +100,7 @@ The search section is sticky on mobile and positioned below the stats.
 - Background: `bg-background`
 
 **Desktop (>=768px):**
+
 - Static: `md:static md:bg-transparent`
 - Title: `md:text-lg md:font-semibold md:text-text-primary`
 - Layout: `md:flex-row md:justify-between`
@@ -103,12 +109,18 @@ The search section is sticky on mobile and positioned below the stats.
 
 ```html
 <!-- Search Section (inside list component) -->
-<div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-            md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
-  <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
+<div
+  class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+            md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+>
+  <div
+    class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+  >
     <!-- Title with count -->
-    <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
-               md:text-lg md:font-semibold md:text-text-primary">
+    <h2
+      class="text-[13px] font-bold text-gray-600 tracking-wide
+               md:text-lg md:font-semibold md:text-text-primary"
+    >
       [Entidad] ({{ items.length }})
     </h2>
 
@@ -139,8 +151,10 @@ The search section is sticky on mobile and positioned below the stats.
 
 ```html
 <!-- Content container (wraps ResponsiveDataView) -->
-<div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-            md:border md:border-border md:min-h-[600px] md:overflow-hidden">
+<div
+  class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
+            md:border md:border-border md:min-h-[600px] md:overflow-hidden"
+>
   <app-responsive-data-view
     [data]="items"
     [columns]="columns"
@@ -152,6 +166,7 @@ The search section is sticky on mobile and positioned below the stats.
 ```
 
 **Consistent Shadow Value:** `0 2px 8px rgba(0,0,0,0.07)` - used across:
+
 - Stats cards
 - Search inputs (mobile only)
 - Item cards (mobile only)
@@ -165,9 +180,13 @@ Use `ResponsiveDataViewComponent` for automatic mobile/desktop switching:
 <div class="relative min-h-[400px] p-2 md:p-4">
   <!-- Loading Overlay -->
   @if (isLoading) {
-    <div class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
-      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-    </div>
+  <div
+    class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+  >
+    <div
+      class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+    ></div>
+  </div>
   }
 
   <!-- Responsive Data View (Table on desktop, Cards on mobile) -->
@@ -201,6 +220,7 @@ Use `ResponsiveDataViewComponent` for automatic mobile/desktop switching:
 ### 7. Angular Signals
 
 All new logic MUST use Angular Signals.
+
 - `input()` instead of `@Input()`
 - `output()` instead of `@Output()`
 - Use `inject()` for dependency injection.
@@ -209,7 +229,7 @@ All new logic MUST use Angular Signals.
 
 ```typescript
 @Component({
-  selector: 'app-product-list',
+  selector: "app-product-list",
   standalone: true,
   imports: [
     ResponsiveDataViewComponent,
@@ -218,11 +238,17 @@ All new logic MUST use Angular Signals.
   ],
   template: `
     <!-- Search Section -->
-    <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
-      <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-        <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
-                   md:text-lg md:font-semibold md:text-text-primary">
+    <div
+      class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+    >
+      <div
+        class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+      >
+        <h2
+          class="text-[13px] font-bold text-gray-600 tracking-wide
+                   md:text-lg md:font-semibold md:text-text-primary"
+        >
           Productos ({{ items().length }})
         </h2>
         <div class="flex items-center gap-2 w-full md:w-auto">
@@ -240,8 +266,10 @@ All new logic MUST use Angular Signals.
     </div>
 
     <!-- Content Container -->
-    <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-                md:border md:border-border md:min-h-[600px] md:overflow-hidden">
+    <div
+      class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
+                md:border md:border-border md:min-h-[600px] md:overflow-hidden"
+    >
       <app-responsive-data-view
         [data]="filteredItems()"
         [columns]="columns"
@@ -260,23 +288,33 @@ export class ProductListComponent {
   delete = output<Product>();
 
   cardConfig: ItemListCardConfig = {
-    titleKey: 'name',
-    subtitleKey: 'brand',
-    avatarKey: 'image_url',
-    avatarShape: 'square',
-    badgeKey: 'state',
-    footerKey: 'base_price',
-    footerLabel: 'Precio',
-    footerStyle: 'prominent',
+    titleKey: "name",
+    subtitleKey: "brand",
+    avatarKey: "image_url",
+    avatarShape: "square",
+    badgeKey: "state",
+    footerKey: "base_price",
+    footerLabel: "Precio",
+    footerStyle: "prominent",
     detailKeys: [
-      { key: 'sku', label: 'SKU' },
-      { key: 'stock', label: 'Stock' },
+      { key: "sku", label: "SKU" },
+      { key: "stock", label: "Stock" },
     ],
   };
 
   actions: TableAction[] = [
-    { label: 'Editar', icon: 'edit', variant: 'primary', action: (item) => this.edit.emit(item) },
-    { label: 'Eliminar', icon: 'trash-2', variant: 'danger', action: (item) => this.delete.emit(item) },
+    {
+      label: "Editar",
+      icon: "edit",
+      variant: "primary",
+      action: (item) => this.edit.emit(item),
+    },
+    {
+      label: "Eliminar",
+      icon: "trash-2",
+      variant: "danger",
+      action: (item) => this.delete.emit(item),
+    },
   ];
 }
 ```

@@ -64,6 +64,34 @@
     }
   }
 
+  // Badge for new modules
+  .settings-badge {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #f97316;
+    border: 2px solid var(--color-surface, #fff);
+    pointer-events: none;
+  }
+
+  .settings-sync-badge {
+    min-width: 18px;
+    height: 18px;
+    border-radius: 9999px;
+    background: #f97316;
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    flex-shrink: 0;
+  }
+
   // Minimal trigger style (mobile)
   .user-trigger-minimal {
     align-items: center;

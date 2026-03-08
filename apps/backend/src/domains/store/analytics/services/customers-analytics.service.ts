@@ -2,8 +2,13 @@ import { Injectable, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { AnalyticsQueryDto, DatePreset, Granularity } from '../dto/analytics-query.dto';
+import {
+  AnalyticsQueryDto,
+  DatePreset,
+  Granularity,
+} from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class CustomersAnalyticsService {
@@ -13,11 +18,14 @@ export class CustomersAnalyticsService {
 
   async getCustomersSummary(query: AnalyticsQueryDto) {
     const { startDate, endDate } = this.parseDateRange(query);
-    const { previousStartDate, previousEndDate } = this.getPreviousPeriod(startDate, endDate);
+    const { previousStartDate, previousEndDate } = this.getPreviousPeriod(
+      startDate,
+      endDate,
+    );
 
     const context = RequestContextService.getContext();
     if (!context?.store_id) {
-      throw new ForbiddenException('Store context required for customers analytics');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const storeId = context.store_id;
 
@@ -90,15 +98,18 @@ export class CustomersAnalyticsService {
     const previousRevenue = Number(previousRevenueAgg._sum.grand_total || 0);
 
     const averageSpend = activeCount > 0 ? totalRevenue / activeCount : 0;
-    const previousAverageSpend = previousActiveCount > 0 ? previousRevenue / previousActiveCount : 0;
+    const previousAverageSpend =
+      previousActiveCount > 0 ? previousRevenue / previousActiveCount : 0;
 
-    const newCustomersGrowth = previousNewCustomers > 0
-      ? ((newCustomers - previousNewCustomers) / previousNewCustomers) * 100
-      : 0;
+    const newCustomersGrowth =
+      previousNewCustomers > 0
+        ? ((newCustomers - previousNewCustomers) / previousNewCustomers) * 100
+        : 0;
 
-    const averageSpendGrowth = previousAverageSpend > 0
-      ? ((averageSpend - previousAverageSpend) / previousAverageSpend) * 100
-      : 0;
+    const averageSpendGrowth =
+      previousAverageSpend > 0
+        ? ((averageSpend - previousAverageSpend) / previousAverageSpend) * 100
+        : 0;
 
     return {
       total_customers: totalCustomers,
@@ -117,7 +128,7 @@ export class CustomersAnalyticsService {
     const context = RequestContextService.getContext();
 
     if (!context?.store_id) {
-      throw new ForbiddenException('Store context required for customer trends');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const storeId = context.store_id;
 
@@ -142,9 +153,8 @@ export class CustomersAnalyticsService {
     `;
 
     // Get cumulative total before start date
-    const cumulativeBefore = await (this.prisma.withoutScope() as any).$queryRaw<
-      Array<{ count: bigint }>
-    >`
+    const cumulativeBefore = await (this.prisma.withoutScope() as any)
+      .$queryRaw<Array<{ count: bigint }>>`
       SELECT COUNT(DISTINCT su.user_id) AS count
       FROM store_users su
       WHERE su.store_id = ${storeId}
@@ -190,7 +200,9 @@ export class CustomersAnalyticsService {
       take: 10,
     });
 
-    const customerIds = results.map((r) => r.customer_id).filter(Boolean) as number[];
+    const customerIds = results
+      .map((r) => r.customer_id)
+      .filter(Boolean) as number[];
     const customers = await this.prisma.users.findMany({
       where: { id: { in: customerIds } },
       select: {
@@ -222,7 +234,7 @@ export class CustomersAnalyticsService {
     const context = RequestContextService.getContext();
 
     if (!context?.store_id) {
-      throw new ForbiddenException('Store context required for customers export');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const storeId = context.store_id;
 
@@ -264,7 +276,8 @@ export class CustomersAnalyticsService {
     return storeUsers.map((su) => {
       const user = su.user;
       const agg: any = aggMap.get(su.user_id);
-      const customerName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Cliente';
+      const customerName =
+        `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Cliente';
 
       return {
         name: customerName,
@@ -272,7 +285,8 @@ export class CustomersAnalyticsService {
         phone: user.phone || '',
         total_orders: agg?._count?.id || 0,
         total_spent: Number(agg?._sum?.grand_total || 0),
-        last_order_date: agg?._max?.created_at?.toISOString().split('T')[0] || 'N/A',
+        last_order_date:
+          agg?._max?.created_at?.toISOString().split('T')[0] || 'N/A',
         registration_date: user.created_at?.toISOString().split('T')[0] || '',
         state: user.state,
       };
@@ -281,7 +295,10 @@ export class CustomersAnalyticsService {
 
   // ==================== HELPERS ====================
 
-  private parseDateRange(query: AnalyticsQueryDto): { startDate: Date; endDate: Date } {
+  private parseDateRange(query: AnalyticsQueryDto): {
+    startDate: Date;
+    endDate: Date;
+  } {
     if (query.date_from && query.date_to) {
       const endDate = new Date(query.date_to);
       endDate.setUTCHours(23, 59, 59, 999);
@@ -313,7 +330,11 @@ export class CustomersAnalyticsService {
         return { startDate: lastWeekStart, endDate: lastWeekEnd };
       case DatePreset.LAST_MONTH:
         const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
-        const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const lastMonthStart = new Date(
+          today.getFullYear(),
+          today.getMonth() - 1,
+          1,
+        );
         return { startDate: lastMonthStart, endDate: lastMonthEnd };
       case DatePreset.THIS_YEAR:
         return { startDate: new Date(today.getFullYear(), 0, 1), endDate: now };
@@ -324,11 +345,17 @@ export class CustomersAnalyticsService {
         };
       case DatePreset.THIS_MONTH:
       default:
-        return { startDate: new Date(today.getFullYear(), today.getMonth(), 1), endDate: now };
+        return {
+          startDate: new Date(today.getFullYear(), today.getMonth(), 1),
+          endDate: now,
+        };
     }
   }
 
-  private getPreviousPeriod(startDate: Date, endDate: Date): { previousStartDate: Date; previousEndDate: Date } {
+  private getPreviousPeriod(
+    startDate: Date,
+    endDate: Date,
+  ): { previousStartDate: Date; previousEndDate: Date } {
     const duration = endDate.getTime() - startDate.getTime();
     const previousEndDate = new Date(startDate.getTime() - 1);
     const previousStartDate = new Date(previousEndDate.getTime() - duration);
@@ -337,12 +364,18 @@ export class CustomersAnalyticsService {
 
   private getDateTruncInterval(granularity: Granularity): string {
     switch (granularity) {
-      case Granularity.HOUR: return 'hour';
-      case Granularity.DAY: return 'day';
-      case Granularity.WEEK: return 'week';
-      case Granularity.MONTH: return 'month';
-      case Granularity.YEAR: return 'year';
-      default: return 'day';
+      case Granularity.HOUR:
+        return 'hour';
+      case Granularity.DAY:
+        return 'day';
+      case Granularity.WEEK:
+        return 'week';
+      case Granularity.MONTH:
+        return 'month';
+      case Granularity.YEAR:
+        return 'year';
+      default:
+        return 'day';
     }
   }
 

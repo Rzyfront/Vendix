@@ -5,7 +5,7 @@ description: >
   Trigger: When asking about different apps, environments (ORG_ADMIN, STORE_ADMIN), or domain logic.
 license: Apache-2.0
 metadata:
-  author: vendix-arch
+  author: rzyfront
   version: "1.0"
   scope: [root]
   auto_invoke: "Understanding Public/Private Apps and Domains"
@@ -75,13 +75,13 @@ Both backend and frontend use the **same enum values** for `app_type`:
 // Frontend: apps/frontend/src/app/core/models/environment.enum.ts
 // Backend: Prisma schema - app_type_enum
 export enum AppType {
-  VENDIX_LANDING = 'VENDIX_LANDING',   // Public: Vendix SaaS landing
-  VENDIX_ADMIN = 'VENDIX_ADMIN',       // Private: Super admin panel
-  ORG_LANDING = 'ORG_LANDING',         // Public: Organization landing
-  ORG_ADMIN = 'ORG_ADMIN',             // Private: Organization admin
-  STORE_LANDING = 'STORE_LANDING',     // Public: Store landing
-  STORE_ADMIN = 'STORE_ADMIN',         // Private: Store admin panel
-  STORE_ECOMMERCE = 'STORE_ECOMMERCE', // Public: Store e-commerce
+  VENDIX_LANDING = "VENDIX_LANDING", // Public: Vendix SaaS landing
+  VENDIX_ADMIN = "VENDIX_ADMIN", // Private: Super admin panel
+  ORG_LANDING = "ORG_LANDING", // Public: Organization landing
+  ORG_ADMIN = "ORG_ADMIN", // Private: Organization admin
+  STORE_LANDING = "STORE_LANDING", // Public: Store landing
+  STORE_ADMIN = "STORE_ADMIN", // Private: Store admin panel
+  STORE_ECOMMERCE = "STORE_ECOMMERCE", // Public: Store e-commerce
 }
 ```
 
@@ -129,17 +129,18 @@ model user_settings {
 
 #### App Type → Domain Type Mapping
 
-| `app_type` | `domain_type` | Example Domain |
-| :--- | :--- | :--- |
-| `VENDIX_LANDING` | `vendix_core` | `vendix.com` |
-| `VENDIX_ADMIN` | `vendix_core` | `app.vendix.com/admin` |
-| `ORG_LANDING` | `organization` | `my-company.vendix.com` |
-| `ORG_ADMIN` | `organization` | `my-company.vendix.com/admin` |
-| `STORE_LANDING` | `store` | `store.example.com` |
-| `STORE_ADMIN` | `store` | `store.example.com/admin` |
-| `STORE_ECOMMERCE` | `ecommerce` | `shop.example.com` |
+| `app_type`        | `domain_type`  | Example Domain                |
+| :---------------- | :------------- | :---------------------------- |
+| `VENDIX_LANDING`  | `vendix_core`  | `vendix.com`                  |
+| `VENDIX_ADMIN`    | `vendix_core`  | `app.vendix.com/admin`        |
+| `ORG_LANDING`     | `organization` | `my-company.vendix.com`       |
+| `ORG_ADMIN`       | `organization` | `my-company.vendix.com/admin` |
+| `STORE_LANDING`   | `store`        | `store.example.com`           |
+| `STORE_ADMIN`     | `store`        | `store.example.com/admin`     |
+| `STORE_ECOMMERCE` | `ecommerce`    | `shop.example.com`            |
 
 **NOTE:** A single domain can resolve to different `app_type` values based on:
+
 - User authentication status
 - URL path (`/admin/*` vs `/`)
 - User permissions and `user_settings.app_type` override
@@ -211,7 +212,7 @@ Users can have a default `app_type` override in their settings:
 ```json
 // user_settings
 {
-  "app_type": "STORE_ADMIN",  // Default app for this user
+  "app_type": "STORE_ADMIN", // Default app for this user
   "config": {
     "panel_ui": {
       "ORG_ADMIN": { "dashboard": true, "stores": true },

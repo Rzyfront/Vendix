@@ -506,6 +506,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
       this.fileInputRef = document.createElement('input');
       this.fileInputRef.type = 'file';
       this.fileInputRef.accept = 'image/*';
+      this.fileInputRef.multiple = true;
       this.fileInputRef.addEventListener('change', (e) =>
         this.onSliderImageUpload(e),
       );
@@ -521,56 +522,77 @@ export class EcommerceComponent implements OnInit, OnDestroy {
     const files = input.files;
 
     if (!files || files.length === 0) return;
-    if (this.sliderImages.length >= 5) {
+
+    const available_slots = 5 - this.sliderImages.length;
+    if (available_slots <= 0) {
       this.toastService.warning('Máximo 5 imágenes permitidas');
       input.value = '';
       return;
     }
 
-    const file = files[0];
-    if (!file.type.startsWith('image/')) {
-      this.toastService.warning('Solo se permiten archivos de imagen');
+    // Filter valid image files and cap to available slots
+    const valid_files: File[] = [];
+    for (let i = 0; i < files.length && valid_files.length < available_slots; i++) {
+      const file = files[i];
+      if (!file.type.startsWith('image/')) continue;
+      if (file.size > 5 * 1024 * 1024) continue;
+      valid_files.push(file);
+    }
+
+    if (valid_files.length === 0) {
+      this.toastService.warning('No se encontraron imágenes válidas (PNG, JPG, WebP - máx 5MB)');
       input.value = '';
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      this.toastService.warning('El archivo excede el tamaño máximo de 5MB');
-      input.value = '';
-      return;
+    if (files.length > available_slots) {
+      this.toastService.info(`Se subirán ${valid_files.length} de ${files.length} imágenes (máximo 5 en total)`);
     }
 
-    // Create placeholder with uploading state
-    const placeholder: SliderImage = { url: '', uploading: true };
-    this.sliderImages.push(placeholder);
     this.isUploadingImage = true;
+    let pending_uploads = valid_files.length;
 
-    // Upload
-    this.ecommerceService
-      .uploadSliderImage(file)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (result) => {
-          const index = this.sliderImages.findIndex((img) => img.uploading);
-          if (index !== -1) {
-            this.sliderImages[index] = {
-              url: result.url || result.key, // Usar la URL firmada para previsualización
-              key: result.key, // Guardar la KEY para persistencia
+    for (const file of valid_files) {
+      // Create placeholder with uploading state
+      const placeholder: SliderImage = { url: '', uploading: true };
+      this.sliderImages.push(placeholder);
+      const placeholder_index = this.sliderImages.length - 1;
+
+      this.ecommerceService
+        .uploadSliderImage(file)
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: (result) => {
+            this.sliderImages[placeholder_index] = {
+              url: result.url || result.key,
+              key: result.key,
               thumbnail: result.thumbKey,
               title: '',
               caption: '',
             };
-          }
-          this.isUploadingImage = false;
-          this.updateSliderPhotosForm();
-          this.toastService.success('Imagen subida exitosamente');
-        },
-        error: (error) => {
-          this.sliderImages = this.sliderImages.filter((img) => !img.uploading);
-          this.isUploadingImage = false;
-          this.toastService.error('Error al subir imagen: ' + error.message);
-        },
-      });
+            pending_uploads--;
+            if (pending_uploads === 0) {
+              this.isUploadingImage = false;
+              this.updateSliderPhotosForm();
+              this.toastService.success(
+                valid_files.length === 1
+                  ? 'Imagen subida exitosamente'
+                  : `${valid_files.length} imágenes subidas exitosamente`
+              );
+            }
+          },
+          error: (error) => {
+            this.sliderImages[placeholder_index] = undefined as any;
+            pending_uploads--;
+            if (pending_uploads === 0) {
+              this.sliderImages = this.sliderImages.filter(Boolean);
+              this.isUploadingImage = false;
+              this.updateSliderPhotosForm();
+            }
+            this.toastService.error('Error al subir imagen: ' + error.message);
+          },
+        });
+    }
 
     input.value = '';
   }

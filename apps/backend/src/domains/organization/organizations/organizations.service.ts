@@ -16,6 +16,7 @@ import { Prisma } from '@prisma/client';
 import { S3Service } from '@common/services/s3.service';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class OrganizationsService {
@@ -31,7 +32,7 @@ export class OrganizationsService {
     const context = RequestContextService.getContext();
 
     if (!context?.organization_id) {
-      throw new NotFoundException('Organization context not found');
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
     }
 
     const organization = await this.prisma.organizations.findUnique({
@@ -42,7 +43,7 @@ export class OrganizationsService {
     });
 
     if (!organization) {
-      throw new NotFoundException('Organization not found');
+      throw new VendixHttpException(ErrorCodes.ORG_FIND_001);
     }
 
     return {
@@ -56,7 +57,7 @@ export class OrganizationsService {
     const context = RequestContextService.getContext();
 
     if (!context?.organization_id) {
-      throw new NotFoundException('Organization context not found');
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
     }
 
     const updated = await this.prisma.organizations.update({
@@ -80,7 +81,7 @@ export class OrganizationsService {
     const context = RequestContextService.getContext();
 
     if (!context?.organization_id) {
-      throw new NotFoundException('Organization context not found');
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
     }
 
     const org_id = context.organization_id;
@@ -272,7 +273,7 @@ export class OrganizationsService {
     });
 
     if (!organization) {
-      throw new NotFoundException('Organization not found');
+      throw new VendixHttpException(ErrorCodes.ORG_FIND_001);
     }
 
     const org_id = organizationId;
@@ -289,7 +290,7 @@ export class OrganizationsService {
     const last_month_end = new Date(now.getFullYear(), now.getMonth(), 0);
 
     // Calculate period dates for profit trend
-    const monthsMap: Record<string, number> = { '6m': 6, '1y': 12, 'all': 24 };
+    const monthsMap: Record<string, number> = { '6m': 6, '1y': 12, all: 24 };
     const monthsToFetch = period && monthsMap[period] ? monthsMap[period] : 6;
     const trend_start_date = new Date(
       now.getFullYear(),
@@ -428,12 +429,14 @@ export class OrganizationsService {
       }),
 
       // Profit Trend - monthly aggregates
-      (this.prisma.withoutScope() as any).$queryRaw<Array<{
-        month: number;
-        year: number;
-        revenue: bigint;
-        costs: bigint;
-      }>>`
+      (this.prisma.withoutScope() as any).$queryRaw<
+        Array<{
+          month: number;
+          year: number;
+          revenue: bigint;
+          costs: bigint;
+        }>
+      >`
         WITH monthly_orders AS (
           SELECT
             EXTRACT(MONTH FROM o.created_at)::int as month,
@@ -470,7 +473,9 @@ export class OrganizationsService {
       `,
 
       // Store Distribution by store type (online vs physical)
-      (this.prisma.withoutScope() as any).$queryRaw<Array<{ type: string; revenue: bigint }>>`
+      (this.prisma.withoutScope() as any).$queryRaw<
+        Array<{ type: string; revenue: bigint }>
+      >`
         SELECT
           s.store_type as type,
           COALESCE(SUM(o.grand_total), 0) as revenue
@@ -570,7 +575,7 @@ export class OrganizationsService {
     const context = RequestContextService.getContext();
 
     if (!context?.organization_id || !context?.user_id) {
-      throw new NotFoundException('Context not found');
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
     }
 
     // Get user with roles to validate owner status
@@ -587,15 +592,13 @@ export class OrganizationsService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new VendixHttpException(ErrorCodes.ORG_USER_001);
     }
 
     // Validate that user is owner
     const isOwner = user.user_roles?.some((ur) => ur.roles?.name === 'owner');
     if (!isOwner) {
-      throw new ForbiddenException(
-        'Solo los owners pueden cambiar el tipo de cuenta.',
-      );
+      throw new VendixHttpException(ErrorCodes.ORG_PERM_001);
     }
 
     // Validate that organization is not already MULTI_STORE_ORG

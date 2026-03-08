@@ -23,6 +23,11 @@ export function isTokenExpired(token: string): boolean {
  * This is the single source of truth for re-creating the session on page load.
  */
 export function hydrateAuthState(): Partial<AuthState> {
+  // SSR: no localStorage available — return clean state
+  if (typeof localStorage === 'undefined') {
+    return getCleanAuthState();
+  }
+
   try {
     // Verificar si el usuario hizo logout recientemente
     const loggedOutRecently = localStorage.getItem(
@@ -80,6 +85,7 @@ export function hydrateAuthState(): Partial<AuthState> {
         user: parsedState.user,
         user_settings: parsedState.user_settings,
         store_settings: parsedState.store_settings, // CRITICAL: Restore store_settings
+        default_panel_ui: parsedState.default_panel_ui || null,
         tokens: parsedState.tokens,
         roles: parsedState.user.roles || parsedState.roles || [],
         permissions: parsedState.permissions || [],
@@ -121,12 +127,14 @@ function getCleanAuthState(): Partial<AuthState> {
  * Saves authentication state to localStorage for persistence
  */
 export function saveAuthState(state: AuthState): void {
+  if (typeof localStorage === 'undefined') return;
   try {
     if (state.user && state.tokens) {
       const stateToSave = {
         user: state.user,
         user_settings: state.user_settings,
         store_settings: state.store_settings,
+        default_panel_ui: state.default_panel_ui,
         tokens: state.tokens,
         roles: state.roles,
         permissions: state.permissions,
@@ -153,6 +161,7 @@ export function saveAuthState(state: AuthState): void {
  * Clears authentication state from localStorage
  */
 export function clearAuthState(): void {
+  if (typeof localStorage === 'undefined') return;
   try {
     console.warn('[CLEAR AUTH STATE]');
 

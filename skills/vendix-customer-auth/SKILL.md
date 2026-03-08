@@ -5,7 +5,7 @@ description: >
   Trigger: When implementing customer login, registration, or auth modal in e-commerce frontend.
 license: Apache-2.0
 metadata:
-  author: gentleman-programming
+  author: rzyfront
   version: "1.0"
   scope: frontend
   auto_invoke:

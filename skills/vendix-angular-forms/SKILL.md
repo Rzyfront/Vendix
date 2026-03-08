@@ -5,7 +5,7 @@ description: >
   Trigger: When creating Angular forms, fixing FormControl type errors, or binding form controls in templates.
 license: Apache-2.0
 metadata:
-  author: gentleman-programming
+  author: rzyfront
   version: "1.0"
   scope: [frontend]
   auto_invoke: "Creating Angular Forms"

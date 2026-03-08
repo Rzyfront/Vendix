@@ -1,7 +1,18 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { ResponseService } from '../../../common/responses/response.service';
-import { CreateCurrencyDto, UpdateCurrencyDto, CurrencyQueryDto, currency_state_enum } from './dto';
+import {
+  CreateCurrencyDto,
+  UpdateCurrencyDto,
+  CurrencyQueryDto,
+  currency_state_enum,
+} from './dto';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class CurrenciesService {
@@ -17,7 +28,9 @@ export class CurrenciesService {
     });
 
     if (existing) {
-      throw new ConflictException(`Currency with code ${createCurrencyDto.code} already exists`);
+      throw new ConflictException(
+        `Currency with code ${createCurrencyDto.code} already exists`,
+      );
     }
 
     const currency = await this.globalPrisma.currencies.create({
@@ -31,7 +44,10 @@ export class CurrenciesService {
       },
     });
 
-    return this.responseService.success(currency, 'Currency created successfully');
+    return this.responseService.success(
+      currency,
+      'Currency created successfully',
+    );
   }
 
   async findAll(query: CurrencyQueryDto) {
@@ -70,10 +86,13 @@ export class CurrenciesService {
     });
 
     if (!currency) {
-      throw new NotFoundException(`Currency with code ${code} not found`);
+      throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
     }
 
-    return this.responseService.success(currency, 'Currency retrieved successfully');
+    return this.responseService.success(
+      currency,
+      'Currency retrieved successfully',
+    );
   }
 
   async update(code: string, updateCurrencyDto: UpdateCurrencyDto) {
@@ -82,7 +101,7 @@ export class CurrenciesService {
     });
 
     if (!currency) {
-      throw new NotFoundException(`Currency with code ${code} not found`);
+      throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
     }
 
     // Note: name, symbol and code are no longer editable as they come from AppNexus API
@@ -93,7 +112,10 @@ export class CurrenciesService {
       data: updateCurrencyDto,
     });
 
-    return this.responseService.success(updated, 'Currency updated successfully');
+    return this.responseService.success(
+      updated,
+      'Currency updated successfully',
+    );
   }
 
   async remove(code: string) {
@@ -102,11 +124,13 @@ export class CurrenciesService {
     });
 
     if (!currency) {
-      throw new NotFoundException(`Currency with code ${code} not found`);
+      throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
     }
 
     if (currency.state === currency_state_enum.ACTIVE) {
-      throw new BadRequestException('Cannot delete active currency. Please deactivate it first.');
+      throw new BadRequestException(
+        'Cannot delete active currency. Please deactivate it first.',
+      );
     }
 
     // Check usage count
@@ -134,7 +158,7 @@ export class CurrenciesService {
     });
 
     if (!currency) {
-      throw new NotFoundException(`Currency with code ${code} not found`);
+      throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
     }
 
     const updated = await this.globalPrisma.currencies.update({
@@ -142,7 +166,10 @@ export class CurrenciesService {
       data: { state: currency_state_enum.ACTIVE },
     });
 
-    return this.responseService.success(updated, 'Currency activated successfully');
+    return this.responseService.success(
+      updated,
+      'Currency activated successfully',
+    );
   }
 
   async deactivate(code: string) {
@@ -151,7 +178,7 @@ export class CurrenciesService {
     });
 
     if (!currency) {
-      throw new NotFoundException(`Currency with code ${code} not found`);
+      throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
     }
 
     const updated = await this.globalPrisma.currencies.update({
@@ -159,7 +186,10 @@ export class CurrenciesService {
       data: { state: currency_state_enum.INACTIVE },
     });
 
-    return this.responseService.success(updated, 'Currency deactivated successfully');
+    return this.responseService.success(
+      updated,
+      'Currency deactivated successfully',
+    );
   }
 
   async deprecate(code: string) {
@@ -168,7 +198,7 @@ export class CurrenciesService {
     });
 
     if (!currency) {
-      throw new NotFoundException(`Currency with code ${code} not found`);
+      throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
     }
 
     const updated = await this.globalPrisma.currencies.update({
@@ -176,15 +206,24 @@ export class CurrenciesService {
       data: { state: currency_state_enum.DEPRECATED },
     });
 
-    return this.responseService.success(updated, 'Currency deprecated successfully');
+    return this.responseService.success(
+      updated,
+      'Currency deprecated successfully',
+    );
   }
 
   async getDashboardStats() {
     const [total, active, inactive, deprecated] = await Promise.all([
       this.globalPrisma.currencies.count(),
-      this.globalPrisma.currencies.count({ where: { state: currency_state_enum.ACTIVE } }),
-      this.globalPrisma.currencies.count({ where: { state: currency_state_enum.INACTIVE } }),
-      this.globalPrisma.currencies.count({ where: { state: currency_state_enum.DEPRECATED } }),
+      this.globalPrisma.currencies.count({
+        where: { state: currency_state_enum.ACTIVE },
+      }),
+      this.globalPrisma.currencies.count({
+        where: { state: currency_state_enum.INACTIVE },
+      }),
+      this.globalPrisma.currencies.count({
+        where: { state: currency_state_enum.DEPRECATED },
+      }),
     ]);
 
     const stats = {
@@ -194,7 +233,10 @@ export class CurrenciesService {
       deprecated_currencies: deprecated,
     };
 
-    return this.responseService.success(stats, 'Dashboard stats retrieved successfully');
+    return this.responseService.success(
+      stats,
+      'Dashboard stats retrieved successfully',
+    );
   }
 
   async getAvailableCurrencies() {
@@ -235,6 +277,9 @@ export class CurrenciesService {
       },
     });
 
-    return this.responseService.success(currencies, 'Active currencies retrieved successfully');
+    return this.responseService.success(
+      currencies,
+      'Active currencies retrieved successfully',
+    );
   }
 }

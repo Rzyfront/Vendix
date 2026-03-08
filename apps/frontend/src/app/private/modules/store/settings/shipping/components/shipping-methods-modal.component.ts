@@ -1,7 +1,7 @@
 import { Component, Input, Output, EventEmitter, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { SystemShippingMethod } from '../../interfaces/shipping-methods.interface';
+import { SystemShippingMethod } from '../interfaces/shipping-methods.interface';
 import {
   ModalComponent,
   InputsearchComponent,
@@ -11,7 +11,7 @@ import {
   ItemListCardConfig,
   IconComponent,
   ButtonComponent,
-} from '../../../../shared/components/index';
+} from '../../../../../../shared/components/index';
 
 @Component({
   selector: 'app-shipping-methods-modal',
@@ -54,7 +54,7 @@ import {
       </div>
 
       <!-- Loading State -->
-      @if (is_loading()) {
+      @if (is_loading) {
         <div class="p-6 text-center">
           <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           <p class="mt-2 text-text-secondary text-sm">Cargando métodos disponibles...</p>
@@ -62,12 +62,10 @@ import {
       }
 
       <!-- Empty State -->
-      @if (!is_loading() && filtered_methods().length === 0) {
+      @if (!is_loading && filtered_methods().length === 0) {
         <div class="p-8 text-center">
           <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-green-50 flex items-center justify-center">
-            <svg class="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
+            <app-icon name="check-circle" [size]="24" class="text-green-500"></app-icon>
           </div>
           <p class="text-sm text-text-secondary">¡Todos los métodos están activados!</p>
           <p class="text-xs text-gray-400 mt-1">No hay más métodos disponibles para agregar</p>
@@ -75,13 +73,13 @@ import {
       }
 
       <!-- Methods List -->
-      @if (!is_loading() && filtered_methods().length > 0) {
+      @if (!is_loading && filtered_methods().length > 0) {
         <app-responsive-data-view
           [data]="filtered_methods()"
           [columns]="table_columns"
           [actions]="table_actions"
           [cardConfig]="card_config"
-          [loading]="is_loading()"
+          [loading]="is_loading"
           emptyMessage="No hay métodos disponibles"
           emptyIcon="truck"
         ></app-responsive-data-view>
@@ -230,7 +228,7 @@ export class ShippingMethodsModalComponent {
   }
 
   private formatDeliveryTime(min_days?: number, max_days?: number): string {
-    if (!min_days && !max_days) return '-';
+    if (min_days == null && max_days == null) return '-';
     if (min_days === max_days) return `${min_days} días`;
     if (!max_days) return `${min_days}+ días`;
     return `${min_days}-${max_days} días`;

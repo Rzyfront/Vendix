@@ -8,15 +8,17 @@ import {
     Query,
     Param,
     BadRequestException,
+    ForbiddenException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { S3Service } from '@common/services/s3.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
-import { ApiTags, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 
 @ApiTags('Upload')
+@ApiBearerAuth()
 @Controller('upload')
 export class UploadController {
     constructor(
@@ -162,6 +164,28 @@ export class UploadController {
     @Get('presigned-url')
     @ApiOperation({ summary: 'Get a temporary URL for a file' })
     async getUrl(@Query('key') key: string) {
+        const context = RequestContextService.getContext();
+        const orgId = context?.organization_id;
+
+        if (!orgId) {
+            throw new BadRequestException('Organization context is required to access files');
+        }
+
+        const org = await this.prisma.organizations.findUnique({
+            where: { id: orgId },
+            select: { id: true, slug: true },
+        });
+
+        if (!org) {
+            throw new BadRequestException('Organization not found');
+        }
+
+        const expectedOrgPrefix = this.s3PathHelper.buildOrgPath(org);
+
+        if (!key.startsWith(expectedOrgPrefix)) {
+            throw new ForbiddenException('You do not have permission to access this file');
+        }
+
         const url = await this.s3Service.getPresignedUrl(key);
         return { url };
     }

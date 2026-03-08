@@ -1,4 +1,5 @@
-import { Injectable, NgZone, OnDestroy } from '@angular/core';
+import { Injectable, NgZone, OnDestroy, PLATFORM_ID, Inject } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
 import { BehaviorSubject, fromEvent, Observable } from 'rxjs';
 import { map, startWith } from 'rxjs/operators';
 
@@ -9,9 +10,16 @@ export class FullscreenService implements OnDestroy {
   private isFullscreen$ = new BehaviorSubject<boolean>(false);
   private fullscreenElement: Element | null = null;
   private eventListeners: (() => void)[] = [];
+  private isBrowser: boolean;
 
-  constructor(private ngZone: NgZone) {
-    this.initializeFullscreenDetection();
+  constructor(
+    private ngZone: NgZone,
+    @Inject(PLATFORM_ID) platformId: object,
+  ) {
+    this.isBrowser = isPlatformBrowser(platformId);
+    if (this.isBrowser) {
+      this.initializeFullscreenDetection();
+    }
   }
 
   /**

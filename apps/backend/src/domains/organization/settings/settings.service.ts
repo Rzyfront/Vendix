@@ -1,8 +1,16 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { UpdateSettingsDto } from './dto';
 import { RequestContextService } from '@common/context/request-context.service';
-import { OrganizationSettings, OrganizationBranding } from './interfaces/organization-settings.interface';
+import {
+  OrganizationSettings,
+  OrganizationBranding,
+} from './interfaces/organization-settings.interface';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class SettingsService {
@@ -11,7 +19,7 @@ export class SettingsService {
   async findOne() {
     const settings = await this.prisma.organization_settings.findFirst();
     if (!settings) {
-      throw new NotFoundException('Organization settings not found');
+      throw new VendixHttpException(ErrorCodes.ORG_FIND_001);
     }
     return settings;
   }
@@ -26,7 +34,7 @@ export class SettingsService {
     } else {
       const context = RequestContextService.getContext();
       if (!context?.organization_id) {
-        throw new ForbiddenException('Organization context required');
+        throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
       }
 
       return this.prisma.organization_settings.create({
@@ -44,7 +52,9 @@ export class SettingsService {
    */
   async updateBranding(brandingDto: Partial<OrganizationBranding>) {
     const existing = await this.prisma.organization_settings.findFirst();
-    const currentSettings = (existing?.settings as OrganizationSettings) || { branding: {} as OrganizationBranding };
+    const currentSettings = (existing?.settings as OrganizationSettings) || {
+      branding: {} as OrganizationBranding,
+    };
 
     const updatedSettings: OrganizationSettings = {
       ...currentSettings,

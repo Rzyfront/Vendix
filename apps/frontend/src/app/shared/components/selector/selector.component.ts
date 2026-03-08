@@ -7,6 +7,8 @@ import {
   OnInit,
   OnDestroy,
   ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
@@ -120,6 +122,8 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
 })
 export class SelectorComponent
   implements ControlValueAccessor, OnInit, OnDestroy {
+  private cdr = inject(ChangeDetectorRef);
+
   @Input() id = `selector-${Math.random().toString(36).substr(2, 9)}`;
   @Input() label = '';
   @Input() placeholder = '';
@@ -154,6 +158,7 @@ export class SelectorComponent
   // ControlValueAccessor implementation
   writeValue(value: string | number | null): void {
     this.selectedValue = value;
+    this.cdr.markForCheck();
   }
 
   registerOnChange(fn: (value: string | number | null) => void): void {

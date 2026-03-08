@@ -27,6 +27,7 @@ import {
   ToastService,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  PaginationComponent,
 } from '../../../../shared/components/index';
 import {
   FormsModule,
@@ -50,6 +51,7 @@ import {
     InputsearchComponent,
     IconComponent,
     ButtonComponent,
+    PaginationComponent,
   ],
   templateUrl: './users.component.html',
   styleUrls: ['./users.component.css'],

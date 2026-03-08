@@ -6,6 +6,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { VendixHttpException } from '../errors';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -19,16 +20,40 @@ export class AllExceptionsFilter implements ExceptionFilter {
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    const message =
-      exception instanceof HttpException
-        ? exception.getResponse()
-        : 'Internal server error';
+    // Extract error_code and details based on exception type
+    let errorCode: string | undefined;
+    let details: any;
+    let message: any;
 
-    const responseBody = {
+    if (exception instanceof VendixHttpException) {
+      errorCode = exception.errorCode;
+      const resp = exception.getResponse() as any;
+      message = resp.message || resp;
+      details = resp.details;
+    } else if (exception instanceof HttpException) {
+      const resp = exception.getResponse() as any;
+      message = resp;
+      if (resp?.error_code) {
+        errorCode = resp.error_code;
+      }
+      // Detect class-validator ValidationPipe errors (array of messages)
+      if (Array.isArray(resp?.message)) {
+        errorCode = 'SYS_VALIDATION_001';
+        details = { validationErrors: resp.message };
+        message = 'Validation failed';
+      }
+    } else {
+      errorCode = 'SYS_INTERNAL_001';
+      message = 'Internal server error';
+    }
+
+    const responseBody: Record<string, any> = {
       statusCode: status,
+      ...(errorCode && { error_code: errorCode }),
+      message,
+      ...(details && { details }),
       timestamp: new Date().toISOString(),
       path: request.url,
-      message: message,
     };
 
     // Dev-friendly error details

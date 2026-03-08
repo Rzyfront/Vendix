@@ -30,10 +30,12 @@ import { ToggleComponent } from '../toggle/toggle.component';
       class="flex items-center justify-between p-3 bg-gray-50 border border-gray-100 rounded-xl transition-all hover:bg-gray-100/50"
       [class.opacity-50]="disabled"
       [class.cursor-not-allowed]="disabled"
+      [class.new-highlight]="isNew"
     >
       <div class="flex-1 mr-4">
         <label class="text-xs font-semibold text-gray-700 block">
           {{ label }}
+          <span *ngIf="isNew" class="new-badge">Nuevo</span>
         </label>
         <p *ngIf="description" class="text-[10px] text-gray-500 leading-tight mt-0.5">
           {{ description }}
@@ -46,11 +48,29 @@ import { ToggleComponent } from '../toggle/toggle.component';
       ></app-toggle>
     </div>
   `,
+    styles: [`
+      .new-highlight {
+        border-color: #f97316 !important;
+        background: rgba(249, 115, 22, 0.05) !important;
+      }
+      .new-badge {
+        font-size: 9px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #f97316;
+        background: rgba(249, 115, 22, 0.1);
+        padding: 1px 6px;
+        border-radius: 9999px;
+        margin-left: 4px;
+      }
+    `],
 })
 export class SettingToggleComponent implements ControlValueAccessor {
     @Input() label: string = '';
     @Input() description?: string;
     @Input() disabled = false;
+    @Input() isNew = false;
 
     @Output() changed = new EventEmitter<boolean>();
 

@@ -7,10 +7,11 @@ import {
 import { Reflector } from '@nestjs/core';
 import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
 import { UserRole } from '../enums/user-role.enum';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
-  constructor(private reflector: Reflector) { }
+  constructor(private reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
     const requiredPermissions = this.reflector.getAllAndOverride<string[]>(
@@ -27,7 +28,7 @@ export class PermissionsGuard implements CanActivate {
     const { method, route } = request;
 
     if (!user) {
-      throw new ForbiddenException('Usuario no autenticado');
+      throw new VendixHttpException(ErrorCodes.AUTH_PERM_001);
     }
 
     // Bypass para super admin - tiene acceso a todo sin verificar permisos
@@ -36,7 +37,7 @@ export class PermissionsGuard implements CanActivate {
     }
 
     if (!user.permissions || user.permissions.length === 0) {
-      throw new ForbiddenException('Usuario sin permisos asignados');
+      throw new VendixHttpException(ErrorCodes.AUTH_PERM_001);
     }
 
     // Verificar si el usuario tiene permisos para esta ruta y método específico
@@ -59,15 +60,12 @@ export class PermissionsGuard implements CanActivate {
     const hasNamedPermission = requiredPermissions.some((permissionName) =>
       user.permissions.some(
         (userPerm) =>
-          userPerm.name === permissionName &&
-          userPerm.status === 'active',
+          userPerm.name === permissionName && userPerm.status === 'active',
       ),
     );
 
     if (!hasPermission && !hasNamedPermission) {
-      throw new ForbiddenException(
-        `Acceso denegado. Se requiere permiso para ${currentMethod} ${currentPath}`,
-      );
+      throw new VendixHttpException(ErrorCodes.AUTH_PERM_001);
     }
 
     return true;

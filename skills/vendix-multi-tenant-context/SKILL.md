@@ -4,7 +4,7 @@ description: >
   Explains the 'Context Bridge' pattern where Middleware resolves the tenant (domain/store), stores it in the Request object, and an Interceptor unifies it with user authentication into AsyncLocalStorage.
 license: Apache-2.0
 metadata:
-  author: Vendix
+  author: rzyfront
   version: "1.0"
   scope: [root, backend]
   auto_invoke:
@@ -100,12 +100,12 @@ export class RequestContextService {
 
 The context flows into **4 domain-scoped Prisma services** that use Prisma Client Extensions to automatically intercept ALL queries and inject tenant filters:
 
-| Service | Scope Applied | Domain |
-|---|---|---|
-| `GlobalPrismaService` | None | Superadmin |
-| `OrganizationPrismaService` | `organization_id` | Org admin |
-| `StorePrismaService` | `store_id` + `organization_id` | Store admin |
-| `EcommercePrismaService` | `store_id` + `user_id` | E-commerce |
+| Service                     | Scope Applied                  | Domain      |
+| --------------------------- | ------------------------------ | ----------- |
+| `GlobalPrismaService`       | None                           | Superadmin  |
+| `OrganizationPrismaService` | `organization_id`              | Org admin   |
+| `StorePrismaService`        | `store_id` + `organization_id` | Store admin |
+| `EcommercePrismaService`    | `store_id` + `user_id`         | E-commerce  |
 
 ```typescript
 // Scoping is transparent - no manual filtering needed

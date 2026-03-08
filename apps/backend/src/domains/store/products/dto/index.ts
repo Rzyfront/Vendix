@@ -991,4 +991,30 @@ export class BulkUploadTemplateDto {
   instructions: string;
 }
 
+export class GenerateProductDescriptionDto {
+  @IsString()
+  name: string;
+
+  @IsOptional()
+  @IsString()
+  brand?: string;
+
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  base_price?: number;
+
+  @IsOptional()
+  @IsString()
+  sku?: string;
+
+  @IsOptional()
+  @IsObject()
+  extra_context?: Record<string, any>;
+}
+
 export * from './bulk-image-upload.dto';

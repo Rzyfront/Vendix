@@ -6,7 +6,7 @@ description: >
   Trigger: When working with Prisma scoped services, adding models to scopes, or debugging
   Forbidden/Unauthorized errors in database queries.
 metadata:
-  author: vendix
+  author: rzyfront
   version: "2.0"
   scope: [root, backend]
   auto_invoke:
@@ -52,7 +52,7 @@ export abstract class BasePrismaService implements OnModuleInit {
   constructor() {
     const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
     const adapter = new PrismaPg(pool);
-    this.baseClient = new PrismaClient({ adapter, log: ['error', 'warn'] });
+    this.baseClient = new PrismaClient({ adapter, log: ["error", "warn"] });
   }
 
   async onModuleInit() {
@@ -113,9 +113,11 @@ async getOrgUsers() {
 This is the **most complex** service with 3 levels of scoping:
 
 #### a) Store-Scoped Models (direct `store_id` filter)
+
 `store_users`, `store_settings`, `inventory_locations`, `categories`, `tax_categories`, `products`, `tax_rates`, `orders`, `store_payment_methods`, `addresses`, `domain_settings`, `shipping_zones`, `shipping_methods`, `expenses`
 
 #### b) Relational-Scoped Models (filter via parent relation)
+
 `stock_levels` → via `inventory_locations.store_id`
 `inventory_batches` → via `inventory_locations.store_id`
 `product_variants` → via `products.store_id`
@@ -133,9 +135,11 @@ This is the **most complex** service with 3 levels of scoping:
 `inventory_transactions` → via `products.store_id`
 
 #### c) Org-Scoped Models (filter via `organization_id`)
+
 `suppliers`, `stock_transfers`, `sales_orders`, `return_orders`, `expense_categories`
 
 #### d) Global Models (no scoping, via `baseClient`)
+
 `organizations`, `brands`, `product_categories`, `system_payment_methods`, `users`, `stores`, `audit_logs`, `default_templates`
 
 ```typescript
@@ -152,12 +156,15 @@ async getProducts() {
 **Use:** Customer-facing e-commerce (`STORE_ECOMMERCE`).
 
 #### a) Store-Only Models
+
 `products`, `categories`, `store_payment_methods`, `store_settings`, `inventory_locations`, `tax_categories`, `tax_rates`, `legal_documents`
 
 #### b) Store + User Models (adds `user_id` or `customer_id`)
+
 `carts`, `wishlists`, `orders` (uses `customer_id`), `addresses`
 
 #### c) Customer-Only Models (no `store_id`, inherits via relation)
+
 `payments` (uses `customer_id`)
 
 ```typescript
@@ -222,14 +229,14 @@ export class PrismaModule {}
 
 ## Which Service to Use per Domain
 
-| Backend Domain | Prisma Service | Scope Level |
-|---|---|---|
-| `domains/superadmin/` | `GlobalPrismaService` | None (full access) |
-| `domains/organization/` | `OrganizationPrismaService` | `organization_id` |
-| `domains/store/` | `StorePrismaService` | `store_id` + `organization_id` |
-| `domains/ecommerce/` | `EcommercePrismaService` | `store_id` + `user_id` |
-| `domains/public/` | `GlobalPrismaService` | None (read-only public) |
-| Background jobs / Seeders | Any service + `withoutScope()` | None |
+| Backend Domain            | Prisma Service                 | Scope Level                    |
+| ------------------------- | ------------------------------ | ------------------------------ |
+| `domains/superadmin/`     | `GlobalPrismaService`          | None (full access)             |
+| `domains/organization/`   | `OrganizationPrismaService`    | `organization_id`              |
+| `domains/store/`          | `StorePrismaService`           | `store_id` + `organization_id` |
+| `domains/ecommerce/`      | `EcommercePrismaService`       | `store_id` + `user_id`         |
+| `domains/public/`         | `GlobalPrismaService`          | None (read-only public)        |
+| Background jobs / Seeders | Any service + `withoutScope()` | None                           |
 
 ---
 
@@ -312,6 +319,7 @@ async findCoupons() {
 ```
 
 **`withoutScope()` is ONLY acceptable for (requires user approval):**
+
 - Background jobs / cron tasks (no request context)
 - Database seeders and migrations
 - Cross-tenant analytics (superadmin)
@@ -354,6 +362,7 @@ async adminOperation() {
 ```
 
 **When the agent encounters a situation where `withoutScope()` seems necessary:**
+
 1. Stop and explain WHY scope can't be used.
 2. Propose alternatives (GlobalPrismaService, model registration, etc.).
 3. Only proceed with `withoutScope()` if the user explicitly approves.
@@ -439,14 +448,14 @@ const context_filter = this.prisma.storeWhere; // { organization_id, store_id }
 
 ## Key Files Reference
 
-| File | Purpose |
-|------|---------|
-| `base/base-prisma.service.ts` | Abstract base with `withoutScope()` |
-| `services/global-prisma.service.ts` | Superadmin (no scope) |
-| `services/organization-prisma.service.ts` | Org-level scope |
-| `services/store-prisma.service.ts` | Store-level scope (most complex) |
-| `services/ecommerce-prisma.service.ts` | Ecommerce scope (store + user) |
-| `prisma.module.ts` | Module registration |
+| File                                      | Purpose                             |
+| ----------------------------------------- | ----------------------------------- |
+| `base/base-prisma.service.ts`             | Abstract base with `withoutScope()` |
+| `services/global-prisma.service.ts`       | Superadmin (no scope)               |
+| `services/organization-prisma.service.ts` | Org-level scope                     |
+| `services/store-prisma.service.ts`        | Store-level scope (most complex)    |
+| `services/ecommerce-prisma.service.ts`    | Ecommerce scope (store + user)      |
+| `prisma.module.ts`                        | Module registration                 |
 
 ## Related Skills
 

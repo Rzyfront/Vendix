@@ -197,7 +197,13 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
               </p>
               <div class="flex items-center gap-2 mt-0.5">
                 <span class="text-[10px] text-text-muted">
-                  Base: {{ formatCurrency(item.unitPrice) }}
+                  Base: {{ formatCurrency(item.unitPrice) }}{{ item.is_weight_product ? '/' + (item.weight_unit || 'kg') : '' }}
+                </span>
+                <span
+                  *ngIf="item.is_weight_product && item.weight"
+                  class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-semibold bg-blue-100 text-blue-800"
+                >
+                  {{ item.weight }} {{ item.weight_unit || 'kg' }}
                 </span>
                 <span
                   *ngIf="getItemTaxAmount(item) > 0"
@@ -221,14 +227,23 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             <div
               class="col-span-3 flex items-center justify-between pt-2 mt-1 border-t border-border/50"
             >
-              <app-quantity-control
-                [value]="item.quantity"
-                [min]="1"
-                [max]="item.product.track_inventory !== false ? item.product.stock : 999"
-                [editable]="true"
-                [size]="'sm'"
-                (valueChange)="updateQuantity(item.id, $event)"
-              ></app-quantity-control>
+              <!-- Weight products: show weight badge instead of quantity control -->
+              <ng-container *ngIf="item.is_weight_product; else unitQuantity">
+                <div class="flex items-center gap-1.5 px-2 py-1 bg-blue-50 rounded-lg border border-blue-200">
+                  <app-icon name="scale" [size]="14" class="text-blue-600"></app-icon>
+                  <span class="text-xs font-bold text-blue-700">{{ item.weight }} {{ item.weight_unit || 'kg' }}</span>
+                </div>
+              </ng-container>
+              <ng-template #unitQuantity>
+                <app-quantity-control
+                  [value]="item.quantity"
+                  [min]="1"
+                  [max]="item.product.track_inventory !== false ? item.product.stock : 999"
+                  [editable]="true"
+                  [size]="'sm'"
+                  (valueChange)="updateQuantity(item.id, $event)"
+                ></app-quantity-control>
+              </ng-template>
               <span class="text-sm font-extrabold text-primary">
                 {{ formatCurrency(item.totalPrice) }}
               </span>

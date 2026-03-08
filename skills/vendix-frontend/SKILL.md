@@ -5,13 +5,14 @@ description: >
   Trigger: When editing files in apps/frontend/, creating components, or working with NgRx store.
 license: MIT
 metadata:
-  author: vendix
+  author: rzyfront
   version: "1.0"
 ---
 
 ## When to Use
 
 Use this skill when:
+
 - Creating or modifying Angular components
 - Adding NgRx features (store, effects, entities)
 - Working with frontend architecture
@@ -68,11 +69,14 @@ export const initialMyFeatureState: MyFeatureState = {
 Components use selectors and dispatch actions:
 
 ```typescript
-import { Store } from '@ngrx/store';
-import { selectMyFeatureItems, selectMyFeatureLoading } from './state/selectors/my-feature.selectors';
+import { Store } from "@ngrx/store";
+import {
+  selectMyFeatureItems,
+  selectMyFeatureLoading,
+} from "./state/selectors/my-feature.selectors";
 
 @Component({
-  selector: 'vendix-my-feature',
+  selector: "vendix-my-feature",
   template: `
     @if (loading$ | async) {
       <vendix-loading />
@@ -98,11 +102,11 @@ export class MyFeatureComponent implements OnInit {
 Angular 20 uses standalone components:
 
 ```typescript
-import { Component } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component } from "@angular/core";
+import { CommonModule } from "@angular/common";
 
 @Component({
-  selector: 'vendix-my-component',
+  selector: "vendix-my-component",
   standalone: true,
   imports: [CommonModule],
   template: `...`,
@@ -137,16 +141,16 @@ Modifying existing component?
 
 ```typescript
 // state/actions/my-feature.actions.ts
-import { createAction, props } from '@ngrx/store';
+import { createAction, props } from "@ngrx/store";
 
-export const loadItems = createAction('[MyFeature] Load Items');
+export const loadItems = createAction("[MyFeature] Load Items");
 export const loadItemsSuccess = createAction(
-  '[MyFeature] Load Items Success',
-  props<{ items: Item[] }>()
+  "[MyFeature] Load Items Success",
+  props<{ items: Item[] }>(),
 );
 export const loadItemsFailure = createAction(
-  '[MyFeature] Load Items Failure',
-  props<{ error: string }>()
+  "[MyFeature] Load Items Failure",
+  props<{ error: string }>(),
 );
 ```
 
@@ -154,27 +158,36 @@ export const loadItemsFailure = createAction(
 
 ```typescript
 // state/reducers/my-feature.reducer.ts
-import { createReducer, on } from '@ngrx/store';
-import * as MyFeatureActions from '../actions/my-feature.actions';
-import { initialMyFeatureState, MyFeatureState } from '../my-feature.state';
+import { createReducer, on } from "@ngrx/store";
+import * as MyFeatureActions from "../actions/my-feature.actions";
+import { initialMyFeatureState, MyFeatureState } from "../my-feature.state";
 
 export const myFeatureReducer = createReducer(
   initialMyFeatureState,
-  on(MyFeatureActions.loadItems, (state): MyFeatureState => ({
-    ...state,
-    loading: true,
-    error: null,
-  })),
-  on(MyFeatureActions.loadItemsSuccess, (state, { items }): MyFeatureState => ({
-    ...state,
-    items,
-    loading: false,
-  })),
-  on(MyFeatureActions.loadItemsFailure, (state, { error }): MyFeatureState => ({
-    ...state,
-    loading: false,
-    error,
-  }))
+  on(
+    MyFeatureActions.loadItems,
+    (state): MyFeatureState => ({
+      ...state,
+      loading: true,
+      error: null,
+    }),
+  ),
+  on(
+    MyFeatureActions.loadItemsSuccess,
+    (state, { items }): MyFeatureState => ({
+      ...state,
+      items,
+      loading: false,
+    }),
+  ),
+  on(
+    MyFeatureActions.loadItemsFailure,
+    (state, { error }): MyFeatureState => ({
+      ...state,
+      loading: false,
+      error,
+    }),
+  ),
 );
 ```
 
@@ -182,19 +195,20 @@ export const myFeatureReducer = createReducer(
 
 ```typescript
 // state/selectors/my-feature.selectors.ts
-import { createFeatureSelector, createSelector } from '@ngrx/store';
-import { MyFeatureState } from '../my-feature.state';
+import { createFeatureSelector, createSelector } from "@ngrx/store";
+import { MyFeatureState } from "../my-feature.state";
 
-export const selectMyFeatureState = createFeatureSelector<MyFeatureState>('myFeature');
+export const selectMyFeatureState =
+  createFeatureSelector<MyFeatureState>("myFeature");
 
 export const selectMyFeatureItems = createSelector(
   selectMyFeatureState,
-  (state: MyFeatureState) => state.items
+  (state: MyFeatureState) => state.items,
 );
 
 export const selectMyFeatureLoading = createSelector(
   selectMyFeatureState,
-  (state: MyFeatureState) => state.loading
+  (state: MyFeatureState) => state.loading,
 );
 ```
 
@@ -202,12 +216,12 @@ export const selectMyFeatureLoading = createSelector(
 
 ```typescript
 // state/effects/my-feature.effects.ts
-import { Injectable } from '@angular/core';
-import { Actions, createEffect, ofType } from '@ngrx/effects';
-import { catchError, map, mergeMap } from 'rxjs/operators';
-import { of } from 'rxjs';
-import * as MyFeatureActions from '../actions/my-feature.actions';
-import { MyFeatureService } from '../../services/my-feature.service';
+import { Injectable } from "@angular/core";
+import { Actions, createEffect, ofType } from "@ngrx/effects";
+import { catchError, map, mergeMap } from "rxjs/operators";
+import { of } from "rxjs";
+import * as MyFeatureActions from "../actions/my-feature.actions";
+import { MyFeatureService } from "../../services/my-feature.service";
 
 @Injectable()
 export class MyFeatureEffects {
@@ -218,16 +232,16 @@ export class MyFeatureEffects {
         this.myFeatureService.getItems().pipe(
           map((items) => MyFeatureActions.loadItemsSuccess({ items })),
           catchError((error) =>
-            of(MyFeatureActions.loadItemsFailure({ error: error.message }))
-          )
-        )
-      )
-    )
+            of(MyFeatureActions.loadItemsFailure({ error: error.message })),
+          ),
+        ),
+      ),
+    ),
   );
 
   constructor(
     private actions$: Actions,
-    private myFeatureService: MyFeatureService
+    private myFeatureService: MyFeatureService,
   ) {}
 }
 ```

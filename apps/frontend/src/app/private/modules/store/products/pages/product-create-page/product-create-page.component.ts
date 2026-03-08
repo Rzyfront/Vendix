@@ -93,6 +93,126 @@ interface GeneratedVariant {
     CurrencyPipe,
   ],
   templateUrl: './product-create-page.component.html',
+  styles: [`
+    /* ── AI Generate Button (subscription card style) ── */
+    .ai-generate-btn {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 6px;
+      border-radius: 5px;
+      border: 1px solid rgba(var(--color-primary-rgb), 0.4);
+      font-size: 8px;
+      background: linear-gradient(135deg,
+        rgba(var(--color-primary-rgb), 0.5) 0%,
+        rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.65) 25%,
+        rgba(var(--color-primary-rgb), 0.4) 50%,
+        rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.7) 75%,
+        rgba(var(--color-primary-rgb), 0.55) 100%
+      );
+      background-size: 200% 200%;
+      animation: ai-shimmer 3s ease-in-out infinite;
+      color: white;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        0 2px 8px rgba(var(--color-primary-rgb), 0.3);
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    }
+
+    .ai-generate-btn:hover {
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.15),
+        0 4px 16px rgba(var(--color-primary-rgb), 0.5),
+        0 0 24px rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.25);
+      transform: translateY(-1px);
+    }
+
+    .ai-generate-btn:disabled {
+      cursor: not-allowed;
+      transform: none;
+      animation: ai-shimmer 1.5s ease-in-out infinite;
+    }
+
+    /* ── Tooltip ── */
+    .ai-tooltip {
+      position: absolute;
+      bottom: calc(100% + 8px);
+      right: 0;
+      padding: 6px 12px;
+      border-radius: 8px;
+      background: linear-gradient(135deg,
+        rgba(var(--color-primary-rgb), 0.85) 0%,
+        rgba(var(--color-primary-rgb), 0.95) 50%,
+        rgba(var(--color-primary-rgb), 0.85) 100%
+      );
+      background-size: 200% 200%;
+      animation: ai-shimmer 3s ease-in-out infinite;
+      color: white;
+      font-size: 11px;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      transform: translateY(4px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.25),
+        inset 0 1px 1px rgba(255, 255, 255, 0.15);
+    }
+
+    .ai-generate-btn:hover .ai-tooltip {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* ── Generating State: animated outline on textarea ── */
+    .ai-generating .ai-textarea-wrapper {
+      position: relative;
+      border-radius: 12px;
+      padding: 2px;
+      background: linear-gradient(135deg,
+        rgba(var(--color-primary-rgb), 0.6) 0%,
+        rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.8) 25%,
+        rgba(var(--color-primary-rgb), 0.4) 50%,
+        rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.9) 75%,
+        rgba(var(--color-primary-rgb), 0.5) 100%
+      );
+      background-size: 300% 300%;
+      animation: ai-outline-flow 2s ease-in-out infinite;
+    }
+
+    .ai-generating .ai-textarea-wrapper ::ng-deep textarea {
+      border: none !important;
+      border-radius: 10px;
+    }
+
+    .ai-generating .ai-label {
+      background: linear-gradient(90deg,
+        rgba(var(--color-primary-rgb), 1) 0%,
+        rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 1) 50%,
+        rgba(var(--color-primary-rgb), 1) 100%
+      );
+      background-size: 200% 100%;
+      animation: ai-shimmer 2s ease-in-out infinite;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      font-weight: 600;
+    }
+
+    @keyframes ai-shimmer {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    @keyframes ai-outline-flow {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+  `],
 })
 export class ProductCreatePageComponent implements OnInit {
   private fb = inject(FormBuilder);
@@ -114,6 +234,9 @@ export class ProductCreatePageComponent implements OnInit {
 
   productForm: FormGroup = this.createForm();
   isSubmitting = signal(false);
+  isGeneratingDescription = signal(false);
+  aiDescriptionUsesLeft = signal(3);
+  aiDescriptionLimitReached = computed(() => this.aiDescriptionUsesLeft() <= 0);
   isEditMode = signal(false);
   productId: number | null = null;
   product: Product | null = null;
@@ -905,7 +1028,6 @@ export class ProductCreatePageComponent implements OnInit {
       };
 
       reader.onerror = () => {
-        console.error('Error reading file:', file.name);
         this.toastService.error(`Error al cargar la imagen: ${file.name}`);
         // Continue with next image even if this one failed
         this.processImagesSequentially(files, index + 1).then(resolve);
@@ -1083,6 +1205,67 @@ export class ProductCreatePageComponent implements OnInit {
             : 'Error al crear el producto',
         );
         this.isSubmitting.set(false);
+      },
+    });
+  }
+
+  generateAIDescription(): void {
+    if (this.aiDescriptionLimitReached()) {
+      this.toastService.warning('Límite de generaciones alcanzado (3 por producto)');
+      return;
+    }
+
+    const name = this.productForm.get('name')?.value;
+    if (!name?.trim()) {
+      this.toastService.warning('Ingresa el nombre del producto primero');
+      return;
+    }
+
+    this.isGeneratingDescription.set(true);
+
+    const brandId = this.productForm.get('brand_id')?.value;
+    const brand = brandId
+      ? this.brandOptions.find((b) => b.value === brandId)?.label
+      : undefined;
+
+    const categoryIds: number[] = this.productForm.get('category_ids')?.value || [];
+    const category = categoryIds.length > 0
+      ? this.categoryOptions
+          .filter((c) => categoryIds.includes(c.value as number))
+          .map((c) => c.label)
+          .join(', ')
+      : undefined;
+
+    const payload: Record<string, any> = {
+      name: name.trim(),
+      base_price: this.productForm.get('base_price')?.value || undefined,
+      sku: this.productForm.get('sku')?.value || undefined,
+      brand,
+      category,
+    };
+
+    // Remove undefined values
+    Object.keys(payload).forEach((key) => {
+      if (payload[key] === undefined || payload[key] === '') delete payload[key];
+    });
+
+    this.productsService.generateDescription(payload).subscribe({
+      next: (data: any) => {
+        this.productForm.get('description')?.setValue(data.description);
+        this.aiDescriptionUsesLeft.update((n) => n - 1);
+        const left = this.aiDescriptionUsesLeft();
+        this.toastService.success(
+          left > 0
+            ? `Descripción generada con IA (${left} uso${left !== 1 ? 's' : ''} restante${left !== 1 ? 's' : ''})`
+            : 'Descripción generada con IA (último uso)',
+        );
+        this.isGeneratingDescription.set(false);
+      },
+      error: (err: any) => {
+        console.error('AI generation error:', err);
+        const message = extractApiErrorMessage(err);
+        this.toastService.error(message, 'Error al generar descripción');
+        this.isGeneratingDescription.set(false);
       },
     });
   }

@@ -1,5 +1,5 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, OnInit, OnDestroy, PLATFORM_ID, Inject } from '@angular/core';
+import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { RouterModule } from '@angular/router';
 
 @Component({
@@ -10,6 +10,11 @@ import { RouterModule } from '@angular/router';
   styleUrls: ['./hero-carousel.component.scss'],
 })
 export class HeroCarouselComponent implements OnInit, OnDestroy {
+  private isBrowser: boolean;
+
+  constructor(@Inject(PLATFORM_ID) platformId: object) {
+    this.isBrowser = isPlatformBrowser(platformId);
+  }
   slides = [
     {
       image: 'assets/images/carrusel/1.webp',
@@ -100,11 +105,11 @@ export class HeroCarouselComponent implements OnInit, OnDestroy {
     grabCursor: true,
   };
 
-  constructor() {}
-
   ngOnInit() {
-    // Component initialization
-    this.startAutoplay();
+    // Only start autoplay in the browser — setInterval prevents SSR app stability
+    if (this.isBrowser) {
+      this.startAutoplay();
+    }
   }
 
   currentSlideIndex = 0;

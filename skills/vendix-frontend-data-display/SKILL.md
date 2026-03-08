@@ -6,7 +6,7 @@ description: >
   Trigger: When displaying lists of data, creating admin modules with tables, or implementing mobile-friendly data views.
 license: Apache-2.0
 metadata:
-  author: gentleman-programming
+  author: rzyfront
   version: "2.0"
   scope: [frontend]
   auto_invoke: "Displaying data lists, implementing responsive tables, creating mobile card views"
@@ -23,12 +23,12 @@ metadata:
 
 ## Component Decision Tree
 
-| Scenario | Component | Reason |
-|----------|-----------|--------|
-| Desktop only | `TableComponent` | Full table functionality |
-| Mobile only | `ItemListComponent` | Card-based layout |
-| **Both (recommended)** | `ResponsiveDataViewComponent` | Auto-switches at 768px |
-| Custom breakpoint | Manual implementation | Use CSS classes directly |
+| Scenario               | Component                     | Reason                   |
+| ---------------------- | ----------------------------- | ------------------------ |
+| Desktop only           | `TableComponent`              | Full table functionality |
+| Mobile only            | `ItemListComponent`           | Card-based layout        |
+| **Both (recommended)** | `ResponsiveDataViewComponent` | Auto-switches at 768px   |
+| Custom breakpoint      | Manual implementation         | Use CSS classes directly |
 
 ---
 
@@ -55,12 +55,14 @@ metadata:
 ### 1. Always Define Both Configurations
 
 When using `ResponsiveDataViewComponent`, you MUST provide:
+
 - `columns` - For TableComponent (desktop)
 - `cardConfig` - For ItemListComponent (mobile)
 
 ### 2. Shared Properties
 
 These are passed to BOTH components:
+
 - `data` - The array of items
 - `actions` - TableAction[] for edit/delete/etc.
 - `loading` - Loading state
@@ -69,6 +71,7 @@ These are passed to BOTH components:
 ### 3. Card Structure
 
 **With Avatar (Square - for products):**
+
 ```
 ┌─────────────────────────────────────┐
 │ [■ Img] Título         [Badge] [⋮] │
@@ -83,6 +86,7 @@ These are passed to BOTH components:
 ```
 
 **With Avatar (Circle - for users/customers):**
+
 ```
 ┌─────────────────────────────────────┐
 │ [● Img] Título         [Badge] [⋮] │
@@ -101,26 +105,28 @@ These are passed to BOTH components:
 ### 4. New Card Config Properties
 
 #### avatarShape - Avatar Form
+
 - `'circle'` (default): For users, customers, people
 - `'square'`: For products with images
 
 #### footerStyle - Footer Value Style
+
 - `'default'`: Normal value display
 - `'prominent'`: Large value (22px, extra-bold) for prices/totals
 
 ```typescript
 cardConfig: ItemListCardConfig = {
-  titleKey: 'name',
-  subtitleKey: 'brand',
-  avatarKey: 'image_url',
-  avatarShape: 'square',        // Square for product images
-  badgeKey: 'state',
-  footerKey: 'base_price',
-  footerLabel: 'Precio',
-  footerStyle: 'prominent',     // Large price display
+  titleKey: "name",
+  subtitleKey: "brand",
+  avatarKey: "image_url",
+  avatarShape: "square", // Square for product images
+  badgeKey: "state",
+  footerKey: "base_price",
+  footerLabel: "Precio",
+  footerStyle: "prominent", // Large price display
   detailKeys: [
-    { key: 'sku', label: 'SKU' },
-    { key: 'stock', label: 'Stock' },
+    { key: "sku", label: "SKU" },
+    { key: "stock", label: "Stock" },
   ],
 };
 ```
@@ -129,13 +135,14 @@ cardConfig: ItemListCardConfig = {
 
 Action buttons have colors based on their variant:
 
-| Variant | Color | Border | Hover BG |
-|---------|-------|--------|----------|
+| Variant   | Color            | Border    | Hover BG  |
+| --------- | ---------------- | --------- | --------- |
 | `default` | `#6B7280` (gray) | `#E5E7EB` | `#F9FAFB` |
 | `primary` | `#3B82F6` (blue) | `#BFDBFE` | `#EFF6FF` |
-| `danger` | `#EF4444` (red) | `#FECACA` | `#FEF2F2` |
+| `danger`  | `#EF4444` (red)  | `#FECACA` | `#FEF2F2` |
 
 **Menu Dropdown Rule:**
+
 - ≤2 actions: Show buttons directly in footer, no menu
 - \>2 actions: First 2 in footer + menu (⋮) for rest
 
@@ -159,7 +166,7 @@ import {
   TableColumn,
   TableAction,
   ItemListCardConfig,
-} from '@/shared/components';
+} from "@/shared/components";
 
 @Component({
   imports: [ResponsiveDataViewComponent],
@@ -178,33 +185,52 @@ import {
 export class MyListComponent {
   // Table columns (desktop)
   columns: TableColumn[] = [
-    { key: 'name', label: 'Nombre', sortable: true, priority: 1 },
-    { key: 'email', label: 'Correo', priority: 2 },
-    { key: 'status', label: 'Estado', badge: true, badgeConfig: { type: 'status' } },
+    { key: "name", label: "Nombre", sortable: true, priority: 1 },
+    { key: "email", label: "Correo", priority: 2 },
+    {
+      key: "status",
+      label: "Estado",
+      badge: true,
+      badgeConfig: { type: "status" },
+    },
   ];
 
   // Card config (mobile) - with new properties
   cardConfig: ItemListCardConfig = {
-    titleKey: 'name',
-    subtitleKey: 'email',
-    avatarFallbackIcon: 'user',
-    avatarShape: 'circle',                // Circle for users
-    badgeKey: 'status',
-    badgeConfig: { type: 'status', size: 'sm' },
+    titleKey: "name",
+    subtitleKey: "email",
+    avatarFallbackIcon: "user",
+    avatarShape: "circle", // Circle for users
+    badgeKey: "status",
+    badgeConfig: { type: "status", size: "sm" },
     detailKeys: [
-      { key: 'phone', label: 'Teléfono', icon: 'phone' },
-      { key: 'created_at', label: 'Fecha', transform: (v) => new Date(v).toLocaleDateString() },
+      { key: "phone", label: "Teléfono", icon: "phone" },
+      {
+        key: "created_at",
+        label: "Fecha",
+        transform: (v) => new Date(v).toLocaleDateString(),
+      },
     ],
-    footerKey: 'total',
-    footerLabel: 'Total',
-    footerStyle: 'prominent',             // Large price display
+    footerKey: "total",
+    footerLabel: "Total",
+    footerStyle: "prominent", // Large price display
     footerTransform: (v) => `$${v.toLocaleString()}`,
   };
 
   // Shared actions - with colored variants
   actions: TableAction[] = [
-    { label: 'Editar', icon: 'edit', variant: 'primary', action: (item) => this.edit(item) },
-    { label: 'Eliminar', icon: 'trash-2', variant: 'danger', action: (item) => this.delete(item) },
+    {
+      label: "Editar",
+      icon: "edit",
+      variant: "primary",
+      action: (item) => this.edit(item),
+    },
+    {
+      label: "Eliminar",
+      icon: "trash-2",
+      variant: "danger",
+      action: (item) => this.delete(item),
+    },
   ];
 }
 ```
@@ -214,29 +240,29 @@ export class MyListComponent {
 ```typescript
 interface ItemListCardConfig {
   // Header section
-  titleKey: string;                           // Required: field for main title
-  titleTransform?: (item: any) => string;     // Optional: combine fields
-  subtitleKey?: string;                       // Secondary text (email, etc.)
+  titleKey: string; // Required: field for main title
+  titleTransform?: (item: any) => string; // Optional: combine fields
+  subtitleKey?: string; // Secondary text (email, etc.)
   subtitleTransform?: (item: any) => string;
 
   // Avatar (OPTIONAL - only shown if either is set)
-  avatarKey?: string;                         // Image URL field
-  avatarFallbackIcon?: string;                // Icon when no image
-  avatarShape?: 'circle' | 'square';          // NEW: Shape (default: 'circle')
+  avatarKey?: string; // Image URL field
+  avatarFallbackIcon?: string; // Icon when no image
+  avatarShape?: "circle" | "square"; // NEW: Shape (default: 'circle')
   // NOTE: If neither avatarKey nor avatarFallbackIcon is set, no avatar is displayed
 
   // Badge
-  badgeKey?: string;                          // Status field
-  badgeConfig?: { type: 'status' | 'custom', size?: 'sm' | 'md' | 'lg' };
-  badgeTransform?: (value: any) => string;    // Display text
+  badgeKey?: string; // Status field
+  badgeConfig?: { type: "status" | "custom"; size?: "sm" | "md" | "lg" };
+  badgeTransform?: (value: any) => string; // Display text
 
   // Details grid (2 columns)
   detailKeys?: ItemListDetailField[];
 
   // Footer
-  footerKey?: string;                         // Highlighted value
-  footerLabel?: string;                       // Label above value
-  footerStyle?: 'default' | 'prominent';      // NEW: Value style (default: 'default')
+  footerKey?: string; // Highlighted value
+  footerLabel?: string; // Label above value
+  footerStyle?: "default" | "prominent"; // NEW: Value style (default: 'default')
   footerTransform?: (value: any, item?: any) => string;
 }
 
@@ -244,7 +270,7 @@ interface ItemListDetailField {
   key: string;
   label: string;
   transform?: (value: any, item?: any) => string;
-  icon?: string;                              // Lucide icon name
+  icon?: string; // Lucide icon name
 }
 ```
 
@@ -253,29 +279,30 @@ interface ItemListDetailField {
 ```typescript
 cardConfig: ItemListCardConfig = {
   // Combine fields for title
-  titleKey: 'first_name',
+  titleKey: "first_name",
   titleTransform: (item) => `${item.first_name} ${item.last_name}`,
 
   // Format currency
-  footerKey: 'total_spend',
-  footerTransform: (v) => new Intl.NumberFormat('es-CO', {
-    style: 'currency',
-    currency: 'COP',
-    minimumFractionDigits: 0,
-  }).format(v || 0),
+  footerKey: "total_spend",
+  footerTransform: (v) =>
+    new Intl.NumberFormat("es-CO", {
+      style: "currency",
+      currency: "COP",
+      minimumFractionDigits: 0,
+    }).format(v || 0),
 
   // Format date
   detailKeys: [
     {
-      key: 'created_at',
-      label: 'Registrado',
-      transform: (v) => v ? new Date(v).toLocaleDateString() : '-',
+      key: "created_at",
+      label: "Registrado",
+      transform: (v) => (v ? new Date(v).toLocaleDateString() : "-"),
     },
   ],
 
   // Status badge
-  badgeKey: 'state',
-  badgeTransform: (v) => v === 'active' ? 'Activo' : 'Inactivo',
+  badgeKey: "state",
+  badgeTransform: (v) => (v === "active" ? "Activo" : "Inactivo"),
 };
 ```
 
@@ -343,26 +370,26 @@ export class MyComponent {
 
 Pre-defined status classes that work automatically:
 
-| Value | Color | Use Case |
-|-------|-------|----------|
-| `active` | Green | Active records |
-| `inactive` | Orange | Disabled records |
-| `pending` | Indigo | Awaiting action |
-| `completed` | Green | Finished tasks |
-| `suspended` | Red | Blocked accounts |
-| `draft` | Gray | Unpublished |
-| `warning` | Yellow | Needs attention |
-| `error` | Red | Failed states |
+| Value       | Color  | Use Case         |
+| ----------- | ------ | ---------------- |
+| `active`    | Green  | Active records   |
+| `inactive`  | Orange | Disabled records |
+| `pending`   | Indigo | Awaiting action  |
+| `completed` | Green  | Finished tasks   |
+| `suspended` | Red    | Blocked accounts |
+| `draft`     | Gray   | Unpublished      |
+| `warning`   | Yellow | Needs attention  |
+| `error`     | Red    | Failed states    |
 
 ---
 
 ## Size Variants
 
-| Size | Card Padding | Avatar | Title | Use Case |
-|------|-------------|--------|-------|----------|
-| `sm` | 12px | 36px | 14px | Dense lists |
-| `md` | 16px | 44px | 16px | Default |
-| `lg` | 20px | 52px | 18px | Featured items |
+| Size | Card Padding | Avatar | Title | Use Case       |
+| ---- | ------------ | ------ | ----- | -------------- |
+| `sm` | 12px         | 36px   | 14px  | Dense lists    |
+| `md` | 16px         | 44px   | 16px  | Default        |
+| `lg` | 20px         | 52px   | 18px  | Featured items |
 
 ```typescript
 <app-responsive-data-view
@@ -376,6 +403,7 @@ Pre-defined status classes that work automatically:
 ## Mobile Card Styles (<768px)
 
 ### Card Container
+
 - Border-radius: 16px
 - Shadow: `0 2px 8px rgba(0,0,0,0.07)`
 - Gap between cards: 8px
@@ -383,22 +411,24 @@ Pre-defined status classes that work automatically:
 
 ### Typography
 
-| Element | Size | Weight | Color |
-|---------|------|--------|-------|
-| Title | 15px | 700 | #1A1A1A |
-| Subtitle | 12px | 400 | #9CA3AF |
-| Detail Label | 10px | 700 | #6B7280 |
-| Detail Value | 14px | 700 | #1A1A1A |
-| Footer Label | 10px | 700 | #6B7280 |
-| Footer Value (default) | 14px | 700 | #1A1A1A |
-| Footer Value (prominent) | 22px | 800 | #1A1A1A |
+| Element                  | Size | Weight | Color   |
+| ------------------------ | ---- | ------ | ------- |
+| Title                    | 15px | 700    | #1A1A1A |
+| Subtitle                 | 12px | 400    | #9CA3AF |
+| Detail Label             | 10px | 700    | #6B7280 |
+| Detail Value             | 14px | 700    | #1A1A1A |
+| Footer Label             | 10px | 700    | #6B7280 |
+| Footer Value (default)   | 14px | 700    | #1A1A1A |
+| Footer Value (prominent) | 22px | 800    | #1A1A1A |
 
 ### Avatar Square Variant (for products)
+
 - Size: 56x56px
 - Border-radius: 12px
 - Background: #E5E7EB (when no image)
 
 ### Footer Section
+
 - Background: Same as card (no separation line)
 - Border-top: none
 - Action buttons aligned to right with color variants
@@ -407,13 +437,13 @@ Pre-defined status classes that work automatically:
 
 ## File Locations
 
-| Component | Path |
-|-----------|------|
-| TableComponent | `shared/components/table/table.component.ts` |
-| ItemListComponent | `shared/components/item-list/item-list.component.ts` |
+| Component                   | Path                                                                       |
+| --------------------------- | -------------------------------------------------------------------------- |
+| TableComponent              | `shared/components/table/table.component.ts`                               |
+| ItemListComponent           | `shared/components/item-list/item-list.component.ts`                       |
 | ResponsiveDataViewComponent | `shared/components/responsive-data-view/responsive-data-view.component.ts` |
-| Interfaces | `shared/components/item-list/item-list.interfaces.ts` |
-| Exports | `shared/components/index.ts` |
+| Interfaces                  | `shared/components/item-list/item-list.interfaces.ts`                      |
+| Exports                     | `shared/components/index.ts`                                               |
 
 ---
 

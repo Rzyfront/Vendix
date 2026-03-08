@@ -2,8 +2,13 @@ import { Injectable, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { InventoryAnalyticsQueryDto, DatePreset, Granularity } from '../dto/analytics-query.dto';
+import {
+  InventoryAnalyticsQueryDto,
+  DatePreset,
+  Granularity,
+} from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class InventoryAnalyticsService {
@@ -36,7 +41,9 @@ export class InventoryAnalyticsService {
       totalSkuCount++;
       const qty = Number(product.stock_quantity || 0);
       const cost = Number(product.cost_price || 0);
-      const reorderPoint = Number(product.reorder_point || product.min_stock_level || 5);
+      const reorderPoint = Number(
+        product.reorder_point || product.min_stock_level || 5,
+      );
 
       totalQuantity += qty;
       totalStockValue += qty * cost;
@@ -53,8 +60,10 @@ export class InventoryAnalyticsService {
       total_stock_value: totalStockValue,
       low_stock_count: lowStockCount,
       out_of_stock_count: outOfStockCount,
-      low_stock_percentage: totalSkuCount > 0 ? (lowStockCount / totalSkuCount) * 100 : 0,
-      out_of_stock_percentage: totalSkuCount > 0 ? (outOfStockCount / totalSkuCount) * 100 : 0,
+      low_stock_percentage:
+        totalSkuCount > 0 ? (lowStockCount / totalSkuCount) * 100 : 0,
+      out_of_stock_percentage:
+        totalSkuCount > 0 ? (outOfStockCount / totalSkuCount) * 100 : 0,
       total_quantity_on_hand: totalQuantity,
     };
   }
@@ -96,7 +105,9 @@ export class InventoryAnalyticsService {
     const results = products.map((product) => {
       const qty = Number(product.stock_quantity || 0);
       const cost = Number(product.cost_price || 0);
-      const reorderPoint = Number(product.reorder_point || product.min_stock_level || 5);
+      const reorderPoint = Number(
+        product.reorder_point || product.min_stock_level || 5,
+      );
       const maxStock = Number(product.max_stock_level || 1000);
 
       let status: 'in_stock' | 'low_stock' | 'out_of_stock' | 'overstock';
@@ -167,7 +178,9 @@ export class InventoryAnalyticsService {
       })
       .map((product) => {
         const qty = Number(product.stock_quantity || 0);
-        const reorderPoint = Number(product.reorder_point || product.min_stock_level || 5);
+        const reorderPoint = Number(
+          product.reorder_point || product.min_stock_level || 5,
+        );
 
         return {
           product_id: product.id,
@@ -192,7 +205,9 @@ export class InventoryAnalyticsService {
           gte: startDate,
           lte: endDate,
         },
-        ...(query.movement_type && { movement_type: query.movement_type as any }),
+        ...(query.movement_type && {
+          movement_type: query.movement_type as any,
+        }),
       },
       include: {
         products: {
@@ -258,18 +273,26 @@ export class InventoryAnalyticsService {
     });
 
     // Aggregate by location
-    const locationMap = new Map<number, { name: string; quantity: number; value: number }>();
+    const locationMap = new Map<
+      number,
+      { name: string; quantity: number; value: number }
+    >();
     let totalValue = 0;
 
     for (const sl of stockLevels) {
       const locationId = sl.inventory_locations?.id || 0;
       const locationName = sl.inventory_locations?.name || 'Sin ubicación';
       const qty = Number(sl.quantity_on_hand || 0);
-      const cost = Number(sl.cost_per_unit || 0) || Number(sl.products?.cost_price || 0);
+      const cost =
+        Number(sl.cost_per_unit || 0) || Number(sl.products?.cost_price || 0);
       const value = qty * cost;
       totalValue += value;
 
-      const existing = locationMap.get(locationId) || { name: locationName, quantity: 0, value: 0 };
+      const existing = locationMap.get(locationId) || {
+        name: locationName,
+        quantity: 0,
+        value: 0,
+      };
       existing.quantity += qty;
       existing.value += value;
       locationMap.set(locationId, existing);
@@ -282,7 +305,8 @@ export class InventoryAnalyticsService {
         total_quantity: data.quantity,
         total_value: data.value,
         average_cost: data.quantity > 0 ? data.value / data.quantity : 0,
-        percentage_of_total: totalValue > 0 ? (data.value / totalValue) * 100 : 0,
+        percentage_of_total:
+          totalValue > 0 ? (data.value / totalValue) * 100 : 0,
       }))
       .sort((a, b) => b.total_value - a.total_value);
   }
@@ -292,7 +316,7 @@ export class InventoryAnalyticsService {
     const context = RequestContextService.getContext();
 
     if (!context?.store_id) {
-      throw new ForbiddenException('Store context required for movement summary');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const storeId = context.store_id;
 
@@ -335,7 +359,7 @@ export class InventoryAnalyticsService {
     const context = RequestContextService.getContext();
 
     if (!context?.store_id) {
-      throw new ForbiddenException('Store context required for movement trends');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const storeId = context.store_id;
 
@@ -398,7 +422,9 @@ export class InventoryAnalyticsService {
           gte: startDate,
           lte: endDate,
         },
-        ...(query.movement_type && { movement_type: query.movement_type as any }),
+        ...(query.movement_type && {
+          movement_type: query.movement_type as any,
+        }),
       },
       include: {
         products: {
@@ -444,12 +470,18 @@ export class InventoryAnalyticsService {
 
   private getDateTruncInterval(granularity: Granularity): string {
     switch (granularity) {
-      case Granularity.HOUR: return 'hour';
-      case Granularity.DAY: return 'day';
-      case Granularity.WEEK: return 'week';
-      case Granularity.MONTH: return 'month';
-      case Granularity.YEAR: return 'year';
-      default: return 'day';
+      case Granularity.HOUR:
+        return 'hour';
+      case Granularity.DAY:
+        return 'day';
+      case Granularity.WEEK:
+        return 'week';
+      case Granularity.MONTH:
+        return 'month';
+      case Granularity.YEAR:
+        return 'year';
+      default:
+        return 'day';
     }
   }
 
@@ -474,7 +506,10 @@ export class InventoryAnalyticsService {
     }
   }
 
-  private parseDateRange(query: InventoryAnalyticsQueryDto): { startDate: Date; endDate: Date } {
+  private parseDateRange(query: InventoryAnalyticsQueryDto): {
+    startDate: Date;
+    endDate: Date;
+  } {
     if (query.date_from && query.date_to) {
       const endDate = new Date(query.date_to);
       endDate.setUTCHours(23, 59, 59, 999);
@@ -506,7 +541,11 @@ export class InventoryAnalyticsService {
         return { startDate: lastWeekStart, endDate: lastWeekEnd };
       case DatePreset.LAST_MONTH:
         const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
-        const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const lastMonthStart = new Date(
+          today.getFullYear(),
+          today.getMonth() - 1,
+          1,
+        );
         return { startDate: lastMonthStart, endDate: lastMonthEnd };
       case DatePreset.THIS_YEAR:
         return { startDate: new Date(today.getFullYear(), 0, 1), endDate: now };
@@ -517,7 +556,10 @@ export class InventoryAnalyticsService {
         };
       case DatePreset.THIS_MONTH:
       default:
-        return { startDate: new Date(today.getFullYear(), today.getMonth(), 1), endDate: now };
+        return {
+          startDate: new Date(today.getFullYear(), today.getMonth(), 1),
+          endDate: now,
+        };
     }
   }
 }

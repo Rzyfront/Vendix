@@ -5,7 +5,7 @@ description: >
   Trigger: When uploading files, handling S3 URLs, or working with image_url/logo_url/favicon_url fields.
 license: MIT
 metadata:
-  author: vendix
+  author: rzyfront
   version: "1.0"
   scope: [root]
   auto_invoke: "Uploading files, handling S3 URLs, or saving image URLs to database"
@@ -18,6 +18,7 @@ metadata:
 ## 🎯 When to Use
 
 Use this skill when:
+
 - Uploading files to S3 (images, documents, etc.)
 - Saving image URLs to the database (`image_url`, `logo_url`, `favicon_url`, etc.)
 - Working with the `S3Service`
@@ -32,11 +33,13 @@ Use this skill when:
 **What happens:** When uploading to S3, a presigned URL is returned. If this URL is saved directly to the database, it will expire (typically 24 hours), causing images to become inaccessible (403 Forbidden).
 
 **The Flow (BEFORE fix):**
+
 ```
 Upload → Presigned URL → Frontend → Backend saves presigned URL → 24h → 403 ❌
 ```
 
 **The Flow (AFTER fix):**
+
 ```
 Upload → Presigned URL → Frontend → Backend extracts KEY → Save KEY → signUrl() regenerates → ✅
 ```
@@ -58,16 +61,18 @@ Upload → Presigned URL → Frontend → Backend extracts KEY → Save KEY → 
  * @param urlOrKey - A signed S3 URL, an S3 key, or null/undefined
  * @returns The extracted S3 key, or null if input is null/undefined/empty
  */
-export function extractS3KeyFromUrl(urlOrKey: string | null | undefined): string | null {
+export function extractS3KeyFromUrl(
+  urlOrKey: string | null | undefined,
+): string | null {
   // Handle null, undefined, or empty strings
-  if (!urlOrKey || urlOrKey.trim() === '') {
+  if (!urlOrKey || urlOrKey.trim() === "") {
     return null;
   }
 
   const trimmed = urlOrKey.trim();
 
   // If it doesn't start with http, it's already a key
-  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
     return trimmed;
   }
 
@@ -92,14 +97,16 @@ export function extractS3KeyFromUrl(urlOrKey: string | null | undefined): string
   let key = decodeURIComponent(url.pathname);
 
   // Remove leading slash
-  if (key.startsWith('/')) {
+  if (key.startsWith("/")) {
     key = key.substring(1);
   }
 
   // Handle path-style URLs: s3.region.amazonaws.com/bucket-name/key
-  const isPathStyleUrl = /^s3(?:\.[\w-]+)?\.amazonaws\.com$/i.test(url.hostname);
+  const isPathStyleUrl = /^s3(?:\.[\w-]+)?\.amazonaws\.com$/i.test(
+    url.hostname,
+  );
   if (isPathStyleUrl) {
-    const slashIndex = key.indexOf('/');
+    const slashIndex = key.indexOf("/");
     if (slashIndex !== -1) {
       key = key.substring(slashIndex + 1);
     }
@@ -113,13 +120,17 @@ export function extractS3KeyFromUrl(urlOrKey: string | null | undefined): string
  */
 export function isSignedS3Url(urlOrKey: string | null | undefined): boolean {
   if (!urlOrKey) return false;
-  if (!urlOrKey.includes('X-Amz-')) return false;
+  if (!urlOrKey.includes("X-Amz-")) return false;
 
   try {
     const url = new URL(urlOrKey);
     const S3_SIGNED_URL_PARAMS = [
-      'X-Amz-Algorithm', 'X-Amz-Credential', 'X-Amz-Date',
-      'X-Amz-Expires', 'X-Amz-SignedHeaders', 'X-Amz-Signature',
+      "X-Amz-Algorithm",
+      "X-Amz-Credential",
+      "X-Amz-Date",
+      "X-Amz-Expires",
+      "X-Amz-SignedHeaders",
+      "X-Amz-Signature",
     ];
     return S3_SIGNED_URL_PARAMS.some((param) => url.searchParams.has(param));
   } catch {
@@ -133,7 +144,7 @@ export function isSignedS3Url(urlOrKey: string | null | undefined): boolean {
 export function isS3Key(value: string | null | undefined): boolean {
   if (!value) return false;
   const trimmed = value.trim();
-  return !trimmed.startsWith('http://') && !trimmed.startsWith('https://');
+  return !trimmed.startsWith("http://") && !trimmed.startsWith("https://");
 }
 ```
 
@@ -144,14 +155,17 @@ export function isS3Key(value: string | null | undefined): boolean {
 **File:** `apps/backend/src/common/services/s3.service.ts`
 
 ```typescript
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import {
-  S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand,
-} from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { Upload } from '@aws-sdk/lib-storage';
-import { extractS3KeyFromUrl } from '../helpers/s3-url.helper';
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { Upload } from "@aws-sdk/lib-storage";
+import { extractS3KeyFromUrl } from "../helpers/s3-url.helper";
 
 @Injectable()
 export class S3Service {
@@ -160,8 +174,10 @@ export class S3Service {
   private readonly logger = new Logger(S3Service.name);
 
   constructor(private readonly configService: ConfigService) {
-    const region = this.configService.get<string>('AWS_REGION') || 'us-east-1';
-    this.bucketName = this.configService.get<string>('AWS_S3_BUCKET') || 'vendix-assets-storage';
+    const region = this.configService.get<string>("AWS_REGION") || "us-east-1";
+    this.bucketName =
+      this.configService.get<string>("AWS_S3_BUCKET") ||
+      "vendix-assets-storage";
     this.s3Client = new S3Client({ region });
   }
 
@@ -203,8 +219,11 @@ export class S3Service {
    * Signs a URL for a given S3 key.
    * If the URL is already an absolute HTTP(S) URL, returns it as is.
    */
-  async signUrl(keyOrUrl: string | null | undefined, useThumbnail = false): Promise<string | undefined> {
-    if (!keyOrUrl || keyOrUrl.startsWith('http')) {
+  async signUrl(
+    keyOrUrl: string | null | undefined,
+    useThumbnail = false,
+  ): Promise<string | undefined> {
+    if (!keyOrUrl || keyOrUrl.startsWith("http")) {
       return keyOrUrl || undefined;
     }
 
@@ -212,9 +231,9 @@ export class S3Service {
 
     let targetKey = keyOrUrl;
     if (useThumbnail) {
-      const pathParts = keyOrUrl.split('/');
+      const pathParts = keyOrUrl.split("/");
       const fileName = pathParts.pop();
-      targetKey = [...pathParts, `thumb_${fileName}`].join('/');
+      targetKey = [...pathParts, `thumb_${fileName}`].join("/");
 
       try {
         return await this.getPresignedUrl(targetKey, EXPIRATION_TIME);
@@ -254,7 +273,7 @@ export class S3Service {
 
 ```typescript
 // apps/backend/src/domains/store/products/products.service.ts
-import { S3Service } from '@/common/services/s3.service';
+import { S3Service } from "@/common/services/s3.service";
 
 @Injectable()
 export class ProductsService {
@@ -293,7 +312,7 @@ export class ProductsService {
       products.map(async (product) => ({
         ...product,
         image_url: await this.s3Service.signUrl(product.image_url),
-      }))
+      })),
     );
   }
 }
@@ -317,13 +336,13 @@ async create(dto: CreateProductDto) {
 
 ## 📋 Affected Services Summary
 
-| Service | Fields Sanitized |
-|---------|------------------|
-| `ecommerce.service.ts` | `inicio.logo_url`, `slider.photos[].url/key` |
-| `products.service.ts` | `image_url` (in handleImageUploads and image_urls legacy) |
-| `settings.service.ts` | `app.logo_url`, `app.favicon_url`, `general.logo_url` |
-| `categories.service.ts` | `image_url` (in create and update) |
-| `brands.service.ts` | `logo_url` (in create and update) |
+| Service                 | Fields Sanitized                                          |
+| ----------------------- | --------------------------------------------------------- |
+| `ecommerce.service.ts`  | `inicio.logo_url`, `slider.photos[].url/key`              |
+| `products.service.ts`   | `image_url` (in handleImageUploads and image_urls legacy) |
+| `settings.service.ts`   | `app.logo_url`, `app.favicon_url`, `general.logo_url`     |
+| `categories.service.ts` | `image_url` (in create and update)                        |
+| `brands.service.ts`     | `logo_url` (in create and update)                         |
 
 ---
 
@@ -344,15 +363,15 @@ Handling image URLs from frontend?
 
 ## 📦 Key Files Reference
 
-| File | Purpose |
-|------|---------|
-| `apps/backend/src/common/helpers/s3-url.helper.ts` | Helper for URL/Key extraction |
-| `apps/backend/src/common/services/s3.service.ts` | S3 operations + `sanitizeForStorage()` |
-| `apps/backend/src/domains/store/products/products.service.ts` | Example usage for products |
-| `apps/backend/src/domains/store/brands/brands.service.ts` | Example usage for brands |
-| `apps/backend/src/domains/store/categories/categories.service.ts` | Example usage for categories |
-| `apps/backend/src/domains/store/settings/settings.service.ts` | Example usage for settings |
-| `apps/backend/src/domains/store/ecommerce/ecommerce.service.ts` | Example usage for ecommerce |
+| File                                                              | Purpose                                |
+| ----------------------------------------------------------------- | -------------------------------------- |
+| `apps/backend/src/common/helpers/s3-url.helper.ts`                | Helper for URL/Key extraction          |
+| `apps/backend/src/common/services/s3.service.ts`                  | S3 operations + `sanitizeForStorage()` |
+| `apps/backend/src/domains/store/products/products.service.ts`     | Example usage for products             |
+| `apps/backend/src/domains/store/brands/brands.service.ts`         | Example usage for brands               |
+| `apps/backend/src/domains/store/categories/categories.service.ts` | Example usage for categories           |
+| `apps/backend/src/domains/store/settings/settings.service.ts`     | Example usage for settings             |
+| `apps/backend/src/domains/store/ecommerce/ecommerce.service.ts`   | Example usage for ecommerce            |
 
 ---
 
