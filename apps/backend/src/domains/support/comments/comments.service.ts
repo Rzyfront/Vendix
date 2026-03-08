@@ -98,8 +98,23 @@ export class CommentsService {
     }
   }
 
-  async findByTicket(ticketId: number) {
+  async findByTicket(ticketId: number, organizationId: number) {
     try {
+      // Verify ticket exists and belongs to the organization
+      const ticket = await this.prisma.support_tickets.findUnique({
+        where: { id: ticketId },
+        select: { id: true, organization_id: true },
+      });
+
+      if (!ticket) {
+        throw new NotFoundException('Ticket not found');
+      }
+
+      // Validate organization matches
+      if (ticket.organization_id !== organizationId) {
+        throw new Error('Unauthorized access to ticket comments');
+      }
+
       const comments = await this.prisma.support_comments.findMany({
         where: { ticket_id: ticketId },
         orderBy: { created_at: 'asc' },

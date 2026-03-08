@@ -42,7 +42,13 @@ export class CommentsController {
   @ApiOperation({ summary: 'Get all comments for a ticket' })
   @ApiResponse({ status: 200, description: 'Comments retrieved successfully' })
   async findByTicket(@Param('ticketId') ticketId: string) {
-    return this.commentsService.findByTicket(+ticketId);
+    const organizationId = RequestContextService.getOrganizationId();
+
+    if (!organizationId) {
+      return { success: false, message: 'Organization context required' };
+    }
+
+    return this.commentsService.findByTicket(+ticketId, organizationId);
   }
 
   @Delete(':id')
