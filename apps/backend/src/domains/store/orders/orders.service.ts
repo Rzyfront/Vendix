@@ -49,20 +49,6 @@ export class OrdersService {
       throw new VendixHttpException(ErrorCodes.CUST_FIND_001);
     }
 
-    // Validar weight si está presente
-    if (createOrderDto.items) {
-      for (const item of createOrderDto.items) {
-        if (item.weight !== undefined && item.weight !== null) {
-          if (item.weight < 0) {
-            throw new VendixHttpException(ErrorCodes.ORD_VALIDATE_001);
-          }
-          if (!item.weight_unit) {
-            throw new VendixHttpException(ErrorCodes.ORD_VALIDATE_001);
-          }
-        }
-      }
-    }
-
     // Validate weight product coherence
     for (const item of createOrderDto.items) {
       if (item.weight !== undefined && item.weight !== null) {

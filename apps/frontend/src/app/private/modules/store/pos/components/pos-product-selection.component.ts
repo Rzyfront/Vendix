@@ -21,7 +21,7 @@ import {
   FilterConfig,
   FilterValues,
 } from '../../../../../shared/components';
-import { CurrencyPipe } from '../../../../../shared/pipes/currency';
+import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { Router } from '@angular/router';
 
 import { PosCartService } from '../services/pos-cart.service';
@@ -208,6 +208,15 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
                 <app-icon name="layers" [size]="12" [color]="'#ffffff'"></app-icon>
                 <span class="text-white">{{ product.product_variants?.length }}</span>
               </div>
+
+              <!-- Weight Product Badge -->
+              <div
+                *ngIf="product.pricing_type === 'weight'"
+                class="absolute bottom-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold backdrop-blur-md bg-blue-600/80 border border-white/10 flex items-center gap-1"
+              >
+                <app-icon name="scale" [size]="12" [color]="'#ffffff'"></app-icon>
+                <span class="text-white">Peso</span>
+              </div>
             </div>
 
             <!-- Product Info -->
@@ -234,7 +243,7 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
                 <!-- Price -->
                 <div class="flex flex-col">
                   <span class="text-text-primary font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate">
-                    {{ product.final_price | currency }}
+                    {{ product.final_price | currency }}<span *ngIf="product.pricing_type === 'weight'" class="text-[10px] font-normal text-text-secondary">/{{ defaultWeightUnit }}</span>
                   </span>
                   <!-- Stock indicator for non-variant products -->
                   @if (product.track_inventory !== false) {
@@ -390,8 +399,9 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   selectedProductForVariant: any = null;
 
   // Scale/weight settings from store
-  scaleEnabled = true;
+  scaleEnabled = false;
   defaultWeightUnit: 'kg' | 'g' | 'lb' = 'kg';
+  allowManualWeightEntry = true;
 
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
@@ -430,6 +440,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
     private dialogService: DialogService,
     private router: Router,
     private store: Store,
+    private currencyService: CurrencyFormatService,
   ) { }
 
   ngOnInit(): void {
@@ -718,12 +729,65 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
     await this.addToCartNormal(product);
   }
 
-  onVariantSelected(variant: PosProductVariant): void {
+  async onVariantSelected(variant: PosProductVariant): Promise<void> {
     this.showVariantSelector = false;
     const product = this.selectedProductForVariant;
     this.selectedProductForVariant = null;
 
     if (!product) return;
+
+    // If product is weight-based and scale is enabled, prompt for weight
+    const isWeightProduct = product.pricing_type === 'weight' && this.scaleEnabled;
+    if (isWeightProduct) {
+      if (!this.allowManualWeightEntry) {
+        this.toastService.warning('El pesado manual está deshabilitado para este punto de venta');
+        return;
+      }
+
+      const unit = this.defaultWeightUnit;
+      const variantPrice = variant.price_override ?? product.final_price;
+      const weightStr = await this.dialogService.prompt(
+        {
+          title: 'Ingresar Peso',
+          message: `${product.name}\nPrecio: ${this.formatPrice(variantPrice)}/${unit}`,
+          placeholder: `Peso en ${unit}`,
+          defaultValue: '1.0',
+          confirmText: 'Agregar',
+          cancelText: 'Cancelar',
+        },
+        { size: 'sm' }
+      );
+
+      if (!weightStr) return;
+
+      const weight = parseFloat(weightStr.replace(',', '.'));
+      if (isNaN(weight) || weight <= 0) {
+        this.toastService.warning('El peso debe ser mayor a 0');
+        return;
+      }
+      if (weight > 999) {
+        this.toastService.warning('El peso máximo permitido es 999 ' + unit);
+        return;
+      }
+
+      this.addingToCart.add(product.id);
+      this.cartService
+        .addToCart({ product, quantity: 1, variant, weight, weight_unit: unit })
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: () => {
+            this.addingToCart.delete(product.id);
+            const variantLabel = variant.attributes?.map(a => a.attribute_value).join(' / ') || '';
+            this.toastService.success(`${product.name} (${variantLabel}) ${weight} ${unit} agregado al carrito`);
+            this.productAddedToCart.emit({ product, quantity: 1 });
+          },
+          error: (error) => {
+            this.addingToCart.delete(product.id);
+            this.toastService.warning(error.message || 'Error al agregar variante al carrito');
+          },
+        });
+      return;
+    }
 
     this.addingToCart.add(product.id);
 
@@ -772,11 +836,16 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
 
     // For weight products, require weight input
     if (isWeightProduct) {
+      if (!this.allowManualWeightEntry) {
+        this.toastService.warning('El pesado manual está deshabilitado para este punto de venta');
+        return;
+      }
+
       const unit = this.defaultWeightUnit;
       const weightStr = await this.dialogService.prompt(
         {
           title: 'Ingresar Peso',
-          message: `${product.name}\nPrecio: $${product.final_price}/${unit}`,
+          message: `${product.name}\nPrecio: ${this.formatPrice(product.final_price)}/${unit}`,
           placeholder: `Peso en ${unit}`,
           defaultValue: '1.0',
           confirmText: 'Agregar',
@@ -793,6 +862,11 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
 
       if (isNaN(weight) || weight <= 0) {
         this.toastService.warning('El peso debe ser mayor a 0');
+        return;
+      }
+
+      if (weight > 999) {
+        this.toastService.warning('El peso máximo permitido es 999 ' + unit);
         return;
       }
 
@@ -840,7 +914,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
         next: () => {
           this.addingToCart.delete(product.id);
           this.toastService.success(
-            `${product.name} (${weight} ${unit}) agregado al carrito - $${totalPrice.toFixed(2)}`
+            `${product.name} (${weight} ${unit}) agregado al carrito - ${this.formatPrice(totalPrice)}`
           );
           this.productAddedToCart.emit({ product, quantity: 1 });
         },
@@ -901,11 +975,16 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
     return 'Los productos aparecerán aquí cuando estén disponibles.';
   }
 
+  private formatPrice(amount: number): string {
+    return this.currencyService.format(amount);
+  }
+
   private loadScaleSettings(): void {
     this.store.select(selectStoreSettings).pipe(takeUntil(this.destroy$)).subscribe((storeSettings: any) => {
       if (storeSettings?.pos?.scale) {
-        this.scaleEnabled = storeSettings.pos.scale.enabled ?? true;
+        this.scaleEnabled = storeSettings.pos.scale.enabled ?? false;
         this.defaultWeightUnit = storeSettings.pos.scale.default_weight_unit || 'kg';
+        this.allowManualWeightEntry = storeSettings.pos.scale.allow_manual_weight_entry ?? true;
       }
     });
   }

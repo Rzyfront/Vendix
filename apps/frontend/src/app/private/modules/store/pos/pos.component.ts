@@ -184,7 +184,43 @@ import { StoreSettingsService } from '../settings/general/services/store-setting
         </div>
 
         <!-- Main Content Grid -->
-        <div class="flex-1 p-3 lg:p-6 min-h-0 overflow-hidden pos-main-content">
+        <div class="flex-1 p-3 lg:p-6 min-h-0 overflow-hidden pos-main-content relative">
+          
+          @if (isOutOfHours && !canBypassSchedule) {
+            <!-- Out of hours overlay -->
+            <div class="absolute inset-0 z-40 bg-surface/90 backdrop-blur-sm flex items-center justify-center p-4">
+              <app-card class="max-w-md w-full shadow-xl border-border" [padding]="true">
+                <div class="flex flex-col items-center text-center py-6 px-4 gap-4">
+                  <div class="w-20 h-20 rounded-full bg-destructive/10 flex items-center justify-center text-destructive mb-2">
+                    <app-icon name="clock" [size]="40"></app-icon>
+                  </div>
+                  <h2 class="text-2xl font-bold text-text-primary">POS Fuera de Horario</h2>
+                  <p class="text-text-secondary text-sm leading-relaxed">
+                    {{ outOfHoursMessage || 'El punto de venta está fuera del horario de atención configurado. No se podrán realizar ventas hasta dentro del horario establecido.' }}
+                  </p>
+                  
+                  @if (nextOpenTime) {
+                    <div class="bg-primary/5 border border-primary/20 rounded-xl p-4 w-full mt-2 flex flex-col items-center">
+                      <span class="text-xs text-text-secondary font-medium uppercase tracking-wider mb-1">Próxima apertura</span>
+                      <span class="text-lg font-bold text-primary">{{ nextOpenTime }}</span>
+                    </div>
+                  }
+                  
+                  <div class="flex flex-col w-full gap-3 mt-6 pt-6 border-t border-border">
+                    <p class="text-xs text-text-secondary mb-1">¿Necesitas modificar los horarios?</p>
+                    <app-button variant="primary" class="w-full" (clicked)="goToSettings()">
+                      <app-icon name="settings" [size]="18" slot="icon"></app-icon>
+                      Configuración de POS y Horarios
+                    </app-button>
+                    <app-button variant="outline" class="w-full" (clicked)="goToDashboard()">
+                      Volver al Dashboard
+                    </app-button>
+                  </div>
+                </div>
+              </app-card>
+            </div>
+          }
+
           <!-- Desktop: Grid 3 columns with sidebar cart -->
           <div class="hidden lg:grid lg:grid-cols-3 gap-6 h-full">
             <!-- Products Area (Left Side - 2 columns) -->
@@ -376,6 +412,13 @@ export class PosComponent implements OnInit, OnDestroy {
   isAdmin = false;
   canBypassSchedule = false;
   scheduleStatusChecked = false;
+  
+  // Schedule UI State
+  isOutOfHours = false;
+  nextOpenTime?: string;
+  outOfHoursMessage?: string;
+  scheduleHandledByBackend = false;
+  storeTimezone = 'America/Bogota';
 
   private destroy$ = new Subject<void>();
 
@@ -425,10 +468,13 @@ export class PosComponent implements OnInit, OnDestroy {
           this.isAdmin = status.isAdmin || false;
           this.canBypassSchedule = status.canBypass || false;
           this.scheduleStatusChecked = true;
+          this.scheduleHandledByBackend = true;
 
-          // Si está fuera de horario y no es admin, mostrar modal
+          // Si está fuera de horario y no es admin
           if (!status.isWithinBusinessHours && !this.canBypassSchedule) {
-            this.showScheduleWarningModal(status.message, status.nextOpenTime);
+            this.isOutOfHours = true;
+            this.nextOpenTime = status.nextOpenTime;
+            this.outOfHoursMessage = status.message;
           }
           // Si está fuera de horario pero es admin, mostrar warning info
           else if (!status.isWithinBusinessHours && this.canBypassSchedule) {
@@ -444,36 +490,23 @@ export class PosComponent implements OnInit, OnDestroy {
     });
   }
 
+  goToSettings(): void {
+    this.router.navigate(['/admin/settings/general']);
+  }
+
+  goToDashboard(): void {
+    this.router.navigate(['/admin/dashboard']);
+  }
+
   /**
    * Muestra warning para admins (info nada más)
    */
   private showAdminScheduleWarning(message: string): void {
     this.toastService.info(
-      message || 'Fuera de horario de atención.Tienes acceso de administrador.',
+      message || 'Fuera de horario de atención. Tienes acceso de administrador.',
       'Horario de Atención',
       8000
     );
-  }
-
-  /**
-   * Muestra el modal de restricción fuera de horario
-   */
-  private showScheduleWarningModal(message?: string, nextOpen?: string): void {
-    const fullMessage = message 
-      ? `${message}${nextOpen ? `<br/><br/>Próxima apertura: <strong>${nextOpen}</strong>` : ''}`
-      : `El punto de venta está fuera del horario de atención configurado. No se podrán realizar ventas hasta dentro del horario establecido.`;
-
-    this.dialogService.confirm({
-      title: 'POS Fuera de Horario',
-      message: fullMessage,
-      confirmText: 'Ir a Configuración',
-      cancelText: 'Cerrar',
-      confirmVariant: 'primary',
-    }).then((confirmed) => {
-      if (confirmed) {
-        this.router.navigate(['/admin/settings/general']);
-      }
-    });
   }
 
   ngOnDestroy(): void {
@@ -931,17 +964,50 @@ export class PosComponent implements OnInit, OnDestroy {
   private loadStoreSettings(): void {
     this.storeSettingsSubscription = this.store.select(selectStoreSettings).pipe(takeUntil(this.destroy$)).subscribe((storeSettings: any) => {
       const settings = storeSettings;
+      if (settings?.general?.timezone) {
+        this.storeTimezone = settings.general.timezone;
+      }
       if (settings?.pos) {
         this.enableScheduleValidation = settings.pos.enable_schedule_validation || false;
         this.businessHours = settings.pos.business_hours || {};
 
-        // Validation is now handled by validateScheduleOnInit using backend endpoint
-        // Keep local validation as fallback if endpoint fails
-        if (this.scheduleStatusChecked && this.enableScheduleValidation && !this.isWithinBusinessHours() && !this.canBypassSchedule) {
-          this.showScheduleWarningModal('Validación local: fuera de horario');
+        // Only apply local fallback if backend hasn't handled schedule validation
+        if (!this.scheduleHandledByBackend && this.scheduleStatusChecked && this.enableScheduleValidation && !this.isWithinBusinessHours() && !this.canBypassSchedule) {
+          this.isOutOfHours = true;
+          this.nextOpenTime = this.getLocalNextOpenDay();
+          this.outOfHoursMessage = 'El punto de venta está fuera del horario de atención configurado (Validación local).';
         }
       }
     });
+  }
+
+  /**
+   * Gets day/hour/minute in the store's timezone using Intl.DateTimeFormat
+   */
+  private getDateInTimezone(): { day: number; hours: number; minutes: number } {
+    const now = new Date();
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: this.storeTimezone,
+        weekday: 'short',
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: false,
+      }).formatToParts(now);
+
+      const weekdayStr = parts.find(p => p.type === 'weekday')?.value || '';
+      const hoursVal = parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10);
+      const minutesVal = parseInt(parts.find(p => p.type === 'minute')?.value || '0', 10);
+
+      const weekdayMap: Record<string, number> = {
+        Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+      };
+      const dayVal = weekdayMap[weekdayStr] ?? now.getDay();
+
+      return { day: dayVal, hours: hoursVal, minutes: minutesVal };
+    } catch {
+      return { day: now.getDay(), hours: now.getHours(), minutes: now.getMinutes() };
+    }
   }
 
   private isWithinBusinessHours(): boolean {
@@ -949,9 +1015,9 @@ export class PosComponent implements OnInit, OnDestroy {
       return true;
     }
 
-    const now = new Date();
+    const { day, hours, minutes } = this.getDateInTimezone();
     const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    const currentDayName = dayNames[now.getDay()];
+    const currentDayName = dayNames[day];
 
     const todayHours = this.businessHours?.[currentDayName];
 
@@ -963,7 +1029,7 @@ export class PosComponent implements OnInit, OnDestroy {
       return false;
     }
 
-    const currentTime = now.getHours() * 60 + now.getMinutes();
+    const currentTime = hours * 60 + minutes;
 
     const [openHour, openMinute] = todayHours.open.split(':').map(Number);
     const [closeHour, closeMinute] = todayHours.close.split(':').map(Number);
@@ -972,5 +1038,40 @@ export class PosComponent implements OnInit, OnDestroy {
     const closeTime = closeHour * 60 + closeMinute;
 
     return currentTime >= openTime && currentTime <= closeTime;
+  }
+
+  /**
+   * Iterates business hours to find the next open day for the local fallback
+   */
+  private getLocalNextOpenDay(): string {
+    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const spanishDays: Record<string, string> = {
+      sunday: 'Domingo', monday: 'Lunes', tuesday: 'Martes', wednesday: 'Miércoles',
+      thursday: 'Jueves', friday: 'Viernes', saturday: 'Sábado',
+    };
+
+    const { day, hours, minutes } = this.getDateInTimezone();
+    const curMinutes = hours * 60 + minutes;
+
+    // Check if today opens later
+    const todayName = dayNames[day];
+    const todayHours = this.businessHours?.[todayName];
+    if (todayHours && todayHours.open !== 'closed' && todayHours.close !== 'closed') {
+      const [openH, openM] = todayHours.open.split(':').map(Number);
+      if (curMinutes < openH * 60 + openM) {
+        return `Hoy ${todayHours.open} - ${todayHours.close}`;
+      }
+    }
+
+    for (let i = 1; i <= 7; i++) {
+      const dayIndex = (day + i) % 7;
+      const dayName = dayNames[dayIndex];
+      const bh = this.businessHours?.[dayName];
+      if (bh && bh.open !== 'closed' && bh.close !== 'closed') {
+        return `${spanishDays[dayName]} ${bh.open} - ${bh.close}`;
+      }
+    }
+
+    return 'Consultar configuración';
   }
 }

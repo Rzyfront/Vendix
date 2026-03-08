@@ -227,12 +227,17 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             <div
               class="col-span-3 flex items-center justify-between pt-2 mt-1 border-t border-border/50"
             >
-              <!-- Weight products: show weight badge instead of quantity control -->
+              <!-- Weight products: show clickable weight badge instead of quantity control -->
               <ng-container *ngIf="item.is_weight_product; else unitQuantity">
-                <div class="flex items-center gap-1.5 px-2 py-1 bg-blue-50 rounded-lg border border-blue-200">
+                <button
+                  (click)="editWeight(item)"
+                  class="flex items-center gap-1.5 px-2 py-1 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 hover:border-blue-300 transition-colors cursor-pointer"
+                  title="Editar peso"
+                >
                   <app-icon name="scale" [size]="14" class="text-blue-600"></app-icon>
                   <span class="text-xs font-bold text-blue-700">{{ item.weight }} {{ item.weight_unit || 'kg' }}</span>
-                </div>
+                  <app-icon name="edit" [size]="10" class="text-blue-400"></app-icon>
+                </button>
               </ng-container>
               <ng-template #unitQuantity>
                 <app-quantity-control
@@ -442,6 +447,45 @@ export class PosCartComponent implements OnInit, OnDestroy {
     }
 
     this.checkout.emit();
+  }
+
+  async editWeight(item: CartItem): Promise<void> {
+    const unit = item.weight_unit || 'kg';
+    const weightStr = await this.dialogService.prompt(
+      {
+        title: 'Editar Peso',
+        message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${unit}`,
+        placeholder: `Peso en ${unit}`,
+        defaultValue: item.weight?.toString() || '1.0',
+        confirmText: 'Actualizar',
+        cancelText: 'Cancelar',
+      },
+      { size: 'sm' }
+    );
+
+    if (!weightStr) return;
+
+    const newWeight = parseFloat(weightStr.replace(',', '.'));
+    if (isNaN(newWeight) || newWeight <= 0) {
+      this.toastService.warning('El peso debe ser mayor a 0');
+      return;
+    }
+    if (newWeight > 999) {
+      this.toastService.warning('El peso máximo permitido es 999 ' + unit);
+      return;
+    }
+
+    this.cartService
+      .updateCartItemWeight(item.id, newWeight)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.toastService.success(`Peso actualizado: ${newWeight} ${unit}`);
+        },
+        error: (error) => {
+          this.toastService.error(error.message || 'Error al actualizar peso');
+        },
+      });
   }
 
   formatCurrency(amount: number): string {

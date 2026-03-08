@@ -248,6 +248,44 @@ export class PosCartService {
   }
 
   /**
+   * Update weight for a weight-based cart item
+   */
+  updateCartItemWeight(itemId: string, newWeight: number): Observable<CartState> {
+    const currentState = this.cartState$.value;
+    const itemIndex = currentState.items.findIndex(item => item.id === itemId);
+
+    if (itemIndex === -1) {
+      return throwError(() => new Error('Item not found in cart'));
+    }
+
+    const item = currentState.items[itemIndex];
+    if (!item.is_weight_product) {
+      return throwError(() => new Error('Item is not a weight product'));
+    }
+
+    const updatedItems = [...currentState.items];
+    const totalPrice = item.finalPrice * newWeight;
+    const taxMultiplier = newWeight;
+
+    updatedItems[itemIndex] = {
+      ...item,
+      weight: newWeight,
+      totalPrice,
+      taxAmount: this.calculateItemTaxWithBase(item.product, item.unitPrice, taxMultiplier),
+    };
+
+    const newState: CartState = {
+      ...currentState,
+      items: updatedItems,
+      summary: this.calculateSummary(updatedItems, currentState.appliedDiscounts),
+      updatedAt: new Date(),
+    };
+
+    this.cartState$.next(newState);
+    return of(newState);
+  }
+
+  /**
    * Get current cart state value
    */
   getCurrentState(): CartState {
