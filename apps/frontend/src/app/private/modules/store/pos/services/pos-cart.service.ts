@@ -248,6 +248,44 @@ export class PosCartService {
   }
 
   /**
+   * Update weight for a weight-based cart item
+   */
+  updateCartItemWeight(itemId: string, newWeight: number): Observable<CartState> {
+    const currentState = this.cartState$.value;
+    const itemIndex = currentState.items.findIndex(item => item.id === itemId);
+
+    if (itemIndex === -1) {
+      return throwError(() => new Error('Item not found in cart'));
+    }
+
+    const item = currentState.items[itemIndex];
+    if (!item.is_weight_product) {
+      return throwError(() => new Error('Item is not a weight product'));
+    }
+
+    const updatedItems = [...currentState.items];
+    const totalPrice = item.finalPrice * newWeight;
+    const taxMultiplier = newWeight;
+
+    updatedItems[itemIndex] = {
+      ...item,
+      weight: newWeight,
+      totalPrice,
+      taxAmount: this.calculateItemTaxWithBase(item.product, item.unitPrice, taxMultiplier),
+    };
+
+    const newState: CartState = {
+      ...currentState,
+      items: updatedItems,
+      summary: this.calculateSummary(updatedItems, currentState.appliedDiscounts),
+      updatedAt: new Date(),
+    };
+
+    this.cartState$.next(newState);
+    return of(newState);
+  }
+
+  /**
    * Get current cart state value
    */
   getCurrentState(): CartState {
@@ -288,12 +326,18 @@ export class PosCartService {
   private processAddToCart(request: AddToCartRequest): CartState {
     const currentState = this.cartState$.value;
 
-    // Identity: product.id + variant_id (null-safe comparison)
-    const existingItemIndex = currentState.items.findIndex(
-      (item) =>
-        item.product.id === request.product.id &&
-        (item.variant_id || null) === (request.variant?.id || null),
-    );
+    // Check if this is a weight product
+    const isWeightProduct = !!request.weight && request.weight > 0;
+
+    // For weight products, we don't combine with existing items (different weights)
+    // Identity: product.id + variant_id + weight (for weight products)
+    const existingItemIndex = isWeightProduct
+      ? -1 // Don't combine weight items
+      : currentState.items.findIndex(
+          (item) =>
+            item.product.id === request.product.id &&
+            (item.variant_id || null) === (request.variant?.id || null),
+        );
 
     // Variant-aware pricing
     const basePrice = request.variant?.price_override ?? request.product.price;
@@ -322,14 +366,23 @@ export class PosCartService {
         ? this.calculateItemFinalPriceWithBase(request.product, basePrice)
         : (request.product.final_price || this.calculateItemFinalPrice(request.product));
 
+      // Calculate total price for weight products
+      const weight = request.weight || 1;
+      const quantity = isWeightProduct ? 1 : request.quantity;
+      const itemTotalPrice = isWeightProduct
+        ? finalUnitPrice * weight
+        : request.quantity * finalUnitPrice;
+
+      // For weight products, tax is calculated on the total (price * weight), not just price * quantity
+      const taxMultiplier = isWeightProduct ? weight : quantity;
       const newItem: CartItem = {
         id: this.generateItemId(),
         product: request.product,
-        quantity: request.quantity,
+        quantity: quantity,
         unitPrice: basePrice,
-        taxAmount: this.calculateItemTaxWithBase(request.product, basePrice, request.quantity),
+        taxAmount: this.calculateItemTaxWithBase(request.product, basePrice, taxMultiplier),
         finalPrice: finalUnitPrice,
-        totalPrice: request.quantity * finalUnitPrice,
+        totalPrice: itemTotalPrice,
         addedAt: new Date(),
         notes: request.notes,
         variant_id: request.variant?.id,
@@ -338,6 +391,10 @@ export class PosCartService {
           ?.map(a => `${a.attribute_name}: ${a.attribute_value}`).join(', '),
         variant_display_name: request.variant?.attributes
           ?.map(a => a.attribute_value).join(' / '),
+        // Weight product fields
+        weight: isWeightProduct ? weight : undefined,
+        weight_unit: isWeightProduct ? (request.weight_unit || 'kg') : undefined,
+        is_weight_product: isWeightProduct,
       };
       updatedItems = [newItem, ...currentState.items];
     }
@@ -374,11 +431,18 @@ export class PosCartService {
 
     const updatedItems = [...currentState.items];
     const finalUnitPrice = item.finalPrice;
-    const newTotalPrice = request.quantity * finalUnitPrice;
+
+    // For weight products, total is based on weight, not quantity
+    const isWeightItem = item.is_weight_product && item.weight;
+    const newTotalPrice = isWeightItem
+      ? item.weight! * finalUnitPrice
+      : request.quantity * finalUnitPrice;
+    const taxMultiplier = isWeightItem ? item.weight! : request.quantity;
+
     updatedItems[itemIndex] = {
       ...item,
       quantity: request.quantity,
-      taxAmount: this.calculateItemTax(item.product, request.quantity),
+      taxAmount: this.calculateItemTaxWithBase(item.product, item.unitPrice, taxMultiplier),
       finalPrice: finalUnitPrice,
       totalPrice: newTotalPrice,
       notes: request.notes || item.notes,

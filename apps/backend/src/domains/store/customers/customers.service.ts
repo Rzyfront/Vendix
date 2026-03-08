@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
@@ -11,13 +6,14 @@ import { AuditResource } from '../../../common/audit/audit.service';
 import * as bcrypt from 'bcrypt';
 import { toTitleCase } from '@common/utils/format.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class CustomersService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly eventEmitter: EventEmitter2,
-  ) { }
+  ) {}
 
   private async generateUniqueUsername(email: string): Promise<string> {
     let baseUsername = email.split('@')[0];
@@ -58,7 +54,7 @@ export class CustomersService {
     });
 
     if (!store) {
-      throw new NotFoundException('Store not found');
+      throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
     }
 
     // Check if user exists in the organization
@@ -70,9 +66,7 @@ export class CustomersService {
     });
 
     if (existingUser) {
-      throw new ConflictException(
-        'User with this email already exists in this organization',
-      );
+      throw new VendixHttpException(ErrorCodes.SYS_CONFLICT_001);
     }
 
     // Find customer role
@@ -81,7 +75,7 @@ export class CustomersService {
     });
 
     if (!customerRole) {
-      throw new BadRequestException('Customer role not found');
+      throw new VendixHttpException(ErrorCodes.CUST_CREATE_001);
     }
 
     const password = this.generateTemporaryPassword();
@@ -226,7 +220,7 @@ export class CustomersService {
     });
 
     if (!user) {
-      throw new NotFoundException('Customer not found');
+      throw new VendixHttpException(ErrorCodes.CUST_FIND_001);
     }
 
     return user;
@@ -334,8 +328,9 @@ export class CustomersService {
         total_revenue: totalRevenue,
       };
     } catch (error) {
-      throw new BadRequestException(
-        `Error calculating customer stats: ${error.message}`,
+      throw new VendixHttpException(
+        ErrorCodes.SYS_INTERNAL_001,
+        'Error calculating customer stats',
       );
     }
   }

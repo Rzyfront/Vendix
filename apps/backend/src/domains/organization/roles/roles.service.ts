@@ -6,7 +6,11 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
-import { AuditService, AuditAction, AuditResource } from '../../../common/audit/audit.service';
+import {
+  AuditService,
+  AuditAction,
+  AuditResource,
+} from '../../../common/audit/audit.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   CreateRoleDto,
@@ -16,6 +20,7 @@ import {
   AssignRoleToUserDto,
   RemoveRoleFromUserDto,
 } from './dto/role.dto';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   RoleDashboardStatsDto,
   RoleWithPermissionDescriptionsDto,
@@ -26,7 +31,7 @@ export class RolesService {
   constructor(
     private readonly prismaService: OrganizationPrismaService,
     private readonly auditService: AuditService,
-  ) { }
+  ) {}
 
   // ===== UTILIDADES PRIVADAS =====
 
@@ -60,9 +65,7 @@ export class RolesService {
     const organization_id = context?.organization_id;
 
     if (!organization_id && !system_role) {
-      throw new ForbiddenException(
-        'Organization context required to create non-system roles',
-      );
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
     }
 
     // Verificar que el nombre no exista
@@ -71,7 +74,7 @@ export class RolesService {
     });
 
     if (existingRole) {
-      throw new ConflictException('Ya existe un rol con este nombre');
+      throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
     }
 
     // Crear el rol
@@ -141,10 +144,10 @@ export class RolesService {
     const where_clause = is_owner_or_admin
       ? {}
       : {
-        name: {
-          notIn: ['owner', 'admin'],
-        },
-      };
+          name: {
+            notIn: ['owner', 'admin'],
+          },
+        };
 
     const roles = await this.prismaService.roles.findMany({
       where: where_clause,
@@ -202,7 +205,7 @@ export class RolesService {
     });
 
     if (!role) {
-      throw new NotFoundException('Rol no encontrado');
+      throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
     }
 
     // Si se proporciona userId, verificar permisos de acceso
@@ -220,7 +223,7 @@ export class RolesService {
 
       // Si el rol es super_admin y el usuario no es super_admin, devolver 404
       if (role.name === 'super_admin' && !isSuperAdmin) {
-        throw new NotFoundException('Rol no encontrado');
+        throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
       }
     }
 
@@ -244,7 +247,7 @@ export class RolesService {
 
     // No permitir cambiar roles del sistema
     if (role.system_role && (name || description)) {
-      throw new BadRequestException('No se pueden modificar roles del sistema');
+      throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
     }
 
     // Actualizar el rol
@@ -290,14 +293,12 @@ export class RolesService {
 
     // No permitir eliminar roles del sistema
     if (role.system_role) {
-      throw new BadRequestException('No se pueden eliminar roles del sistema');
+      throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
     }
 
     // Verificar que no tenga usuarios asignados
     if (role.user_roles && role.user_roles.length > 0) {
-      throw new BadRequestException(
-        'No se puede eliminar un rol que tiene usuarios asignados',
-      );
+      throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
     }
 
     // Eliminar el rol
@@ -333,9 +334,7 @@ export class RolesService {
 
     // No permitir modificar permisos de roles del sistema
     if (role.system_role) {
-      throw new BadRequestException(
-        'No se pueden modificar permisos de roles del sistema',
-      );
+      throw new VendixHttpException(ErrorCodes.ORG_PERM_001);
     }
 
     // Verificar que los permisos existan
@@ -351,15 +350,13 @@ export class RolesService {
     });
 
     if (permissions.length !== permission_ids.length) {
-      throw new BadRequestException(
-        'Uno o más permisos no existen o están inactivos',
-      );
+      throw new VendixHttpException(ErrorCodes.AUTH_VALIDATE_001);
     }
 
     // Verificar que no se asignen permisos del sistema
     const systemPermission = permissions.find((p) => p.is_system_permission);
     if (systemPermission) {
-      throw new ForbiddenException('No se pueden asignar permisos del sistema');
+      throw new VendixHttpException(ErrorCodes.ORG_PERM_001);
     }
 
     // Crear las relaciones role_permissions
@@ -413,9 +410,7 @@ export class RolesService {
 
     // No permitir modificar permisos de roles del sistema
     if (role.system_role) {
-      throw new BadRequestException(
-        'No se pueden modificar permisos de roles del sistema',
-      );
+      throw new VendixHttpException(ErrorCodes.ORG_PERM_001);
     }
 
     // Verificar que no se remuevan permisos del sistema
@@ -432,7 +427,7 @@ export class RolesService {
 
     const systemPermission = permissions.find((p) => p.is_system_permission);
     if (systemPermission) {
-      throw new ForbiddenException('No se pueden remover permisos del sistema');
+      throw new VendixHttpException(ErrorCodes.ORG_PERM_001);
     }
 
     // Verificar que no se remuevan permisos del sistema
@@ -449,7 +444,7 @@ export class RolesService {
 
     const systemPerm = permissionsToRemove.find((p) => p.is_system_permission);
     if (systemPerm) {
-      throw new ForbiddenException('No se pueden remover permisos del sistema');
+      throw new VendixHttpException(ErrorCodes.ORG_PERM_001);
     }
 
     // Eliminar las relaciones role_permissions
@@ -497,7 +492,7 @@ export class RolesService {
     });
 
     if (!role) {
-      throw new NotFoundException('Rol no encontrado');
+      throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
     }
 
     // Si se proporciona userId, verificar permisos de acceso
@@ -515,7 +510,7 @@ export class RolesService {
 
       // Si el rol es super_admin y el usuario no es super_admin, devolver 404
       if (role.name === 'super_admin' && !isSuperAdmin) {
-        throw new NotFoundException('Rol no encontrado');
+        throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
       }
     }
 
@@ -557,7 +552,7 @@ export class RolesService {
     });
 
     if (!user) {
-      throw new NotFoundException('Usuario no encontrado');
+      throw new VendixHttpException(ErrorCodes.ORG_USER_001);
     }
 
     // Verificar que el rol existe
@@ -567,7 +562,7 @@ export class RolesService {
     });
 
     if (!role) {
-      throw new NotFoundException('Rol no encontrado');
+      throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
     }
 
     // Validar pertenencia organizacional
@@ -577,9 +572,7 @@ export class RolesService {
       role.organization_id !== null &&
       role.organization_id !== user.organization_id
     ) {
-      throw new ForbiddenException(
-        'El rol no pertenece a la organización del usuario',
-      );
+      throw new VendixHttpException(ErrorCodes.ORG_PERM_001);
     }
 
     // Verificar permisos para asignar el rol super_admin
@@ -596,9 +589,7 @@ export class RolesService {
       );
 
       if (!isSuperAdmin) {
-        throw new ForbiddenException(
-          'Solo los super administradores pueden asignar el rol super_admin',
-        );
+        throw new VendixHttpException(ErrorCodes.ORG_PERM_001);
       }
 
       // Verificar que no exista ya un super admin
@@ -621,9 +612,7 @@ export class RolesService {
       });
 
       if (existingSuperAdmin) {
-        throw new ConflictException(
-          `Ya existe un super administrador: ${existingSuperAdmin.users?.email}. Solo puede existir un super administrador en el sistema.`,
-        );
+        throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
       }
     }
 
@@ -638,7 +627,7 @@ export class RolesService {
     });
 
     if (existingUserRole) {
-      throw new ConflictException('El usuario ya tiene este rol asignado');
+      throw new VendixHttpException(ErrorCodes.ORG_USER_001);
     }
 
     // Asignar el rol
@@ -713,7 +702,7 @@ export class RolesService {
     });
 
     if (!userRole) {
-      throw new NotFoundException('El usuario no tiene este rol asignado');
+      throw new VendixHttpException(ErrorCodes.ORG_USER_001);
     }
 
     // Validar pertenencia organizacional (seguridad adicional)
@@ -723,9 +712,7 @@ export class RolesService {
       userRole.roles?.organization_id !== null &&
       userRole.roles?.organization_id !== userRole.users?.organization_id
     ) {
-      throw new ForbiddenException(
-        'El rol no pertenece a la organización del usuario',
-      );
+      throw new VendixHttpException(ErrorCodes.ORG_PERM_001);
     }
 
     // No permitir remover roles del sistema si es el último rol del usuario
@@ -735,9 +722,7 @@ export class RolesService {
       });
 
       if (userRoleCount === 1) {
-        throw new BadRequestException(
-          'No se puede remover el último rol del sistema de un usuario',
-        );
+        throw new VendixHttpException(ErrorCodes.ORG_PERM_001);
       }
     }
 
@@ -834,9 +819,7 @@ export class RolesService {
 
     // Si no es super_admin, no puede ver estadísticas completas
     if (!isSuperAdmin) {
-      throw new ForbiddenException(
-        'No tienes permisos para ver estas estadísticas',
-      );
+      throw new VendixHttpException(ErrorCodes.ORG_PERM_001);
     }
 
     // Obtener el total de roles

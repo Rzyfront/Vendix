@@ -40,8 +40,9 @@ export interface UserMenuOption {
         [attr.aria-expanded]="isOpen"
         aria-label="Menú de usuario"
       >
-        <div class="user-avatar">
+        <div class="user-avatar" style="position: relative;">
           <span class="user-initials">{{ user.initials || 'US' }}</span>
+          <span class="settings-badge" *ngIf="hasNewModules$ | async"></span>
         </div>
         <div class="user-info">
           <span class="user-name">{{ user.name || 'Usuario' }}</span>
@@ -63,8 +64,9 @@ export interface UserMenuOption {
         [attr.aria-expanded]="isOpen"
         aria-label="Menú de usuario"
       >
-        <div class="user-avatar-minimal">
+        <div class="user-avatar-minimal" style="position: relative;">
           <span class="user-initials">{{ user.initials || 'US' }}</span>
+          <span class="settings-badge" *ngIf="hasNewModules$ | async"></span>
         </div>
       </button>
 
@@ -92,6 +94,10 @@ export interface UserMenuOption {
               class="item-icon"
             ></app-icon>
             <span class="item-label">{{ option.label }}</span>
+            <span
+              class="settings-sync-badge"
+              *ngIf="option.label === 'Configuración' && (newModuleCount$ | async) as count"
+            >{{ count }}</span>
           </button>
         </div>
       </div>
@@ -104,6 +110,8 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
 
   isOpen = false;
   isFullscreen = false;
+  hasNewModules$: Observable<boolean>;
+  newModuleCount$: Observable<number>;
   private destroy$ = new Subject<void>();
 
   private router = inject(Router);
@@ -128,6 +136,8 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
   constructor() {
     // Inicializar el observable en el constructor
     this.userContext$ = this.globalFacade.userContext$;
+    this.hasNewModules$ = this.authFacade.hasNewModules$;
+    this.newModuleCount$ = this.authFacade.newModuleCount$;
   }
 
   ngOnInit() {

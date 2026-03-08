@@ -28,6 +28,7 @@ export interface Product {
   tax_assignments?: ProductTaxAssignment[];
   has_variants: boolean;
   product_variants: PosProductVariant[];
+  pricing_type?: 'unit' | 'weight';
 }
 
 export interface ProductTaxAssignment {

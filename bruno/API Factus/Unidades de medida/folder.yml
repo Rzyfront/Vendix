@@ -1,0 +1,11 @@
+info:
+  name: Unidades de medida
+  type: folder
+  seq: 10
+
+request:
+  auth: inherit
+
+docs:
+  content: Busca en todas las unidades de medida
+  type: text/markdown

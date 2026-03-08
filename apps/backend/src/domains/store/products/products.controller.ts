@@ -21,6 +21,7 @@ import {
   UpdateProductVariantDto,
   ProductImageDto,
   ProductQueryDto,
+  GenerateProductDescriptionDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -36,6 +37,26 @@ export class ProductsController {
     private readonly productVariantService: ProductVariantService,
     private readonly responseService: ResponseService,
   ) { }
+  @Post('generate-description')
+  @Permissions('store:products:create')
+  async generateDescription(
+    @Body() dto: GenerateProductDescriptionDto,
+  ) {
+    try {
+      const result = await this.productsService.generateDescription(dto);
+      return this.responseService.success(
+        result,
+        'Descripción generada exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al generar la descripción',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
   @Post()
   @Permissions('store:products:create')
   async create(

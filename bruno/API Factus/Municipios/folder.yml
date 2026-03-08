@@ -1,0 +1,11 @@
+info:
+  name: Municipios
+  type: folder
+  seq: 7
+
+request:
+  auth: inherit
+
+docs:
+  content: Busca en todos los municipios
+  type: text/markdown

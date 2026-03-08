@@ -1,393 +1,208 @@
 ---
 name: vendix-error-handling
-description: Error handling patterns.
+description: Standardized error code system with VendixHttpException, error registry, and UX message mapping.
 metadata:
   scope: [root]
   auto_invoke: "Handling Errors"
 ---
-# Vendix Error Handling Pattern
+# Vendix Error Handling - Standardized Error Codes
 
-> **Consistent Error Handling** - Try-catch patterns, respuestas de error y logging estandarizado.
-
-## 🎯 Error Handling Principles
-
-**Siempre manejar errores en todas las capas:**
-- Service layer: Lógica de negocio
-- Controller layer: Respuestas HTTP
-- Frontend services: Notificaciones al usuario
-- Componentes: Estados de error
+> **Error Code Format:** `{DOMAIN}_{FUNCTIONALITY}_{NNN}`
+> Example: `PAY_FIND_001` = Payment domain, Find functionality, first error
 
 ---
 
-## 🔧 Backend Error Handling
+## Error Code System Architecture
 
-### Service Layer Pattern
+```
+Backend (throw)                    Frontend (display)
+VendixHttpException ──> AllExceptionsFilter ──> { error_code } ──> parseApiError() ──> ERROR_MESSAGES[code]
+```
+
+### Domain Prefixes
+
+| Prefix | Domain | Status |
+|--------|--------|--------|
+| `SYS_` | System (generic) | Active |
+| `PAY_` | Payments | Active |
+| `ORD_` | Orders | Pending |
+| `AUTH_` | Authentication | Pending |
+| `PROD_` | Products | Pending |
+| `CUST_` | Customers | Pending |
+| `INV_` | Inventory | Pending |
+| `SHIP_` | Shipping | Pending |
+| `CAT_` | Catalog | Pending |
+| `STORE_` | Store settings | Pending |
+| `ORG_` | Organization | Pending |
+| `ECOM_` | Ecommerce | Pending |
+
+### Functionality Suffixes
+
+| Suffix | Use | Typical HTTP Status |
+|--------|-----|---------------------|
+| `FIND_` | Resource not found | 404 |
+| `CREATE_` | Error creating | 400 |
+| `VALIDATE_` | Business validation | 400/422 |
+| `DUP_` | Duplicate/conflict | 409 |
+| `STATUS_` | Invalid state transition | 400 |
+| `PERM_` | No permissions | 403 |
+| `TOKEN_` | Invalid/expired token | 401 |
+
+---
+
+## Backend: Throwing Errors
+
+### Using VendixHttpException
 
 ```typescript
-async createOrder(create_order_dto: CreateOrderDto): Promise<Order> {
-  try {
-    // Validate business rules
-    if (!create_order_dto.items || create_order_dto.items.length === 0) {
-      throw new BadRequestException('Order must have at least one item');
-    }
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
-    // Check product availability
-    for (const item of create_order_dto.items) {
-      const product = await this.prisma.products.findUnique({
-        where: { id: item.product_id },
-      });
+// Simple throw
+throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
 
-      if (!product) {
-        throw new NotFoundException(`Product ${item.product_id} not found`);
-      }
+// With custom detail (for logs, NOT shown to user)
+throw new VendixHttpException(ErrorCodes.PAY_FIND_001, 'Payment abc-123 not found');
 
-      if (product.stock_quantity < item.quantity) {
-        throw new BadRequestException(
-          `Insufficient stock for product: ${product.name}`
-        );
-      }
-    }
+// With extra details object
+throw new VendixHttpException(ErrorCodes.PAY_VALIDATE_001, 'Amount below minimum', { min: 1000 });
+```
 
-    // Create order with transaction
-    const order = await this.prisma.$transaction(async (tx) => {
-      const new_order = await tx.sales_orders.create({
-        data: {
-          customer_id: create_order_dto.customer_id,
-          total_amount: create_order_dto.total_amount,
-          organization_id: this.context.organization_id,
-          store_id: this.context.store_id,
-        },
-      });
+### Adding New Error Codes
 
-      // Create order items
-      await Promise.all(
-        create_order_dto.items.map(item =>
-          tx.sales_order_items.create({
-            data: {
-              order_id: new_order.id,
-              product_id: item.product_id,
-              quantity: item.quantity,
-              unit_price: item.unit_price,
-              subtotal: item.quantity * item.unit_price,
-            },
-          })
-        )
-      );
+1. Add to `apps/backend/src/common/errors/error-codes.ts`:
 
-      // Update stock
-      await Promise.all(
-        create_order_dto.items.map(item =>
-          tx.products.update({
-            where: { id: item.product_id },
-            data: {
-              stock_quantity: {
-                decrement: item.quantity,
-              },
-            },
-          })
-        )
-      );
+```typescript
+export const ErrorCodes = {
+  // ... existing codes
+  ORD_FIND_001: { code: 'ORD_FIND_001', httpStatus: 404, devMessage: 'Order not found' },
+} as const satisfies Record<string, ErrorCodeEntry>;
+```
 
-      return new_order;
-    });
+2. Add UX message to `apps/frontend/src/app/core/utils/error-messages.ts`:
 
-    return order;
+```typescript
+export const ERROR_MESSAGES: Record<string, string> = {
+  // ... existing messages
+  ORD_FIND_001: 'La orden no fue encontrada.',
+};
+```
 
-  } catch (error) {
-    // Handle Prisma-specific errors
-    if (error.code === 'P2002') {
-      throw new ConflictException('Duplicate entry');
-    }
+3. Use in service:
 
-    if (error.code === 'P2025') {
-      throw new NotFoundException('Record not found');
-    }
+```typescript
+throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
+```
 
-    // Re-throw HTTP exceptions
-    if (error instanceof HttpException) {
-      throw error;
-    }
+### Early Return Validation Order
 
-    // Log unexpected errors
-    console.error('Unexpected error creating order:', error);
+Always validate in this order in services:
 
-    // Throw generic error
-    throw new InternalServerErrorException(
-      'An error occurred while creating the order'
-    );
-  }
+```typescript
+async updateOrder(id: number, dto: UpdateOrderDto) {
+  // 1. Auth/Permissions
+  if (!user.can('update_orders')) throw new VendixHttpException(ErrorCodes.SYS_FORBIDDEN_001);
+
+  // 2. Input validation (beyond DTO)
+  if (dto.amount < 0) throw new VendixHttpException(ErrorCodes.ORD_VALIDATE_001);
+
+  // 3. Resource lookup
+  const order = await this.prisma.orders.findUnique({ where: { id } });
+  if (!order) throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
+
+  // 4. Business logic
+  if (order.state === 'finished') throw new VendixHttpException(ErrorCodes.ORD_STATUS_001);
+
+  // 5. Execute
+  return this.prisma.orders.update({ ... });
 }
 ```
 
 ---
 
-### Controller Layer Pattern
+## Frontend: Displaying Errors
+
+### NEVER show backend devMessage to users
+
+The `extractApiErrorMessage()` function (used by 14+ files) automatically detects `error_code` and returns the UX message from `ERROR_MESSAGES`. No changes needed in components.
 
 ```typescript
-@Post()
-async createOrder(@Body() create_order_dto: CreateOrderDto) {
-  try {
-    const order = await this.order_service.createOrder(create_order_dto);
-    return this.response_service.success(order, 'Order created successfully');
-  } catch (error) {
-    // ResponseService handles error formatting
-    if (error instanceof HttpException) {
-      throw error;  // Let exception filter handle it
+// This already works - parseApiError is called internally
+const msg = extractApiErrorMessage(httpError);
+this.toast_service.error(msg); // Shows Spanish UX message, NOT devMessage
+```
+
+### For advanced error handling (e.g., conditional actions):
+
+```typescript
+import { parseApiError } from '@core/utils/parse-api-error';
+
+this.api.createPayment(dto).subscribe({
+  error: (err) => {
+    const { errorCode, userMessage } = parseApiError(err);
+    this.toast_service.error(userMessage);
+
+    if (errorCode === 'PAY_DUPLICATE_001') {
+      this.router.navigate(['/orders', orderId]);
     }
-
-    return this.response_service.error(
-      'Failed to create order',
-      'ORDER_CREATION_FAILED',
-      error.message
-    );
   }
-}
-```
-
----
-
-### Prisma Error Codes
-
-| Code | Description | Handling |
-|------|-------------|----------|
-| P2002 | Unique constraint violation | `ConflictException` |
-| P2025 | Record not found | `NotFoundException` |
-| P2003 | Foreign key constraint violation | `BadRequestException` |
-| P2014 | Changing required relation would violate constraint | `BadRequestException` |
-| P2006 | Invalid value for field type | `BadRequestException` |
-
----
-
-## 🌐 Frontend Error Handling
-
-### Service Layer Pattern
-
-```typescript
-getOrders(filters?: OrderFilters): Observable<Order[]> {
-  const params = new HttpParams({ fromObject: filters });
-
-  return this.http.get<Order[]>(this.api_url, { params }).pipe(
-    catchError((error: HttpErrorResponse) => {
-      // Handle specific error codes
-      if (error.status === 401) {
-        this.toast_service.error('Session expired. Please login again.');
-        this.router.navigate(['/auth/login']);
-      } else if (error.status === 403) {
-        this.toast_service.error('You do not have permission to view orders.');
-      } else if (error.status === 404) {
-        this.toast_service.error('Orders not found.');
-      } else if (error.status >= 500) {
-        this.toast_service.error('Server error. Please try again later.');
-      } else {
-        this.toast_service.error(
-          error.error?.message || 'An error occurred while loading orders'
-        );
-      }
-
-      // Return empty array or rethrow
-      return of([]);
-    })
-  );
-}
-```
-
----
-
-### Component Error Handling
-
-```typescript
-@Component({
-  selector: 'app-order-list',
-  template: `
-    @if (isLoading()) {
-      <div class="loading">Loading...</div>
-    } @else if (error()) {
-      <div class="error">
-        <p>{{ error() }}</p>
-        <button (click)="retry()">Retry</button>
-      </div>
-    } @else if (orders().length === 0) {
-      <app-empty-state message="No orders found" />
-    } @else {
-      <div *ngFor="let order of orders()">
-        {{ order.id }}
-      </div>
-    }
-  `,
-})
-export class OrderListComponent implements OnInit {
-  private order_service = inject(OrderService);
-
-  orders = signal<Order[]>([]);
-  isLoading = signal<boolean>(false);
-  error = signal<string | null>(null);
-
-  ngOnInit() {
-    this.loadOrders();
-  }
-
-  loadOrders() {
-    this.isLoading.set(true);
-    this.error.set(null);
-
-    this.order_service.getOrders().subscribe({
-      next: (data) => {
-        this.orders.set(data);
-        this.isLoading.set(false);
-      },
-      error: (err) => {
-        this.error.set(err.message);
-        this.isLoading.set(false);
-      },
-    });
-  }
-
-  retry() {
-    this.loadOrders();
-  }
-}
-```
-
----
-
-## 🔔 Toast Notifications
-
-### Using ToastService
-
-```typescript
-// Success
-this.toast_service.success('Order created successfully');
-
-// Error
-this.toast_service.error('Failed to create order');
-
-// Warning
-this.toast_service.warning('Stock is low for some products');
-
-// Info
-this.toast_service.info('Order is being processed');
-
-// Custom duration
-this.toast_service.show({
-  variant: 'success',
-  message: 'Order completed',
-  duration: 5000,
 });
 ```
 
 ---
 
-## 📝 Error Logging
+## AllExceptionsFilter Behavior
 
-### Backend Logging
+The filter at `common/filters/http-exception.filter.ts` handles all exception types:
 
-```typescript
-import { Logger } from '@nestjs/common';
+| Exception Type | `error_code` in response |
+|---------------|-------------------------|
+| `VendixHttpException` | From `errorCode` property |
+| `HttpException` with `error_code` body | Passed through |
+| `HttpException` with validation array | `SYS_VALIDATION_001` |
+| Unknown exception | `SYS_INTERNAL_001` |
 
-export class OrderService {
-  private logger = new Logger(OrderService.name);
+Response shape:
 
-  createOrder(dto: CreateOrderDto) {
-    try {
-      this.logger.log(`Creating order for customer ${dto.customer_id}`);
-
-      const order = await this.executeOrderCreation(dto);
-
-      this.logger.log(`Order ${order.id} created successfully`);
-
-      return order;
-    } catch (error) {
-      this.logger.error(
-        `Failed to create order: ${error.message}`,
-        error.stack
-      );
-      throw error;
-    }
-  }
-}
-```
-
-### Frontend Logging
-
-```typescript
-import { Injectable } from '@angular/core';
-
-@Injectable({
-  providedIn: 'root',
-})
-export class LoggingService {
-  private is_production = environment.production;
-
-  log(message: string, data?: any) {
-    if (!this.is_production) {
-      console.log(`[LOG] ${message}`, data);
-    }
-  }
-
-  warn(message: string, data?: any) {
-    console.warn(`[WARN] ${message}`, data);
-  }
-
-  error(message: string, error?: any) {
-    console.error(`[ERROR] ${message}`, error);
-
-    // Send to error tracking service in production
-    if (this.is_production) {
-      this.sendToErrorTracking(message, error);
-    }
-  }
-
-  private sendToErrorTracking(message: string, error: any) {
-    // Send to Sentry, LogRocket, etc.
-  }
-}
-```
-
----
-
-## 🎯 Error Response Format
-
-### Standard Error Response
-
-```typescript
-interface ErrorResponse {
-  success: false;
-  error: {
-    message: string;
-    code?: string;
-    details?: any;
-    stack?: string;  // Only in development
-  };
-}
-
-// Example
+```json
 {
-  "success": false,
-  "error": {
-    "message": "Product not found",
-    "code": "PRODUCT_NOT_FOUND",
-    "details": {
-      "product_id": 123
-    }
-  }
+  "statusCode": 404,
+  "error_code": "PAY_FIND_001",
+  "message": "Payment not found",
+  "timestamp": "2026-03-07T...",
+  "path": "/api/payments/abc"
 }
 ```
 
 ---
 
-## 🔍 Key Files Reference
+## Migration Checklist (per domain)
+
+- [ ] Add `{DOMAIN}_*` codes to `error-codes.ts`
+- [ ] Replace `throw new NotFoundException('...')` with `throw new VendixHttpException(ErrorCodes.XXX_FIND_001)`
+- [ ] Apply early return order: Auth -> Validation -> Lookup -> Business Logic
+- [ ] Add UX messages to frontend `error-messages.ts`
+- [ ] No component changes needed (extractApiErrorMessage handles it)
+
+---
+
+## Key Files
 
 | File | Purpose |
 |------|---------|
-| `common/responses/response.service.ts` | Error formatting |
-| `common/filters/http-exception.filter.ts` | Global error filter |
-| `core/interceptors/error.interceptor.ts` | Frontend error handling |
-| `shared/components/toast/toast.service.ts` | User notifications |
+| `apps/backend/src/common/errors/error-codes.ts` | Error code registry |
+| `apps/backend/src/common/errors/vendix-http.exception.ts` | Exception class |
+| `apps/backend/src/common/errors/index.ts` | Barrel export |
+| `apps/backend/src/common/filters/http-exception.filter.ts` | Global error filter |
+| `apps/backend/src/common/responses/response.interface.ts` | ErrorResponse with error_code |
+| `apps/backend/src/common/responses/response.service.ts` | error() with errorCode param |
+| `apps/frontend/src/app/core/utils/error-messages.ts` | UX message map |
+| `apps/frontend/src/app/core/utils/parse-api-error.ts` | Error parser |
+| `apps/frontend/src/app/core/utils/api-error-handler.ts` | extractApiErrorMessage (auto-integration) |
 
 ---
 
 ## Related Skills
 
-- `vendix-validation` - Validation patterns
+- `vendix-validation` - DTO validation patterns
 - `vendix-backend-api` - API response patterns
-- `vendix-frontend-state` - Frontend service patterns
+- `vendix-backend-domain` - Service layer architecture

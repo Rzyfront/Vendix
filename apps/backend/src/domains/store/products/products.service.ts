@@ -25,8 +25,15 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ProductVariantService } from './services/product-variant.service';
 import { S3Service } from '@common/services/s3.service';
-import { S3PathHelper, S3OrgContext, S3StoreContext } from '@common/helpers/s3-path.helper';
+import {
+  S3PathHelper,
+  S3OrgContext,
+  S3StoreContext,
+} from '@common/helpers/s3-path.helper';
 import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { AIEngineService } from '../../../ai-engine/ai-engine.service';
+import { GenerateProductDescriptionDto } from './dto';
 
 @Injectable()
 export class ProductsService {
@@ -39,7 +46,35 @@ export class ProductsService {
     private readonly productVariantService: ProductVariantService,
     private readonly s3Service: S3Service,
     private readonly s3PathHelper: S3PathHelper,
-  ) { }
+    private readonly ai_engine: AIEngineService,
+  ) {}
+
+  async generateDescription(dto: GenerateProductDescriptionDto) {
+    const productData: Record<string, any> = { nombre: dto.name };
+
+    if (dto.brand) productData.marca = dto.brand;
+    if (dto.category) productData.categorías = dto.category;
+    if (dto.base_price) productData.precio = dto.base_price;
+    if (dto.sku) productData.sku = dto.sku;
+    if (dto.extra_context) productData.extra = dto.extra_context;
+
+    const variables: Record<string, string> = {
+      name: dto.name,
+      brand: dto.brand || '',
+      category: dto.category || '',
+      base_price: dto.base_price ? String(dto.base_price) : '',
+      sku: dto.sku || '',
+      context: JSON.stringify(productData),
+    };
+
+    const response = await this.ai_engine.run('product_description_creator', variables);
+
+    if (!response.success) {
+      throw new VendixHttpException(ErrorCodes.AI_REQUEST_001);
+    }
+
+    return { description: response.content };
+  }
 
   async create(createProductDto: CreateProductDto) {
     try {
@@ -49,17 +84,13 @@ export class ProductsService {
       const store_id = context?.store_id;
 
       if (!store_id) {
-        throw new ForbiddenException(
-          'Store context required for this operation',
-        );
+        throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
       }
 
       // Verify user context for audit
       const user_id = context?.user_id;
       if (!user_id) {
-        throw new ForbiddenException(
-          'User context required for stock operations',
-        );
+        throw new VendixHttpException(ErrorCodes.PROD_PERM_001);
       }
 
       // Generar slug si no se proporciona
@@ -73,9 +104,7 @@ export class ProductsService {
       });
 
       if (existingProduct) {
-        throw new ConflictException(
-          'El slug del producto ya existe en esta tienda',
-        );
+        throw new VendixHttpException(ErrorCodes.PROD_DUP_001);
       }
 
       // Verificar que el SKU sea único si se proporciona
@@ -87,9 +116,7 @@ export class ProductsService {
         });
 
         if (existingSku) {
-          throw new ConflictException(
-            `El SKU '${createProductDto.sku}' ya está en uso en esta tienda. Use un SKU diferente o deje el campo vacío.`,
-          );
+          throw new VendixHttpException(ErrorCodes.PROD_DUP_001);
         }
       }
 
@@ -103,10 +130,7 @@ export class ProductsService {
         });
 
         if (!brand) {
-          throw new BadRequestException(
-            `Brand with ID ${createProductDto.brand_id} not found or inactive. ` +
-            `Please check available brands in the system.`,
-          );
+          throw new VendixHttpException(ErrorCodes.PROD_VALIDATE_001);
         }
       } else {
         // Si brand_id es nulo pero la tabla lo requiere, poner un valor por defecto o error
@@ -149,20 +173,29 @@ export class ProductsService {
           // Crear variantes si se proporcionan
           if (variants && variants.length > 0) {
             for (const variantData of variants) {
-              const { variant_image_url, ...variantFields } = variantData as CreateVariantWithStockDto;
-              const createdVariant = await this.productVariantService.createVariant(
-                product.id,
-                {
-                  ...variantFields,
-                  stock_quantity: variantFields.stock_quantity || 0,
-                },
-                prisma,
-              );
+              const { variant_image_url, ...variantFields } =
+                variantData as CreateVariantWithStockDto;
+              const createdVariant =
+                await this.productVariantService.createVariant(
+                  product.id,
+                  {
+                    ...variantFields,
+                    stock_quantity: variantFields.stock_quantity || 0,
+                  },
+                  prisma,
+                );
 
               // Process variant image if base64 provided
-              if (variant_image_url && variant_image_url.startsWith('data:image')) {
-                const { org, store: storeCtx } = await this.getStoreWithOrgContext(store_id);
-                const basePath = this.s3PathHelper.buildProductPath(org, storeCtx);
+              if (
+                variant_image_url &&
+                variant_image_url.startsWith('data:image')
+              ) {
+                const { org, store: storeCtx } =
+                  await this.getStoreWithOrgContext(store_id);
+                const basePath = this.s3PathHelper.buildProductPath(
+                  org,
+                  storeCtx,
+                );
                 const uploadResult = await this.s3Service.uploadBase64(
                   variant_image_url,
                   `${basePath}/${slug}-variant-${createdVariant.id}-${Date.now()}`,
@@ -196,11 +229,11 @@ export class ProductsService {
                 ...(current_context?.is_super_admin
                   ? {}
                   : {
-                    OR: [
-                      { store_id: store_id }, // Categorías específicas - El interceptor garantiza que este store_id es del usuario
-                      { store_id: null }, // Categorías globales
-                    ],
-                  }),
+                      OR: [
+                        { store_id: store_id }, // Categorías específicas - El interceptor garantiza que este store_id es del usuario
+                        { store_id: null }, // Categorías globales
+                      ],
+                    }),
               },
             });
 
@@ -209,9 +242,7 @@ export class ProductsService {
               const missing_ids = tax_category_ids.filter(
                 (id) => !found_ids.includes(id),
               );
-              throw new BadRequestException(
-                `Tax categories not found or out of scope: ${missing_ids.join(', ')}`,
-              );
+              throw new VendixHttpException(ErrorCodes.PROD_VALIDATE_001);
             }
 
             await prisma.product_tax_assignments.createMany({
@@ -238,8 +269,14 @@ export class ProductsService {
 
           // 2. Procesar images (structured with possible base64)
           if (images && images.length > 0) {
-            const { org, store: storeContext } = await this.getStoreWithOrgContext(store_id);
-            const uploadedImages = await this.handleImageUploads(images, slug, org, storeContext);
+            const { org, store: storeContext } =
+              await this.getStoreWithOrgContext(store_id);
+            const uploadedImages = await this.handleImageUploads(
+              images,
+              slug,
+              org,
+              storeContext,
+            );
             finalImages.push(
               ...uploadedImages.map((img) => ({
                 ...img,
@@ -418,13 +455,12 @@ export class ProductsService {
 
       return result;
     } catch (error) {
-
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
-          throw new ConflictException('El producto ya existe');
+          throw new VendixHttpException(ErrorCodes.PROD_DUP_001);
         }
         if (error.code === 'P2003') {
-          throw new BadRequestException('Tienda, categoría o marca no válida');
+          throw new VendixHttpException(ErrorCodes.PROD_VALIDATE_001);
         }
       }
       throw error;
@@ -464,12 +500,12 @@ export class ProductsService {
       }),
       ...(search &&
         !barcode && {
-        OR: [
-          { name: { contains: search, mode: 'insensitive' } },
-          { description: { contains: search, mode: 'insensitive' } },
-          { sku: { contains: search, mode: 'insensitive' } },
-        ],
-      }),
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { description: { contains: search, mode: 'insensitive' } },
+            { sku: { contains: search, mode: 'insensitive' } },
+          ],
+        }),
       ...(state && { state }),
       ...(brand_id && { brand_id }),
       ...(category_id && {
@@ -550,7 +586,7 @@ export class ProductsService {
                   select: {
                     quantity_available: true,
                     quantity_reserved: true,
-                    ...((!pos_optimized) && {
+                    ...(!pos_optimized && {
                       inventory_locations: {
                         select: {
                           id: true,
@@ -588,20 +624,28 @@ export class ProductsService {
           const signed_image_url = await this.s3Service.signUrl(raw_image_url);
 
           // Map variant data for POS
-          const product_variants = (product as any).product_variants?.map((variant: any) => {
-            const variantStock = variant.stock_levels?.[0]?.quantity_available ?? variant.stock_quantity ?? 0;
-            const variantImageUrl = variant.product_images?.image_url || null;
+          const product_variants =
+            (product as any).product_variants?.map((variant: any) => {
+              const variantStock =
+                variant.stock_levels?.[0]?.quantity_available ??
+                variant.stock_quantity ??
+                0;
+              const variantImageUrl = variant.product_images?.image_url || null;
 
-            return {
-              id: variant.id,
-              sku: variant.sku,
-              price_override: variant.price_override ? Number(variant.price_override) : null,
-              cost_price: variant.cost_price ? Number(variant.cost_price) : null,
-              stock: variantStock,
-              image_url: variantImageUrl,
-              attributes: this.parseVariantAttributes(variant.attributes),
-            };
-          }) || [];
+              return {
+                id: variant.id,
+                sku: variant.sku,
+                price_override: variant.price_override
+                  ? Number(variant.price_override)
+                  : null,
+                cost_price: variant.cost_price
+                  ? Number(variant.cost_price)
+                  : null,
+                stock: variantStock,
+                image_url: variantImageUrl,
+                attributes: this.parseVariantAttributes(variant.attributes),
+              };
+            }) || [];
 
           return {
             id: product.id,
@@ -616,10 +660,12 @@ export class ProductsService {
             cost_price: product.cost_price,
             stock_quantity: product.stock_quantity,
             state: product.state,
+            pricing_type: String(product.pricing_type),
             track_inventory: product.track_inventory,
             image_url: signed_image_url || null,
             brand: product.brands,
-            categories: product.product_categories?.map((pc: any) => pc.categories) || [],
+            categories:
+              product.product_categories?.map((pc: any) => pc.categories) || [],
             product_tax_assignments: product.product_tax_assignments,
             stock_levels: product.stock_levels,
             has_variants: product_variants.length > 0,
@@ -633,7 +679,9 @@ export class ProductsService {
         if (product.product_variants) {
           for (const variant of product.product_variants) {
             if (variant.image_url) {
-              variant.image_url = await this.s3Service.signUrl(variant.image_url);
+              variant.image_url = await this.s3Service.signUrl(
+                variant.image_url,
+              );
             }
           }
         }
@@ -682,7 +730,8 @@ export class ProductsService {
           track_inventory: product.track_inventory,
           image_url: signed_image_url || null,
           brand: product.brands,
-          categories: product.product_categories?.map((pc: any) => pc.categories) || [],
+          categories:
+            product.product_categories?.map((pc: any) => pc.categories) || [],
           product_tax_assignments: product.product_tax_assignments,
           // Mantener compatibilidad con el campo existente pero basado en stock_levels
           stock_quantity: totalStockAvailable,
@@ -803,7 +852,7 @@ export class ProductsService {
     });
 
     if (!product) {
-      throw new NotFoundException('Producto no encontrado');
+      throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
     }
 
     // Calcular stock totals dinámicamente
@@ -832,10 +881,12 @@ export class ProductsService {
       sku: product.sku,
       cost_price: product.cost_price,
       state: product.state,
+      pricing_type: String(product.pricing_type),
       track_inventory: product.track_inventory,
       image_url: await this.signProductImage(product),
       brand: product.brands,
-      categories: product.product_categories?.map((pc: any) => pc.categories) || [],
+      categories:
+        product.product_categories?.map((pc: any) => pc.categories) || [],
       product_tax_assignments: product.product_tax_assignments,
       product_images: product.product_images,
       product_variants: product.product_variants,
@@ -877,13 +928,14 @@ export class ProductsService {
     });
 
     if (!product) {
-      throw new NotFoundException('Producto no encontrado');
+      throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
     }
 
     await this.signProductImages(product);
 
     return {
       ...product,
+      pricing_type: String(product.pricing_type),
       image_url: await this.signProductImage(product),
     };
   }
@@ -899,7 +951,7 @@ export class ProductsService {
       });
 
       if (!existingProduct) {
-        throw new NotFoundException('Producto no encontrado');
+        throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
       }
 
       // Si se actualiza el slug, verificar que sea único dentro de la tienda
@@ -912,7 +964,7 @@ export class ProductsService {
         });
 
         if (existingSlug) {
-          throw new ConflictException('El slug ya está en uso en esta tienda');
+          throw new VendixHttpException(ErrorCodes.PROD_DUP_001);
         }
       }
 
@@ -927,9 +979,7 @@ export class ProductsService {
         });
 
         if (existingSku) {
-          throw new ConflictException(
-            `El SKU '${updateProductDto.sku}' ya está en uso en esta tienda`,
-          );
+          throw new VendixHttpException(ErrorCodes.PROD_DUP_001);
         }
       }
 
@@ -943,9 +993,7 @@ export class ProductsService {
           (updateProductDto.stock_by_location &&
             updateProductDto.stock_by_location.length > 0))
       ) {
-        throw new ForbiddenException(
-          'User context required for stock operations',
-        );
+        throw new VendixHttpException(ErrorCodes.PROD_PERM_001);
       }
 
       const {
@@ -1012,7 +1060,9 @@ export class ProductsService {
               where: { product_id: id },
               select: { image_url: true },
             });
-            const oldS3Keys = oldImages.map((img) => img.image_url).filter(Boolean);
+            const oldS3Keys = oldImages
+              .map((img) => img.image_url)
+              .filter(Boolean);
 
             // 1. Limpiar image_id en variantes para evitar FK Restrict
             await prisma.product_variants.updateMany({
@@ -1039,7 +1089,8 @@ export class ProductsService {
 
             // 3. Procesar images (structured with possible base64)
             if (images && images.length > 0) {
-              const { org, store: storeContext } = await this.getStoreWithOrgContext(existingProduct.store_id);
+              const { org, store: storeContext } =
+                await this.getStoreWithOrgContext(existingProduct.store_id);
               const uploadedImages = await this.handleImageUploads(
                 images,
                 product.slug,
@@ -1080,7 +1131,9 @@ export class ProductsService {
                     this.s3Service.deleteFile(thumbKey).catch(() => {}),
                   ];
                 }),
-              ).catch((err) => console.warn('S3 cleanup error during product update:', err));
+              ).catch((err) =>
+                console.warn('S3 cleanup error during product update:', err),
+              );
             }
           }
 
@@ -1114,7 +1167,11 @@ export class ProductsService {
             const keptVariantIds = new Set<number>();
 
             for (const variantData of variants) {
-              const { variant_image_url, id: variantDbId, ...variantFields } = variantData as CreateVariantWithStockDto & { id?: number };
+              const {
+                variant_image_url,
+                id: variantDbId,
+                ...variantFields
+              } = variantData as CreateVariantWithStockDto & { id?: number };
 
               // Buscar variante existente: primero por ID, luego por SKU como fallback
               let existingVariant = variantDbId
@@ -1141,21 +1198,19 @@ export class ProductsService {
                 variantId = existingVariant.id;
               } else {
                 // Crear nueva variante
-                const createdVariant = await this.productVariantService.createVariant(
-                  id,
-                  {
-                    ...variantFields,
-                    stock_quantity: variantFields.stock_quantity || 0,
-                  },
-                  prisma,
-                );
+                const createdVariant =
+                  await this.productVariantService.createVariant(
+                    id,
+                    {
+                      ...variantFields,
+                      stock_quantity: variantFields.stock_quantity || 0,
+                    },
+                    prisma,
+                  );
                 variantId = createdVariant.id;
 
                 // If transitioning, inherit locations from base stock
-                if (
-                  isTransitionToVariants &&
-                  inheritedLocationIds.length > 0
-                ) {
+                if (isTransitionToVariants && inheritedLocationIds.length > 0) {
                   await this.stockLevelManager.initializeVariantStockAtLocations(
                     id,
                     variantId,
@@ -1168,9 +1223,16 @@ export class ProductsService {
               keptVariantIds.add(variantId);
 
               // Process variant image if new base64 provided
-              if (variant_image_url && variant_image_url.startsWith('data:image')) {
-                const { org, store: storeCtx } = await this.getStoreWithOrgContext(existingProduct.store_id);
-                const basePath = this.s3PathHelper.buildProductPath(org, storeCtx);
+              if (
+                variant_image_url &&
+                variant_image_url.startsWith('data:image')
+              ) {
+                const { org, store: storeCtx } =
+                  await this.getStoreWithOrgContext(existingProduct.store_id);
+                const basePath = this.s3PathHelper.buildProductPath(
+                  org,
+                  storeCtx,
+                );
                 const uploadResult = await this.s3Service.uploadBase64(
                   variant_image_url,
                   `${basePath}/${product.slug}-variant-${variantId}-${Date.now()}`,
@@ -1218,9 +1280,11 @@ export class ProductsService {
                     where: { id: ev.id },
                     data: { image_id: null },
                   });
-                  await prisma.product_images.delete({
-                    where: { id: ev.image_id },
-                  }).catch(() => {});
+                  await prisma.product_images
+                    .delete({
+                      where: { id: ev.image_id },
+                    })
+                    .catch(() => {});
                 }
 
                 await prisma.product_variants.delete({
@@ -1237,7 +1301,10 @@ export class ProductsService {
 
           if (currentVariantCount === 0) {
             // Actualizar stock levels para múltiples ubicaciones
-            if (stock_by_location !== undefined && stock_by_location.length > 0) {
+            if (
+              stock_by_location !== undefined &&
+              stock_by_location.length > 0
+            ) {
               // Actualizar stock en las ubicaciones especificadas
               for (const stockLocation of stock_by_location) {
                 // Obtener stock actual en esta ubicación
@@ -1308,10 +1375,10 @@ export class ProductsService {
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
-          throw new ConflictException('Conflicto de datos únicos');
+          throw new VendixHttpException(ErrorCodes.PROD_DUP_001);
         }
         if (error.code === 'P2003') {
-          throw new BadRequestException('Categoría o marca no válida');
+          throw new VendixHttpException(ErrorCodes.PROD_VALIDATE_001);
         }
       }
       throw error;
@@ -1328,7 +1395,7 @@ export class ProductsService {
     });
 
     if (!existingProduct) {
-      throw new NotFoundException('Producto no encontrado');
+      throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
     }
 
     return await this.prisma.products.update({
@@ -1357,7 +1424,7 @@ export class ProductsService {
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2025') {
-          throw new NotFoundException('Producto no encontrado');
+          throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
         }
       }
       throw error;
@@ -1414,6 +1481,7 @@ export class ProductsService {
 
         return {
           ...product,
+          pricing_type: String(product.pricing_type),
           image_url: await this.signProductImage(product, true),
           // Mantener compatibilidad con el campo existente pero basado en stock_levels
           stock_quantity: totalStockAvailable,
@@ -1445,7 +1513,7 @@ export class ProductsService {
     });
 
     if (!product) {
-      throw new BadRequestException('Producto no encontrado o inactivo');
+      throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
     }
 
     // Si es imagen principal, quitar el flag de las demás
@@ -1470,7 +1538,7 @@ export class ProductsService {
     });
 
     if (!existingImage) {
-      throw new NotFoundException('Imagen no encontrada');
+      throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
     }
 
     // Limpiar referencia en variantes que usen esta imagen
@@ -1647,7 +1715,9 @@ export class ProductsService {
     return processedImages;
   }
 
-  private parseVariantAttributes(attributes: any): Array<{ attribute_name: string; attribute_value: string }> {
+  private parseVariantAttributes(
+    attributes: any,
+  ): Array<{ attribute_name: string; attribute_value: string }> {
     if (!attributes || typeof attributes !== 'object') return [];
     return Object.entries(attributes).map(([key, value]) => ({
       attribute_name: key,
@@ -1714,9 +1784,10 @@ export class ProductsService {
    * Calculates the final price of a product including taxes and active offers.
    */
   private calculateFinalPrice(product: any): number {
-    const basePrice = product.is_on_sale && product.sale_price
-      ? Number(product.sale_price)
-      : Number(product.base_price);
+    const basePrice =
+      product.is_on_sale && product.sale_price
+        ? Number(product.sale_price)
+        : Number(product.base_price);
 
     let totalTaxRate = 0;
 

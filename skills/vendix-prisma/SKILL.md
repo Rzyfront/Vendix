@@ -5,13 +5,14 @@ description: >
   Trigger: When editing schema.prisma, creating migrations, or using Prisma client.
 license: MIT
 metadata:
-  author: vendix
+  author: rzyfront
   version: "1.0"
 ---
 
 ## When to Use
 
 Use this skill when:
+
 - Modifying Prisma schema
 - Creating or running migrations
 - Using Prisma Client in services
@@ -66,20 +67,20 @@ model OrderItem {
 
 Vendix uses **domain-scoped Prisma services** built on an abstract `BasePrismaService`. Each domain injects the appropriate scoped service:
 
-| Service | Scope | Use Case |
-|---|---|---|
-| `GlobalPrismaService` | None | Superadmin, background jobs |
-| `OrganizationPrismaService` | `organization_id` | Org admin |
-| `StorePrismaService` | `store_id` | Store admin, POS |
-| `EcommercePrismaService` | `store_id` + `user_id` | Customer e-commerce |
+| Service                     | Scope                  | Use Case                    |
+| --------------------------- | ---------------------- | --------------------------- |
+| `GlobalPrismaService`       | None                   | Superadmin, background jobs |
+| `OrganizationPrismaService` | `organization_id`      | Org admin                   |
+| `StorePrismaService`        | `store_id`             | Store admin, POS            |
+| `EcommercePrismaService`    | `store_id` + `user_id` | Customer e-commerce         |
 
 > **For complete scoping documentation, model registration rules, and `withoutScope()` guidelines, see `vendix-prisma-scopes` skill.**
 
 ### Pattern 3: Using Prisma in Services
 
 ```typescript
-import { Injectable } from '@nestjs/common';
-import { StorePrismaService } from '@/prisma/services/store-prisma.service';
+import { Injectable } from "@nestjs/common";
+import { StorePrismaService } from "@/prisma/services/store-prisma.service";
 
 @Injectable()
 export class UsersService {
@@ -227,16 +228,17 @@ npx prisma migrate dev --name add_user_roles
 ### Example 2: Seeding Database
 
 **prisma/seed.ts**:
+
 ```typescript
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
 async function main() {
   await prisma.user.createMany({
     data: [
-      { email: 'admin@vendix.com', name: 'Admin' },
-      { email: 'user@vendix.com', name: 'User' },
+      { email: "admin@vendix.com", name: "Admin" },
+      { email: "user@vendix.com", name: "User" },
     ],
   });
 }
@@ -252,6 +254,7 @@ main()
 ```
 
 **package.json**:
+
 ```json
 {
   "prisma": {
@@ -315,11 +318,13 @@ npx prisma generate
 ## Environment Variables
 
 **apps/backend/.env**:
+
 ```env
 DATABASE_URL="postgresql://postgres:password@localhost:5432/vendix_db?schema=public"
 ```
 
 **Docker DATABASE_URL** (for containers):
+
 ```env
 DATABASE_URL="postgresql://postgres:password@db:5432/vendix_db?schema=public"
 ```

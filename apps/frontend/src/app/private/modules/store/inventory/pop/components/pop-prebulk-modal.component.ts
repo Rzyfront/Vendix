@@ -99,6 +99,17 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
           ></app-input>
         </div>
 
+        <!-- Base Price (Selling Price) -->
+        <app-input
+          label="Precio de Venta"
+          type="number"
+          [(ngModel)]="form.base_price"
+          name="base_price"
+          step="0.01"
+          [min]="0"
+          placeholder="$ 0.00"
+        ></app-input>
+
         <!-- Calculated Total -->
         <div class="bg-[var(--color-muted)] rounded-md p-3">
           <div class="flex justify-between items-center">
@@ -157,6 +168,7 @@ export class PopPreBulkModalComponent {
     description: '',
     quantity: 1,
     unit_cost: 0,
+    base_price: 0,
     notes: '',
   };
 
@@ -182,6 +194,7 @@ export class PopPreBulkModalComponent {
         name: this.form.name,
         code: this.form.code,
         description: this.form.description || undefined,
+        base_price: this.form.base_price || 0,
       },
       quantity: this.form.quantity,
       unit_cost: this.form.unit_cost,
@@ -224,6 +237,7 @@ export class PopPreBulkModalComponent {
       description: '',
       quantity: 1,
       unit_cost: 0,
+      base_price: 0,
       notes: '',
     };
   }

@@ -156,6 +156,15 @@ export class ProductListComponent implements OnChanges {
       transform: (value: number) => this.formatCurrency(value),
     },
     {
+      key: 'pricing_type',
+      label: 'Tipo',
+      sortable: false,
+      width: '80px',
+      align: 'center',
+      priority: 3,
+      transform: (value: string) => value === 'weight' ? 'Peso' : 'Unidad',
+    },
+    {
       key: 'stock_quantity',
       label: 'Stock',
       sortable: true,
@@ -163,7 +172,7 @@ export class ProductListComponent implements OnChanges {
       align: 'center',
       priority: 1,
       transform: (value: number, item?: any) =>
-        item?.track_inventory === false ? 'Bajo pedido' : (value?.toString() || '0'),
+        item?.track_inventory === false ? 'Disponible' : (value?.toString() || '0'),
     },
     {
       key: 'state',
@@ -232,7 +241,7 @@ export class ProductListComponent implements OnChanges {
         key: 'stock_quantity',
         label: 'Stock',
         transform: (val: any, item?: any) =>
-          item?.track_inventory === false ? 'Bajo pedido' : (val?.toString() || '0'),
+          item?.track_inventory === false ? 'Disponible' : (val?.toString() || '0'),
       }
     ]
   };

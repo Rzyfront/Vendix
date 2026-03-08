@@ -1,0 +1,211 @@
+opencollection: 1.0.0
+
+info:
+  name: API Factus
+
+request:
+  auth:
+    type: bearer
+    token: "{{access_token}}"
+  scripts:
+    - type: before-request
+      code: |-
+        const urlAPI = bru.getEnvVar("url_api");
+        const clientID = bru.getEnvVar("client_id");
+        const clientSecret = bru.getEnvVar("client_secret");
+        const username = bru.getEnvVar("email");
+        const password = bru.getEnvVar("password");
+        await bru.sendRequest({
+            url: urlAPI + '/oauth/token',
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                "Content-Type": "application/x-www-form-urlencoded"
+            },
+            data: {
+                "grant_type": 'password',
+                "client_id": clientID,
+                "client_secret": clientSecret,
+                "username": username,
+                "password": password
+            }
+        }, async function(err, res) {
+            if (err) {
+                console.error(err);
+            } else {
+                bru.setGlobalEnvVar('access_token', res.data.access_token);
+            }
+        });
+
+docs:
+  content: |-
+    # API de facturación electrónica para Colombia
+
+    Documentacion oficial de Factus API, en la cual podrá crear, consultar y validar facturas desde su propio cliente.
+
+    _**Pre-requisitos para usar el API:**_
+
+    |  |  |
+    | --- | --- |
+    | **Tipo:** | REST API |
+    | **Credenciales:** | **Se deben solicitar al administrador del sistema.**  <br>  <br>**grandtype:** password (valor por default)  <br>**client_id,  <br>client_secret,  <br>username,  <br>password**  <br>  <br>Las anteriores credenciales se deben usar para la solicitud del token de acceso y el token de refresco usando el endpoint Auth.  <br>[Ver endpoint](https://developers.factus.com.co/autenticacion/auth/) |
+    | **Token genereados:** | **access_token:** Token que se deben usar para realizar cada solicitud a los endpoint.  <br>**refresh_token:** Token que se debe enviar para solicitar un nuevo access_token al caducar su uso. |
+    | **Tiempo de caducidad de tokens:** | 1 hora, el tiempo de caducidad se genera en milisegundos, en la peticion de [genereacion de token](https://developers.factus.com.co/autenticacion/auth/) y en el endpoint de [refresh token](https://developers.factus.com.co/autenticacion/refresh-token/). |
+
+    # **Tablas**
+
+    ### Códigos de corrección
+
+    | **Código** | **Descripción** |
+    | --- | --- |
+    | 1 | Devolución parcial de los bienes y/o no aceptación parcial del servicio. |
+    | 2 | Anulación de factura electrónica. |
+    | 3 | Rebaja o descuento parcial o total. |
+    | 4 | Ajuste de precio. |
+    | 5 | Descuento comercial por pronto pago. |
+    | 6 | Descuento comercial por volumen de ventas. |
+
+    ### Códigos de tipos de operación
+
+    | **Código** | **Descripción** |
+    | --- | --- |
+    | 20 | Nota Crédito que referencia una factura electrónica. |
+    | 22 | Nota Crédito sin referencia a una factura electrónica. |
+
+    ### Códigos de estandar de identificación del producto
+
+    | **ID** | **Nombre** |
+    | --- | --- |
+    | 1 | Estándar de adopción del contribuyente |
+    | 2 | UNSPSC |
+    | 3 | Partida Arancelarias |
+    | 4 | GTIN |
+
+    ### Códigos de medios de pago
+
+    | Código | Descripción |
+    | --- | --- |
+    | 10 | Efectivo |
+    | 42 | Consignación |
+    | 20 | Cheque |
+    | 46 | Transferencia Débito Interbancario |
+    | 47 | Transferencia |
+    | 71 | Bonos |
+    | 72 | Vales |
+    | ZZZ | Otro\* |
+    | 1 | Medio de pago no definido |
+    | 49 | Tarjeta Débito |
+    | 3 | Débito ACH |
+    | 25 | Cheque certificado |
+    | 26 | Cheque Local |
+    | 24 | Nota cambiaria esperando aceptación |
+    | 64 | Nota promisoria firmada por el banco |
+    | 65 | Nota promisoria firmada por un banco avalada por otro banco |
+    | 66 | Nota promisoria firmada |
+    | 67 | Nota promisoria firmada por un tercero avalada por un banco |
+    | 2 | Crédito ACH |
+    | 95 | Giro formato abierto |
+    | 13 | Crédito Ahorro |
+    | 14 | Débito Ahorro |
+    | 39 | Crédito Intercambio Corporativo (CTX) |
+    | 4 | Reversión débito de demanda ACH |
+    | 5 | Reversión crédito de demanda ACH |
+    | 6 | Crédito de demanda ACH |
+    | 7 | Débito de demanda ACH |
+    | 9 | Clearing Nacional o Regional |
+    | 11 | Reversión Crédito Ahorro |
+    | 12 | Reversión Débito Ahorro |
+    | 18 | Desembolso (CCD) débito |
+    | 19 | Crédito Pago negocio corporativo (CTP) |
+    | 21 | Proyecto bancario |
+    | 22 | Proyecto bancario certificado |
+    | 27 | Débito Pago Negocio Corporativo (CTP) |
+    | 28 | Crédito Negocio Intercambio Corporativo (CTX) |
+    | 29 | Débito Negocio Intercambio Corporativo (CTX) |
+    | 30 | Transferencia Crédito |
+    | 31 | Transferencia Débito |
+    | 32 | Desembolso Crédito plus (CCD+) |
+    | 33 | Desembolso Débito plus (CCD+) |
+    | 34 | Pago y depósito pre acordado (PPD) |
+    | 35 | Desembolso Crédito (CCD) |
+    | 36 | Desembolso Débito (CCD) |
+    | 48 | Tarjeta Crédito |
+    | 44 | Nota cambiaria |
+    | 23 | Cheque bancario de gerencia |
+    | 61 | Nota promisoria firmada por el acreedor |
+    | 62 | Nota promisoria firmada por el acreedor, avalada por el banco |
+    | 63 | Nota promisoria firmada por el acreedor, avalada por un tercero |
+    | 60 | Nota promisoria |
+    | 96 | Método de pago solicitado no usado |
+    | 91 | Nota bancaria transferible |
+    | 92 | Cheque local transferible |
+    | 93 | Giro referenciado |
+    | 94 | Giro urgente |
+    | 40 | Débito Intercambio Corporativo (CTX) |
+    | 41 | Desembolso Crédito plus (CCD+) |
+    | 43 | Desembolso Débito plus (CCD+) |
+    | 45 | Transferencia Crédito Bancario |
+    | 50 | Postgiro |
+    | 51 | Telex estándar bancario |
+    | 52 | Pago comercial urgente |
+    | 53 | Pago Tesorería Urgente |
+    | 15 | Bookentry Crédito |
+    | 16 | Bookentry Débito |
+    | 17 | Desembolso Crédito (CCD) |
+    | 70 | Retiro de nota por el acreedor |
+    | 74 | Retiro de nota por el acreedor sobre un banco |
+    | 75 | Retiro de nota por el acreedor, avalada por otro banco |
+    | 76 | Retiro de nota por el acreedor, sobre un banco avalada por un tercero |
+    | 77 | Retiro de una nota por el acreedor sobre un tercero |
+    | 78 | Retiro de una nota por el acreedor sobre un tercero avalada por un banco |
+    | 37 | Pago Negocio Corporativo Ahorros Crédito (CTP) |
+    | 38 | Pago Negocio Corporativo Ahorros Débito (CTP) |
+    | 97 | Clearing entre partners |
+
+    ---
+
+    ### **Códigos conceptos de reclamo**
+
+    | **Código** | **Nombre** |
+    | --- | --- |
+    | 1 | Documento con inconsistencias |
+    | 2 | Mercancía no entregada |
+    | 3 | Mercancía entregada parcialmente |
+    | 4 | Servicio no prestado |
+
+    ---
+
+    ### **Códigos de eventos**
+
+    | **Código** | **Nombre** |
+    | --- | --- |
+    | 030 | Acuse de recibo de Factura Electrónica de Venta |
+    | 031 | Reclamo de la Factura Electrónica de Venta |
+    | 032 | Recibo del bien y/o prestación del servicio |
+    | 033 | Aceptación expresa |
+    | 034 | Aceptación Tácita |
+
+    ---
+
+    ### **Códigos tipos de documentos de identidad**
+
+    | **ID** | **Nombre** |
+    | --- | --- |
+    | 1 | Registro civil |
+    | 2 | Tarjeta de identidad |
+    | 3 | Cédula ciudadanía |
+    | 4 | Tarjeta de extranjería |
+    | 5 | Cédula de extranjería |
+    | 6 | NIT |
+    | 7 | Pasaporte |
+    | 8 | Documento de identificación extranjero |
+    | 9 | PEP |
+    | 10 | NIT otro país |
+    | 11 | NUIP \* |
+  type: text/markdown
+bundled: false
+extensions:
+  bruno:
+    ignore:
+      - node_modules
+      - .git

@@ -1,8 +1,6 @@
 import {
   Injectable,
-  NotFoundException,
   BadRequestException,
-  ForbiddenException,
   ConflictException,
 } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
@@ -20,7 +18,8 @@ import {
   PosPaymentResponseDto,
   UpdateOrderWithPaymentDto,
 } from './dto';
-import { PaymentError, PaymentErrorCodes } from './utils';
+import { PaymentError, PaymentErrorCodes, LEGACY_TO_NEW } from './utils';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { resolveCostPrice } from '../orders/utils/resolve-cost-price';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../settings/settings.service';
@@ -34,7 +33,7 @@ export class PaymentsService {
     private readonly taxes_service: TaxesService,
     private readonly eventEmitter: EventEmitter2,
     private readonly settingsService: SettingsService,
-  ) { }
+  ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
     try {
@@ -59,11 +58,8 @@ export class PaymentsService {
       };
     } catch (error) {
       if (error instanceof PaymentError) {
-        throw new BadRequestException({
-          code: error.code,
-          message: error.message,
-          details: error.details,
-        });
+        const mapped = LEGACY_TO_NEW[error.code];
+        throw new VendixHttpException(mapped, error.message, error.details);
       }
       throw error;
     }
@@ -101,11 +97,8 @@ export class PaymentsService {
       };
     } catch (error) {
       if (error instanceof PaymentError) {
-        throw new BadRequestException({
-          code: error.code,
-          message: error.message,
-          details: error.details,
-        });
+        const mapped = LEGACY_TO_NEW[error.code];
+        throw new VendixHttpException(mapped, error.message, error.details);
       }
       throw error;
     }
@@ -127,7 +120,7 @@ export class PaymentsService {
       });
 
       if (!payment) {
-        throw new NotFoundException('Payment not found');
+        throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
       }
 
       await this.validateUserAccess(user, payment.orders.stores.id);
@@ -145,11 +138,8 @@ export class PaymentsService {
       };
     } catch (error) {
       if (error instanceof PaymentError) {
-        throw new BadRequestException({
-          code: error.code,
-          message: error.message,
-          details: error.details,
-        });
+        const mapped = LEGACY_TO_NEW[error.code];
+        throw new VendixHttpException(mapped, error.message, error.details);
       }
       throw error;
     }
@@ -167,7 +157,7 @@ export class PaymentsService {
       });
 
       if (!payment) {
-        throw new NotFoundException('Payment not found');
+        throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
       }
 
       await this.validateUserAccess(user, payment.orders.stores.id);
@@ -180,11 +170,8 @@ export class PaymentsService {
       };
     } catch (error) {
       if (error instanceof PaymentError) {
-        throw new BadRequestException({
-          code: error.code,
-          message: error.message,
-          details: error.details,
-        });
+        const mapped = LEGACY_TO_NEW[error.code];
+        throw new VendixHttpException(mapped, error.message, error.details);
       }
       throw error;
     }
@@ -327,7 +314,7 @@ export class PaymentsService {
     });
 
     if (!payment) {
-      throw new NotFoundException('Payment not found');
+      throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
     }
 
     // Check if user has access to this payment's store
@@ -338,7 +325,7 @@ export class PaymentsService {
       // If for some reason order linkage is missing (should not happen)
       // For safety, only super_admin should access orphaned records
       if (!user.roles || !user.roles.includes('super_admin')) {
-        throw new ForbiddenException('Access denied to this payment record');
+        throw new VendixHttpException(ErrorCodes.PAY_PERM_001);
       }
     }
 
@@ -385,7 +372,7 @@ export class PaymentsService {
     }
 
     // 6. Access denied
-    throw new ForbiddenException('Access denied to this store');
+    throw new VendixHttpException(ErrorCodes.PAY_PERM_001);
   }
 
   /**
@@ -400,7 +387,8 @@ export class PaymentsService {
 
       // Resolve store currency once if not provided in DTO
       if (!createPosPaymentDto.currency) {
-        createPosPaymentDto.currency = await this.settingsService.getStoreCurrency();
+        createPosPaymentDto.currency =
+          await this.settingsService.getStoreCurrency();
       }
 
       return await this.prisma.$transaction(async (tx) => {
@@ -419,10 +407,20 @@ export class PaymentsService {
             order,
             createPosPaymentDto,
           );
-          await this.updateOrderPaymentStatus(tx, order.id, 'succeeded', order.delivery_type);
+          await this.updateOrderPaymentStatus(
+            tx,
+            order.id,
+            'succeeded',
+            order.delivery_type,
+          );
         } else {
           // Credit sale - update order status
-          await this.updateOrderPaymentStatus(tx, order.id, 'pending_payment', order.delivery_type);
+          await this.updateOrderPaymentStatus(
+            tx,
+            order.id,
+            'pending_payment',
+            order.delivery_type,
+          );
         }
 
         // 3. Update inventory if required
@@ -448,8 +446,8 @@ export class PaymentsService {
             amount: payment.amount,
             currency: payment.currency || createPosPaymentDto.currency,
             payment_method:
-              payment.store_payment_method?.system_payment_method?.display_name ||
-              'Unknown',
+              payment.store_payment_method?.system_payment_method
+                ?.display_name || 'Unknown',
           });
         }
 
@@ -472,17 +470,17 @@ export class PaymentsService {
           },
           payment: payment
             ? {
-              id: payment.id,
-              amount: payment.amount,
-              payment_method:
-                payment.store_payment_method?.display_name ||
-                payment.store_payment_method?.system_payment_method
-                  ?.display_name ||
-                'Unknown',
-              status: payment.status,
-              transaction_id: payment.transaction_id,
-              change: payment.change,
-            }
+                id: payment.id,
+                amount: payment.amount,
+                payment_method:
+                  payment.store_payment_method?.display_name ||
+                  payment.store_payment_method?.system_payment_method
+                    ?.display_name ||
+                  'Unknown',
+                status: payment.status,
+                transaction_id: payment.transaction_id,
+                change: payment.change,
+              }
             : undefined,
         };
       });
@@ -512,45 +510,56 @@ export class PaymentsService {
         orderNumber = await this.generateOrderNumber(tx, dto.store_id);
 
         // Create order items
-        const orderItems = await Promise.all(dto.items.map(async (item) => {
-          let item_tax_rate = item.tax_rate;
-          let item_tax_amount = item.tax_amount_item;
+        const orderItems = await Promise.all(
+          dto.items.map(async (item) => {
+            let item_tax_rate = item.tax_rate;
+            let item_tax_amount = item.tax_amount_item;
 
-          // If taxes are missing or 0, calculate them
-          if (!item_tax_rate || item_tax_rate === 0) {
-            const taxInfo = await this.taxes_service.calculateProductTaxes(item.product_id, item.unit_price);
-            item_tax_rate = taxInfo.total_rate;
-            item_tax_amount = taxInfo.total_tax_amount;
-          }
+            // If taxes are missing or 0, calculate them
+            if (!item_tax_rate || item_tax_rate === 0) {
+              const taxInfo = await this.taxes_service.calculateProductTaxes(
+                item.product_id,
+                item.unit_price,
+              );
+              item_tax_rate = taxInfo.total_rate;
+              item_tax_amount = taxInfo.total_tax_amount;
+            }
 
-          const cost_price = await resolveCostPrice(tx, item.product_id, item.product_variant_id);
+            const cost_price = await resolveCostPrice(
+              tx,
+              item.product_id,
+              item.product_variant_id,
+            );
 
-          const orderItem: any = {
-            product_name: item.product_name,
-            variant_sku: item.product_sku,
-            variant_attributes: item.variant_attributes
-              ? JSON.stringify(item.variant_attributes)
-              : undefined,
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-            total_price: item.total_price,
-            tax_rate: item_tax_rate,
-            tax_amount_item: item_tax_amount,
-            cost_price,
-          };
-
-          if (item.product_id) {
-            orderItem.products = { connect: { id: item.product_id } };
-          }
-
-          if (item.product_variant_id) {
-            orderItem.product_variants = {
-              connect: { id: item.product_variant_id },
+            const orderItem: any = {
+              product_name: item.product_name,
+              variant_sku: item.product_sku,
+              variant_attributes: item.variant_attributes
+                ? JSON.stringify(item.variant_attributes)
+                : undefined,
+              quantity: item.quantity,
+              unit_price: item.unit_price,
+              total_price: item.total_price,
+              tax_rate: item_tax_rate,
+              tax_amount_item: item_tax_amount,
+              cost_price,
+              weight: item.weight || undefined,
+              weight_unit: item.weight_unit || undefined,
             };
-          }
 
-          return orderItem;
-        }));
+            if (item.product_id) {
+              orderItem.products = { connect: { id: item.product_id } };
+            }
+
+            if (item.product_variant_id) {
+              orderItem.product_variants = {
+                connect: { id: item.product_variant_id },
+              };
+            }
+
+            return orderItem;
+          }),
+        );
 
         // Build order data - only include customer_id if provided (for anonymous sales)
         // Initial state is 'created' - state transitions handled by OrderFlowService

@@ -41,11 +41,35 @@
                                 [error]="getErrorMessage('slug')"></app-input>
                         </div>
 
-                        <!-- Description -->
-                        <div class="md:col-span-2">
-                            <app-textarea label="Descripción" formControlName="description"
-                                placeholder="Describe tu producto..." [rows]="3"
-                                [control]="$any(productForm).get('description')"></app-textarea>
+                        <!-- Description + AI Generator -->
+                        <div class="md:col-span-2 ai-description-wrapper"
+                            [class.ai-generating]="isGeneratingDescription()">
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="block text-sm font-medium text-text-secondary ai-label">Descripción</label>
+                                <button type="button" (click)="generateAIDescription()"
+                                    [disabled]="isGeneratingDescription() || aiDescriptionLimitReached()"
+                                    class="ai-generate-btn group relative">
+                                    <span class="ai-tooltip">
+                                        @if (aiDescriptionLimitReached()) {
+                                            Límite alcanzado (0/3)
+                                        } @else {
+                                            Generar con IA ({{ aiDescriptionUsesLeft() }}/3)
+                                        }
+                                    </span>
+                                    @if (isGeneratingDescription()) {
+                                        <app-icon name="loader-2" [size]="11" class="animate-spin" />
+                                    } @else {
+                                        <app-icon name="sparkles" [size]="11" />
+                                    }
+                                    <span class="text-xs font-medium hidden sm:inline ml-1">IA</span>
+                                </button>
+                            </div>
+                            <div class="ai-textarea-wrapper">
+                                <app-textarea formControlName="description"
+                                    placeholder="Describe tu producto..." [rows]="3"
+                                    [control]="$any(productForm).get('description')">
+                                </app-textarea>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -57,12 +81,33 @@
                         <h2 class="text-base font-bold text-gray-900">Precios y Rentabilidad</h2>
                     </div>
 
+                    <!-- Pricing Type Selector -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="md:col-span-2">
+                            <app-selector label="Tipo de Venta" [options]="pricingTypeOptions"
+                                formControlName="pricing_type"
+                                placeholder="Seleccionar tipo de venta"
+                                helpText="Define si el producto se vende por unidad o por peso (kg)">
+                            </app-selector>
+                        </div>
+                    </div>
+
+                    <!-- Weight pricing info banner -->
+                    <div *ngIf="productForm.get('pricing_type')?.value === 'weight'"
+                        class="flex items-center gap-2 p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 text-sm">
+                        <app-icon name="info" size="16" class="text-blue-600 shrink-0"></app-icon>
+                        <span>Los precios se interpretan <strong>por unidad de peso (kg)</strong>. El precio base es el precio por kilogramo.</span>
+                    </div>
+
                     <!-- First Row: Core pricing -->
                     <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
                         <!-- Cost Price -->
-                        <app-input label="Precio de Costo" type="number" formControlName="cost_price"
+                        <app-input
+                            [label]="productForm.get('pricing_type')?.value === 'weight' ? 'Costo por kg' : 'Precio de Costo'"
+                            type="number" formControlName="cost_price"
                             [error]="getErrorMessage('cost_price')" prefix="$" placeholder="0.00"
-                            helperText="Inversión por unidad" customWrapperClass="!mt-0"></app-input>
+                            [helperText]="productForm.get('pricing_type')?.value === 'weight' ? 'Costo por kilogramo' : 'Inversión por unidad'"
+                            customWrapperClass="!mt-0"></app-input>
 
                         <!-- Margin -->
                         <app-input label="Margen (%)" type="number" formControlName="profit_margin"
@@ -70,9 +115,12 @@
                             helperText="Rentabilidad deseada" customWrapperClass="!mt-0"></app-input>
 
                         <!-- Base Price (Sale Price before tax) -->
-                        <app-input label="Precio Base (PVP)" type="number" formControlName="base_price"
+                        <app-input
+                            [label]="productForm.get('pricing_type')?.value === 'weight' ? 'Precio por kg (PVP)' : 'Precio Base (PVP)'"
+                            type="number" formControlName="base_price"
                             [error]="getErrorMessage('base_price')" prefix="$" placeholder="0.00"
-                            helperText="Precio antes de impuestos" [required]="true"
+                            [helperText]="productForm.get('pricing_type')?.value === 'weight' ? 'Precio por kilogramo antes de impuestos' : 'Precio antes de impuestos'"
+                            [required]="true"
                             customWrapperClass="!mt-0"></app-input>
                     </div>
 
@@ -164,11 +212,17 @@
                         <!-- Horizontal Thumbnails Carousel -->
                         <div class="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
                             <!-- Upload Button -->
-                            <button *ngIf="imageUrls.length < 5" type="button" (click)="triggerFileUpload()"
+                            <button *ngIf="imageUrls.length < 5 && !isLoadingImages" type="button" (click)="triggerFileUpload()"
                                 class="flex-shrink-0 w-16 h-16 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:bg-white hover:border-primary-400 transition-all">
                                 <app-icon name="plus" size="20" class="text-gray-400"></app-icon>
                                 <span class="text-[9px] text-gray-400 mt-0.5">Subir</span>
                             </button>
+
+                            <!-- Loading Indicator Mobile -->
+                            <div *ngIf="isLoadingImages" class="flex-shrink-0 w-16 h-16 bg-primary-50 rounded-xl border-2 border-dashed border-primary-300 flex flex-col items-center justify-center">
+                                <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-600"></div>
+                                <span class="text-[9px] text-primary-600 mt-1">{{ loadingProgress }}%</span>
+                            </div>
 
                             <!-- Thumbnails -->
                             <div *ngFor="let url of imageUrls; let i = index" (click)="setActiveImage(i)"
@@ -462,8 +516,16 @@
 
                         <!-- Drag & Drop Indicative Box -->
                         <div *ngIf="imageUrls.length < 5" class="group mt-4 relative">
+                            <!-- Loading Indicator -->
+                            <div *ngIf="isLoadingImages" class="w-full py-4 border-2 border-dashed border-primary-300 rounded-xl bg-primary-50/50 flex flex-col items-center justify-center mb-2">
+                                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mb-2"></div>
+                                <p class="text-[13px] font-semibold text-primary-700">Cargando imágenes...</p>
+                                <p class="text-xs text-primary-600 mt-1">{{ loadingProgress }}%</p>
+                            </div>
                             <div (click)="triggerFileUpload()"
-                                class="w-full py-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-white hover:border-primary-300 hover:shadow-md">
+                                class="w-full py-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-white hover:border-primary-300 hover:shadow-md"
+                                [class.opacity-50]="isLoadingImages"
+                                [class.pointer-events-none]="isLoadingImages">
                                 <div class="p-2 bg-white rounded-full shadow-sm mb-2 group-hover:scale-110 transition-transform">
                                     <app-icon name="upload-cloud" size="24" class="text-primary-500"></app-icon>
                                 </div>
@@ -751,7 +813,7 @@
                               <div class="flex flex-col justify-end">
                                 <label class="block text-xs font-medium text-text-secondary mb-1">Stock</label>
                                 <div class="h-[34px] px-2 flex items-center bg-blue-50 border border-blue-200 rounded-lg text-xs font-medium text-blue-600">
-                                  Bajo pedido
+                                  Disponible
                                 </div>
                               </div>
                             }

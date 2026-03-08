@@ -1,0 +1,59 @@
+info:
+  name: Rangos
+  type: http
+  seq: 2
+
+http:
+  method: GET
+  url: "{{url_api}}/v1/numbering-ranges?filter[id]&filter[document]&filter[resolution_number]&filter[technical_key]&filter[is_active]"
+  headers:
+    - name: Accept
+      value: application/json
+  params:
+    - name: filter[id]
+      value: ""
+      type: query
+      description: ID del registro
+    - name: filter[document]
+      value: ""
+      type: query
+      description: Código de documento. 21=Factura de Venta, 22=Nota Crédito, 23=Nota Débito, 24=Documento Soporte, 25=Nota de Ajuste Documento Soporte, 26=Nómina, 27=Nota de Ajuste Nómina, 28=Nota de eliminación de nómina, 30=Factura de talonario o de papel.
+    - name: filter[resolution_number]
+      value: ""
+      type: query
+      description: Número de resolución (solo para facturas y docuentos soporte)
+    - name: filter[technical_key]
+      value: ""
+      type: query
+      description: Clave técnica (solo para facturas)
+    - name: filter[is_active]
+      value: ""
+      type: query
+      description: 1 para activo 0 para inactivo
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+docs: |-
+  Lista todos los rangos de numeración
+
+  #### **Response**
+
+  | Valor | Descripción |
+  | --- | --- |
+  | id | id del rango de numeracion |
+  | document | Nombre del documento |
+  | prefix | prefijo del rango de numeración |
+  | from | Número de incio del rango de numeración |
+  | to | Número del final del rango de numeración |
+  | current | Siguiente número del rango de numeración |
+  | resolution_number | Numero de resolución |
+  | start_date | Fecha en la que se expidio el rango de numeración |
+  | end_date | Fecha de vencimiento del rango de numeración |
+  | technical_key | Clave tecnica |
+  | is_expired | El valor es 1 cuando el rango de numeracion esta vencido y 0 cuando esta vigente |
+  | is_active | El valor es 1 cuando el rango de numeración esta activo y 0 cuando no esta activo |

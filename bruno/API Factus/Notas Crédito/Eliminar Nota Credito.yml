@@ -1,0 +1,100 @@
+info:
+  name: Eliminar Nota Credito
+  type: http
+  seq: 8
+
+http:
+  method: DELETE
+  url: "{{url_api}}/v1/credit-notes/reference/:reference_code"
+  headers:
+    - name: Accept
+      value: application/json
+  params:
+    - name: reference_code
+      value: ""
+      type: path
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+examples:
+  - name: 200 - Eliminar Nota Credito
+    request:
+      url: "{{url_api}}/v1/credit-notes/reference/:reference_code"
+      method: DELETE
+      headers:
+        - name: Accept
+          value: application/json
+      params:
+        - name: reference_code
+          value: "6"
+          type: path
+    response:
+      statusText: "200"
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "OK",
+              "message": "Documento con código de referencia 6 eliminado con éxito"
+          }
+  - name: 404 - Eliminar Nota Credito
+    request:
+      url: "{{url_api}}/v1/credit-notes/reference/:reference_code"
+      method: DELETE
+      headers:
+        - name: Accept
+          value: application/json
+      params:
+        - name: reference_code
+          value: "644"
+          type: path
+    response:
+      statusText: "404"
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "Not Found",
+              "message": "No se encontró el documento con código de referencia 644"
+          }
+  - name: 409 - Eliminar Nota Credito
+    request:
+      url: "{{url_api}}/v1/credit-notes/reference/:reference_code"
+      method: DELETE
+      headers:
+        - name: Accept
+          value: application/json
+      params:
+        - name: reference_code
+          value: "5"
+          type: path
+    response:
+      statusText: "409"
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "Conflict",
+              "message": "Documento con código de referencia 5 se encuentra validado"
+          }
+
+docs: |-
+  Elimina una nota crédito usando el código de referencia con el cual se creó.
+
+  Las notas crédito se pueden eliminar siempre y cuando no se encuentren validadas por la DIAN.
+
+  Se suele eliminar una nota crédito cuando contiene errores de validación notificados por la DIAN para crearla nuevamente corregida.

@@ -18,6 +18,7 @@ import {
 import slugify from 'slugify';
 import { S3Service } from '@common/services/s3.service';
 import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class CategoriesService {
@@ -25,14 +26,14 @@ export class CategoriesService {
     private prisma: StorePrismaService,
     private accessValidation: AccessValidationService,
     private s3Service: S3Service,
-  ) { }
+  ) {}
 
   async create(createCategoryDto: CreateCategoryDto, user: any) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
 
     if (!store_id) {
-      throw new ForbiddenException('Store context required for this operation');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
     const slug = slugify(createCategoryDto.name, { lower: true, strict: true });
@@ -100,10 +101,12 @@ export class CategoriesService {
       this.prisma.categories.count({ where }),
     ]);
 
-    const signedCategories = await Promise.all(categories.map(async (category) => ({
-      ...category,
-      image_url: await this.s3Service.signUrl(category.image_url, true),
-    })));
+    const signedCategories = await Promise.all(
+      categories.map(async (category) => ({
+        ...category,
+        image_url: await this.s3Service.signUrl(category.image_url, true),
+      })),
+    );
 
     return {
       data: signedCategories,
@@ -119,7 +122,7 @@ export class CategoriesService {
       where,
       include: { stores: true },
     });
-    if (!category) throw new NotFoundException('Category not found');
+    if (!category) throw new VendixHttpException(ErrorCodes.CAT_FIND_001);
 
     return {
       ...category,

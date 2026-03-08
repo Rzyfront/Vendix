@@ -1,0 +1,74 @@
+info:
+  name: Rangos asociados al software
+  type: http
+  seq: 8
+
+http:
+  method: GET
+  url: "{{url_api}}/v1/numbering-ranges/dian"
+  headers:
+    - name: Accept
+      value: application/json
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+examples:
+  - name: 200 - Rangos asociados al software
+    request:
+      url: "{{url_api}}/v1/numbering-ranges/dian"
+      method: GET
+      headers:
+        - name: Accept
+          value: application/json
+    response:
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "OK",
+              "message": "Solicitud exitosa",
+              "data": [
+                  {
+                      "resolution_number": "18760000007",
+                      "prefix": "SEDS",
+                      "from": "984000000",
+                      "to": "985000000",
+                      "start_date": "2024-01-01",
+                      "end_date": "2024-12-31",
+                      "technical_key": ""
+                  }
+              ]
+          }
+
+docs: |-
+  **Descripción:** Aquí podrás consultar todos los rangos de numeración asociados al software. Solo se mostrarán los rangos autorizados desde la plataforma Muisca y vinculados al software **“Factus”** en la plataforma de la DIAN.  
+  Resoluciones que devolvera el endpoint:
+
+  - Factura electrónica.
+      
+  - Documento soporte.
+      
+  - Factura de talonario o de papel.
+      
+
+  **Uso:** Usa este endpoint para asegurarte se que el rango de numeracion exista y este asociado al software Factus en la plataforma de la DIAN antes de crearlo en el API de Factus. Puedes consultar y usar esos datos para consumir el endpoint de "Crear rango". Con esto te aseguras de que no haya errores al momento de crear un rango de numeración para Factura electronica, Documento soporte, Factura de talonario o de papel.
+
+  **Response:** La consulta devuelve un array con los rangos de numeración asociados al software.
+
+  | Valor | Descripción |
+  | --- | --- |
+  | prefix | Prefijo |
+  | from | Número de inicio del consecutivo |
+  | to | Número del final del concecutivo |
+  | resolution_number | Numero de resolución |
+  | start_date | Fecha de expedición |
+  | end_date | Fecha de vencimiento |
+  | technical_key | Clave técnica |

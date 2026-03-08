@@ -1,4 +1,5 @@
-import { Injectable, Inject, DOCUMENT } from '@angular/core';
+import { Injectable, Inject, DOCUMENT, PLATFORM_ID } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
 import { BehaviorSubject } from 'rxjs';
 import { BrandingConfig, ThemeConfig } from '../models/tenant-config.interface';
 import { AppConfig } from './app-config.service';
@@ -15,8 +16,14 @@ export class ThemeService {
   private injectedStyleElements = new Map<string, HTMLStyleElement>();
   private currentBranding: BrandingConfig | null = null;
   private activeUserTheme: string = 'default';
+  private isBrowser: boolean;
 
-  constructor(@Inject(DOCUMENT) private document: Document) { }
+  constructor(
+    @Inject(DOCUMENT) private document: Document,
+    @Inject(PLATFORM_ID) platformId: object,
+  ) {
+    this.isBrowser = isPlatformBrowser(platformId);
+  }
 
   /**
    * Aplica un ajuste preestablecido de tema (preset)
@@ -27,6 +34,8 @@ export class ThemeService {
    */
   async applyUserTheme(theme: 'default' | 'aura' | 'monocromo' | string): Promise<void> {
     this.activeUserTheme = theme;
+    // SSR: skip DOM-heavy theme operations (getComputedStyle, body.style, etc.)
+    if (!this.isBrowser) return;
     const root = this.document.documentElement;
     const body = this.document.body;
 

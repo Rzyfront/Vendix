@@ -115,25 +115,6 @@ import { Subject, takeUntil } from 'rxjs';
             <label
               class="block text-sm font-medium text-[var(--color-text-primary)]"
             >
-              Aplicación
-            </label>
-            <select
-              formControlName="app"
-              class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
-              [disabled]="isUpdating"
-            >
-              <option value="">Seleccionar aplicación</option>
-              <option value="ORG_ADMIN">ORG_ADMIN</option>
-              <option value="STORE_ADMIN">STORE_ADMIN</option>
-              <option value="STORE_ECOMMERCE">STORE_ECOMMERCE</option>
-              <option value="VENDIX_LANDING">VENDIX_LANDING</option>
-            </select>
-          </div>
-
-          <div class="space-y-2">
-            <label
-              class="block text-sm font-medium text-[var(--color-text-primary)]"
-            >
               Estado
             </label>
             <select
@@ -312,7 +293,6 @@ export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
     ],
     organization_id: [null, [Validators.required]],
     password: ['', [Validators.minLength(8)]],
-    app: [''],
     state: [UserState.ACTIVE],
   });
 
@@ -340,7 +320,6 @@ export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
       username: user.username,
       email: user.email,
       organization_id: user.organization_id,
-      app: user.app || '',
       state: user.state,
       password: '',
     });

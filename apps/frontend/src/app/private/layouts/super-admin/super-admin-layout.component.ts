@@ -214,6 +214,11 @@ export class SuperAdminLayoutComponent implements OnInit, OnDestroy {
           route: '/super-admin/system/settings',
         },
         {
+          label: 'AI Engine',
+          icon: 'circle',
+          route: '/super-admin/system/ai-engine',
+        },
+        {
           label: 'Plantillas',
           icon: 'circle',
           route: '/super-admin/system/templates',

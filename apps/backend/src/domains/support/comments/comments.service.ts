@@ -4,6 +4,7 @@ import { CreateCommentDto } from './dto/create-comment.dto';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class CommentsService {
@@ -16,7 +17,11 @@ export class CommentsService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  async create(ticketId: number, userId: number, createCommentDto: CreateCommentDto) {
+  async create(
+    ticketId: number,
+    userId: number,
+    createCommentDto: CreateCommentDto,
+  ) {
     try {
       // Get ticket to verify it exists and get organization
       const ticket = await this.prisma.support_tickets.findUnique({
@@ -31,7 +36,7 @@ export class CommentsService {
       });
 
       if (!ticket) {
-        throw new NotFoundException('Ticket not found');
+        throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
       }
 
       // Get user info
@@ -41,7 +46,7 @@ export class CommentsService {
       });
 
       if (!user) {
-        throw new NotFoundException('User not found');
+        throw new VendixHttpException(ErrorCodes.SUP_USER_001);
       }
 
       // Get organization for S3 path
@@ -51,12 +56,15 @@ export class CommentsService {
       });
 
       if (!organization) {
-        throw new NotFoundException('Organization not found');
+        throw new VendixHttpException(ErrorCodes.SUP_ORG_001);
       }
 
       // Handle attachments if any
       let attachmentKeys: string[] = [];
-      if (createCommentDto.attachments && createCommentDto.attachments.length > 0) {
+      if (
+        createCommentDto.attachments &&
+        createCommentDto.attachments.length > 0
+      ) {
         attachmentKeys = await this.handleCommentAttachments(
           ticketId,
           organization,
@@ -177,7 +185,9 @@ export class CommentsService {
         keys.push(uploadResult.key);
         this.logger.log(`Comment attachment uploaded: ${fileName}`);
       } catch (error) {
-        this.logger.error(`Error uploading comment attachment: ${error.message}`);
+        this.logger.error(
+          `Error uploading comment attachment: ${error.message}`,
+        );
         // Continue with other attachments
       }
     }

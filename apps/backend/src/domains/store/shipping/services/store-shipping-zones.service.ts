@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  ForbiddenException,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import {
@@ -11,6 +7,7 @@ import {
   CreateRateDto,
   UpdateRateDto,
 } from '../dto/store-shipping-zones.dto';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class StoreShippingZonesService {
@@ -55,7 +52,7 @@ export class StoreShippingZonesService {
     });
 
     if (!zone) {
-      throw new NotFoundException('Zona del sistema no encontrada');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     return base_client.shipping_rates.findMany({
@@ -105,7 +102,7 @@ export class StoreShippingZonesService {
     const store_id = context?.store_id;
 
     if (!store_id) {
-      throw new ForbiddenException('Store context required');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
     // Use base client to create with explicit store_id
@@ -141,11 +138,11 @@ export class StoreShippingZonesService {
     });
 
     if (!zone) {
-      throw new NotFoundException('Zona no encontrada');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     if (zone.is_system) {
-      throw new ForbiddenException('No se pueden editar zonas del sistema');
+      throw new VendixHttpException(ErrorCodes.SHIP_PERM_001);
     }
 
     return this.prisma.shipping_zones.update({
@@ -168,11 +165,11 @@ export class StoreShippingZonesService {
     });
 
     if (!zone) {
-      throw new NotFoundException('Zona no encontrada');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     if (zone.is_system) {
-      throw new ForbiddenException('No se pueden eliminar zonas del sistema');
+      throw new VendixHttpException(ErrorCodes.SHIP_PERM_001);
     }
 
     // Rates are deleted automatically via onDelete: Cascade
@@ -196,7 +193,7 @@ export class StoreShippingZonesService {
     });
 
     if (!zone) {
-      throw new NotFoundException('Zona de tienda no encontrada');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     return this.prisma.shipping_rates.findMany({
@@ -228,7 +225,7 @@ export class StoreShippingZonesService {
     });
 
     if (!zone) {
-      throw new NotFoundException('Zona de tienda no encontrada');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     // Verify shipping method exists
@@ -238,7 +235,7 @@ export class StoreShippingZonesService {
     });
 
     if (!method) {
-      throw new NotFoundException('Método de envío no encontrado');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     return this.prisma.shipping_rates.create({
@@ -279,11 +276,11 @@ export class StoreShippingZonesService {
     });
 
     if (!rate) {
-      throw new NotFoundException('Tarifa no encontrada');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     if (rate.shipping_zone?.is_system) {
-      throw new ForbiddenException('No se pueden editar tarifas del sistema');
+      throw new VendixHttpException(ErrorCodes.SHIP_PERM_001);
     }
 
     // Remove zone_id from update if present (can't change zone)
@@ -317,11 +314,11 @@ export class StoreShippingZonesService {
     });
 
     if (!rate) {
-      throw new NotFoundException('Tarifa no encontrada');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     if (rate.shipping_zone?.is_system) {
-      throw new ForbiddenException('No se pueden eliminar tarifas del sistema');
+      throw new VendixHttpException(ErrorCodes.SHIP_PERM_001);
     }
 
     return this.prisma.shipping_rates.delete({
@@ -340,7 +337,7 @@ export class StoreShippingZonesService {
     const store_id = context?.store_id;
 
     if (!store_id) {
-      throw new ForbiddenException('Store context required');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
     const base_client = this.prisma.withoutScope();
@@ -358,7 +355,7 @@ export class StoreShippingZonesService {
     });
 
     if (!system_zone) {
-      throw new NotFoundException('Zona del sistema no encontrada');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     // Create a copy with source_type='custom'
@@ -383,7 +380,9 @@ export class StoreShippingZonesService {
       });
 
       // Copy all rates
-      const rate_copies: Awaited<ReturnType<typeof tx.shipping_rates.create>>[] = [];
+      const rate_copies: Awaited<
+        ReturnType<typeof tx.shipping_rates.create>
+      >[] = [];
       for (const rate of system_zone.shipping_rates) {
         const rate_copy = await tx.shipping_rates.create({
           data: {
@@ -416,10 +415,7 @@ export class StoreShippingZonesService {
    * Duplicate a specific system rate to a store zone.
    * Useful for selectively adding rates from system zones.
    */
-  async duplicateSystemRate(
-    system_rate_id: number,
-    target_zone_id: number,
-  ) {
+  async duplicateSystemRate(system_rate_id: number, target_zone_id: number) {
     const base_client = this.prisma.withoutScope();
 
     // Verify the rate is from a system zone
@@ -432,7 +428,7 @@ export class StoreShippingZonesService {
     });
 
     if (!system_rate || !system_rate.shipping_zone?.is_system) {
-      throw new NotFoundException('Tarifa del sistema no encontrada');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     // Verify target zone belongs to this store
@@ -444,7 +440,7 @@ export class StoreShippingZonesService {
     });
 
     if (!target_zone) {
-      throw new NotFoundException('Zona destino no encontrada');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     // Create the rate copy
@@ -492,9 +488,7 @@ export class StoreShippingZonesService {
     });
 
     if (!zone) {
-      throw new NotFoundException(
-        'Zona no encontrada o no es una copia del sistema',
-      );
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     const base_client = this.prisma.withoutScope();
@@ -518,7 +512,7 @@ export class StoreShippingZonesService {
     const store_id = context?.store_id;
 
     if (!store_id) {
-      throw new ForbiddenException('Store context required');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
     // Verify the zone belongs to this store and was copied from system
@@ -532,9 +526,7 @@ export class StoreShippingZonesService {
     });
 
     if (!store_zone) {
-      throw new NotFoundException(
-        'Zona no encontrada o no es una copia del sistema',
-      );
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     const base_client = this.prisma.withoutScope();
@@ -551,7 +543,7 @@ export class StoreShippingZonesService {
     });
 
     if (!system_zone) {
-      throw new NotFoundException('Zona del sistema original ya no existe');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     // Sync in a transaction

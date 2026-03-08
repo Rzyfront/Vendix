@@ -11,12 +11,17 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
-import { AuditService, AuditAction, AuditResource } from '../../../common/audit/audit.service';
+import {
+  AuditService,
+  AuditAction,
+  AuditResource,
+} from '../../../common/audit/audit.service';
 import { StoreSettings } from './interfaces/store-settings.interface';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { AppSettingsDto } from './dto/settings-schemas.dto';
 import { validateSync } from 'class-validator';
 import { getDefaultStoreSettings } from './defaults/default-store-settings';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class SettingsService {
@@ -28,14 +33,14 @@ export class SettingsService {
     private s3Service: S3Service,
     private s3PathHelper: S3PathHelper,
     private auditService: AuditService,
-  ) { }
+  ) {}
 
   async getSettings(): Promise<StoreSettings> {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
 
     if (!store_id) {
-      throw new ForbiddenException('Store context required');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
     // Obtener datos de la tienda desde la tabla stores
@@ -48,7 +53,7 @@ export class SettingsService {
         store_type: true,
         timezone: true,
         organization_id: true,
-      }
+      },
     });
 
     const storeSettings = await this.prisma.store_settings.findUnique({
@@ -67,7 +72,9 @@ export class SettingsService {
     // Sign URLs on-demand before returning to frontend
     // Keys are stored in DB, but frontend needs signed URLs to access S3 objects
     const signedStoreLogoUrl = await this.s3Service.signUrl(store?.logo_url);
-    const signedBrandingLogoUrl = await this.s3Service.signUrl(branding.logo_url);
+    const signedBrandingLogoUrl = await this.s3Service.signUrl(
+      branding.logo_url,
+    );
     const signedFaviconUrl = await this.s3Service.signUrl(branding.favicon_url);
 
     if (!storeSettings || !storeSettings.settings) {
@@ -78,7 +85,8 @@ export class SettingsService {
           name: store?.name,
           logo_url: signedStoreLogoUrl,
           store_type: store?.store_type,
-          timezone: store?.timezone || getDefaultStoreSettings().general.timezone,
+          timezone:
+            store?.timezone || getDefaultStoreSettings().general.timezone,
         },
         app: {
           name: branding.name || store?.name || 'Vendix',
@@ -88,11 +96,12 @@ export class SettingsService {
           theme: 'default',
           logo_url: signedBrandingLogoUrl || signedStoreLogoUrl,
           favicon_url: signedFaviconUrl,
-        }
+        },
       };
     }
 
     // Merge existing settings with store data
+    // Use branding as the single source of truth for colors (same as onboarding)
     return {
       ...settings,
       general: {
@@ -103,14 +112,15 @@ export class SettingsService {
         timezone: store?.timezone || settings.general?.timezone,
       },
       app: {
+        // Use branding as the single source of truth for colors
         name: branding.name || store?.name || 'Vendix',
         primary_color: primaryColor,
         secondary_color: secondaryColor,
         accent_color: accentColor,
-        theme: 'default',
+        theme: settings.app?.theme || 'default',
         logo_url: signedBrandingLogoUrl || signedStoreLogoUrl,
         favicon_url: signedFaviconUrl,
-      }
+      },
     };
   }
 
@@ -120,12 +130,15 @@ export class SettingsService {
     const user_id = context?.user_id;
 
     if (!store_id) {
-      throw new ForbiddenException('Store context required');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
     // Read raw DB settings (without signed URLs) to avoid leaking temporary URLs into stored JSON
-    const storeSettings = await this.prisma.store_settings.findUnique({ where: { store_id } });
-    const currentSettings = (storeSettings?.settings || getDefaultStoreSettings()) as StoreSettings;
+    const storeSettings = await this.prisma.store_settings.findUnique({
+      where: { store_id },
+    });
+    let currentSettings = (storeSettings?.settings ||
+      getDefaultStoreSettings()) as StoreSettings;
 
     // Guardar valores antiguos para auditoría
     const oldValues = { ...currentSettings };
@@ -141,7 +154,8 @@ export class SettingsService {
         dto.app.logo_url = extractS3KeyFromUrl(dto.app.logo_url) ?? undefined;
       }
       if (dto.app.favicon_url !== undefined) {
-        dto.app.favicon_url = extractS3KeyFromUrl(dto.app.favicon_url) ?? undefined;
+        dto.app.favicon_url =
+          extractS3KeyFromUrl(dto.app.favicon_url) ?? undefined;
       }
 
       // Sincronizar logo_url simultáneamente en stores table
@@ -162,20 +176,23 @@ export class SettingsService {
         // Sincronizar con organizations table
         const store = await this.prisma.stores.findUnique({
           where: { id: store_id },
-          select: { organization_id: true }
+          select: { organization_id: true },
         });
 
         if (store?.organization_id) {
           await this.organizationPrisma.organizations.update({
             where: { id: store.organization_id },
-            data: { name: dto.app.name }
+            data: { name: dto.app.name },
           });
         }
       }
 
       // Update branding in store_settings.settings.branding (source of truth)
       await this.updateStoreBranding(store_id, dto.app);
-      delete (dto as any).app; // Remove from dto to not save again in store_settings
+
+      // Delete app from dto - branding is the single source of truth
+      // App will be built from branding in getSettings()
+      delete (dto as any).app;
     }
 
     // Merge solo las secciones enviadas
@@ -220,7 +237,7 @@ export class SettingsService {
           // Obtener la tienda para saber si es la principal y su organización
           const store = await this.prisma.stores.findUnique({
             where: { id: store_id },
-            select: { organization_id: true, main_store_users: { take: 1 } }
+            select: { organization_id: true, main_store_users: { take: 1 } },
           });
 
           await this.prisma.stores.update({
@@ -235,8 +252,9 @@ export class SettingsService {
 
           // Trigger favicon generation asynchronously if logo_url was updated
           if (logo_url !== undefined && logo_url !== null) {
-            this.generateFaviconForStore(store_id, logo_url)
-              .catch(error => this.logger.warn(`Favicon generation failed: ${error.message}`));
+            this.generateFaviconForStore(store_id, logo_url).catch((error) =>
+              this.logger.warn(`Favicon generation failed: ${error.message}`),
+            );
           }
         } catch (error) {
           console.error('Error updating stores table:', error);
@@ -246,14 +264,13 @@ export class SettingsService {
 
     // Safety net: sanitize any signed URLs that may have leaked into the settings object
     if (updatedSettings.general?.logo_url) {
-      updatedSettings.general.logo_url = extractS3KeyFromUrl(updatedSettings.general.logo_url) ?? undefined;
+      updatedSettings.general.logo_url =
+        extractS3KeyFromUrl(updatedSettings.general.logo_url) ?? undefined;
     }
-    if (updatedSettings.app?.logo_url) {
-      updatedSettings.app.logo_url = extractS3KeyFromUrl(updatedSettings.app.logo_url) ?? undefined;
-    }
-    if (updatedSettings.app?.favicon_url) {
-      updatedSettings.app.favicon_url = extractS3KeyFromUrl(updatedSettings.app.favicon_url) ?? undefined;
-    }
+
+    // Remove app from settings - branding is the single source of truth
+    // App will be built from branding in getSettings()
+    delete (updatedSettings as any).app;
 
     const result = await this.prisma.store_settings.upsert({
       where: { store_id },
@@ -289,11 +306,15 @@ export class SettingsService {
         {
           sections_updated: Object.keys(dto),
           store_id,
-        }
+        },
       );
-      this.logger.log(`Audit log created for settings update by user ${user_id}`);
+      this.logger.log(
+        `Audit log created for settings update by user ${user_id}`,
+      );
     } catch (error) {
-      this.logger.error(`Failed to create audit log for settings update: ${error.message}`);
+      this.logger.error(
+        `Failed to create audit log for settings update: ${error.message}`,
+      );
     }
 
     return result.settings as StoreSettings;
@@ -304,7 +325,7 @@ export class SettingsService {
     const store_id = context?.store_id;
 
     if (!store_id) {
-      throw new ForbiddenException('Store context required');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
     await this.prisma.store_settings.delete({
@@ -339,7 +360,7 @@ export class SettingsService {
     const store_id = context?.store_id;
 
     if (!store_id) {
-      throw new ForbiddenException('Store context required');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
     const template = await this.prisma.default_templates.findFirst({
@@ -351,7 +372,7 @@ export class SettingsService {
     });
 
     if (!template) {
-      throw new NotFoundException(`Template '${template_name}' not found`);
+      throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
     }
 
     await this.prisma.store_settings.upsert({
@@ -376,7 +397,10 @@ export class SettingsService {
    * @param storeId - Store ID
    * @param logoUrl - Logo URL (S3 key or HTTP URL)
    */
-  private async generateFaviconForStore(storeId: number, logoUrl: string): Promise<void> {
+  private async generateFaviconForStore(
+    storeId: number,
+    logoUrl: string,
+  ): Promise<void> {
     try {
       // 1. Get store with organization and slugs for path S3
       const store = await this.prisma.stores.findUnique({
@@ -405,14 +429,18 @@ export class SettingsService {
       // 2. Download logo from S3 (if it's a key, not an external URL)
       let logoBuffer: Buffer;
       if (store.logo_url.startsWith('http')) {
-        this.logger.warn(`Store ${storeId} has external logo URL, skipping favicon generation`);
+        this.logger.warn(
+          `Store ${storeId} has external logo URL, skipping favicon generation`,
+        );
         return;
       }
 
       try {
         logoBuffer = await this.s3Service.downloadImage(store.logo_url);
       } catch (error) {
-        this.logger.error(`Failed to download logo for store ${storeId}: ${error.message}`);
+        this.logger.error(
+          `Failed to download logo for store ${storeId}: ${error.message}`,
+        );
         return;
       }
 
@@ -432,14 +460,17 @@ export class SettingsService {
         return;
       }
 
-      this.logger.log(`Favicons generated for store ${storeId}: ${result.sizes.join(', ')}px`);
+      this.logger.log(
+        `Favicons generated for store ${storeId}: ${result.sizes.join(', ')}px`,
+      );
 
       // 4. Update store_settings.settings.branding.favicon_url (source of truth)
       const storeSettings = await this.prisma.store_settings.findUnique({
         where: { store_id: storeId },
       });
 
-      const currentSettings = (storeSettings?.settings || getDefaultStoreSettings()) as StoreSettings;
+      const currentSettings = (storeSettings?.settings ||
+        getDefaultStoreSettings()) as StoreSettings;
       const updatedSettings = {
         ...currentSettings,
         branding: {
@@ -462,7 +493,9 @@ export class SettingsService {
 
       this.logger.log(`Favicon updated in store_settings for store ${storeId}`);
     } catch (error) {
-      this.logger.error(`Error in generateFaviconForStore for store ${storeId}: ${error.message}`);
+      this.logger.error(
+        `Error in generateFaviconForStore for store ${storeId}: ${error.message}`,
+      );
       throw error;
     }
   }
@@ -473,24 +506,39 @@ export class SettingsService {
    * @param storeId - Store ID
    * @param appSettings - App settings containing branding configuration
    */
-  private async updateStoreBranding(storeId: number, appSettings: AppSettingsDto): Promise<void> {
+  private async updateStoreBranding(
+    storeId: number,
+    appSettings: AppSettingsDto,
+  ): Promise<void> {
     // Get current store_settings
     const storeSettings = await this.prisma.store_settings.findUnique({
       where: { store_id: storeId },
     });
 
-    const currentSettings = (storeSettings?.settings || getDefaultStoreSettings()) as StoreSettings;
-    const existingBranding = currentSettings.branding || getDefaultStoreSettings().branding;
+    const currentSettings = (storeSettings?.settings ||
+      getDefaultStoreSettings()) as StoreSettings;
+    const existingBranding =
+      currentSettings.branding || getDefaultStoreSettings().branding;
 
     // Build updated branding - only update fields that are provided
     const updatedBranding = {
       ...existingBranding,
       ...(appSettings.name !== undefined && { name: appSettings.name }),
-      ...(appSettings.primary_color !== undefined && { primary_color: appSettings.primary_color }),
-      ...(appSettings.secondary_color !== undefined && { secondary_color: appSettings.secondary_color }),
-      ...(appSettings.accent_color !== undefined && { accent_color: appSettings.accent_color }),
-      ...(appSettings.logo_url !== undefined && { logo_url: appSettings.logo_url }),
-      ...(appSettings.favicon_url !== undefined && { favicon_url: appSettings.favicon_url }),
+      ...(appSettings.primary_color !== undefined && {
+        primary_color: appSettings.primary_color,
+      }),
+      ...(appSettings.secondary_color !== undefined && {
+        secondary_color: appSettings.secondary_color,
+      }),
+      ...(appSettings.accent_color !== undefined && {
+        accent_color: appSettings.accent_color,
+      }),
+      ...(appSettings.logo_url !== undefined && {
+        logo_url: appSettings.logo_url,
+      }),
+      ...(appSettings.favicon_url !== undefined && {
+        favicon_url: appSettings.favicon_url,
+      }),
     };
 
     const updatedSettings = {
@@ -518,15 +566,17 @@ export class SettingsService {
       try {
         const store = await this.prisma.stores.findUnique({
           where: { id: storeId },
-          select: { organization_id: true }
+          select: { organization_id: true },
         });
 
         if (store?.organization_id) {
           await this.organizationPrisma.organizations.update({
             where: { id: store.organization_id },
-            data: { name: appSettings.name }
+            data: { name: appSettings.name },
           });
-          this.logger.log(`Organization ${store.organization_id} name updated to ${appSettings.name}`);
+          this.logger.log(
+            `Organization ${store.organization_id} name updated to ${appSettings.name}`,
+          );
         }
       } catch (error) {
         this.logger.warn(`Failed to sync organization name: ${error.message}`);
@@ -563,7 +613,7 @@ export class SettingsService {
     const store_id = context?.store_id;
 
     if (!store_id) {
-      throw new ForbiddenException('Store context required');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
     return this.prisma.store_settings.create({
@@ -582,7 +632,7 @@ export class SettingsService {
     const setting = await this.prisma.store_settings.findFirst({
       where: { id },
     });
-    if (!setting) throw new NotFoundException('Setting not found');
+    if (!setting) throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
     return setting;
   }
 

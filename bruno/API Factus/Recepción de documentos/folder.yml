@@ -1,0 +1,62 @@
+info:
+  name: Recepción de documentos
+  type: folder
+  seq: 11
+
+request:
+  auth: inherit
+
+docs:
+  content: |-
+    # Módulo de Gestión de Documentos Electrónicos
+
+    En este módulo podrás cargar tus facturas, notas crédito y débito que te generan a ti como persona o empresa. Esto te permitirá llevar un control de tus gastos y emitir los siguientes eventos en caso de que las facturas generadas sean a crédito:
+
+    ---
+
+    ## **1\. Acuse de recibo de Factura Electrónica de Venta**
+
+    Este evento se emite para confirmar que has recibido la factura electrónica, ya sea en físico o a través de un medio electrónico.
+
+    ---
+
+    ## **2\. Recibo del bien o prestación del servicio**
+
+    Este evento se emite cuando has recibido los bienes (productos) o servicios que adquiriste y que están especificados en la factura.
+
+    **Nota:** Para emitir este evento, es obligatorio haber generado previamente el **Acuse de recibo de Factura Electrónica de Venta**.
+
+    ---
+
+    ## **3\. Reclamo de la Factura Electrónica de Venta**
+
+    Este evento se emite en caso de que la factura presente alguna inconsistencia, como la entrega parcial o total de los productos, o si el servicio no fue prestado.
+
+    **Nota:** Para emitir este evento, es obligatorio haber generado previamente el **Recibo del bien o prestación del servicio**.
+
+    ---
+
+    ## **4\. Aceptación expresa**
+
+    Este evento se emite para indicar que estás de acuerdo con la factura recibida, y que los productos han sido entregados o el servicio ha sido prestado satisfactoriamente.
+
+    **Importante:**
+
+    - Una vez que emitas este evento, ya no será posible generar otros eventos, notas crédito ni modificar el estado de la factura como Título Valor en el sistema RADIAN.
+        
+
+    ---
+
+    ## **5\. Aceptación tácita**
+
+    Este evento no puede ser emitido por ti. Será generado automáticamente por la persona o empresa (facturador/emisor) de la factura si, pasados tres (3) días hábiles desde la emisión del evento **Recibo del bien o prestación del servicio**, no has emitido un **Reclamo de la Factura Electrónica de Venta** o una **Aceptación expresa**.
+
+    **Importante:**
+
+    - Una vez que se genere este evento, ya no será posible emitir otros eventos, notas crédito ni modificar el estado de la factura como Título Valor en el sistema RADIAN.
+        
+
+    ---
+
+    Este módulo te permitirá mantener un control detallado sobre tus facturas y cumplir con los requisitos legales en la gestión de tus documentos electrónicos.
+  type: text/markdown

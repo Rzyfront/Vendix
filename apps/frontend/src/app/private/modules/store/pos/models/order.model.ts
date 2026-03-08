@@ -31,6 +31,8 @@ export interface PosOrderItem {
   cost?: number;
   notes?: string;
   discounts?: PosOrderItemDiscount[];
+  weight?: number;
+  weight_unit?: string;
 }
 
 export interface PosOrderItemDiscount {
@@ -112,6 +114,8 @@ export interface ProcessPaymentRequest {
     unitPrice: number;
     totalPrice: number;
     cost?: number;
+    weight?: number;
+    weight_unit?: string;
   }>;
   subtotal?: number;
   taxAmount?: number;

@@ -1,12 +1,14 @@
 import { Controller, Get, Patch, Post, Body, UseGuards, UsePipes } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { SettingsService } from './settings.service';
+import { ScheduleValidationService } from './schedule-validation.service';
 import { ResponseService } from '@common/responses/response.service';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { IsString } from 'class-validator';
 import { ValidationPipe } from '@nestjs/common';
+import { RequestContextService } from '@common/context/request-context.service';
 
 export class ApplyTemplateDto {
   @IsString()
@@ -19,6 +21,7 @@ export class ApplyTemplateDto {
 export class SettingsController {
   constructor(
     private readonly settingsService: SettingsService,
+    private readonly scheduleValidationService: ScheduleValidationService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -32,6 +35,34 @@ export class SettingsController {
   async getSettings() {
     const settings = await this.settingsService.getSettings();
     return this.responseService.success(settings);
+  }
+
+  @Get('schedule-status')
+  @Permissions('store:pos:access')
+  @ApiOperation({ summary: 'Get POS schedule validation status' })
+  @ApiResponse({
+    status: 200,
+    description: 'Schedule status retrieved successfully',
+  })
+  async getScheduleStatus() {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+
+    if (!storeId) {
+      return this.responseService.error('Store context required');
+    }
+
+    // Verificar si el usuario es admin
+    const isAdmin = await this.scheduleValidationService.canBypassScheduleCheck();
+    
+    // Obtener el estado de validación
+    const validation = await this.scheduleValidationService.validateBusinessHours(storeId);
+
+    return this.responseService.success({
+      ...validation,
+      isAdmin,
+      canBypass: isAdmin,
+    });
   }
 
   @Patch()

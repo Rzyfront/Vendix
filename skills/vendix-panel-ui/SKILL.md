@@ -5,7 +5,7 @@ description: >
   Trigger: When adding new modules to the sidebar, configuring panel_ui visibility, or understanding how menu filtering works.
 license: Apache-2.0
 metadata:
-  author: gentleman-programming
+  author: rzyfront
   version: "1.0"
   scope: [root]
   auto_invoke:
@@ -196,11 +196,13 @@ There are **3 backend places** where panel_ui defaults are defined. All three mu
 ## Backend → Frontend Flow
 
 ### On User Creation
+
 1. `AuthService` or `UsersService` calls `DefaultPanelUIService.generatePanelUI(app_type)`.
 2. Result stored in `user_settings.config` (JSON column) + `user_settings.app_type` (direct column).
 3. panel_ui is generated **once** at creation and persisted — not regenerated on each login.
 
 ### On Login
+
 1. Backend reads `user_settings` from DB (does NOT regenerate).
 2. Login response includes:
    - `user_settings: { id, user_id, app_type, config: { panel_ui, preferences } }`
@@ -208,6 +210,7 @@ There are **3 backend places** where panel_ui defaults are defined. All three mu
 3. Frontend auth effects store both in NgRx `auth` state.
 
 ### On Environment Switch
+
 1. `EnvironmentSwitchService` only updates `user_settings.app_type` column.
 2. `config.panel_ui` is **NOT regenerated** — the full panel_ui for all app types is always stored.
 3. Frontend picks the correct sub-object via `selectCurrentAppPanelUi` using the new `app_type`.
@@ -228,6 +231,7 @@ selectUserSettings
 ```
 
 **AuthFacade** exposes:
+
 - `getVisibleModules$()` — Observable of `string[]` (keys where value is `true`)
 - `isModuleVisible(moduleKey)` — Synchronous boolean check
 
@@ -277,7 +281,9 @@ private moduleKeyMap: Record<string, string | string[]> = {
 
 ```typescript
 // In layout component:
-this.filteredMenuItems$ = this.menuFilterService.filterMenuItems(this.allMenuItems);
+this.filteredMenuItems$ = this.menuFilterService.filterMenuItems(
+  this.allMenuItems,
+);
 // Template: <app-sidebar [menuItems]="filteredMenuItems$ | async">
 ```
 
@@ -306,34 +312,41 @@ this.filteredMenuItems$ = this.menuFilterService.filterMenuItems(this.allMenuIte
 ### Backend (3 files)
 
 **1.** `apps/backend/src/common/services/default-panel-ui.service.ts`
-   - Add `new_module: true` in `PANEL_UI_FALLBACK` under the target app_type (e.g., `STORE_ADMIN`).
+
+- Add `new_module: true` in `PANEL_UI_FALLBACK` under the target app_type (e.g., `STORE_ADMIN`).
 
 **2.** `apps/backend/prisma/seeds/default-templates.seed.ts`
-   - Add `new_module: true` in `template_data.panel_ui` under the same app_type.
+
+- Add `new_module: true` in `template_data.panel_ui` under the same app_type.
 
 **3.** `apps/backend/src/domains/store/settings/defaults/default-store-settings.ts`
-   - Add `new_module: true` if the module is for `STORE_ADMIN` or `STORE_ECOMMERCE`.
-   - Skip this file if the module is only for `ORG_ADMIN`.
+
+- Add `new_module: true` if the module is for `STORE_ADMIN` or `STORE_ECOMMERCE`.
+- Skip this file if the module is only for `ORG_ADMIN`.
 
 ### Frontend (5 files)
 
 **4.** `apps/frontend/src/app/core/services/menu-filter.service.ts`
-   - Add `'Label en Español': 'new_module'` in `moduleKeyMap`.
+
+- Add `'Label en Español': 'new_module'` in `moduleKeyMap`.
 
 **5.** `apps/frontend/src/app/shared/components/settings-modal/settings-modal.component.ts`
-   - Add the new module in `APP_MODULES` constant so it appears as a **toggle** in the user-facing settings modal.
-   - For standalone modules: add a new entry with `key`, `label`, `description`.
-   - For submodules: add as a child in the parent's `children[]` array.
-   - **Critical:** Without this, existing users cannot enable/disable the module from their settings.
+
+- Add the new module in `APP_MODULES` constant so it appears as a **toggle** in the user-facing settings modal.
+- For standalone modules: add a new entry with `key`, `label`, `description`.
+- For submodules: add as a child in the parent's `children[]` array.
+- **Critical:** Without this, existing users cannot enable/disable the module from their settings.
 
 **6.** `apps/frontend/src/app/private/modules/organization/users/components/user-config-modal.component.ts`
-   - Add `new_module: true` (or `false`) in `defaultPanelUi` under the target app_type.
-   - This controls the **default state** when an admin creates/configures a user from the organization panel.
+
+- Add `new_module: true` (or `false`) in `defaultPanelUi` under the target app_type.
+- This controls the **default state** when an admin creates/configures a user from the organization panel.
 
 **7.** Layout component (choose one):
-   - `store-admin-layout.component.ts` — for STORE_ADMIN modules
-   - `organization-admin-layout.component.ts` — for ORG_ADMIN modules
-   - Add a new `MenuItem` in `allMenuItems` with `label`, `icon`, `routerLink`.
+
+- `store-admin-layout.component.ts` — for STORE_ADMIN modules
+- `organization-admin-layout.component.ts` — for ORG_ADMIN modules
+- Add a new `MenuItem` in `allMenuItems` with `label`, `icon`, `routerLink`.
 
 **8.** Configure the lazy-loaded route in the corresponding routing file.
 
@@ -353,6 +366,7 @@ Submodules are children of an existing parent module.
 ### Key Convention
 
 Use `parent_child` for the key:
+
 - `orders_sales`, `orders_purchase_orders`
 - `inventory_pop`, `inventory_adjustments`
 - `settings_general`, `settings_payments`
@@ -364,12 +378,14 @@ Same as "Add a New Module" but add the `parent_child: true` key alongside the ex
 ### Frontend (5 files)
 
 **1.** `menu-filter.service.ts` — Add both parent label and child label mappings:
+
 ```typescript
 'Parent Label': 'parent',           // if not already present
 'New Child Label': 'parent_child',
 ```
 
 **2.** `settings-modal.component.ts` — Add the submodule in the parent's `children[]` inside `APP_MODULES`:
+
 ```typescript
 {
   key: 'parent',
@@ -386,6 +402,7 @@ Same as "Add a New Module" but add the `parent_child: true` key alongside the ex
 **3.** `user-config-modal.component.ts` — Add `parent_child: true` in `defaultPanelUi` under the target app_type.
 
 **4.** Layout component — Add as `children[]` of the parent `MenuItem`:
+
 ```typescript
 {
   label: 'Parent',
@@ -403,23 +420,23 @@ Same as "Add a New Module" but add the `parent_child: true` key alongside the ex
 
 ## Key Files Reference
 
-| Purpose | File Path |
-|---------|-----------|
-| Fallback hardcoded defaults | `apps/backend/src/common/services/default-panel-ui.service.ts` |
-| Seed defaults (DB) | `apps/backend/prisma/seeds/default-templates.seed.ts` |
-| Store-level defaults | `apps/backend/src/domains/store/settings/defaults/default-store-settings.ts` |
-| Auth service (login response) | `apps/backend/src/domains/auth/auth.service.ts` |
-| Environment switch | `apps/backend/src/domains/auth/environment-switch.service.ts` |
-| User config DTO | `apps/backend/src/domains/organization/users/dto/user-config.dto.ts` |
-| Users service (update config) | `apps/backend/src/domains/organization/users/users.service.ts` |
-| Auth selectors (NgRx) | `apps/frontend/src/app/core/store/auth/auth.selectors.ts` |
-| Auth facade | `apps/frontend/src/app/core/store/auth/auth.facade.ts` |
-| MenuFilterService | `apps/frontend/src/app/core/services/menu-filter.service.ts` |
-| Settings modal (user toggles) | `apps/frontend/src/app/shared/components/settings-modal/settings-modal.component.ts` |
-| User config modal (admin) | `apps/frontend/src/app/private/modules/organization/users/components/user-config-modal.component.ts` |
-| MenuItem interface | `apps/frontend/src/app/shared/components/sidebar/sidebar.component.ts` |
-| Store admin layout | `apps/frontend/src/app/private/layouts/store-admin/store-admin-layout.component.ts` |
-| Org admin layout | `apps/frontend/src/app/private/layouts/organization-admin/organization-admin-layout.component.ts` |
+| Purpose                       | File Path                                                                                            |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Fallback hardcoded defaults   | `apps/backend/src/common/services/default-panel-ui.service.ts`                                       |
+| Seed defaults (DB)            | `apps/backend/prisma/seeds/default-templates.seed.ts`                                                |
+| Store-level defaults          | `apps/backend/src/domains/store/settings/defaults/default-store-settings.ts`                         |
+| Auth service (login response) | `apps/backend/src/domains/auth/auth.service.ts`                                                      |
+| Environment switch            | `apps/backend/src/domains/auth/environment-switch.service.ts`                                        |
+| User config DTO               | `apps/backend/src/domains/organization/users/dto/user-config.dto.ts`                                 |
+| Users service (update config) | `apps/backend/src/domains/organization/users/users.service.ts`                                       |
+| Auth selectors (NgRx)         | `apps/frontend/src/app/core/store/auth/auth.selectors.ts`                                            |
+| Auth facade                   | `apps/frontend/src/app/core/store/auth/auth.facade.ts`                                               |
+| MenuFilterService             | `apps/frontend/src/app/core/services/menu-filter.service.ts`                                         |
+| Settings modal (user toggles) | `apps/frontend/src/app/shared/components/settings-modal/settings-modal.component.ts`                 |
+| User config modal (admin)     | `apps/frontend/src/app/private/modules/organization/users/components/user-config-modal.component.ts` |
+| MenuItem interface            | `apps/frontend/src/app/shared/components/sidebar/sidebar.component.ts`                               |
+| Store admin layout            | `apps/frontend/src/app/private/layouts/store-admin/store-admin-layout.component.ts`                  |
+| Org admin layout              | `apps/frontend/src/app/private/layouts/organization-admin/organization-admin-layout.component.ts`    |
 
 ---
 

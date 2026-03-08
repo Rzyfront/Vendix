@@ -1,10 +1,13 @@
 import { Injectable, inject, OnDestroy } from '@angular/core';
 import { Router, Routes } from '@angular/router';
 import { Actions, ofType } from '@ngrx/effects';
+import { Store } from '@ngrx/store';
 import { takeUntil, tap } from 'rxjs/operators';
 import { ReplaySubject, Subject } from 'rxjs';
 import { AppConfig } from './app-config.service';
 import * as ConfigActions from '../store/config/config.actions';
+import { AppType } from '../models/environment.enum';
+import { vendixLandingPublicRoutes } from '../../routes/public/vendix_landing.public.routes';
 import { LandingOnlyGuard } from '../guards/landing-only.guard';
 
 @Injectable({
@@ -13,6 +16,7 @@ import { LandingOnlyGuard } from '../guards/landing-only.guard';
 export class RouteManagerService implements OnDestroy {
   private router = inject(Router);
   private actions$ = inject(Actions);
+  private store = inject(Store);
   private destroy$ = new Subject<void>();
 
   private routesConfigured = new ReplaySubject<boolean>(1);
@@ -44,15 +48,31 @@ export class RouteManagerService implements OnDestroy {
       )
       .subscribe();
 
-    // Listen for app initialization FAILURE
+    // Listen for app initialization FAILURE → recover with Vendix Landing fallback
     this.actions$
       .pipe(
         ofType(ConfigActions.initializeAppFailure),
         tap(({ error }) => {
-          console.error('[RouteManager] App initialization failed:', error);
-          // Usar rutas de fallback para no bloquear la app
-          this.router.resetConfig(this.getFallbackRoutes());
-          this.routesConfigured.next(true);
+          console.warn('[RouteManager] App initialization failed, recovering with Vendix Landing fallback:', error);
+          // Dispatch success with fallback config to clear the error state
+          // and allow the router-outlet to render instead of the error screen
+          this.store.dispatch(
+            ConfigActions.initializeAppSuccess({
+              config: {
+                environment: AppType.VENDIX_LANDING,
+                domainConfig: {
+                  hostname: window.location.hostname,
+                  domainType: 'PRIMARY',
+                  environment: AppType.VENDIX_LANDING,
+                  isVendixDomain: true,
+                  isMainVendixDomain: true,
+                } as any,
+                routes: vendixLandingPublicRoutes,
+                layouts: [],
+                branding: {} as any,
+              },
+            }),
+          );
         }),
         takeUntil(this.destroy$),
       )

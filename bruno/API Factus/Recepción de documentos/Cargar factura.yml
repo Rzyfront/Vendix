@@ -1,0 +1,216 @@
+info:
+  name: Cargar factura
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{url_api}}/v1/receptions/upload"
+  headers:
+    - name: Accept
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+          "track_id": ""
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+examples:
+  - name: 422 - Cargar factura
+    request:
+      url: "{{url_api}}/v1/receptions/upload"
+      method: POST
+      headers:
+        - name: Accept
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "track_id": "50dba570e71754d44d5ef86b808f400f3ba7e1009ac29d903dd5271fbcf87fd5282acaa610f2d4066052cd7a9e422f67"
+          }
+    response:
+      statusText: "422"
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "Validation error",
+              "message": "Error de validación",
+              "data": {
+                  "message": "Error de validación",
+                  "errors": {
+                      "track_id": [
+                          "La factura ya existe en la base de datos."
+                      ]
+                  }
+              }
+          }
+  - name: 422 - Cargar factura
+    request:
+      url: "{{url_api}}/v1/receptions/upload"
+      method: POST
+      headers:
+        - name: Accept
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "track_id": "50dba570e71754d44d5ef86b808f400f3ba7e1009ac29d903dd5271fbcf87fd5282acaa610f2d4066052cd7a9e422f"
+          }
+    response:
+      statusText: "422"
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "Validation error",
+              "message": "Error de validación",
+              "data": {
+                  "message": "Error de validación",
+                  "errors": {
+                      "track_id": [
+                          "No se encontro el documento xml en la DIAN. Por favor verifique el track id."
+                      ]
+                  }
+              }
+          }
+  - name: 422 - Cargar factura
+    request:
+      url: "{{url_api}}/v1/receptions/upload"
+      method: POST
+      headers:
+        - name: Accept
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              
+          }
+    response:
+      statusText: "422"
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "Validation error",
+              "message": "Error de validación",
+              "data": {
+                  "message": "Error de validación",
+                  "errors": {
+                      "track_id": [
+                          "El campo track_id es requerido."
+                      ]
+                  }
+              }
+          }
+  - name: 201 - Cargar factura
+    request:
+      url: "{{url_api}}/v1/receptions/upload"
+      method: POST
+      headers:
+        - name: Accept
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "track_id": "79760c1d956a143a1076c9d06808b0916f90eb3eec5d34697fd875a2f4be1c3c18ae583d902671161d443c5dfbd48a4d"
+          }
+    response:
+      statusText: "201"
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "Created",
+              "message": "Documento subido correctamente",
+              "data": {
+                  "id": "9d86ea7f-b561-407c-8407-477abd1b53f7",
+                  "issue_date": "2024-11-19",
+                  "issue_time": "09:49:18",
+                  "payment_due_date": "2024-11-30",
+                  "number": "SETP990000312",
+                  "cufe": "79760c1d956a143a1076c9d06808b0916f90eb3eec5d34697fd875a2f4be1c3c18ae583d902671161d443c5dfbd48a4d",
+                  "company_identification_type_code": "31",
+                  "company_nit": "901594759",
+                  "company_dv": "8",
+                  "company_name": "COSMOSLAB",
+                  "payment_form": {
+                      "code": "2",
+                      "name": "Pago a crédito"
+                  },
+                  "payment_method": {
+                      "code": "10",
+                      "name": "Efectivo"
+                  },
+                  "total": "20000.00",
+                  "has_claim": false,
+                  "is_negotiable_instrument": false,
+                  "events": [],
+                  "created_at": "2024-11-19T14:50:54.000000Z"
+              }
+          }
+
+docs: |-
+  Este endpoint se utiliza para cargar las facturas electrónicas que hayan sido generadas por una persona o empresa (emisor/facturador).
+
+  | ID | Descripción |
+  | --- | --- |
+  | **`track_id`** | CUFE de la factura electrónica |
+
+  ---
+
+  ## **Descripción de la response cuando el código de estado es 201**
+
+  | **ID** | **Descripción** |
+  | --- | --- |
+  | `ID` | ID del registro. |
+  | `issue_date` | Fecha en la que se emitió de la factura. |
+  | `Issute_time` | Hora en la que se emitió la factura. |
+  | `payment_due_date` | Fecha de vencimiento de la factura. |
+  | `number` | Número de la factura. |
+  | `cufe` | CUFE de la factura. |
+  | `company_identification_type_code` | Código de tipo de indentificación de la persona o empresa (emisor/facturador). |
+  | `company_nit` | NIT de la persona o empresa (emisor/facturador). |
+  | `dv` | Dígito de verificación de la person o empresa (emisor/facturador). |
+  | `company_name` | Nombre o razíón social de la persona o empresa (emisor/facturador). |
+  | `payment_form[code]` | Código de la forma de pago. |
+  | `payment_form[name]` | Nombre de la forma de pago. |
+  | `payment_method[code]` | Código de método de pago. |
+  | `payment_method[name]` | Nombre del método de pago. |
+  | `total` | Total de la factura. |
+  | `has_claim` | Booleano que me indica si la factura tiene el evento de reclamo. |
+  | `is_negotiable_instrument` | Booleano que me indica si la factura se encuentra como título valor. |
+  | `events` | array que contiene los eventos generados a la factura. |
+  | `events.\\*.[number]` | Número del evento. |
+  | `events.\\*.[cude]` | CUDE del evento. |
+  | `events.\\*.[code]` | Código del evento. |
+  | `events.\\*.[name]` | Nombre del evento. |
+  | `events.\\*.[effective_date]` | Fecha en la que se emitió el evento. |
+  | `events.\\*.[affective_time]` | Hora en la que se emitió el evento. |
+  | `events.\\*.[peson_identification]` | Número de identificación de la persona del evento. |
+  | `events.\\*.[person_names]` | Nombre de la persona del evento. |
+  | `created_at` | Fecha en la que se cargo el documento a la API de Factus. |

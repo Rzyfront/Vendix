@@ -95,7 +95,12 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
                 </p>
                 <div class="item-meta">
                   <span *ngIf="item.variant_sku || item.product.sku" class="item-sku">{{ item.variant_sku || item.product.sku }}</span>
-                  <span class="item-unit-price">{{ formatCurrency(item.finalPrice) }} c/u</span>
+                  <span *ngIf="item.is_weight_product && item.weight" class="item-weight-badge">
+                    {{ item.weight }} {{ item.weight_unit || 'kg' }}
+                  </span>
+                  <span class="item-unit-price">
+                    {{ formatCurrency(item.finalPrice) }}{{ item.is_weight_product ? '/' + (item.weight_unit || 'kg') : ' c/u' }}
+                  </span>
                 </div>
               </div>
 
@@ -110,14 +115,21 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
               <!-- Actions Row: Quantity + Total -->
               <div class="item-actions">
-                <app-quantity-control
-                  [value]="item.quantity"
-                  [min]="1"
-                  [max]="item.product.track_inventory !== false ? item.product.stock : 999"
-                  [editable]="true"
-                  [size]="'sm'"
-                  (valueChange)="onQuantityChange(item.id, $event)"
-                ></app-quantity-control>
+                <ng-container *ngIf="item.is_weight_product; else mobileUnitQty">
+                  <div class="weight-badge-mobile">
+                    <span class="weight-value">{{ item.weight }} {{ item.weight_unit || 'kg' }}</span>
+                  </div>
+                </ng-container>
+                <ng-template #mobileUnitQty>
+                  <app-quantity-control
+                    [value]="item.quantity"
+                    [min]="1"
+                    [max]="item.product.track_inventory !== false ? item.product.stock : 999"
+                    [editable]="true"
+                    [size]="'sm'"
+                    (valueChange)="onQuantityChange(item.id, $event)"
+                  ></app-quantity-control>
+                </ng-template>
                 <span class="item-total">{{ formatCurrency(item.totalPrice) }}</span>
               </div>
             </div>
@@ -402,6 +414,33 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       .item-unit-price {
         font-size: 12px;
         color: var(--color-text-secondary);
+      }
+
+      .item-weight-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 1px 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        background: rgba(59, 130, 246, 0.1);
+        color: rgb(29, 78, 216);
+      }
+
+      .weight-badge-mobile {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: 8px;
+        background: rgba(59, 130, 246, 0.08);
+        border: 1px solid rgba(59, 130, 246, 0.2);
+      }
+
+      .weight-value {
+        font-size: 13px;
+        font-weight: 700;
+        color: rgb(29, 78, 216);
       }
 
       .remove-btn {

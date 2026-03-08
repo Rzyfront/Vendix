@@ -3,7 +3,7 @@ name: vendix-frontend-icons
 description: Protocol for using and registering system icons (Lucide) in the Frontend. Trigger: When adding icons to components, buttons, menus, or using <app-icon>.
 license: Apache-2.0
 metadata:
-  author: vendix-bot
+  author: rzyfront
   version: "1.0"
   scope: [frontend]
   auto_invoke: "When adding icons to components, buttons, menus, or using <app-icon>"

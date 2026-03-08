@@ -1,0 +1,28 @@
+info:
+  name: Crear rango para notas credito
+  type: http
+  seq: 3
+
+http:
+  method: POST
+  url: "{{url_api}}/v1/numbering-ranges"
+  headers:
+    - name: Accept
+      value: application/json
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+          "document": "22", // 22 para crear un rango de notas crédito electrónica
+          "prefix": "NCCC", // Prefijo alfanumérico (máx. 4 caracteres)
+          "current": 1 // número del consecutivo (es el número de la siguiente nota crédito)
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

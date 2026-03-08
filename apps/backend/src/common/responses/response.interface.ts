@@ -15,6 +15,7 @@ export interface ErrorResponse {
   success: false;
   message: string;
   error: string | Record<string, any>;
+  error_code?: string;
   statusCode?: number;
   timestamp?: string;
 }

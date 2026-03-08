@@ -1,0 +1,63 @@
+info:
+  name: Factura con recargo (propina)
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{url_api}}/v1/bills/validate"
+  headers:
+    - name: Accept
+      value: application/json
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+          "numbering_range_id": 4,
+          "reference_code": "REF20251359",
+          "payment_form": "1",
+          "payment_method_code": "10",
+          "customer": {
+              "identification": "123456789",
+              "names": "Alan Turing",
+              "address": "calle 1 # 2-68",
+              "email": "alanturing@enigmasas.com",
+              "phone": "1234567890",
+              "legal_organization_id": "2",
+              "tribute_id": "21",
+              "identification_document_id": "3",
+              "municipality_id": "980"
+          },
+          "items": [
+              {
+                  "code_reference": "12345",
+                  "name": "Cena",
+                  "quantity": 10,
+                  "discount_rate": 0,
+                  "price": 119000,
+                  "tax_rate": "19.00",
+                  "unit_measure_id": 70,
+                  "standard_code_id": 1,
+                  "is_excluded": 0,
+                  "tribute_id": 1
+              }
+          ],
+          "allowance_charges": [ // propinas
+              {
+                  "concept_type": "03",
+                  "is_surcharge": true,
+                  "reason": "Propina sugerida",
+                  "base_amount": "1000000",
+                  "amount": "100000"
+              }
+          ]
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

@@ -7,6 +7,7 @@ import {
   ValidateNested,
   IsEnum,
   Min,
+  MaxLength,
   IsDateString,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
@@ -54,6 +55,16 @@ export class CreateOrderItemDto {
   @Transform(({ value }) => parseFloat(value))
   @IsNumber({ maxDecimalPlaces: 2 })
   tax_amount_item?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => parseFloat(value))
+  @IsNumber({ maxDecimalPlaces: 3 })
+  weight?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  weight_unit?: string;
 }
 
 export class CreateOrderDto {

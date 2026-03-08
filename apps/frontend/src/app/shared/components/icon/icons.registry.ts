@@ -97,6 +97,7 @@ import {
   GitBranch,
   History,
   Pause,
+  Play,
   Server,
   Unlock,
   UploadCloud,
@@ -165,6 +166,10 @@ import {
   Landmark,
   // Overflow menu icon
   MoreHorizontal,
+  // Weight/scale icon
+  Scale,
+  // AI Engine icon
+  Cpu,
 } from 'lucide-angular';
 
 /**
@@ -304,6 +309,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   link: Link,
   'log-out': LogOut,
   pause: Pause,
+  play: Play,
   server: Server,
   'shopping-cart': ShoppingCart,
   'trending-up': TrendingUp,
@@ -384,6 +390,12 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // Overflow menu icon
   'more-horizontal': MoreHorizontal,
+
+  // Weight/scale icon
+  scale: Scale,
+
+  // AI Engine icon
+  cpu: Cpu,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

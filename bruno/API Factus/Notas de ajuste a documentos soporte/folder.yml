@@ -1,0 +1,19 @@
+info:
+  name: Notas de ajuste a documentos soporte
+  type: folder
+  seq: 5
+
+request:
+  auth: inherit
+
+docs:
+  content: |-
+    **¿Qué es una Nota de Ajuste al Documento Soporte?**  
+    Es un documento electrónico que permite corregir o modificar la información de un Documento Soporte en Adquisiciones a No Obligados a Facturar Electrónicamente. Se utiliza para realizar ajustes relacionados con valores, conceptos, errores en la información o cualquier modificación necesaria sobre el documento original.
+
+    **¿Quién lo debe emitir?**  
+    El comprador del bien o servicio que previamente generó el Documento Soporte.
+
+    **¿Cuándo se usa?**  
+    Se genera cuando es necesario corregir errores en un Documento Soporte previamente emitido o ajustar información relevante para efectos tributarios, costos, deducciones o impuestos descontables.
+  type: text/markdown

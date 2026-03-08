@@ -5,7 +5,7 @@ description: >
   Trigger: When working with settings configuration, adding new settings sections, or understanding how settings flow works.
 license: Apache-2.0
 metadata:
-  author: gentleman-programming
+  author: rzyfront
   version: "1.0"
   scope: backend, frontend
   auto_invoke:
@@ -56,17 +56,18 @@ stores (1)
 
 ### Key Relationships
 
-| Table | Relationship | Description |
-|-------|--------------|-------------|
-| `store_settings` | 1-to-1 with `stores` | `store_id` UNIQUE constraint |
-| `organization_settings` | 1-to-1 with `organizations` | `organization_id` UNIQUE constraint |
-| `default_templates` | System-wide | Reusable templates, manually applied |
+| Table                   | Relationship                | Description                          |
+| ----------------------- | --------------------------- | ------------------------------------ |
+| `store_settings`        | 1-to-1 with `stores`        | `store_id` UNIQUE constraint         |
+| `organization_settings` | 1-to-1 with `organizations` | `organization_id` UNIQUE constraint  |
+| `default_templates`     | System-wide                 | Reusable templates, manually applied |
 
 ---
 
 ## Source of Truth Pattern
 
 ### Store Branding
+
 ```
 store_settings.settings.branding  ← SOURCE OF TRUTH
     │
@@ -76,6 +77,7 @@ store_settings.settings.branding  ← SOURCE OF TRUTH
 ```
 
 ### Organization Branding
+
 ```
 organization_settings.settings.branding  ← SOURCE OF TRUTH
     │
@@ -134,7 +136,7 @@ export interface MyNewSettings {
 // 2. Add to main StoreSettings interface
 export interface StoreSettings {
   // ... existing sections
-  my_new_section?: MyNewSettings;  // ← Optional for backwards compatibility
+  my_new_section?: MyNewSettings; // ← Optional for backwards compatibility
 }
 ```
 
@@ -150,7 +152,7 @@ export function getDefaultStoreSettings(): StoreSettings {
     // NEW SECTION
     my_new_section: {
       enabled: false,
-      option_a: 'default_value',
+      option_a: "default_value",
       option_b: 10,
     },
   };
@@ -162,7 +164,7 @@ export function getDefaultStoreSettings(): StoreSettings {
 **File:** `apps/backend/src/domains/store/settings/dto/settings-schemas.dto.ts`
 
 ```typescript
-import { IsBoolean, IsString, IsNumber, IsOptional } from 'class-validator';
+import { IsBoolean, IsString, IsNumber, IsOptional } from "class-validator";
 
 export class MyNewSettingsDto {
   @IsOptional()
@@ -184,7 +186,7 @@ export class MyNewSettingsDto {
 **File:** `apps/backend/src/domains/store/settings/dto/update-settings.dto.ts`
 
 ```typescript
-import { MyNewSettingsDto } from './settings-schemas.dto';
+import { MyNewSettingsDto } from "./settings-schemas.dto";
 
 export class UpdateSettingsDto {
   // ... existing sections
@@ -302,13 +304,13 @@ if (dto.app?.name !== undefined) {
 if (dto.app?.name !== undefined) {
   const store = await this.prisma.stores.findUnique({
     where: { id: store_id },
-    select: { organization_id: true }
+    select: { organization_id: true },
   });
 
   if (store?.organization_id) {
     await this.organizationPrisma.organizations.update({
       where: { id: store.organization_id },
-      data: { name: dto.app.name }
+      data: { name: dto.app.name },
     });
   }
 }
@@ -321,7 +323,7 @@ if (dto.app?.name !== undefined) {
 ### Service Pattern
 
 ```typescript
-@Injectable({ providedIn: 'root' })
+@Injectable({ providedIn: "root" })
 export class StoreSettingsService {
   private http = inject(HttpClient);
   private save$$ = new Subject<Partial<StoreSettings>>();
@@ -331,21 +333,21 @@ export class StoreSettingsService {
     return this.save$$.pipe(
       debounceTime(2500),
       distinctUntilChanged((a, b) => JSON.stringify(a) === JSON.stringify(b)),
-      switchMap(s => this.http.patch<StoreSettings>('/store/settings', s)),
+      switchMap((s) => this.http.patch<StoreSettings>("/store/settings", s)),
     );
   }
 
   // Immediate save (no debounce)
   saveSettingsNow(settings: Partial<StoreSettings>): Observable<StoreSettings> {
-    return this.http.patch<StoreSettings>('/store/settings', settings);
+    return this.http.patch<StoreSettings>("/store/settings", settings);
   }
 
   getSettings(): Observable<StoreSettings> {
-    return this.http.get<StoreSettings>('/store/settings');
+    return this.http.get<StoreSettings>("/store/settings");
   }
 
   resetToDefault(): Observable<StoreSettings> {
-    return this.http.post<StoreSettings>('/store/settings/reset', {});
+    return this.http.post<StoreSettings>("/store/settings/reset", {});
   }
 }
 ```
@@ -377,22 +379,22 @@ onSectionChange(section: keyof StoreSettings, newSettings: any) {
 
 ### Store Settings
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/store/settings` | Get current store settings |
-| PATCH | `/store/settings` | Update settings (partial) |
-| POST | `/store/settings/reset` | Reset to defaults |
-| GET | `/store/settings/templates` | Get system templates |
-| POST | `/store/settings/apply-template` | Apply a template |
+| Method | Endpoint                         | Description                |
+| ------ | -------------------------------- | -------------------------- |
+| GET    | `/store/settings`                | Get current store settings |
+| PATCH  | `/store/settings`                | Update settings (partial)  |
+| POST   | `/store/settings/reset`          | Reset to defaults          |
+| GET    | `/store/settings/templates`      | Get system templates       |
+| POST   | `/store/settings/apply-template` | Apply a template           |
 
 ### Organization Settings
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/organization/settings` | Get organization settings |
-| PUT | `/organization/settings` | Update settings (full) |
-| GET | `/organization/settings/branding` | Get branding only |
-| PUT | `/organization/settings/branding` | Update branding only |
+| Method | Endpoint                          | Description               |
+| ------ | --------------------------------- | ------------------------- |
+| GET    | `/organization/settings`          | Get organization settings |
+| PUT    | `/organization/settings`          | Update settings (full)    |
+| GET    | `/organization/settings/branding` | Get branding only         |
+| PUT    | `/organization/settings/branding` | Update branding only      |
 
 ---
 
@@ -401,7 +403,7 @@ onSectionChange(section: keyof StoreSettings, newSettings: any) {
 **CRITICAL**: Never store signed URLs. Always extract S3 keys.
 
 ```typescript
-import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
+import { extractS3KeyFromUrl } from "@common/helpers/s3-url.helper";
 
 // BEFORE storing
 if (dto.app.logo_url !== undefined) {
@@ -409,7 +411,7 @@ if (dto.app.logo_url !== undefined) {
 }
 
 // WHEN reading (in public-domains.service.ts)
-if (branding.logo_url && !branding.logo_url.startsWith('http')) {
+if (branding.logo_url && !branding.logo_url.startsWith("http")) {
   branding.logo_url = await this.s3Service.getSignedUrl(branding.logo_url);
 }
 ```
@@ -454,14 +456,14 @@ model default_templates {
 
 ## Key Files
 
-| File | Purpose |
-|------|---------|
-| `apps/backend/src/domains/store/settings/interfaces/store-settings.interface.ts` | StoreSettings type definition |
-| `apps/backend/src/domains/store/settings/defaults/default-store-settings.ts` | Hardcoded defaults |
-| `apps/backend/src/domains/store/settings/settings.service.ts` | Main store settings service |
-| `apps/backend/src/domains/organization/settings/settings.service.ts` | Organization settings service |
-| `apps/backend/prisma/seeds/default-templates.seed.ts` | Database templates |
-| `apps/frontend/src/app/private/modules/store/settings/general/services/store-settings.service.ts` | Frontend service |
+| File                                                                                              | Purpose                       |
+| ------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `apps/backend/src/domains/store/settings/interfaces/store-settings.interface.ts`                  | StoreSettings type definition |
+| `apps/backend/src/domains/store/settings/defaults/default-store-settings.ts`                      | Hardcoded defaults            |
+| `apps/backend/src/domains/store/settings/settings.service.ts`                                     | Main store settings service   |
+| `apps/backend/src/domains/organization/settings/settings.service.ts`                              | Organization settings service |
+| `apps/backend/prisma/seeds/default-templates.seed.ts`                                             | Database templates            |
+| `apps/frontend/src/app/private/modules/store/settings/general/services/store-settings.service.ts` | Frontend service              |
 
 ---
 

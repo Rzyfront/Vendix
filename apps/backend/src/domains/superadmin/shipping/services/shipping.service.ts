@@ -12,6 +12,7 @@ import {
   CreateSystemShippingRateDto,
   UpdateSystemShippingRateDto,
 } from '../dto/shipping.dto';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class ShippingService {
@@ -34,7 +35,7 @@ export class ShippingService {
 
   async getMethod(id: number) {
     if (!id || isNaN(id)) {
-      throw new NotFoundException('Invalid shipping method ID');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     const method = await this.globalPrisma.shipping_methods.findFirst({
@@ -50,7 +51,7 @@ export class ShippingService {
     });
 
     if (!method) {
-      throw new NotFoundException('System shipping method not found');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     return method;
@@ -137,7 +138,7 @@ export class ShippingService {
 
   async getZone(id: number) {
     if (!id || isNaN(id)) {
-      throw new NotFoundException('Invalid shipping zone ID');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     const zone = await this.globalPrisma.shipping_zones.findFirst({
@@ -158,7 +159,7 @@ export class ShippingService {
     });
 
     if (!zone) {
-      throw new NotFoundException('System shipping zone not found');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     return zone;
@@ -244,7 +245,7 @@ export class ShippingService {
 
   async getRate(id: number) {
     if (!id || isNaN(id)) {
-      throw new NotFoundException('Invalid shipping rate ID');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     const rate = await this.globalPrisma.shipping_rates.findFirst({
@@ -261,7 +262,7 @@ export class ShippingService {
     });
 
     if (!rate) {
-      throw new NotFoundException('System shipping rate not found');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     return rate;
@@ -277,7 +278,7 @@ export class ShippingService {
     });
 
     if (!zone) {
-      throw new NotFoundException('System shipping zone not found');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     // Verify method exists and is system
@@ -289,7 +290,7 @@ export class ShippingService {
     });
 
     if (!method) {
-      throw new NotFoundException('System shipping method not found');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     return this.globalPrisma.shipping_rates.create({
@@ -313,7 +314,7 @@ export class ShippingService {
       });
 
       if (!zone) {
-        throw new NotFoundException('System shipping zone not found');
+        throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
       }
     }
 
@@ -327,7 +328,7 @@ export class ShippingService {
       });
 
       if (!method) {
-        throw new NotFoundException('System shipping method not found');
+        throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
       }
     }
 

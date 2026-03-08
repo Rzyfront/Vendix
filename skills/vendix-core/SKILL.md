@@ -5,13 +5,14 @@ description: >
   Trigger: When working with monorepo structure, shared libs, or cross-app code.
 license: MIT
 metadata:
-  author: vendix
+  author: rzyfront
   version: "1.0"
 ---
 
 ## When to Use
 
 Use this skill when:
+
 - Creating or modifying shared libraries
 - Working with monorepo workspace configuration
 - Understanding the Vendix architecture
@@ -44,10 +45,7 @@ Root package.json defines workspaces:
 ```json
 {
   "private": true,
-  "workspaces": [
-    "apps/*",
-    "libs/*"
-  ],
+  "workspaces": ["apps/*", "libs/*"],
   "scripts": {
     "dev": "npm run start:dev -w apps/backend & npm run start -w apps/frontend",
     "build": "npm run build -w apps/backend && npm run build:prod -w apps/frontend",
@@ -71,15 +69,16 @@ mkdir -p libs/my-lib/src/lib
 
 ```typescript
 // In apps/frontend
-import { MyService } from '@vendix/my-lib';
+import { MyService } from "@vendix/my-lib";
 
 // In apps/backend
-import { MyUtil } from '@vendix/shared';
+import { MyUtil } from "@vendix/shared";
 ```
 
 ### Pattern 5: Library Path Mapping
 
 **apps/frontend/tsconfig.json**:
+
 ```json
 {
   "compilerOptions": {
@@ -93,6 +92,7 @@ import { MyUtil } from '@vendix/shared';
 ```
 
 **apps/backend/tsconfig.json**:
+
 ```json
 {
   "compilerOptions": {
@@ -133,9 +133,9 @@ Running development?
 ```typescript
 // libs/shared/src/lib/utils.ts
 export function formatPrice(price: number): string {
-  return new Intl.NumberFormat('es-AR', {
-    style: 'currency',
-    currency: 'ARS',
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
   }).format(price);
 }
 
@@ -144,7 +144,7 @@ export function generateId(): string {
 }
 
 // Export in public-api.ts
-export * from './lib/utils';
+export * from "./lib/utils";
 ```
 
 ### Example 2: Shared Types
@@ -155,7 +155,7 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  role: 'admin' | 'user';
+  role: "admin" | "user";
 }
 
 export interface CreateUserData {
@@ -165,17 +165,17 @@ export interface CreateUserData {
 }
 
 // Export in public-api.ts
-export * from './lib/user.types';
+export * from "./lib/user.types";
 ```
 
 ### Example 3: Using Shared Library in Frontend
 
 ```typescript
 // apps/frontend/src/app/services/user.service.ts
-import { User, CreateUserData } from '@vendix/types';
-import { formatPrice } from '@vendix/shared';
+import { User, CreateUserData } from "@vendix/types";
+import { formatPrice } from "@vendix/shared";
 
-@Injectable({ providedIn: 'root' })
+@Injectable({ providedIn: "root" })
 export class UserService {
   createUser(data: CreateUserData): Observable<User> {
     // implementation
@@ -187,7 +187,7 @@ export class UserService {
 
 ```typescript
 // apps/backend/src/users/users.service.ts
-import { User, CreateUserData } from '@vendix/types';
+import { User, CreateUserData } from "@vendix/types";
 
 @Injectable()
 export class UsersService {

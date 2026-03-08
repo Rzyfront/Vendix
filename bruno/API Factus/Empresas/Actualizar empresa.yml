@@ -1,0 +1,130 @@
+info:
+  name: Actualizar empresa
+  type: http
+  seq: 2
+
+http:
+  method: PUT
+  url: "{{url_api}}/v1/company"
+  body:
+    type: json
+    data: |-
+      {
+        "legal_organization_code": "2",
+        "company": null,
+        "trade_name": null,
+        "names": "Alan",
+        "surnames": "Turing",
+        "email": "alanturing@enigmasas.com",
+        "address": "calle 100 #50-80",
+        "registration_code": null,
+        "economic_activity": "6920",
+        "phone": "0987654321",
+        "municipality_code": "68872",
+        "tribute_code": "ZZ",
+        "responsibilities": "5"
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+examples:
+  - name: 200 - Actualizar empresa
+    request:
+      url: "{{url_api}}/v1/company"
+      method: PUT
+      body:
+        type: json
+        data: |-
+          {
+            "legal_organization_code": "2",
+            "company": null,
+            "trade_name": null,
+            "names": "Alan",
+            "surnames": "Turing",
+            "registration_code": null,
+            "economic_activity": "6920",
+            "phone": "0987654321",
+            "email": "alanturing@enigmasas.com",
+            "address": "calle 100 #50-80",
+            "tribute_code": "ZZ",
+            "municipality_code": "68872",
+            "responsibilities": "5"
+          }
+    response:
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "OK",
+              "message": "Solicitud exitosa",
+              "data": {
+                  "url_logo": "http://api.test/storage/images/logos/Z9YTux0jqEfj0JJtwK8E2LLn9FVUiGDwcJNKFQp9.png",
+                  "nit": "1100960164",
+                  "dv": "1",
+                  "company": "",
+                  "trade_name": "",
+                  "names": "ALAN",
+                  "surnames": "TURING",
+                  "graphic_representation_name": "ALAN TURING",
+                  "registration_code": "",
+                  "economic_activity": "6920",
+                  "phone": "0987654321",
+                  "email": "alanturing@enigmasas.com",
+                  "address": "calle 100 #50-80",
+                  "tribute": {
+                      "code": "ZZ",
+                      "name": "No aplica"
+                  },
+                  "legal_organization": {
+                      "code": "2",
+                      "name": "Persona Natural"
+                  },
+                  "municipality": {
+                      "code": "68872",
+                      "name": "Villanueva",
+                      "department": {
+                          "code": "68",
+                          "name": "Santander"
+                      }
+                  },
+                  "responsibilities": [
+                      {
+                          "code": "R-99-PN",
+                          "name": "No responsable"
+                      }
+                  ],
+                  "created_at": "2025-07-23T12:33:22Z",
+                  "updated_at": "2025-09-25T14:54:55Z"
+              }
+          }
+
+docs: |-
+  Actualiza la información de la empresa
+
+  La información ingresada en estos campos debe corresponder a la registrada en el RUT
+
+  #### **Descripción del body**
+
+  | **ID** | **Valor** |
+  | --- | --- |
+  | `legal_organization_code` | Código que corresponda al tipo de organización para saber el código correspondiente consulte la tabla [Código de los tipos de organizaciones.](https://developers.factus.com.co/tablas-de-referencia/tablas/#ids-de-tipos-de-organizaciones) |
+  | `company` | (Opcional) Este campo es requerido si el campo `legal_organization_code` contiene el valor de 1 (Persona jurídica) |
+  | `trade_name` | (Opcional) Nombre comercial. |
+  | `names` | (Opcional) Este campo es requerido si el campo `legal_organization_code` contiene el valor de 2 (Persona natural). |
+  | `surnames` | (Opcional) Este campo es requerido si el campo `legal_organization_code` contiene el valor de 2 (Persona natural) |
+  | `registration_code` | (Opcional) Código de registro mercantil. |
+  | `economic_activity` | Número de la actividad economica. |
+  | `phone` | Número de teléfono. |
+  | `email` | Correo electrónico. |
+  | `address` | Dirección |
+  | `tribute_code` | Código del tributo. Para saber el código que corresponde al tributo consulte la tabla de [Tributos.](https://developers.factus.com.co/tablas-de-referencia/tablas/#ids-de-tributos-clientes) |
+  | `municipality_code` | Código del municipio. Para saber el código que corresponde al municipio consulte el endpoint de [Municipios.](https://martian-spaceship-418933.postman.co/workspace/af54fc7a-b3d9-40a7-9f62-273f3ec355b9/request/22150862-f830b201-2ae5-446d-bc32-6b3e92f218b3) |
+  | `responsibilities[]` | Id de los tipos de responsabilidad fiscal. |

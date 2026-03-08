@@ -33,6 +33,7 @@ import {
   ItemListCardConfig,
   TableColumn,
   TableAction,
+  PaginationComponent,
 } from '../../../../shared/components/index';
 
 // Import styles (CSS instead of SCSS to avoid loader issues)
@@ -50,6 +51,7 @@ import './domains.component.css';
     IconComponent,
     ResponsiveDataViewComponent,
     ButtonComponent,
+    PaginationComponent,
     DomainCreateModalComponent,
     DomainEditModalComponent,
     DomainStatsComponent,
@@ -159,39 +161,14 @@ import './domains.component.css';
           </app-responsive-data-view>
 
           <!-- Pagination -->
-          <div class="mt-6 flex justify-between items-center">
-            <div class="text-sm text-text-secondary">
-              Mostrando {{ domains.length }} de {{ pagination.total }} dominios
-            </div>
-            <div class="flex gap-2">
-              <app-button
-                variant="outline"
-                size="sm"
-                (clicked)="changePage(pagination.page - 1)"
-                [disabled]="pagination.page <= 1"
-              >
-                <app-icon
-                  name="chevron-left"
-                  [size]="16"
-                  slot="icon"
-                ></app-icon>
-                Anterior
-              </app-button>
-              <app-button
-                variant="outline"
-                size="sm"
-                (clicked)="changePage(pagination.page + 1)"
-                [disabled]="pagination.page >= pagination.totalPages"
-              >
-                Siguiente
-                <app-icon
-                  name="chevron-right"
-                  [size]="16"
-                  slot="icon"
-                ></app-icon>
-              </app-button>
-            </div>
-          </div>
+          <app-pagination
+            [currentPage]="pagination.page"
+            [totalPages]="pagination.totalPages"
+            [total]="pagination.total"
+            [limit]="pagination.limit"
+            infoStyle="range"
+            (pageChange)="changePage($event)"
+          />
         </div>
       </div>
 

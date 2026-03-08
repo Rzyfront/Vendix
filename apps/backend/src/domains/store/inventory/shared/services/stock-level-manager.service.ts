@@ -9,6 +9,7 @@ import { StorePrismaService } from '../../../../../prisma/services/store-prisma.
 import { InventoryTransactionsService } from '../../transactions/inventory-transactions.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 export interface UpdateStockParams {
   product_id: number;
@@ -81,7 +82,7 @@ export class StockLevelManager {
     // Validar contexto de organización
     const context = RequestContextService.getContext();
     if (!context?.organization_id && !context?.is_super_admin) {
-      throw new BadRequestException('Organization context is required');
+      throw new VendixHttpException(ErrorCodes.INV_CONTEXT_001);
     }
 
     // Skip stock operations for products that don't track inventory
@@ -136,7 +137,7 @@ export class StockLevelManager {
     });
 
     if (!existing_stock_level) {
-      throw new BadRequestException('Stock level not found');
+      throw new VendixHttpException(ErrorCodes.INV_FIND_001);
     }
 
     const updated_stock = await prisma.stock_levels.update({
@@ -398,9 +399,7 @@ export class StockLevelManager {
     if (!context?.is_super_admin) {
       // Validar que el contexto tenga organization_id
       if (!context?.organization_id) {
-        throw new BadRequestException(
-          'Organization context is required for stock level operations',
-        );
+        throw new VendixHttpException(ErrorCodes.INV_CONTEXT_001);
       }
 
       // Validar que el producto pertenezca a la organización del contexto
@@ -414,9 +413,7 @@ export class StockLevelManager {
       });
 
       if (!product) {
-        throw new BadRequestException(
-          'Product not found or out of organization scope',
-        );
+        throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
       }
 
       // Validar que la ubicación pertenezca a la organización
@@ -428,9 +425,7 @@ export class StockLevelManager {
       });
 
       if (!location) {
-        throw new BadRequestException(
-          'Location not found or out of organization scope',
-        );
+        throw new VendixHttpException(ErrorCodes.INV_LOC_001);
       }
     }
 
@@ -665,7 +660,7 @@ export class StockLevelManager {
     });
 
     if (!product) {
-      throw new NotFoundException(`Product with ID ${product_id} not found`);
+      throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
     }
 
     return product.stores.organization_id;

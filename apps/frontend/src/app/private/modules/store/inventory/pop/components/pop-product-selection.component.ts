@@ -158,7 +158,7 @@ import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
                 </div>
               } @else {
                 <div class="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold shadow-sm backdrop-blur-sm bg-blue-100/90 text-blue-700">
-                  Bajo pedido
+                  Disponible
                 </div>
               }
             </div>
@@ -172,9 +172,17 @@ import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
                 {{ product.name }}
               </h3>
               <div class="flex items-center justify-between mt-auto">
-                <span class="text-xs text-text-secondary font-mono truncate max-w-[60%]">
-                  {{ product.sku }}
-                </span>
+                <div class="flex items-center gap-1 min-w-0">
+                  <span class="text-xs text-text-secondary font-mono truncate max-w-[60%]">
+                    {{ product.sku }}
+                  </span>
+                  <span
+                    *ngIf="product.pricing_type === 'weight'"
+                    class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-semibold bg-blue-50 text-blue-600 shrink-0"
+                  >
+                    Peso
+                  </span>
+                </div>
                 <button
                   class="w-6 h-6 rounded-full bg-primary/10 hover:bg-primary/20 text-primary flex items-center justify-center transition-colors"
                 >

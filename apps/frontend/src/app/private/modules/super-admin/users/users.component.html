@@ -60,7 +60,6 @@
       </div>
 
       <!-- Table Section -->
-      <!-- Table Section -->
       <app-responsive-data-view
         [data]="users"
         [columns]="tableColumns"
@@ -78,6 +77,16 @@
           </app-user-empty-state>
         </div>
       </app-responsive-data-view>
+
+      <!-- Pagination -->
+      <app-pagination
+        [currentPage]="pagination.page"
+        [totalPages]="pagination.totalPages"
+        [total]="pagination.total"
+        [limit]="pagination.limit"
+        infoStyle="range"
+        (pageChange)="onPageChange($event)"
+      />
     </div>
 
     <!-- Create User Modal -->

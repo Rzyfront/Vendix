@@ -1,0 +1,7 @@
+info:
+  name: Empresas
+  type: folder
+  seq: 14
+
+request:
+  auth: inherit

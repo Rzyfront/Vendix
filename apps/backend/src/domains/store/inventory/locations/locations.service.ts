@@ -1,19 +1,23 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { CreateLocationDto } from './dto/create-location.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { LocationQueryDto } from './dto/location-query.dto';
-import { BadRequestException } from '@nestjs/common';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class LocationsService {
-  constructor(private prisma: StorePrismaService) { }
+  constructor(private prisma: StorePrismaService) {}
 
   async create(createLocationDto: CreateLocationDto) {
     const context = RequestContextService.getContext();
     if (!context?.organization_id) {
-      throw new BadRequestException('Organization context is missing');
+      throw new VendixHttpException(ErrorCodes.INV_CONTEXT_001);
     }
 
     const { address, ...locationData } = createLocationDto;
@@ -29,10 +33,13 @@ export class LocationsService {
             city: address.city,
             state_province: address.state,
             postal_code: address.postal_code,
-            country_code: (address.country && address.country.length <= 3) ? address.country : 'COL',
+            country_code:
+              address.country && address.country.length <= 3
+                ? address.country
+                : 'COL',
             organization_id: context.organization_id,
             store_id: createLocationDto.store_id || context.store_id,
-          }
+          },
         });
       }
 
@@ -41,11 +48,11 @@ export class LocationsService {
           ...(locationData as any),
           organization_id: context.organization_id,
           store_id: createLocationDto.store_id || context.store_id,
-          address_id: newAddress?.id
+          address_id: newAddress?.id,
         },
         include: {
-          addresses: true
-        }
+          addresses: true,
+        },
       });
     });
   }
@@ -115,7 +122,7 @@ export class LocationsService {
       // Check if location already has an address
       const location = await this.prisma.inventory_locations.findUnique({
         where: { id },
-        select: { address_id: true }
+        select: { address_id: true },
       });
 
       if (location?.address_id) {
@@ -126,8 +133,11 @@ export class LocationsService {
             city: address.city,
             state_province: address.state,
             postal_code: address.postal_code,
-            country_code: (address.country && address.country.length <= 3) ? address.country : 'COL',
-          }
+            country_code:
+              address.country && address.country.length <= 3
+                ? address.country
+                : 'COL',
+          },
         };
       } else {
         data.addresses = {
@@ -137,10 +147,13 @@ export class LocationsService {
             city: address.city,
             state_province: address.state,
             postal_code: address.postal_code,
-            country_code: (address.country && address.country.length <= 3) ? address.country : 'COL',
+            country_code:
+              address.country && address.country.length <= 3
+                ? address.country
+                : 'COL',
             organization_id: context?.organization_id,
             store_id: updateLocationDto.store_id || context?.store_id,
-          }
+          },
         };
       }
     }
@@ -149,8 +162,8 @@ export class LocationsService {
       where: { id },
       data,
       include: {
-        addresses: true
-      }
+        addresses: true,
+      },
     });
   }
 

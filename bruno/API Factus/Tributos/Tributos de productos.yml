@@ -1,0 +1,183 @@
+info:
+  name: Tributos de productos
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: "{{url_api}}/v1/tributes/products?name="
+  headers:
+    - name: Accept
+      value: application/json
+  params:
+    - name: name
+      value: ""
+      type: query
+      description: Nombre del tributo
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+examples:
+  - name: Tributos de productos
+    request:
+      url: "{{url_api}}/v1/tributes/products?name="
+      method: GET
+      headers:
+        - name: Accept
+          value: application/json
+      params:
+        - name: name
+          value: ""
+          type: query
+          description: Nombre del tributo
+    response:
+      statusText: "200"
+      headers:
+        - name: Server
+          value: nginx
+        - name: Content-Type
+          value: application/json
+        - name: Transfer-Encoding
+          value: chunked
+        - name: Connection
+          value: keep-alive
+        - name: Cache-Control
+          value: no-cache, private
+        - name: Date
+          value: Thu, 02 May 2024 21:08:18 GMT
+        - name: X-RateLimit-Limit
+          value: "60"
+        - name: X-RateLimit-Remaining
+          value: "59"
+        - name: X-Frame-Options
+          value: SAMEORIGIN
+        - name: X-XSS-Protection
+          value: 1; mode=block
+        - name: X-Content-Type-Options
+          value: nosniff
+      body:
+        type: json
+        data: |-
+          {
+              "status": "OK",
+              "message": "Solicitud exitosa",
+              "data": [
+                  {
+                      "id": 1,
+                      "code": "01",
+                      "name": "IVA",
+                      "description": "Impuesto sobre la Ventas"
+                  },
+                  {
+                      "id": 2,
+                      "code": "02",
+                      "name": "IC",
+                      "description": "Impuesto al Consumo Departamental Nominal"
+                  },
+                  {
+                      "id": 3,
+                      "code": "03",
+                      "name": "ICA",
+                      "description": "Impuesto de Industria, Comercio y Aviso"
+                  },
+                  {
+                      "id": 4,
+                      "code": "04",
+                      "name": "INC",
+                      "description": "Impuesto Nacional al Consumo"
+                  },
+                  {
+                      "id": 5,
+                      "code": "05",
+                      "name": "ReteIVA",
+                      "description": "Retención sobre el IVA"
+                  },
+                  {
+                      "id": 6,
+                      "code": "06",
+                      "name": "ReteRenta",
+                      "description": "Retención sobre renta"
+                  },
+                  {
+                      "id": 7,
+                      "code": "07",
+                      "name": "ReteICA",
+                      "description": "Retención sobre el ICA"
+                  },
+                  {
+                      "id": 8,
+                      "code": "08",
+                      "name": "IC Porcentual",
+                      "description": "Impuesto al Consumo Departamental Porcentual"
+                  },
+                  {
+                      "id": 9,
+                      "code": "20",
+                      "name": "FtoHorticultura",
+                      "description": "Cuota de Fomento Hortifrutícula"
+                  },
+                  {
+                      "id": 10,
+                      "code": "21",
+                      "name": "Timbre",
+                      "description": "Impuesto de Timbre"
+                  },
+                  {
+                      "id": 11,
+                      "code": "22",
+                      "name": "INC Bolsas",
+                      "description": "Impuesto Nacional al Consumo de Bolsa Plástica"
+                  },
+                  {
+                      "id": 12,
+                      "code": "23",
+                      "name": "INCarbono",
+                      "description": "Impuesto Nacional del Carbono"
+                  },
+                  {
+                      "id": 13,
+                      "code": "24",
+                      "name": "INCarbono",
+                      "description": "Impuesto Nacional del Carbono"
+                  },
+                  {
+                      "id": 14,
+                      "code": "24",
+                      "name": "INCombustibles",
+                      "description": "Impuesto Nacional a los Combustibles"
+                  },
+                  {
+                      "id": 15,
+                      "code": "25",
+                      "name": "Sobretasa Combustibles",
+                      "description": "Sobretasa a los combustibles"
+                  },
+                  {
+                      "id": 16,
+                      "code": "26",
+                      "name": "Sordicom",
+                      "description": "Contribución minoristas (Combustibles)"
+                  },
+                  {
+                      "id": 17,
+                      "code": "30",
+                      "name": "IC Datos",
+                      "description": "Impuesto al Consumo de Datos"
+                  }
+              ]
+          }
+
+docs: |-
+  #### **Response**
+
+  | Valor | Descripción |
+  | --- | --- |
+  | id | id del tributo |
+  | code | codigo del tributo |
+  | name | nombre del tributo |
+  | description | descripción del tributo |

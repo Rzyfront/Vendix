@@ -1,0 +1,14 @@
+info:
+  name: Auth
+  type: folder
+  seq: 1
+
+request:
+  auth: inherit
+
+docs:
+  content: |-
+    Nuestra API Factus usa el sistema de autenticación OAuth2, el cual utiliza las credenciales de acceso al sistema suministradas por factus para generar un token de acceso, el cual debe usarse para realizar cualquier petición a los endpoints, tener en cuenta que se dará acceso con un limite tiempo valido por cada token y tendrá que hacer uso del token de refresco para generar uno nuevo.
+
+    Puede ver mas información en el siguiente link [OAuth2](https://oauth2.thephpleague.com/terminology/) .
+  type: text/markdown

@@ -1,0 +1,145 @@
+/**
+ * Mapa de mensajes UX por error_code.
+ * Estos mensajes son seguros para mostrar al usuario final (en espanol).
+ * El devMessage del backend NUNCA se muestra al usuario.
+ */
+export const ERROR_MESSAGES: Record<string, string> = {
+  // System
+  SYS_INTERNAL_001: 'Ocurrio un error inesperado. Intente de nuevo.',
+  SYS_VALIDATION_001: 'Los datos ingresados no son validos.',
+  SYS_NOT_FOUND_001: 'El recurso solicitado no fue encontrado.',
+  SYS_FORBIDDEN_001: 'No tiene permisos para realizar esta accion.',
+  SYS_UNAUTHORIZED_001: 'Debe iniciar sesion para continuar.',
+  SYS_CONFLICT_001: 'El recurso ya existe o esta en conflicto.',
+
+  // Payments
+  PAY_INVALID_ORDER_001: 'La orden no es valida o no existe.',
+  PAY_INVALID_AMOUNT_001: 'El monto del pago no es valido.',
+  PAY_METHOD_DISABLED_001: 'El metodo de pago esta deshabilitado.',
+  PAY_PROCESSOR_001: 'Error en el procesador de pago. Intente mas tarde.',
+  PAY_DUPLICATE_001: 'Ya se registro un pago para esta orden.',
+  PAY_FIND_001: 'Pago no encontrado.',
+  PAY_VALIDATE_001: 'La validacion de los datos de pago fallo.',
+  PAY_PERM_001: 'No tiene permisos para acceder a este recurso de pago.',
+
+  // Authentication
+  AUTH_FIND_001: 'Usuario no encontrado.',
+  AUTH_CREATE_001: 'Error al crear el usuario.',
+  AUTH_VALIDATE_001: 'La validacion de autenticacion fallo.',
+  AUTH_DUP_001: 'Ya existe un usuario con este email.',
+  AUTH_PERM_001: 'No tiene permisos para realizar esta accion.',
+  AUTH_TOKEN_001: 'Token invalido o expirado.',
+  AUTH_CREDENTIALS_001: 'Email o contrasena incorrectos.',
+  AUTH_PASSWORD_001: 'La contrasena es incorrecta.',
+  AUTH_ROLE_001: 'Rol no encontrado.',
+  AUTH_STORE_001: 'Tienda no encontrada.',
+  AUTH_VERIFY_001: 'Error al verificar el email.',
+  AUTH_CONTEXT_001: 'Contexto requerido para esta operacion.',
+
+  // Ecommerce
+  ECOM_CART_001: 'El carrito esta vacio.',
+  ECOM_CART_002: 'Item del carrito invalido.',
+  ECOM_CART_003: 'Stock insuficiente disponible.',
+  ECOM_CART_004: 'Carrito no encontrado.',
+  ECOM_PRODUCT_001: 'Producto no encontrado.',
+  ECOM_PRODUCT_002: 'Producto no disponible.',
+  ECOM_CHECKOUT_001: 'Error en el proceso de compra.',
+  ECOM_CHECKOUT_002: 'Metodo de pago invalido.',
+  ECOM_CHECKOUT_003: 'Metodo de envio invalido.',
+  ECOM_ACCOUNT_001: 'Cuenta no encontrada.',
+  ECOM_ACCOUNT_002: 'Contrasena actual incorrecta.',
+  ECOM_WISHLIST_001: 'Lista de deseos no encontrada.',
+  ECOM_WISHLIST_002: 'El producto no esta en la lista de deseos.',
+
+  // Support
+  SUP_TICKET_001: 'Ticket de soporte no encontrado.',
+  SUP_COMMENT_001: 'Comentario no encontrado.',
+  SUP_ORG_001: 'Organizacion no encontrada.',
+  SUP_USER_001: 'Usuario no encontrado.',
+
+  // Organization
+  ORG_FIND_001: 'Organizacion no encontrada.',
+  ORG_CREATE_001: 'Error al crear la organizacion.',
+  ORG_VALIDATE_001: 'La validacion de la organizacion fallo.',
+  ORG_PERM_001: 'No tiene permisos para acceder a esta organizacion.',
+  ORG_CONTEXT_001: 'Debe seleccionar una organizacion.',
+  ORG_USER_001: 'Usuario de la organizacion no encontrado.',
+  ORG_STORE_001: 'Tienda no encontrada.',
+  ORG_ROLE_001: 'Rol no encontrado.',
+  ORG_DOMAIN_001: 'Dominio no encontrado.',
+  ORG_DOMAIN_002: 'Dominio invalido.',
+
+  // Store
+  STORE_FIND_001: 'Tienda no encontrada.',
+  STORE_CREATE_001: 'Error al crear la tienda.',
+  STORE_VALIDATE_001: 'La validacion de la tienda fallo.',
+  STORE_PERM_001: 'No tiene permisos para acceder a esta tienda.',
+  STORE_CONTEXT_001: 'Debe seleccionar una tienda.',
+
+  // Products
+  PROD_FIND_001: 'Producto no encontrado.',
+  PROD_CREATE_001: 'Error al crear el producto.',
+  PROD_VALIDATE_001: 'La validacion del producto fallo.',
+  PROD_PERM_001: 'No tiene permisos para acceder a este producto.',
+  PROD_DUP_001: 'Ya existe un producto con estas caracteristicas.',
+  PROD_IMAGE_001: 'Imagen no encontrada.',
+  PROD_CAT_001: 'Categoria o marca invalida.',
+
+  // Orders
+  ORD_FIND_001: 'Orden no encontrada.',
+  ORD_CREATE_001: 'Error al crear la orden.',
+  ORD_VALIDATE_001: 'La validacion de la orden fallo.',
+  ORD_PERM_001: 'No tiene permisos para acceder a esta orden.',
+  ORD_STATUS_001: 'Estado de orden invalido.',
+  ORD_SHIP_001: 'Metodo de envio no encontrado.',
+
+  // Inventory
+  INV_FIND_001: 'Inventario no encontrado.',
+  INV_CREATE_001: 'Error al crear el registro de inventario.',
+  INV_VALIDATE_001: 'La validacion del inventario fallo.',
+  INV_PERM_001: 'No tiene permisos para acceder al inventario.',
+  INV_CONTEXT_001: 'Debe seleccionar una organizacion.',
+  INV_STOCK_001: 'Stock insuficiente.',
+  INV_LOC_001: 'Ubicacion no encontrada.',
+  INV_ADJ_001: 'Ajuste no encontrado.',
+
+  // Customers
+  CUST_FIND_001: 'Cliente no encontrado.',
+  CUST_CREATE_001: 'Error al crear el cliente.',
+  CUST_VALIDATE_001: 'La validacion del cliente fallo.',
+  CUST_PERM_001: 'No tiene permisos para acceder a este cliente.',
+
+  // Shipping
+  SHIP_FIND_001: 'Metodo de envio no encontrado.',
+  SHIP_CREATE_001: 'Error al crear el metodo de envio.',
+  SHIP_VALIDATE_001: 'La validacion del envio fallo.',
+  SHIP_PERM_001: 'No tiene permisos para acceder a este envio.',
+
+  // Categories & Brands
+  CAT_FIND_001: 'Categoria no encontrada.',
+  BRAND_FIND_001: 'Marca no encontrada.',
+
+  // Refunds
+  REF_FIND_001: 'Reembolso no encontrado.',
+  REF_CREATE_001: 'Error al crear el reembolso.',
+  REF_VALIDATE_001: 'La validacion del reembolso fallo.',
+
+  // Superadmin
+  SUP_ADMIN_USER_001: 'Usuario de superadministrador no encontrado.',
+  SUP_ADMIN_ORG_001: 'Organizacion no encontrada.',
+  SUP_ADMIN_ROLE_001: 'Rol de superadministrador no encontrado.',
+  SUP_ADMIN_PERM_001: 'Permiso de superadministrador denegado.',
+
+  // AI Engine
+  AI_CONFIG_001: 'Configuracion de IA no encontrada.',
+  AI_PROVIDER_001: 'No se pudo conectar con el proveedor de IA.',
+  AI_PROVIDER_002: 'No hay un proveedor de IA configurado por defecto.',
+  AI_REQUEST_001: 'La solicitud al proveedor de IA fallo.',
+  AI_CONFIG_002: 'Ya existe una configuracion con ese proveedor y modelo.',
+  AI_APP_001: 'Aplicacion de IA no encontrada.',
+  AI_APP_002: 'Ya existe una aplicacion con esa clave.',
+  AI_APP_003: 'La aplicacion de IA esta deshabilitada.',
+  AI_APP_004: 'Se excedio el limite de solicitudes de esta aplicacion.',
+};
+
+export const DEFAULT_ERROR_MESSAGE = 'Ocurrio un error. Intente de nuevo.';

@@ -73,6 +73,17 @@ export class PosOrderItemDto {
   cost?: number;
 
   @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  @Type(() => Number)
+  weight?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  weight_unit?: string;
+
+  @IsOptional()
   @IsString()
   @MaxLength(500)
   notes?: string;

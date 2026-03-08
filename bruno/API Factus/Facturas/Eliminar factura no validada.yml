@@ -1,0 +1,32 @@
+info:
+  name: Eliminar factura no validada
+  type: http
+  seq: 8
+
+http:
+  method: DELETE
+  url: "{{url_api}}/v1/bills/destroy/reference/:reference_code"
+  headers:
+    - name: Accept
+      value: application/json
+  params:
+    - name: reference_code
+      value: ""
+      type: path
+  body:
+    type: json
+    data: ""
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+docs: |-
+  Elimina la factura que esta pendiente por validar con la DIAN.
+
+  #### **Nota:**
+
+  - Esta peticion es sincrona, eso quiere decir que en la misma solicitud recibe el mesaje de si se ha eliminado la factura.

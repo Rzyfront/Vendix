@@ -4,6 +4,11 @@ export enum ProductState {
   ARCHIVED = 'archived',
 }
 
+export enum PricingType {
+  UNIT = 'unit',
+  WEIGHT = 'weight',
+}
+
 export interface Product {
   id: number;
   store_id: number;
@@ -28,6 +33,7 @@ export interface Product {
     height: number;
   };
   state: ProductState;
+  pricing_type?: 'unit' | 'weight';
   final_price: number;
   created_at: Date;
   updated_at: Date;
@@ -174,6 +180,7 @@ export interface CreateProductDto {
     height: number;
   };
   state?: ProductState;
+  pricing_type?: 'unit' | 'weight';
   brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];

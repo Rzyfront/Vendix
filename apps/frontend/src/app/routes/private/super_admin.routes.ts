@@ -79,6 +79,13 @@ export const superAdminRoutes: Routes = [
           ).then((c) => c.CurrenciesComponent),
       },
       {
+        path: 'system/ai-engine',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/ai-engine/ai-engine.component'
+          ).then((c) => c.AIEngineComponent),
+      },
+      {
         path: 'system/templates',
         loadComponent: () =>
           import(

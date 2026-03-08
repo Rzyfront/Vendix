@@ -1,0 +1,30 @@
+info:
+  name: Eliminar documento no validado
+  type: http
+  seq: 4
+
+http:
+  method: DELETE
+  url: "{{url_api}}/v1/support-documents/reference/:reference_code"
+  headers:
+    - name: Accept
+      value: application/json
+  params:
+    - name: reference_code
+      value: SEDS984000063
+      type: path
+      description: Codigo de referencia que se uso al crear el documento soporte
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+docs: |-
+  Elimina el documento soporte que esta pendiente por validar con la DIAN.
+
+  #### **Nota:**
+
+  - Esta peticion es sincrona, eso quiere decir que en la misma solicitud recibe el mesaje de si se ha eliminado el documento soporte.

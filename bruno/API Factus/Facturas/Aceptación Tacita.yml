@@ -1,0 +1,41 @@
+info:
+  name: Aceptación Tacita
+  type: http
+  seq: 10
+
+http:
+  method: POST
+  url: "{{url_api}}/v1/bills/radian/events/update/:number/:event_type"
+  headers:
+    - name: Accept
+      value: application/json
+  params:
+    - name: number
+      value: ""
+      type: path
+      description: Número de factura
+    - name: event_type
+      value: ""
+      type: path
+      description: Código del evento
+  body:
+    type: json
+    data: |-
+      {
+          "identification_document_code": "13",
+          "identification": "12345667",
+          "dv": "",
+          "first_name": "Pepito",
+          "last_name": "Perez",
+          "job_title": "Desarollador de software",
+          "organization_department": "Sistemas"
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+docs: Este evento permite emitir el evento de aceptación tacita. Este evento solo es valido para las facturas generadas con la forma de pago a crédito.

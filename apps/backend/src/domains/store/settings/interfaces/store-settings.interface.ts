@@ -229,6 +229,13 @@ export interface PosSettings {
   allow_discount: boolean;
   max_discount_percentage: number;
   allow_refund_without_approval: boolean;
+  scale?: ScaleSettings;
+}
+
+export interface ScaleSettings {
+  enabled: boolean;
+  allow_manual_weight_entry: boolean;
+  default_weight_unit: 'kg' | 'g' | 'lb';
 }
 
 export interface ReceiptsSettings {

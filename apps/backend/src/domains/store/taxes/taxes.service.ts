@@ -11,12 +11,11 @@ import {
   TaxCategoryQueryDto,
 } from './dto';
 import { RequestContextService } from '@common/context/request-context.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class TaxesService {
-  constructor(
-    private prisma: StorePrismaService,
-  ) { }
+  constructor(private prisma: StorePrismaService) {}
 
   /**
    * Calculates taxes for a product based on its assignments.
@@ -40,7 +39,12 @@ export class TaxesService {
     });
 
     let totalRate = 0;
-    const taxes: { tax_rate_id: number; name: string; rate: number; amount: number }[] = [];
+    const taxes: {
+      tax_rate_id: number;
+      name: string;
+      rate: number;
+      amount: number;
+    }[] = [];
 
     for (const assignment of assignments) {
       if (assignment.tax_categories?.tax_rates) {
@@ -70,7 +74,7 @@ export class TaxesService {
     const store_id = context?.store_id;
 
     if (!store_id) {
-      throw new ForbiddenException('Store context required');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
     return this.prisma.tax_categories.create({
@@ -107,7 +111,12 @@ export class TaxesService {
     // Los usuarios solo pueden ver tax_categories de su store actual
 
     const [taxCategories, total] = await Promise.all([
-      this.prisma.tax_categories.findMany({ where, skip, take: limit, include: { tax_rates: true } }),
+      this.prisma.tax_categories.findMany({
+        where,
+        skip,
+        take: limit,
+        include: { tax_rates: true },
+      }),
       this.prisma.tax_categories.count({ where }),
     ]);
 
@@ -122,7 +131,7 @@ export class TaxesService {
     const taxCategory = await this.prisma.tax_categories.findFirst({
       where: { id },
     });
-    if (!taxCategory) throw new NotFoundException('Tax category not found');
+    if (!taxCategory) throw new VendixHttpException(ErrorCodes.CAT_FIND_001);
 
     return taxCategory;
   }

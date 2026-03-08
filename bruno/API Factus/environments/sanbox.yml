@@ -1,0 +1,12 @@
+name: sanbox
+variables:
+  - name: url_api
+    value: https://api-sandbox.factus.com.co
+  - name: email
+    value: sandbox@factus.com.co
+  - name: password
+    value: sandbox2024%
+  - name: client_id
+    value: a08d84a9-d3e9-4d7e-bea8-98de548c5c79
+  - name: client_secret
+    value: XYF8C2f0IfzSqjjuSfkjsEaJFbVsRW4BCZ15T4ER

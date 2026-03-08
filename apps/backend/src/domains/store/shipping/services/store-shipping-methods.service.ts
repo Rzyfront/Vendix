@@ -11,6 +11,7 @@ import {
   UpdateStoreShippingMethodDto,
   ReorderShippingMethodsDto,
 } from '../dto/store-shipping-method.dto';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class StoreShippingMethodsService {
@@ -26,7 +27,7 @@ export class StoreShippingMethodsService {
     const store_id = context?.store_id;
 
     if (!store_id) {
-      throw new ForbiddenException('Store context required for this operation');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
     // Use base client to query across scopes
@@ -78,7 +79,7 @@ export class StoreShippingMethodsService {
    */
   async findOne(method_id: number) {
     if (!method_id || isNaN(method_id)) {
-      throw new NotFoundException('Invalid shipping method ID');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     const method = await this.prisma.shipping_methods.findFirst({
@@ -89,7 +90,7 @@ export class StoreShippingMethodsService {
     });
 
     if (!method) {
-      throw new NotFoundException('Shipping method not found for this store');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     return method;
@@ -112,7 +113,7 @@ export class StoreShippingMethodsService {
     const store_id = context?.store_id;
 
     if (!store_id) {
-      throw new ForbiddenException('Store context required for this operation');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
     const base_client = this.prisma.withoutScope();
@@ -318,7 +319,7 @@ export class StoreShippingMethodsService {
     });
 
     if (!method) {
-      throw new NotFoundException('Shipping method not found for this store');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     return this.prisma.shipping_methods.update({
@@ -339,11 +340,11 @@ export class StoreShippingMethodsService {
     });
 
     if (!method) {
-      throw new NotFoundException('Shipping method not found for this store');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     if (method.is_active) {
-      throw new BadRequestException('Shipping method is already enabled');
+      throw new VendixHttpException(ErrorCodes.SHIP_VALIDATE_001);
     }
 
     return this.prisma.shipping_methods.update({
@@ -364,7 +365,7 @@ export class StoreShippingMethodsService {
     const store_id = context?.store_id;
 
     if (!store_id) {
-      throw new ForbiddenException('Store context required for this operation');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
     const method = await this.prisma.shipping_methods.findFirst({
@@ -375,7 +376,7 @@ export class StoreShippingMethodsService {
     });
 
     if (!method) {
-      throw new NotFoundException('Shipping method not found for this store');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     const base_client = this.prisma.withoutScope();
@@ -412,7 +413,7 @@ export class StoreShippingMethodsService {
     });
 
     if (!method) {
-      throw new NotFoundException('Shipping method not found for this store');
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
     await this.prisma.shipping_methods.delete({

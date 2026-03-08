@@ -17,6 +17,7 @@ import { RegisterOwnerDto } from './dto/register-owner.dto';
 import { RegisterCustomerDto } from './dto/register-customer.dto';
 import { RegisterStaffDto } from './dto/register-staff.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   AuditService,
   AuditAction,
@@ -66,11 +67,11 @@ export interface UserAccountLookupResult {
   }> | null;
   /** Type of match result */
   matchType:
-    | 'single_account'         // Only one account exists → direct login
-    | 'account_resolved'       // Multi-account + org specified → resolved to specific account
+    | 'single_account' // Only one account exists → direct login
+    | 'account_resolved' // Multi-account + org specified → resolved to specific account
     | 'account_disambiguation' // Multi-account + no org → show selector
-    | 'no_account_in_org'      // User has no account in requested organization
-    | 'not_found';             // Email doesn't exist in system
+    | 'no_account_in_org' // User has no account in requested organization
+    | 'not_found'; // Email doesn't exist in system
 }
 
 @Injectable()
@@ -86,7 +87,7 @@ export class AuthService {
     private readonly defaultPanelUIService: DefaultPanelUIService,
     private readonly s3Service: S3Service,
     private readonly eventEmitter: EventEmitter2,
-  ) { }
+  ) {}
 
   /**
    * Smart Fallback: Find organization by identifier (slug or name)
@@ -107,7 +108,11 @@ export class AuthService {
     });
 
     if (bySlug) {
-      return { organization: bySlug, candidates: null, matchType: 'slug_exact' };
+      return {
+        organization: bySlug,
+        candidates: null,
+        matchType: 'slug_exact',
+      };
     }
 
     // 2. Search by name (case-insensitive, partial match)
@@ -301,7 +306,9 @@ export class AuthService {
         return {
           user: null,
           accounts: accounts
-            .filter((a) => validCandidates.some((c) => c.id === a.organization_id))
+            .filter((a) =>
+              validCandidates.some((c) => c.id === a.organization_id),
+            )
             .map((a: any) => ({
               id: a.id,
               organization_id: a.organization_id,
@@ -429,16 +436,20 @@ export class AuthService {
   }
 
   async getSettings(userId: number) {
-    const settings = await this.prismaService.user_settings.findUnique({
-      where: { user_id: userId },
-    });
+    const [settings, defaults] = await Promise.all([
+      this.prismaService.user_settings.findUnique({
+        where: { user_id: userId },
+      }),
+      this.defaultPanelUIService.generatePanelUI(''),
+    ]);
 
     if (!settings) {
-      // Return default or empty if not found, or maybe create one.
-      // For now, let's return null or empty object if specific behavior isn't defined
       return null;
     }
-    return settings;
+    return {
+      ...settings,
+      default_panel_ui: defaults.panel_ui,
+    };
   }
 
   async updateSettings(userId: number, updateSettingsDto: any) {
@@ -542,7 +553,7 @@ export class AuthService {
         where: { name: 'owner' },
       });
       if (!ownerRole) {
-        throw new BadRequestException('Rol de owner no encontrado');
+        throw new VendixHttpException(ErrorCodes.AUTH_ROLE_001);
       }
 
       const organization = await tx.organizations.create({
@@ -656,7 +667,7 @@ export class AuthService {
     });
 
     if (!userWithRoles) {
-      throw new BadRequestException('Error al crear usuario owner');
+      throw new VendixHttpException(ErrorCodes.AUTH_CREATE_001);
     }
 
     // Registrar auditoría para creación de organización
@@ -808,7 +819,7 @@ export class AuthService {
       where: { id: store_id },
     });
     if (!store) {
-      throw new BadRequestException('Tienda no encontrada');
+      throw new VendixHttpException(ErrorCodes.AUTH_STORE_001);
     }
 
     // Verificar si el usuario ya existe en la tienda
@@ -829,7 +840,7 @@ export class AuthService {
       where: { name: 'customer' },
     });
     if (!customerRole) {
-      throw new BadRequestException('Rol customer no encontrado');
+      throw new VendixHttpException(ErrorCodes.AUTH_ROLE_001);
     }
 
     // Generar contraseña si no se proporciona
@@ -908,7 +919,7 @@ export class AuthService {
     });
 
     if (!userWithRoles) {
-      throw new BadRequestException('Error al recuperar el usuario registrado');
+      throw new VendixHttpException(ErrorCodes.AUTH_FIND_001);
     }
 
     // Generar tokens
@@ -1066,7 +1077,7 @@ export class AuthService {
     });
 
     if (!adminUser) {
-      throw new NotFoundException('Usuario administrador no encontrado');
+      throw new VendixHttpException(ErrorCodes.AUTH_FIND_001);
     }
 
     // Verificar que el admin tenga rol de owner, admin o super_admin
@@ -1078,9 +1089,7 @@ export class AuthService {
     );
 
     if (!hasPermission) {
-      throw new UnauthorizedException(
-        'No tienes permisos para crear usuarios staff',
-      );
+      throw new VendixHttpException(ErrorCodes.AUTH_PERM_001);
     }
 
     // Obtener organización del admin
@@ -1089,9 +1098,7 @@ export class AuthService {
     });
 
     if (!adminOrganization) {
-      throw new BadRequestException(
-        'Organización del administrador no encontrada',
-      );
+      throw new VendixHttpException(ErrorCodes.ORG_FIND_001);
     }
 
     // Verificar si el usuario ya existe en la organización
@@ -1111,9 +1118,7 @@ export class AuthService {
     // Verificar rol válido (solo roles de staff que puede asignar un admin)
     const validRoles = ['manager', 'supervisor', 'employee'];
     if (!validRoles.includes(role)) {
-      throw new BadRequestException(
-        `Rol inválido. Roles válidos: ${validRoles.join(', ')}`,
-      );
+      throw new VendixHttpException(ErrorCodes.AUTH_VALIDATE_001);
     }
 
     // Buscar rol en la base de datos
@@ -1122,9 +1127,7 @@ export class AuthService {
     });
 
     if (!staffRole) {
-      throw new BadRequestException(
-        `Rol '${role}' no encontrado en la base de datos`,
-      );
+      throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
     }
 
     // Verificar store si se proporciona
@@ -1137,9 +1140,7 @@ export class AuthService {
       });
 
       if (!store) {
-        throw new BadRequestException(
-          'Tienda no encontrada o no pertenece a tu organización',
-        );
+        throw new VendixHttpException(ErrorCodes.ORG_STORE_001);
       }
     }
 
@@ -1253,14 +1254,16 @@ export class AuthService {
             storeName = storeWithBranding.name;
             organizationName = storeWithBranding.organizations?.name;
             organizationSlug = storeWithBranding.organizations?.slug;
-            branding = await this.emailBrandingService.getStoreBranding(store_id);
+            branding =
+              await this.emailBrandingService.getStoreBranding(store_id);
           }
         } else {
           // Si no hay store_id, usar branding de la organización
-          const orgWithBranding = await this.prismaService.organizations.findUnique({
-            where: { id: adminUser.organization_id },
-            select: { name: true, slug: true },
-          });
+          const orgWithBranding =
+            await this.prismaService.organizations.findUnique({
+              where: { id: adminUser.organization_id },
+              select: { name: true, slug: true },
+            });
           if (orgWithBranding) {
             organizationName = orgWithBranding.name;
             organizationSlug = orgWithBranding.slug;
@@ -1309,15 +1312,11 @@ export class AuthService {
     // Validar que se proporcione al menos uno de los dos slugs (obligatorio)
     // IMPORTANT: Must validate BEFORE account lookup to avoid exposing account existence
     if (!organization_slug && !store_slug) {
-      throw new BadRequestException(
-        'Debe proporcionar organization_slug o store_slug',
-      );
+      throw new VendixHttpException(ErrorCodes.AUTH_VALIDATE_001);
     }
 
     if (organization_slug && store_slug) {
-      throw new BadRequestException(
-        'Proporcione solo organization_slug o store_slug, no ambos',
-      );
+      throw new VendixHttpException(ErrorCodes.AUTH_VALIDATE_001);
     }
 
     // 🆕 MULTI-ACCOUNT SUPPORT: Find ALL accounts for this email
@@ -1342,12 +1341,12 @@ export class AuthService {
     // Handle account lookup results
     if (accountLookup.matchType === 'not_found') {
       await this.logLoginAttempt(null, false, email);
-      throw new UnauthorizedException('Credenciales inválidas');
+      throw new VendixHttpException(ErrorCodes.AUTH_CREDENTIALS_001);
     }
 
     if (accountLookup.matchType === 'no_account_in_org') {
       await this.logLoginAttempt(null, false, email);
-      throw new UnauthorizedException('Credenciales inválidas');
+      throw new VendixHttpException(ErrorCodes.AUTH_CREDENTIALS_001);
     }
 
     if (accountLookup.matchType === 'account_disambiguation') {
@@ -1379,7 +1378,8 @@ export class AuthService {
 
     // Transformar user_roles a roles array simple para compatibilidad con frontend
     const { user_roles, ...userWithoutRoles } = user;
-    const roles = user_roles?.map((ur: any) => ur.roles?.name).filter(Boolean) || [];
+    const roles =
+      user_roles?.map((ur: any) => ur.roles?.name).filter(Boolean) || [];
 
     const userWithRolesArray = {
       ...userWithoutRoles,
@@ -1390,7 +1390,7 @@ export class AuthService {
     // Note: findUserAccountsByEmail already filters these, but double-check for safety
     if (user.state === 'suspended' || user.state === 'archived') {
       await this.logLoginAttempt(user.id, false);
-      throw new UnauthorizedException('Cuenta suspendida o archivada');
+      throw new VendixHttpException(ErrorCodes.AUTH_VALIDATE_001);
     }
 
     // Validar consistencia entre slugs y user_settings.app_type
@@ -1424,7 +1424,7 @@ export class AuthService {
         targetStore.organization_id !== user.organization_id
       ) {
         await this.logLoginAttempt(user.id, false);
-        throw new UnauthorizedException('Credenciales inválidas');
+        throw new VendixHttpException(ErrorCodes.AUTH_CREDENTIALS_001);
       }
 
       if (!hasHighPrivilege) {
@@ -1437,7 +1437,7 @@ export class AuthService {
 
         if (!isStoreUser) {
           await this.logLoginAttempt(user.id, false);
-          throw new UnauthorizedException('Credenciales inválidas');
+          throw new VendixHttpException(ErrorCodes.AUTH_CREDENTIALS_001);
         }
       }
     }
@@ -1530,11 +1530,7 @@ export class AuthService {
     }
 
     // 2. Lógica para ORG_ADMIN intentando login con Store Slug
-    if (
-      store_slug &&
-      userSettings &&
-      userSettings.app_type === 'ORG_ADMIN'
-    ) {
+    if (store_slug && userSettings && userSettings.app_type === 'ORG_ADMIN') {
       // Actualizar app_type en base de datos
       userSettings = await this.prismaService.user_settings.update({
         where: { id: userSettings.id },
@@ -1574,18 +1570,14 @@ export class AuthService {
           userOrganization.slug !== effective_organization_slug
         ) {
           await this.logLoginAttempt(user.id, false);
-          throw new UnauthorizedException(
-            'Usuario no pertenece a la organización especificada',
-          );
+          throw new VendixHttpException(ErrorCodes.AUTH_PERM_001);
         }
 
         target_organization_id = userOrganization.id;
         login_context = `organization:${effective_organization_slug}`;
       } else {
         await this.logLoginAttempt(user.id, false);
-        throw new UnauthorizedException(
-          'Usuario no pertenece a ninguna organización',
-        );
+        throw new VendixHttpException(ErrorCodes.AUTH_PERM_001);
       }
     } else if (effective_store_slug) {
       // Verificar que el usuario tenga acceso a la tienda especificada
@@ -1668,9 +1660,7 @@ export class AuthService {
 
       if (!storeUser) {
         await this.logLoginAttempt(user.id, false);
-        throw new UnauthorizedException(
-          'Usuario no tiene acceso a la tienda especificada',
-        );
+        throw new VendixHttpException(ErrorCodes.AUTH_PERM_001);
       }
 
       target_organization_id = storeUser.store.organizations.id;
@@ -1682,7 +1672,7 @@ export class AuthService {
 
     // Verificar si la cuenta está bloqueada
     if (user.locked_until && new Date() < user.locked_until) {
-      throw new UnauthorizedException('Cuenta temporalmente bloqueada');
+      throw new VendixHttpException(ErrorCodes.AUTH_VALIDATE_001);
     }
 
     // Verificar contraseña
@@ -1705,7 +1695,7 @@ export class AuthService {
       // Incrementar intentos fallidos
       await this.handleFailedLogin(user.id, client_info);
       await this.logLoginAttempt(user.id, false);
-      throw new UnauthorizedException('Credenciales inválidas');
+      throw new VendixHttpException(ErrorCodes.AUTH_CREDENTIALS_001);
     }
 
     // Reset intentos fallidos en login exitoso
@@ -1780,9 +1770,7 @@ export class AuthService {
     };
 
     if (!userSettings) {
-      throw new UnauthorizedException(
-        'User settings not found. Please contact support.',
-      );
+      throw new VendixHttpException(ErrorCodes.AUTH_FIND_001);
     }
 
     const userSettingsForResponse = {
@@ -1792,10 +1780,14 @@ export class AuthService {
       config: userSettings.config || {},
     };
 
+    // Obtener defaults para detectar módulos nuevos en el frontend
+    const defaults = await this.defaultPanelUIService.generatePanelUI('');
+
     return {
       user: userWithRolesAndPassword, // Usar usuario con roles array simple y store activo
       user_settings: userSettingsForResponse,
       store_settings: active_store_settings,
+      default_panel_ui: defaults.panel_ui,
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       token_type: tokens.token_type,
@@ -1825,7 +1817,7 @@ export class AuthService {
         this.configService.get<string>('JWT_SECRET');
 
       if (!refreshSecret) {
-        throw new UnauthorizedException('JWT secret not configured');
+        throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
       }
 
       // Verificar el refresh token JWT (firma y expiración)
@@ -1873,7 +1865,7 @@ export class AuthService {
       }
 
       if (!tokenRecord) {
-        throw new UnauthorizedException('Refresh token inválido o expirado');
+        throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
       }
 
       // 🔒 VALIDACIONES DE SEGURIDAD ADICIONALES
@@ -1882,16 +1874,12 @@ export class AuthService {
       // 🔒 VERIFICAR QUE EL TOKEN TIENE USUARIO ASOCIADO
       const user = tokenRecord.users;
       if (!user) {
-        throw new UnauthorizedException(
-          'Refresh token inválido: usuario no encontrado',
-        );
+        throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
       }
 
       // 🔒 VALIDACIÓN DE ORGANIZACIÓN: Asegurar que el token scope corresponde al usuario
       if (Number(payload.organization_id) !== user.organization_id) {
-        throw new UnauthorizedException(
-          'Token scope inválido: organización no corresponde al usuario',
-        );
+        throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
       }
 
       // Generar nuevos tokens
@@ -1932,7 +1920,7 @@ export class AuthService {
         ...tokens,
       };
     } catch (error) {
-      throw new UnauthorizedException('Token de refresco inválido');
+      throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
     }
   }
 
@@ -1958,7 +1946,7 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException('Usuario no encontrado');
+      throw new VendixHttpException(ErrorCodes.AUTH_FIND_001);
     }
 
     // Remover password del response
@@ -2074,9 +2062,7 @@ export class AuthService {
           },
         };
       } catch (error) {
-        throw new BadRequestException(
-          'No se pudo cerrar la sesión. Intenta de nuevo.',
-        );
+        throw new VendixHttpException(ErrorCodes.AUTH_VALIDATE_001);
       }
     }
 
@@ -2112,11 +2098,11 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new NotFoundException('Usuario no encontrado');
+      throw new VendixHttpException(ErrorCodes.AUTH_FIND_001);
     }
 
     if (user.email_verified) {
-      throw new BadRequestException('El email ya está verificado');
+      throw new VendixHttpException(ErrorCodes.AUTH_VERIFY_001);
     }
 
     // Invalidar tokens anteriores
@@ -2172,15 +2158,15 @@ export class AuthService {
       });
 
     if (!verificationToken) {
-      throw new BadRequestException('Token de verificación inválido');
+      throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
     }
 
     if (verificationToken.verified) {
-      throw new BadRequestException('Token ya utilizado');
+      throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
     }
 
     if (new Date() > verificationToken.expires_at) {
-      throw new BadRequestException('Token expirado');
+      throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
     }
 
     // Marcar token como usado
@@ -2340,22 +2326,20 @@ export class AuthService {
       });
 
     if (!resetToken) {
-      throw new BadRequestException('Token de restablecimiento inválido');
+      throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
     }
 
     if (resetToken.used) {
-      throw new BadRequestException('Token ya utilizado');
+      throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
     }
 
     if (new Date() > resetToken.expires_at) {
-      throw new BadRequestException(
-        'Token expirado. Solicita un nuevo enlace de recuperación.',
-      );
+      throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
     }
 
     // Verificar que el usuario aún existe y está activo
     if (!resetToken.users || resetToken.users.state !== 'active') {
-      throw new BadRequestException('Usuario no encontrado o cuenta inactiva');
+      throw new VendixHttpException(ErrorCodes.AUTH_FIND_001);
     }
 
     // Validar fortaleza de la nueva contraseña
@@ -2426,7 +2410,7 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new NotFoundException('Usuario no encontrado');
+      throw new VendixHttpException(ErrorCodes.AUTH_FIND_001);
     }
 
     // Verificar contraseña actual
@@ -2435,22 +2419,18 @@ export class AuthService {
       user.password,
     );
     if (!isCurrentPasswordValid) {
-      throw new BadRequestException('Contraseña actual incorrecta');
+      throw new VendixHttpException(ErrorCodes.AUTH_PASSWORD_001);
     }
 
     // Validar fortaleza de la nueva contraseña
     if (!this.validatePasswordStrength(new_password)) {
-      throw new BadRequestException(
-        'La contraseña debe tener al menos 8 caracteres, incluyendo mayúsculas, minúsculas y números',
-      );
+      throw new VendixHttpException(ErrorCodes.AUTH_VALIDATE_001);
     }
 
     // Verificar que la nueva contraseña no sea igual a la actual
     const isSamePassword = await bcrypt.compare(new_password, user.password);
     if (isSamePassword) {
-      throw new BadRequestException(
-        'La nueva contraseña no puede ser igual a la contraseña actual',
-      );
+      throw new VendixHttpException(ErrorCodes.AUTH_VALIDATE_001);
     }
 
     // Hashear nueva contraseña

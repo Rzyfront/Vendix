@@ -325,6 +325,86 @@ cd apps/frontend && npm run build
 
 ---
 
+## 🐳 Container Recreation (Cache Issues)
+
+### When to Recreate
+
+**Recrear el contenedor es NECESARIO cuando:**
+
+- ❌ Errores persisten después de múltiples intentos de fix
+- ❌ Cambios en `package.json` (nuevas dependencias)
+- ❌ Cambios en `docker-compose.yml` (volúmenes, redes, environment)
+- ❌ La imagen tiene caché corrupto o desactualizado
+- ❌ Errores extraños de módulos que "deberían" estar instalados
+- ❌ Problemas de permisos en archivos mapeados
+- ❌ El contenedor no responde después de `docker restart`
+- ❌ Cambios en el Dockerfile
+
+### How to Recreate
+
+**Opción 1: Restart + Rebuild (Recomendado para cambios menores)**
+```bash
+# Restart y rebuild de un contenedor específico
+docker-compose restart <service>
+# Ejemplo:
+docker-compose restart backend
+```
+
+**Opción 2: Rebuild (Sin stop)**
+```bash
+# Rebuild sin detener otros servicios
+docker-compose build --no-cache <service>
+docker-compose up -d <service>
+```
+
+**Opción 3: Full Recreate (Para cambios críticos)**
+```bash
+# Detener, eliminar y recrear contenedor
+docker-compose down
+docker-compose up -d
+
+# O para un servicio específico:
+docker-compose down <service>
+docker-compose up -d <service>
+```
+
+**Opción 4: Force Recreate (Limpia cache)**
+```bash
+# Forzar recreate - elimina contenedores y recreatea
+docker-compose up -d --force-recreate
+
+# Para un servicio específico:
+docker-compose up -d --force-recreate <service>
+```
+
+### Verification After Recreate
+
+**SIEMPRE verificar después de recrear:**
+
+```bash
+# 1. Verificar que el contenedor esté corriendo
+docker ps
+
+# 2. Verificar logs del contenedor recreado
+docker logs --tail 40 vendix_<service>
+
+# 3. Verificar que no haya errores
+docker logs --tail 40 vendix_backend
+docker logs --tail 40 vendix_frontend
+```
+
+### Common Scenarios
+
+| Problema | Solución |
+|----------|----------|
+| Nuevas dependencias en package.json | `docker-compose build --no-cache backend` |
+| Cambios en volumenes/docker-compose | `docker-compose down && docker-compose up -d` |
+| Caché corrupta de node_modules | `docker-compose build --no-cache frontend` |
+| Errores persistentes sin sentido | `docker-compose up -d --force-recreate` |
+| Cambios en Dockerfile | `docker-compose up -d --build` |
+
+---
+
 ### 🎯 GOLDEN RULE
 
 **Development → Docker logs (watch mode)**

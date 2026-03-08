@@ -5,6 +5,7 @@ import {
   ApplicationRef,
 } from '@angular/core';
 import { ConfirmationModalComponent } from '../confirmation-modal/confirmation-modal.component';
+import { PromptModalComponent } from '../prompt-modal/prompt-modal.component';
 
 export interface DialogConfig {
   hasBackdrop?: boolean;
@@ -87,7 +88,44 @@ export class DialogService {
     data: PromptData,
     config: DialogConfig = {},
   ): Promise<string | undefined> {
-    console.warn('DialogService.prompt not implemented:', data, config);
-    return Promise.resolve(undefined);
+    return new Promise<string | undefined>((resolve) => {
+      const componentRef = createComponent(PromptModalComponent, {
+        environmentInjector: this.injector,
+      });
+
+      componentRef.instance.title = data.title;
+      componentRef.instance.message = data.message;
+      componentRef.instance.placeholder = data.placeholder || '';
+      componentRef.instance.defaultValue = data.defaultValue || '';
+      if (data.confirmText)
+        componentRef.instance.confirmText = data.confirmText;
+      if (data.cancelText) componentRef.instance.cancelText = data.cancelText;
+
+      // Apply config
+      if (config.size) componentRef.instance.size = config.size;
+      if (config.showCloseButton !== undefined)
+        componentRef.instance.showCloseButton = config.showCloseButton;
+      if (config.customClasses)
+        componentRef.instance.customClasses = config.customClasses;
+
+      const sub = componentRef.instance.confirm.subscribe((value: string) => {
+        resolve(value);
+        sub.unsubscribe();
+        this.appRef.detachView(componentRef.hostView);
+        componentRef.destroy();
+      });
+
+      const subCancel = componentRef.instance.cancel.subscribe(() => {
+        resolve(undefined);
+        subCancel.unsubscribe();
+        this.appRef.detachView(componentRef.hostView);
+        componentRef.destroy();
+      });
+
+      this.appRef.attachView(componentRef.hostView);
+      const domElem = (componentRef.hostView as any)
+        .rootNodes[0] as HTMLElement;
+      document.body.appendChild(domElem);
+    });
   }
 }

@@ -321,4 +321,13 @@ export class GlobalPrismaService extends BasePrismaService {
   get support_notifications() {
     return this.baseClient.support_notifications;
   }
+
+  // AI Engine models
+  get ai_engine_configs() {
+    return this.baseClient.ai_engine_configs;
+  }
+
+  get ai_engine_applications() {
+    return this.baseClient.ai_engine_applications;
+  }
 }

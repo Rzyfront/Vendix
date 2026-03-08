@@ -83,6 +83,11 @@ export function getDefaultStoreSettings(): StoreSettings {
       allow_discount: true,
       max_discount_percentage: 15,
       allow_refund_without_approval: false,
+      scale: {
+        enabled: false,
+        allow_manual_weight_entry: true,
+        default_weight_unit: 'kg',
+      },
     },
     receipts: {
       print_receipt: true,

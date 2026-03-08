@@ -223,12 +223,16 @@ npx prisma migrate reset
 # 1. Create migration without applying
 npx prisma migrate dev --create-only --name describe_your_changes
 
-# 2. Review generated migration SQL
-# Edit migration if needed
+# 2. MANDATORY: Review and edit generated migration SQL
+# - Replace any `ALTER TYPE ... ADD VALUE 'x'` with `ALTER TYPE ... ADD VALUE IF NOT EXISTS 'x'`
+# - See vendix-prisma-migrations skill for full idempotent patterns
 
 # 3. Apply migration (production environment)
 npx prisma migrate deploy
 ```
+
+> **WARNING:** If a migration fails in production, the backend enters a **crash loop** (P3009).
+> Enum `ADD VALUE` statements are the #1 cause. See `vendix-prisma-migrations` skill for recovery and prevention.
 
 ---
 
@@ -385,6 +389,7 @@ model products {
 
 ## Related Skills
 
+- `vendix-prisma-migrations` - Production migration safety, enum handling, P3009 recovery
 - `vendix-prisma-scopes` - Prisma scoping system and model registration
 - `vendix-prisma-seed` - Seed data patterns
 - `vendix-naming-conventions` - Naming conventions (CRITICAL)

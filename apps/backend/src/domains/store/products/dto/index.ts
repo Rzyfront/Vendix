@@ -26,6 +26,11 @@ export enum ProductState {
   ARCHIVED = 'archived',
 }
 
+export enum PricingType {
+  UNIT = 'unit',
+  WEIGHT = 'weight',
+}
+
 // DTO para especificar stock por ubicación
 export class StockByLocationDto {
   @IsInt()
@@ -275,6 +280,10 @@ export class CreateProductDto {
   state?: ProductState = ProductState.ACTIVE;
 
   @IsOptional()
+  @IsEnum(PricingType)
+  pricing_type?: PricingType = PricingType.UNIT;
+
+  @IsOptional()
   @IsArray()
   @IsInt({ each: true })
   category_ids?: number[];
@@ -402,6 +411,10 @@ export class UpdateProductDto {
   @IsOptional()
   @IsEnum(ProductState)
   state?: ProductState;
+
+  @IsOptional()
+  @IsEnum(PricingType)
+  pricing_type?: PricingType;
 
   @IsOptional()
   @IsArray()
@@ -752,6 +765,10 @@ export class UpdateProductWithVariantsDto {
   state?: ProductState;
 
   @IsOptional()
+  @IsEnum(PricingType)
+  pricing_type?: PricingType;
+
+  @IsOptional()
   @IsArray()
   @IsInt({ each: true })
   category_ids?: number[];
@@ -972,6 +989,32 @@ export class BulkUploadTemplateDto {
   headers: string[];
   sample_data: any[];
   instructions: string;
+}
+
+export class GenerateProductDescriptionDto {
+  @IsString()
+  name: string;
+
+  @IsOptional()
+  @IsString()
+  brand?: string;
+
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  base_price?: number;
+
+  @IsOptional()
+  @IsString()
+  sku?: string;
+
+  @IsOptional()
+  @IsObject()
+  extra_context?: Record<string, any>;
 }
 
 export * from './bulk-image-upload.dto';

@@ -15,20 +15,21 @@ import {
   UpdateGPSCoordinatesDto,
 } from './dto';
 import { Prisma } from '@prisma/client';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class AddressesService {
   constructor(
     private prisma: StorePrismaService,
     private accessValidation: AccessValidationService,
-  ) { }
+  ) {}
 
   async create(createAddressDto: CreateAddressDto, user: any) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
 
     if (!store_id) {
-      throw new ForbiddenException('Store context required for this operation');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
     // Force store_id from context
@@ -36,10 +37,14 @@ export class AddressesService {
 
     // Block direct organization_id or user_id — use customer_id instead
     if (createAddressDto.organization_id) {
-      throw new BadRequestException('Cannot create organization addresses in Store domain');
+      throw new BadRequestException(
+        'Cannot create organization addresses in Store domain',
+      );
     }
     if (createAddressDto.user_id) {
-      throw new BadRequestException('Use customer_id instead of user_id to associate addresses with customers');
+      throw new BadRequestException(
+        'Use customer_id instead of user_id to associate addresses with customers',
+      );
     }
 
     // If customer_id is provided, resolve the user_id from the customer in this store
@@ -59,7 +64,9 @@ export class AddressesService {
     }
 
     if (createAddressDto.is_primary) {
-      const unsetCriteria: { store_id?: number; user_id?: number } = { store_id: store_id };
+      const unsetCriteria: { store_id?: number; user_id?: number } = {
+        store_id: store_id,
+      };
       if (resolvedUserId) {
         unsetCriteria.user_id = resolvedUserId;
       }
@@ -169,10 +176,10 @@ export class AddressesService {
   }
 
   async findByStore(storeId: number, user: any) {
-    // Check context matches storeId derived from param? 
-    // Or just ignore param and use context? 
-    // To be safe and compliant with "always use prisma store service", 
-    // we lean on the service's automatic filtering. 
+    // Check context matches storeId derived from param?
+    // Or just ignore param and use context?
+    // To be safe and compliant with "always use prisma store service",
+    // we lean on the service's automatic filtering.
     return this.prisma.addresses.findMany({
       orderBy: { is_primary: 'desc' },
       include: {

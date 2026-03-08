@@ -5,7 +5,7 @@ description: >
   Trigger: Cuando se hacen commits, se crean PRs, se trabaja con ramas, o se resuelven conflictos en git.
 license: Apache-2.0
 metadata:
-  author: vendix
+  author: rzyfront
   version: "1.0"
   scope: [root]
   auto_invoke:
@@ -28,18 +28,18 @@ metadata:
 
 **Si el servidor MCP de GitHub está disponible, SIEMPRE preferir usar las herramientas MCP sobre comandos bash de git.** Esto aplica especialmente para:
 
-| Operación | MCP Tool preferido | Evitar |
-|-----------|-------------------|--------|
-| Crear PR | `mcp__github__create_pull_request` | `gh pr create` vía Bash |
-| Crear rama | `mcp__github__create_branch` | `git checkout -b` + `git push` |
-| Ver PRs | `mcp__github__list_pull_requests` | `gh pr list` vía Bash |
-| Ver issues | `mcp__github__list_issues` / `mcp__github__search_issues` | `gh issue list` vía Bash |
-| Leer archivos del repo | `mcp__github__get_file_contents` | `gh api` vía Bash |
-| Ver diff de PR | `mcp__github__pull_request_read` (method: get_diff) | `gh pr diff` vía Bash |
-| Comentar en PR/issue | `mcp__github__add_issue_comment` | `gh pr comment` vía Bash |
-| Crear review | `mcp__github__pull_request_review_write` | `gh pr review` vía Bash |
-| Push archivos | `mcp__github__push_files` | `git add` + `git commit` + `git push` |
-| Merge PR | `mcp__github__merge_pull_request` | `gh pr merge` vía Bash |
+| Operación              | MCP Tool preferido                                        | Evitar                                |
+| ---------------------- | --------------------------------------------------------- | ------------------------------------- |
+| Crear PR               | `mcp__github__create_pull_request`                        | `gh pr create` vía Bash               |
+| Crear rama             | `mcp__github__create_branch`                              | `git checkout -b` + `git push`        |
+| Ver PRs                | `mcp__github__list_pull_requests`                         | `gh pr list` vía Bash                 |
+| Ver issues             | `mcp__github__list_issues` / `mcp__github__search_issues` | `gh issue list` vía Bash              |
+| Leer archivos del repo | `mcp__github__get_file_contents`                          | `gh api` vía Bash                     |
+| Ver diff de PR         | `mcp__github__pull_request_read` (method: get_diff)       | `gh pr diff` vía Bash                 |
+| Comentar en PR/issue   | `mcp__github__add_issue_comment`                          | `gh pr comment` vía Bash              |
+| Crear review           | `mcp__github__pull_request_review_write`                  | `gh pr review` vía Bash               |
+| Push archivos          | `mcp__github__push_files`                                 | `git add` + `git commit` + `git push` |
+| Merge PR               | `mcp__github__merge_pull_request`                         | `gh pr merge` vía Bash                |
 
 **Razón:** Las herramientas MCP proveen acceso estructurado, tipado y con mejor manejo de errores que los comandos CLI. Solo usar `git` vía Bash para operaciones locales que no tengan equivalente MCP (ej: `git status`, `git diff` local, `git stash`).
 
@@ -97,23 +97,28 @@ feat: agregar campo status a tabla orders
 
 Formato para PRs con migraciones:
 
-```markdown
+````markdown
 ## Summary
+
 Agrega campo de status a órdenes
 
 ## ⚠️ MIGRACIÓN DE BASE DE DATOS
+
 > **ATENCIÓN**: Este PR requiere ejecutar migraciones antes del deploy.
 
-| Operación | Tabla | Detalle |
-|-----------|-------|---------|
-| ALTER TABLE | orders | ADD COLUMN status VARCHAR(50) DEFAULT 'pending' |
-| CREATE INDEX | orders | idx_orders_status ON orders(status) |
+| Operación    | Tabla  | Detalle                                         |
+| ------------ | ------ | ----------------------------------------------- |
+| ALTER TABLE  | orders | ADD COLUMN status VARCHAR(50) DEFAULT 'pending' |
+| CREATE INDEX | orders | idx_orders_status ON orders(status)             |
 
 ### Comandos de migración
+
 ```bash
 npx prisma migrate deploy
 ```
-```
+````
+
+````
 
 ### REGLA 4: Resolución de conflictos
 
@@ -130,7 +135,7 @@ git commit -m "merge: resolver conflictos con main"
 # PROHIBIDO: resolver conflictos en main
 git checkout main
 git merge feature/mi-rama  # NO hacer esto directamente
-```
+````
 
 ---
 
@@ -158,13 +163,13 @@ git merge feature/mi-rama  # NO hacer esto directamente
 
 ## Conflictos: Reglas de Resolución
 
-| Situación | Acción |
-|-----------|--------|
-| Conflicto claro (solo formato, imports) | Resolver a favor del cambio nuevo |
-| Conflicto en lógica de negocio | Mantener ambos cambios si es posible, priorizar el nuevo |
-| Conflicto ambiguo o riesgoso | Preguntar al usuario mostrando las opciones |
-| Conflicto en archivos de config | Merge manual, preservar ambas configuraciones |
-| Conflicto en migraciones | Preguntar siempre al usuario (alto riesgo) |
+| Situación                               | Acción                                                   |
+| --------------------------------------- | -------------------------------------------------------- |
+| Conflicto claro (solo formato, imports) | Resolver a favor del cambio nuevo                        |
+| Conflicto en lógica de negocio          | Mantener ambos cambios si es posible, priorizar el nuevo |
+| Conflicto ambiguo o riesgoso            | Preguntar al usuario mostrando las opciones              |
+| Conflicto en archivos de config         | Merge manual, preservar ambas configuraciones            |
+| Conflicto en migraciones                | Preguntar siempre al usuario (alto riesgo)               |
 
 ---
 

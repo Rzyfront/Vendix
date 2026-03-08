@@ -5,7 +5,7 @@ description: >
   Trigger: When working with pricing that includes taxes/fees, creating UI components for pricing, or implementing price calculations.
 license: MIT
 metadata:
-  author: vendix
+  author: rzyfront
   version: "1.0"
 ---
 
@@ -16,6 +16,7 @@ metadata:
 ## Trigger
 
 Use this skill when:
+
 - Working with pricing that includes taxes/fees (products, services, orders, invoices)
 - Creating UI components that display calculated prices
 - Designing database schemas for pricing
@@ -37,6 +38,7 @@ Use this skill when:
 ## Database Schema Pattern
 
 ### DO Store (Persist):
+
 ```prisma
 model products {
   id          Int      @id
@@ -66,6 +68,7 @@ model tax_rates {
 ```
 
 ### DO NOT Store:
+
 ❌ `final_price` - Calculated field
 ❌ `price_with_tax` - Calculated field
 ❌ `total_amount` - Calculated field (unless it's a snapshot like order)
@@ -74,12 +77,12 @@ model tax_rates {
 
 ## Naming Convention
 
-| Concept | Database Field | Description |
-|---------|---------------|-------------|
-| Base Price | `base_price` | Price WITHOUT taxes (PVP) - **STORED** |
-| Cost Price | `cost_price` | Acquisition/manufacturing cost - **STORED** |
-| Calculated Price | `priceWithTax` / `finalPrice` | Base + taxes - **CALCULATED** |
-| Sale Price | `sale_price` | Optional promotional price - **STORED** |
+| Concept          | Database Field                | Description                                 |
+| ---------------- | ----------------------------- | ------------------------------------------- |
+| Base Price       | `base_price`                  | Price WITHOUT taxes (PVP) - **STORED**      |
+| Cost Price       | `cost_price`                  | Acquisition/manufacturing cost - **STORED** |
+| Calculated Price | `priceWithTax` / `finalPrice` | Base + taxes - **CALCULATED**               |
+| Sale Price       | `sale_price`                  | Optional promotional price - **STORED**     |
 
 ## Frontend Pattern (Angular)
 
@@ -112,7 +115,9 @@ get priceWithTax(): number {
   <label class="block text-sm font-bold text-text-primary">
     Precio Final (PVP + Imp)
   </label>
-  <div class="h-[42px] px-4 flex items-center bg-surface border-2 border-primary-500/20 rounded-lg text-xl font-black text-primary-600 shadow-sm">
+  <div
+    class="h-[42px] px-4 flex items-center bg-surface border-2 border-primary-500/20 rounded-lg text-xl font-black text-primary-600 shadow-sm"
+  >
     {{ priceWithTax | currency }}
   </div>
   <p class="text-[10px] text-text-secondary font-medium italic">
@@ -124,6 +129,7 @@ get priceWithTax(): number {
 ### 3. Visual Design Guidelines
 
 **Calculated fields should be:**
+
 - ✅ Read-only (no input field)
 - ✅ Visually distinct (different background/border)
 - ✅ Labeled clearly as "Calculated"
@@ -134,7 +140,7 @@ get priceWithTax(): number {
   background: var(--surface-bg);
   border: 2px solid var(--primary-border);
   color: var(--primary-color);
-  font-weight: 900;  // Extra bold to emphasize it's a result
+  font-weight: 900; // Extra bold to emphasize it's a result
 }
 ```
 
@@ -147,15 +153,15 @@ get priceWithTax(): number {
 export class CreateProductDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
-  base_price: number;  // ✅ ACCEPTED
+  base_price: number; // ✅ ACCEPTED
 
   @IsNumber({ maxDecimalPlaces: 2 })
   @IsOptional()
-  cost_price?: number;  // ✅ ACCEPTED
+  cost_price?: number; // ✅ ACCEPTED
 
   @IsArray()
   @IsOptional()
-  tax_category_ids?: number[];  // ✅ ACCEPTED
+  tax_category_ids?: number[]; // ✅ ACCEPTED
 
   // ❌ NEVER include final_price or price_with_tax
 }
@@ -190,14 +196,15 @@ calculatePriceWithTax(
 export class ProductResponseDto {
   id: number;
   name: string;
-  base_price: number;          // Stored value
+  base_price: number; // Stored value
   cost_price: number;
-  tax_categories: {            // Tax breakdown
+  tax_categories: {
+    // Tax breakdown
     id: number;
     name: string;
     rate: number;
   }[];
-  price_with_tax?: number;     // ✅ OK in READ responses (calculated)
+  price_with_tax?: number; // ✅ OK in READ responses (calculated)
 }
 ```
 
@@ -271,23 +278,23 @@ model orders {
 ## Testing Pattern
 
 ```typescript
-describe('Price Calculation', () => {
-  it('should calculate price with single tax', () => {
+describe("Price Calculation", () => {
+  it("should calculate price with single tax", () => {
     const base = 100;
-    const taxes = [{ rate: 0.21 }];  // 21%
+    const taxes = [{ rate: 0.21 }]; // 21%
     expect(calculatePriceWithTax(base, taxes)).toBe(121);
   });
 
-  it('should calculate price with composite taxes', () => {
+  it("should calculate price with composite taxes", () => {
     const base = 100;
     const taxes = [
-      { rate: 0.21 },  // VAT
-      { rate: 0.02 }   // Municipal
+      { rate: 0.21 }, // VAT
+      { rate: 0.02 }, // Municipal
     ];
     expect(calculatePriceWithTax(base, taxes)).toBe(123);
   });
 
-  it('should handle zero taxes', () => {
+  it("should handle zero taxes", () => {
     expect(calculatePriceWithTax(100, [])).toBe(100);
   });
 });
@@ -299,7 +306,7 @@ Always use a consistent pipe or formatter:
 
 ```typescript
 // currency.pipe.ts
-@Pipe({ name: 'currency' })
+@Pipe({ name: "currency" })
 export class CurrencyPipe implements PipeTransform {
   transform(value: number): string {
     return `$${value.toFixed(2)}`;

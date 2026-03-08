@@ -306,6 +306,23 @@ export class AppConfigService {
   }
 
   private async detectDomain(hostname?: string): Promise<DomainConfig> {
+    // SSR: no real domain to resolve — return VENDIX_LANDING config directly
+    if (typeof window === 'undefined' && !hostname) {
+      return {
+        hostname: 'vendix.store',
+        domainType: 'PRIMARY',
+        environment: AppType.VENDIX_LANDING,
+        organization_slug: 'vendix-corp',
+        store_slug: undefined,
+        organization_id: undefined,
+        store_id: undefined,
+        store_logo_url: undefined,
+        customConfig: {},
+        isVendixDomain: true,
+        isMainVendixDomain: true,
+      } as DomainConfig;
+    }
+
     const rawHostname =
       hostname ||
       (typeof window !== 'undefined' ? window.location.hostname : 'localhost');

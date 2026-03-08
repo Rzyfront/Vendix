@@ -9,6 +9,7 @@ import {
   UpdateDomainSettingDto,
 } from '../../organization/domains/dto/domain-settings.dto';
 import { Prisma } from '@prisma/client';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class DomainsService {
@@ -127,7 +128,7 @@ export class DomainsService {
     });
 
     if (!domain) {
-      throw new NotFoundException('Domain not found');
+      throw new VendixHttpException(ErrorCodes.ORG_DOMAIN_001);
     }
 
     return domain;
@@ -141,7 +142,7 @@ export class DomainsService {
     });
 
     if (!existingDomain) {
-      throw new NotFoundException('Domain not found');
+      throw new VendixHttpException(ErrorCodes.ORG_DOMAIN_001);
     }
 
     const { domain_type, config, is_primary, status, ssl_status, ownership } =
@@ -179,7 +180,7 @@ export class DomainsService {
     });
 
     if (!existingDomain) {
-      throw new NotFoundException('Domain not found');
+      throw new VendixHttpException(ErrorCodes.ORG_DOMAIN_001);
     }
 
     if (existingDomain.is_primary) {
@@ -294,7 +295,7 @@ export class DomainsService {
     });
 
     if (!domain) {
-      throw new NotFoundException('Domain not found');
+      throw new VendixHttpException(ErrorCodes.ORG_DOMAIN_001);
     }
 
     // Here you would implement actual domain verification logic

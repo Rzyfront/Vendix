@@ -1,3 +1,5 @@
+import { ErrorCodes, ErrorCodeEntry } from 'src/common/errors';
+
 export enum PaymentErrorCodes {
   INVALID_ORDER = 'INVALID_ORDER',
   INVALID_AMOUNT = 'INVALID_AMOUNT',
@@ -11,6 +13,9 @@ export enum PaymentErrorCodes {
   CURRENCY_NOT_SUPPORTED = 'CURRENCY_NOT_SUPPORTED',
 }
 
+/**
+ * @deprecated Use VendixHttpException with ErrorCodes.PAY_* instead
+ */
 export class PaymentError extends Error {
   constructor(
     public code: PaymentErrorCodes,
@@ -21,6 +26,20 @@ export class PaymentError extends Error {
     this.name = 'PaymentError';
   }
 }
+
+/** Maps legacy PaymentErrorCodes to the new standardized ErrorCodeEntry */
+export const LEGACY_TO_NEW: Record<PaymentErrorCodes, ErrorCodeEntry> = {
+  [PaymentErrorCodes.INVALID_ORDER]: ErrorCodes.PAY_INVALID_ORDER_001,
+  [PaymentErrorCodes.INVALID_AMOUNT]: ErrorCodes.PAY_INVALID_AMOUNT_001,
+  [PaymentErrorCodes.PAYMENT_METHOD_DISABLED]: ErrorCodes.PAY_METHOD_DISABLED_001,
+  [PaymentErrorCodes.PROCESSOR_ERROR]: ErrorCodes.PAY_PROCESSOR_001,
+  [PaymentErrorCodes.VALIDATION_FAILED]: ErrorCodes.PAY_VALIDATE_001,
+  [PaymentErrorCodes.INSUFFICIENT_FUNDS]: ErrorCodes.PAY_INVALID_AMOUNT_001,
+  [PaymentErrorCodes.GATEWAY_TIMEOUT]: ErrorCodes.PAY_PROCESSOR_001,
+  [PaymentErrorCodes.FRAUD_DETECTED]: ErrorCodes.PAY_VALIDATE_001,
+  [PaymentErrorCodes.DUPLICATE_PAYMENT]: ErrorCodes.PAY_DUPLICATE_001,
+  [PaymentErrorCodes.CURRENCY_NOT_SUPPORTED]: ErrorCodes.PAY_VALIDATE_001,
+};
 
 export const PAYMENT_ERRORS = {
   [PaymentErrorCodes.INVALID_ORDER]:

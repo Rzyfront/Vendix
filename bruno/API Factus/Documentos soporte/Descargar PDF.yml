@@ -1,0 +1,31 @@
+info:
+  name: Descargar PDF
+  type: http
+  seq: 5
+
+http:
+  method: GET
+  url: "{{url_api}}/v1/support-documents/download-pdf/:number"
+  headers:
+    - name: Accept
+      value: application/json
+  params:
+    - name: number
+      value: SEDS984000063
+      type: path
+      description: numero del documento soporte
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+docs: |-
+  **Nota:** Es necesario el envio del (access_token) token de acceso para la descarga de el documento soporte.  
+  para ver como generar el token. use el siguiente link. [Auth endpoint](https://martian-spaceship-418933.postman.co/workspace/api.factus.com.co~af54fc7a-b3d9-40a7-9f62-273f3ec355b9/request/22150862-d94026db-94e7-430e-81b1-86cd3e7d9de6?ctx=documentation)
+
+  Recuerde que el token de acceso caduca cada hora.
+
+  El endpoint devuelve un documento soporte codificado en base64 y el nombre del archivo, deberas decodificar el contenido de pdf_base_64_encoded

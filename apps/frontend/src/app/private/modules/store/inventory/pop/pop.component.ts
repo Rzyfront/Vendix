@@ -410,7 +410,7 @@ export class PopComponent implements OnInit, OnDestroy {
       name: event.prebulkData.name,
       code: event.prebulkData.code || 'MANUAL-TEMP',
       cost: event.unit_cost,
-      price: 0,
+      price: event.prebulkData.base_price || 0,
       stock: 0,
       is_active: true,
     };

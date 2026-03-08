@@ -11,10 +11,11 @@ import {
   RemovePermissionsDto,
 } from '../../organization/roles/dto/role.dto';
 import { Prisma } from '@prisma/client';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class RolesService {
-  constructor(private prisma: GlobalPrismaService) { }
+  constructor(private prisma: GlobalPrismaService) {}
 
   async create(createRoleDto: CreateRoleDto) {
     const existingRole = await (this.prisma as any).roles.findUnique({
@@ -173,7 +174,7 @@ export class RolesService {
     });
 
     if (!role) {
-      throw new NotFoundException('Role not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_ROLE_001);
     }
 
     return this.mapToResponse(role);
@@ -185,7 +186,7 @@ export class RolesService {
     });
 
     if (!existingRole) {
-      throw new NotFoundException('Role not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_ROLE_001);
     }
 
     if (updateRoleDto.name && updateRoleDto.name !== existingRole.name) {
@@ -253,7 +254,7 @@ export class RolesService {
     });
 
     if (!existingRole) {
-      throw new NotFoundException('Role not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_ROLE_001);
     }
 
     if (existingRole.is_system_role) {
@@ -283,7 +284,7 @@ export class RolesService {
     });
 
     if (!role) {
-      throw new NotFoundException('Role not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_ROLE_001);
     }
 
     const existingPermissions = await (
@@ -324,7 +325,7 @@ export class RolesService {
     });
 
     if (!role) {
-      throw new NotFoundException('Role not found');
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_ROLE_001);
     }
 
     await this.prisma.role_permissions.deleteMany({
@@ -410,7 +411,6 @@ export class RolesService {
       recentRoles,
     };
   }
-
 
   private mapToResponse(role: any) {
     if (!role) return role;

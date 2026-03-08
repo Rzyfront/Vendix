@@ -13,6 +13,7 @@ import {
   UpdateStoreSettingsDto,
   StoreDashboardDto,
 } from './dto';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { Prisma } from '@prisma/client';
 import slugify from 'slugify';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -24,7 +25,7 @@ export class StoresService {
   constructor(
     private prisma: StorePrismaService,
     private s3Service: S3Service,
-  ) { }
+  ) {}
 
   async create(createStoreDto: CreateStoreDto) {
     // Obtener organization_id del contexto
@@ -68,9 +69,10 @@ export class StoresService {
     });
 
     // Always create store_settings with defaults or provided settings
-    const settingsToCreate = settings && Object.keys(settings).length > 0
-      ? settings
-      : getDefaultStoreSettings();
+    const settingsToCreate =
+      settings && Object.keys(settings).length > 0
+        ? settings
+        : getDefaultStoreSettings();
 
     await this.prisma.store_settings.create({
       data: {
@@ -101,9 +103,15 @@ export class StoresService {
     };
   }
 
-  private async createDefaultLocationForStore(store: any, organization_id: number) {
+  private async createDefaultLocationForStore(
+    store: any,
+    organization_id: number,
+  ) {
     try {
-      const address = store.addresses && store.addresses.length > 0 ? store.addresses[0] : null;
+      const address =
+        store.addresses && store.addresses.length > 0
+          ? store.addresses[0]
+          : null;
 
       await this.prisma.inventory_locations.create({
         data: {
@@ -158,10 +166,12 @@ export class StoresService {
       this.prisma.stores.count({ where }),
     ]);
 
-    const signedStores = await Promise.all(stores.map(async (store) => ({
-      ...store,
-      logo_url: await this.s3Service.signUrl((store as any).logo_url, true),
-    })));
+    const signedStores = await Promise.all(
+      stores.map(async (store) => ({
+        ...store,
+        logo_url: await this.s3Service.signUrl((store as any).logo_url, true),
+      })),
+    );
 
     return {
       data: signedStores,
@@ -225,7 +235,7 @@ export class StoresService {
 
         // Actualizar TODOS los dominios de la tienda
         const domains = await this.prisma.domain_settings.findMany({
-          where: { store_id: id }
+          where: { store_id: id },
         });
 
         for (const domain of domains) {
@@ -239,19 +249,19 @@ export class StoresService {
                 ...config,
                 branding: {
                   ...branding,
-                  name: storeData.name
-                }
-              }
-            }
+                  name: storeData.name,
+                },
+              },
+            },
           });
         }
 
-        // Si es la tienda principal (o simplemente queremos consistencia), 
+        // Si es la tienda principal (o simplemente queremos consistencia),
         // actualizar el nombre de la organización también
         if (organization_id) {
           await this.prisma.organizations.update({
             where: { id: organization_id },
-            data: { name: storeData.name }
+            data: { name: storeData.name },
           });
         }
       } catch (error) {
@@ -301,7 +311,7 @@ export class StoresService {
   async getDashboardStats() {
     const context = RequestContextService.getContext();
     if (!context?.store_id) {
-      throw new ForbiddenException('Store context required for dashboard stats');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
     const [recentOrders, dispatchPendingOrders, refundPendingOrders] =
@@ -362,23 +372,34 @@ export class StoresService {
     const formattedRecentOrders = recentOrders.map((order) => ({
       id: String(order.id),
       customerName: order.users
-        ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim() || 'Cliente'
+        ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim() ||
+          'Cliente'
         : 'Cliente Anónimo',
       customerEmail: order.users?.email || '',
       amount: Number(order.grand_total || 0),
-      status: order.state as 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled',
+      status: order.state as
+        | 'pending'
+        | 'processing'
+        | 'shipped'
+        | 'delivered'
+        | 'cancelled',
       items: order._count?.order_items || 0,
       timestamp: order.created_at,
       hasShipping: !!order.shipping_method_id,
       shippingMethodName: order.shipping_method?.name || null,
       isPaid: order.payments?.some((p) => p.state === 'succeeded') || false,
-      deliveryType: order.delivery_type as 'pickup' | 'home_delivery' | 'direct_delivery',
+      deliveryType: order.delivery_type as
+        | 'pickup'
+        | 'home_delivery'
+        | 'direct_delivery',
     }));
 
     // Format dispatch pending orders
     const formattedDispatchPendingOrders = dispatchPendingOrders.map((o) => ({
       id: String(o.id),
-      customerName: `${o.users?.first_name || ''} ${o.users?.last_name || ''}`.trim() || 'Cliente',
+      customerName:
+        `${o.users?.first_name || ''} ${o.users?.last_name || ''}`.trim() ||
+        'Cliente',
       items: o._count?.order_items || 0,
       amount: Number(o.grand_total || 0),
       createdAt: o.created_at,
@@ -390,7 +411,8 @@ export class StoresService {
       orderId: String(r.orders.id),
       orderNumber: r.orders.order_number,
       customerName: r.users
-        ? `${r.users.first_name || ''} ${r.users.last_name || ''}`.trim() || 'Cliente'
+        ? `${r.users.first_name || ''} ${r.users.last_name || ''}`.trim() ||
+          'Cliente'
         : 'Cliente',
       amount: Number(r.orders.grand_total || 0),
       refundAmount: Number(r.amount || 0),

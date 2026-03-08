@@ -1,0 +1,482 @@
+info:
+  name: Crear y validar
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{url_api}}/v1/support-documents/validate"
+  headers:
+    - name: Accept
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+          "reference_code": "REF0017",
+          "numbering_range_id": 8,
+          "payment_method_code": "10",
+          "observation": "",
+          "provider": {
+              "identification_document_id": 6,
+              "identification": "123456789",
+              "dv": 6,
+              "trade_name": "",
+              "names": "Alan Turing",
+              "address": "calle 1 # 2-68",
+              "email": "alanturing@enigmasas.com",
+              "phone": "1234567890",
+              "is_resident": 1,
+              "country_code": "CO",
+              "municipality_id": 980
+          },
+          "items": [
+              {
+                  "code_reference": "12345",
+                  "name": "producto de prueba",
+                  "quantity": 1,
+                  "discount_rate": 20,
+                  "price": 50000,
+                  "unit_measure_id": 70,
+                  "standard_code_id": 1,
+                  "withholding_taxes": [
+                      {
+                          "code": "06",
+                          "withholding_tax_rate": "3.50"
+                      }
+                  ]
+              },
+              {
+                  "code_reference": "54321",
+                  "name": "producto de prueba 2",
+                  "quantity": 1,
+                  "discount_rate": 0,
+                  "price": 50000,
+                  "unit_measure_id": 70,
+                  "standard_code_id": 1
+              }
+          ]
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+
+examples:
+  - name: 201-Crear y validar
+    request:
+      url: "{{url_api}}/v1/support-documents/validate"
+      method: POST
+      headers:
+        - name: Accept
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "reference_code": "REF0012",
+              "numbering_range_id": 8,
+              "payment_method_code": "10",
+              "observation": "",
+              "provider": {
+                  "identification_document_id": 6,
+                  "identification": "123456789",
+                  "dv": 6,
+                  "trade_name": "",
+                  "names": "Alan Turing",
+                  "address": "calle 1 # 2-68",
+                  "email": "alanturing@enigmasas.com",
+                  "phone": "1234567890",
+                  "is_resident": 1,
+                  "country_code": "CO",
+                  "municipality_id": 980
+              },
+              "items": [
+                  {
+                      "code_reference": "12345",
+                      "name": "producto de prueba",
+                      "quantity": 1,
+                      "discount_rate": 20,
+                      "price": 50000,
+                      "unit_measure_id": 70,
+                      "standard_code_id": 1,
+                      "withholding_taxes": [
+                          {
+                              "code": "06",
+                              "withholding_tax_rate": "3.50"
+                          }
+                      ]
+                  },
+                  {
+                      "code_reference": "54321",
+                      "name": "producto de prueba 2",
+                      "quantity": 1,
+                      "discount_rate": 0,
+                      "price": 50000,
+                      "unit_measure_id": 70,
+                      "standard_code_id": 1
+                  }
+              ]
+          }
+    response:
+      statusText: "201"
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "Created",
+              "message": "Documento con el código de referencia REF0012 registrado y validado con éxito",
+              "data": {
+                  "company": {
+                      "url_logo": "http://api.test/storage/images/logos/2wkU627FUczVkr8U5P8yrYowQ44eYQG0Y9ymXhtP.png",
+                      "nit": "900825759",
+                      "dv": "7",
+                      "company": "HALLTEC S.A.S.",
+                      "name": "HALLTEC S.A.S.",
+                      "graphic_representation_name": "HALLTEC S.A.S.",
+                      "registration_code": "3FJ3253427",
+                      "economic_activity": "6311",
+                      "phone": "3165584659",
+                      "email": "yocahe5@gmail.com",
+                      "direction": "cra 10 # 9 - 04",
+                      "municipality": "San Gil"
+                  },
+                  "establishment": {
+                      "name": "HALLTEC S.A.S.",
+                      "address": "cra 10 # 9 - 04",
+                      "phone_number": "3165584659",
+                      "email": "yocahe5@gmail.com",
+                      "municipality": {
+                          "id": 980,
+                          "code": "68679",
+                          "name": "San Gil",
+                          "department": {
+                              "id": 28,
+                              "code": "68",
+                              "name": "Santander"
+                          }
+                      }
+                  },
+                  "provider": {
+                      "identification": "123456789",
+                      "dv": "6",
+                      "graphic_representation_name": "Alan Turing",
+                      "trade_name": null,
+                      "names": "Alan Turing",
+                      "address": "calle 1 # 2-68",
+                      "email": "alanturing@enigmasas.com",
+                      "phone": "1234567890",
+                      "identification_document": {
+                          "id": 6,
+                          "code": "31",
+                          "name": "NIT"
+                      },
+                      "legal_organization": {
+                          "id": 2,
+                          "code": "2",
+                          "name": "Persona Natural"
+                      },
+                      "tribute": {
+                          "id": 21,
+                          "code": "ZZ",
+                          "name": "No aplica"
+                      },
+                      "country": {
+                          "id": 46,
+                          "code": "CO",
+                          "name": "Colombia"
+                      },
+                      "municipality": {
+                          "id": 980,
+                          "code": "68679",
+                          "name": "San Gil"
+                      }
+                  },
+                  "support_document": {
+                      "id": 218,
+                      "number": "SEDS984000082",
+                      "reference_code": "REF0012",
+                      "status": 1,
+                      "qr": "https://catalogo-vpfe-hab.dian.gov.co/document/searchqr?documentkey=48556042d354b2e89f1920a24d00842a043c54ccc286ba297bb75d46510ff5759ed31b4474e34132ad1f29f701be75db",
+                      "cuds": "48556042d354b2e89f1920a24d00842a043c54ccc286ba297bb75d46510ff5759ed31b4474e34132ad1f29f701be75db",
+                      "validated": "07-02-2025 10:21:10 AM",
+                      "discount_rate": "0.00",
+                      "discount": "0.00",
+                      "gross_value": "90000.00",
+                      "taxable_amount": "0.00",
+                      "tax_amount": "0.00",
+                      "total": "90000.00",
+                      "observation": null,
+                      "errors": [],
+                      "created_at": "07-02-2025 10:21:07 AM",
+                      "qr_image": "data:image/png;base64, iVBORw0KGgoAAAANSUhEUgAAANwAAADcCAAAAAA+MZBdAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAACYktHRAD/h4/MvwAAJSdJREFUeNrtnX18VcWZ+L83rzdAIPIaXoSIUGOxiGBBocUWXGzFKFpoP42flsW6K3y2hW6b1hq7a6o1XbdxV+gL2OIiWrEttouKrdBihRZ30aLiD5Uq8maIxhAMNwn3Jvdlfn/MnDkz5+XeG+g/azp/3DPnmWeemXPPnJl5XgdCU4foAdgjRBXQJEQ9MEt4UtpBT5rQvQAJEQN4UwghxH6D8n6Nt1xB9mpIHTBXiG2qoFEX7ARIOXcZh1aP6Ah9ggI+wOkD/XBFuVH+Yl2g67i8DhpLS6cXudUYJEe8JELvvRDr7niXmz8oL5ML8n+4jT7wUgCKNwKzJKSuDjZCMTw/X0Ia7mBjPVTfJm8LAfjFKpdIdUAOgIvcrGp6hgVZWq0LJsD6Bl3wY0Woeay3w4GPIN/cFz0Fh+Ul8kV4ygBfPTzo//ni2Yyc68sBHjcg1wxNLQUmzfaijpvHj0PpfPw8D+Ch/vLNffeQC/uvMORvwqA1+u7oTfKqLj8tjH01sFZjtvZXwch/syB1Ore8N6zWvwQBb3KzE79tDFghlhlYQhyS65wQQmwF6Ozs7OzsVOtcRt61ArR0drrrXLtBY0unk9Yb0E4zvamANUKkJeSogbpbCOdLbZWN7BBiFlDf2dlk4Kl17pAQBnCZEBvzmy2BgRHjJjIIgNNyysyEVBkUuPAMCFmQJPbJMFqZnJTPdCkAeqAoGDORpZLIEz0B0azNJ3K2dTYPVwZNX/fAChcDY6D6InjMKqn8GAyAJU9qSPQaNQJ8lBfDY2WwdzpA0WK3oBRmqCVjlLzMl+jD5F3Vpd5mz/ThgtKwzfC9x4DNPOdpZbMPWUJu9FP5r/Iet/IYu+LP5OU7BvWfFxokn8/1cP13+yV+5Yc9BrPO5b/TMHqOhgBssXCmfshbKzip3f+hQ7CYrqfdgsvHhnzJT+YimefDJZcAe+THfo4E7VkCO8/lzpehYQ61C+HiJbCtkq8sgbovABKyxXq4xBIf7X1wMbAEar7L4UVAJnLSQNutH27p9caHTqfCObIEtp4LJWf3zU0NL5oAGRNnKoDIa8hMdTbBMNXZ7gWnqjPq2t9YHofvuMgHuu8+eG00AJ+TkPXrYd/4/Aieo3N/VNmhVvlCebn1W9z5ny70RGGfn3CjV3ZwyBYzCCGaFaoSM0xTty2umMHZcUoJwBYhhNBiBoBNmvomhbreEjNUqmy7EMISMzQY1FOizRmsmpyz/bLTxv4xLA9nR7KLT7dmw00f1nW8LBbNSSgeF0ZXpVOnKJgQhnPMWhVacBs5HPZwS3P8A/OOQNNA3pbMy//OB9bCChdhLTy6C+rOp3ciVN4Bi4BEqYfOrZug9hFd5WYfndUlvDUR5u7UOCvqNc5aeHAi1J9Lt2SL9s0CeuRaMLGPLzVMtLcDIC1ajW9umxBzgTohVgOVPtGe+uZqgVr1zQnxJkBMJIxvbrUt2kuLFoBW2YjD8gjRJL+5Pf1atJd7KXjkkSDoP/91u7FRCnjeWqX5c6ORuy3UrlX5P1z4Sx1CSQf86RqgAzzfzxov9pMCinM0dv+PHSEZwKQOoJzSDnh2EdDBKTWR7NoFu6dw2RpvW9sFyRFA8yCAj3YAJQwJfYSiIdl64xQOjuT8lwbn8U8OCqTuNnIqqG1PIyfcwsiQcEx3WIYKYiLqXSRdkAe3V19Kcj1aUCupTB/Qe4NuZLNC9bBYvwWRlA/3l+qwBhZso3QBvOGOyT2lsMBFGAPV4+EqIFkEMGCBOfLMVBsE/Mo61RAQodCgPAfd0HaYNlJy4gpYgHC6JJeC+9V6slnz8g8vBYQQB0L/vQVyK+PZl+/Ue5xGoFqI3VL6Fa7lCeIVQ7Q8KqmlQAi5/ZqmtDxyKbC1PEIIsdZhz/vb9is0PQUfHekFdj6lN+0Kx+Cp/xrJEeH/FipnBJXOK9N3v/MVXh3J/FZNGcL95hZ/g2OKz107XfIAwJ6ZvCDH1eONMGsNXfOBdAHAwZNaUeJJW0bDTMQLwNQoAZOtJLliHdR8Gy4sN2cZY0lpvI03OqDgUt5/E1buUZvUsTyvZM/b1VyA7nA82lUuIdabm+luTGeaM9JH5eVxWfCMW2GSw4n700yAyMx8XlQOJCWwOGdmtkojzgN4xVxKLug/39yfXR7lnnt09nPAocjxj8m7VoVzPnzp29yzLozuV7/qfhWTghDctv6fm/36l4OpZc637z8G5a+ENX2hvHxKTcmZTCaTycQB9mUymUzGUfksyGS2AmQ0Jw6wM5OZBjTIpQBgWyaTyWTaAY5mvAPV4QoymUwm0w2wP5Nx5OexjCkkX620+W7yWBUA9ZlMk8uJ23j7FM6yTEYrQiw1h71FCd64ZINEwqRfkVzZHK0Glkay4RQdB4YMOtvRfTww602tKR8oFguhM6JE34zNv3EbVDQO2OjV/JYrDdiAHGQvUnhXyUtdJUyAyrqQLfXXNvkojLPuVrnszO7ZXKm2Tq0jC5qQWsmmADHmKZsGTVC3IcsiPvzr+b2wGnl5Tk8Ikj35+l993vs67AL4ah6ivX+KdtX1I078Ry3y+otf6KLbB6T/VWW/3VeyB+W44NzlPP3Hs+3jaii5Q2b/1YXeLi93+t7lXW62ra2tLW7rxG0BkTOS29rqXa5ALQUqpdra2gIERMByIdYD0ba2toQUEAHsF6Ktre1N1TzA3ra2SmB1m04pIU7InOIKkm1tbc5Wr7mtzeAK2qy0GFjW1rYRKBqe7/+XBbFweJ8rD4cOgNLyHhPBwhtmjzGzbLjI3rPheQqIggSvoTdhqOlQAl6EjDjjzhR623EebtAs3+46cH2cBVwhr3KTkSlyS8p8uOvWwSzYY/+HF/nWCZexubUpy4OMmKXXaGeEukKCivd55WJ9VzxLc8ROcpTSa4UQwv7mvELZYHvLcKFsXlOHFMr60zQRkgzBRIWx/ZKFH+ylwOHOPmmPwmd8mM94CpLhU/wzf/1+PgMfrmSXvX+7YGxYs8/YG8/OQQBvH4brbCGnEsxc4fmMC94b5d5ti8JcKUBVG6gt58BcMn8CLh0gdxdw/yaovYXjtRb1K9xGKj/EN5pg7l3eZ7sC2DGPy/ZY0K0L+R8p03vNkX6NNDvrmS3PPdf3n0Vn5tgOg/NkPkjBXKv4fpl/1EC7RC4Fg6ZnJRcu3bxcXl6zajrWp3/TiedMt97qhTQ0wB5TCP26GouvXRL0jr5k80EKZ2/Bu5+2Ns+B6dQnwtdAlQxjeplWOjJmVyfeltYftKOfS6fT6fRug97RdDqdTqulwEj7AbrT3QGsRTq9JaRvosUDSaXbAJrNPncAHEqnXaFsJ8CBdLrIPy6zjNSCdG7krAO9IG9gdgL5NFtAESDagJHwXjC998Anl1XKFlXsryDHi6+kqyukgeB0wgdpt15sew5aRcAb1UDnoMQoz2fjbrgyzopR0KAKRslLGRmjVt0gGIBwIKO85N4Y5etMAzSMcrNus0YjDTBtkRRBj4L6Emeft1dtwVYOhYESVcmUl02Q+jJHEdIp4j6WR5sBK+lXmxBCbb80y2MO1DpbR2GnTS7LY84dIuFumY9CiB2K2n4pnbhKzqK3UkP61fbre6FFP4aBasrU9uPCtCQPqvrbl8+2R/fbt2H9+56dv3lEGL2NLS0tQoiWlpbNAC0tLS0tLSuBBULEW1paqoCmlpYWIVIAO1taptkEtrW0GJw4wBZJxB6W70mgNo/SzW6RwzLT0tKSlStwh2UGYKvbiDSPSklAi/x+hFzERxu/7lXuvgKgo32Nh0A8rj4jAmu5dSOj+/iWR3sm5cLR+exQMoGgnB9oJhu6LIxEwioJkaUBg1wme3sG91hUTYAS+7BtbTQsKh2V2rLISgZWQ1MTVMMBtHlUNfIWqJVzZe0jFFbDET1J9kRdKcFq+Y07OnpVsxpeLoQd8+T8KRUUVVG4RpczESreB+Czrn1w0et5vP0/w/FxOXB+AyeHAdvGGzNw+evwwM1e1M9+1ieRsNNIyQFd6LBFIzMBstjXeV6tcwtWs27F2W59/k9yBafDp+/nrLs33siCp1zCmptztGiR3NedR7PB0Od8WV8tUyeuFzO6d8NTa8K6t3Muv7dnHGmHclIJGiuVp54U3viHpVw9YMIFUif+ZeKLJGTMRbzwvtarsE1mW0eyXTWyzbpsLdatb/PVgkA7FLlIrAz973d6RVDKDsXZx1ZaheuDibh2KDVCqHVOpaSH5Wk1vY0ly6PWOcsM2KkVF5394pu7Igh6NJer5rWn4JpvAAiHD55vi3NyJRfnlM423wg8XhGwyn1SZeZZ4H//d/i9HJp/b38j4UlZpwMLksmtAMlkMplMBipCpKVsMjkXqJN44ZS7k94JJJaUlrLJZFI4XIExLEUymUyqRnYkk1oRIkQymVSWsiKZTK4FKmTrjvXXgWSyKC8RS2GEvPCK5HyUBc9ni1eUzirLKQrbTRX5s0XeqkFE/Q6I7wcinHQdHU6e6WeR9NPK0RdPQVc+0i+1G28ChkEd9BpLwTDf51InBVwtoyN1gcPcv7lvCkLoUpRnAJlItA4ooaBOo78zRnEFV4L1LYphksYrw7ztXFolr6Y+v9OrCFEsz9YwwZSyTtdLgc2Jb/EuF1L6Jbr9S4HLiftNElv8LI+9FNiKEE/qj0LZ3jVnRG0NfEG6HR1dA18u6F2XBbntUfv+B/LyD2VC5fihRfnvLtR3ymnxLW8vm38N/FMhwHN/VoqQjZ8A6Tz1mOGedxQKx3JaydcmSMgEYGcVjJeuJ+dGAJ6b4xYeHc8xODEDSJR2Gmbdm+bAeE4PBPaXw3gOTnYL9w5n1rtKejc0VQzsHsdVB6DxRt26UoTU38LmOqjaybuzZLNOGi+Vj/EowEM6NkOgW9iQIQADZNlxgAHD0wa6p9KYopO6kQCJo4U/PluhDRnv4511wbsAlSW5hmXw0iR8mmPhvYkE1Q1Z6EQ2oy7hy4o8aoW1JoyHW2p7KilPtgpYsM0rA6nEaey9UUDLaIOPjMiKosCloci9qzjx7gEB7ThLgbvsVCKt0yuhvh5aRzrNFleau+FIJV5nDkmyqzzb9svhChboWdXjHCiE5agkuQIzPJDfOdBYCvZ75+wtdgd8jkqeZJgkLrBrGooQ+qV+rteN9XTiGGDoPV/scxMxt8qBvpGxJASn3pLXwdrwVsflIKR7MkzPEB7fYEKPu9/AnmuATOQcNXIWuSUN00y32sA0YItaFdxPq/azMBrm+KNIuGOz2EVv/LDjq7NPcUb12inr9Vmy1iI1Rzyos9abu84KlBPYzevkrsuEXZfzry+8Dh7wwEJrXRs4K+Zq5NMlp1zUV/qZ9Mv3FwbA3v1HYKM1CvfaeDfAZfW5G+y8tq9dvO8ZGPhoWC8XZ6uaSCQSGWmSuDiRSCQSiQpgrcz2ePVzKbdagM+x5AqEIumo2BM61Vrt6jA9icSWYK4AUz+3U/U2KUQqkUgAbE0knKXgUCKRkE0vBpbJ9orMRbA0MBuYirOMZ7tuQWkupNI+DLRCgMJCtQfxESm17orAp4xRoPJsrQQLU21CkkAyQQ5anRZPXR7WH4DTUBylp9ffXlCHtXPgcq3D/ryAFSugI5vHp+3FqXjOJpvbln7iD90MUVclXatrlqpa6wbDctgyWHMFg12So2Hsco3z0mCov5sfKj7/Grd1VxEyZbhkIkyhbGdAbAa/TjwV/KjbhBBCeI0LElooG5VklZ+4nUw/cUP6tdsXZ9L2EzfSSukc2H858cwG4OrRetV9DMps+4PQlf7tB4KgPwvEfQCuGQXQvgX4otyNvPSSLv9vtf2QurWq+fzuWK6HeEBfLtWmsi+8IhUhqSPAJBJlwL6pnNMBa6/kB2tgwTY6W4FJZA7BBiOwnLWte09FI6q7BYDJwJYpfM0IjSW/uRuVNnz/FEBy4rFyDsKrizTJ++0x13gb32mAaZth9EAOZWDAGO5V39zWC3R7b8qL65DrcOJFAT5gGlQu56ACD85Eczy/Z9USNoGcaRK8CnB+JDsS/vASk0DpxAvPC6j0gf7mHAPuZaEIdiSbaDTq6LAbXFfqqEwGzhYhamx0X7tehkVZEEWt1ChEQzQa9cgt7fb8admZuVJfHI8/5QPOjsfj8XjcsaatiMfjajP/9/H4D/vYwvG4mW6DO+Lx+Es2zsF4PB6P78xF6m+Wsq8ZEqZXfaUKMqVvDb+avfiU+g6GjONYJxRceCbUzYdbfIOMoOC68KllbuERaJIqiVrlzbFJOyQeUJAwbdglm7xUqcXyClGFEc7ZhBN6Y89VeinY0ADT5LisS/piPNidVXe1G2CT5819Xgaw+7wWpdiFQNoh/bm8x/P06apDmqyfN+OC6QDln89Ba7Ff3PuZEvPhihfrLfj0fuQn7safbL4VuN9y033xRvhRhb79go/S0tyN3X4Equ4OKrnXza4dnA7UyL9wH/CwfBnfNAu6bgHu8Vk43Rm8zvkitnV3d2fnCuykTDXi3d3dykAdfNGjHLlfd3d3d7cplHW4gu7u7u7u7l4heru7u0+7geG7u7vDA+aqkCHd3d15B8wd4FMc55Oi5Ek7R0FxcX4V/DhFp/PAPe3L5IlPYSnpnhy4BdHA2lZbkbIz+uYGunONO1yKazENFacckXPRCJh1ftBEXAvNu/QsvcmNi7t8LQ+65lFVta6bt2pvMNQ8YUGGwdxxUhHipmkvSfZL7q2HWp0trCUgcNVgc8kwrNM1J5vzMIZGlxOfS5B1+nLXPMoTJdHdW7rmUY4i0TiMwXk4L5PtCdPjfNib+yEn7nKWnkX2rbcs6KMwe4KXSvujeTT1aP4FQahHDYvDGneVsmP6Jq2aUic+g3s3ZOvXfmu7tFO7tzWfsgrqvu9s7HpmyFplE8NMEoWlEwfIRFLqEIaLgN2W7K3gQnYZFmXNY/MackV5bXo/HAl2Dhw3LsjUe4rSJE0q7eswkv1InclGvN+xPAUAt5SVPdq3apeUOWlgOFJFWdmKPnfoG2Vl5QDzy8rKMn+Nh0skEgnbUclnHjXWmGHnqioyVbvmUV6hbCIBfEmYAXO1TtzZfrlkI7rWXCG2JZSyw046YG7EXhlsoax0DuwvS8G7HimFvRzIixS+db+Tg+ZBO19VFERSpdZWiqqIvRdI4RCUjwqqGz9oSvcOhnWjSG0gdk+GxZ/SBTcD66EMzlsP31WTtvQI2TPfS2aMIqLsUCbLygA3r4M3J7GekCiJTIaaJ/jDIheyHm6eDOuhaTI03gaQmeyrpXcoJacm+7bs65F+IgbLszhIEWJGSbSdA1WqDtwZ2XYogWdhebdfHpZHnhHSaHsgukGqPSwPXkXIBz9KYrbJOvWVfEisgC9e7tz8XAkTn34a1hQbKP5KYey6vDz8MADHVkCjq4r/cl4PlfCG843FYl3uS43FYjEjZEgsZvispmOxWCwWk+ZRMm7XNl1xNVAZiwXFcY7FaoHaWCwmhIgC62Mx02lCkq0D5sZiJlfQKvsTi8W0pWxMJ6ELY/ZSYM6WEUti4tHADooYsccKZKFcFsuDFtpgJXG5r7Dc00g4gfJs9+W5BUTyNZU6mUA9fA+RYPNGWacwq9BCjwPRG1jQG4BqAkp9kJIIvQIKi8goX4SSCMmM/+HU4++bSqWafjqGFNS47G6N4sT/N6jfV2muYFANFEJxDaadZI1aCmqgEn6usmrn9mQUauCFqMZ90s0CFJKJop0D1R8UBbYupGY7rFzNT9yAubWP5SdOL3rClWg9Abc/mftbvkmeSPWRJyzoE/Dqk8DPB5ggIzVM166rDw7VkUm3nOVc3o8VIYYSfNyMIITnffhXDuRxYEqgZvV3YQ29/bbOnl2At8d9D7fxInOrBrB2Jgym19gVNc1g2Wd8vrsGwl6Y0QRHB4pFwJbAh1ukUY1U08DbixQBiTP3PzlhOZkU7AXOg/vVVmUUkb2YVt8LFckZVn/km5vu68b0gK5lV3NPLcrboad0iqettwEuiRxzIdsDu3NxWAdVeCHTJHHgB1wREnF28wc1S31Oh4QcGNJrLC3KwGfSH/lDbSCTpIzQ3YuDU+lD3z+FsRm4+yZWrJPlRk0syKpvcZc66XHTJ/m4n7t5V6I/J0MdX2x3OJPJeMyjKlSpHSVRpVlGyJBMpjHXf7c8kzF9Vrt1dNsosF4IkZEBc/dmMto8KmN6FxpH1+xwFf7+dMgbancjUBQ5y7feN5xIWHmkb2Tza85cCo7lU/1YH/H7nDyhfPJt7xiMJ9WCdjNSD1exGigl4QiSVdiPKEWr3cqrZMEqV9rc0CAhbi2VrZTHyv5ebmg+tFpXNg5suAcnbnjxamA43C73hG9PsDqxSloWT1smPX4NWjI9tR1Wnu+YJL4mHZW6Jigcl83xK0KMFKJ8tDxCPH7iNcByS/mYT3JcJqVJouEcaPuJm1ESXZPEfaD9xD/w0q9vqMx33Wlfgb4zAOB/fo01lkLTbZgErvuYRQt48UW4u8Rs4xML+aHh/vZ9L8V6v1P2t6xO3nC51Yi6/IsWNOnUKUR7e7t5oqRhKWunne06CSHa29utiG3t7UpA1NHe7gzUaHu78ll1kloK/D6rnaqWIyCS7ZwUItXe3j4LqG9vbxc+n9VDstbm9vbFwLL2dq9OfGi+r3soWWoNdYTJQwwD66G8kyftQY4ixEu+cGjWbg4NuJgP5zdVCDFeSEGRW5iPzUDKumaroYPmp8y2snTGh260MxcVuVtayoKOXBiht1TeHTtihZy8AjN4Z/XrJhHPmqoKEsWSwEC9/ZoloBTK53orOgFz58imlXMgSP3cXO9BtCMUgYlQMVVHbNuwQbYXELEtTCeuknmKmSuUdR7+qNdP3NCJ11pCWdM63f3mTO/5oJAhpuTXCBmCFTC3XywF2/2w7X0jEYa+swfKLw8qOe7qaa8syM2mG23syL8jR49S5HK8UTWjL3RBC+6AC3xc6W5L9nJAoe92mGQn3fskLJcPF91hOUsbXHas3Kn8GZuOFPAM3w0MJXOVr2bVI2DYxOyGORaBg1fZE9ds/58RAGJ4cPSvmdnmwNk53n7UZayrzam+eHaeJEe71unToyD1Wv1D+vVRmPEzfn27zUdcCA9fKnczctYb+3u5WrT5KH0Erm/kxz+wgM8q890+WPHOgfN+w+/z0MH82bCLvDoX8mIVMsQXMLfK4sSdQ2Qb0ulGoFqie6MkSq4ga1qfTqddR6V0Op3FPMqJ6+sGzDWCd6bTa4GKdFpxBU7c36KzENQWnK1ctyD/Vguy3RaEAIMe7p2st/S2+8qHlgaj5kztvS6R0eFN5ujTO9bl/awS5zHuUvAJGTBXCoK65OVP8yVEHcB1YAxsW8D1n4L6JgeV0XCVu8Y5jrqNblamb6+DmsudMD0aZ4ymA/Q2wMtjrGqGzW8j1MuwKB2y1otjsn5zblqgnQOFCDqvwDBJdJwDjwax11r6JUx30PXeiG1maCzXObAh67u3D5HdLMTivn9f/7eXAoDvhGHdmRvn+z4T4fuU6/0/jg5htpsDaam15He/gzvyeIDv5ULY2Nrq8cJa29oaED2qtbXV3bDrAy1bW1t7lKVsa6sR3sNZCuxjNGpbW1tbW1ujLskTQiRaZc3W1labKxBCiFOtVgJo1neaE5e3cSFOuKjyzfnDh48MnI+HBx3lMjJHrayUpRVb6cgs9Qdbns0ncnV4GFlnS8h2/EEQSsa9Fsi7glBaGV9hQBVdGInoCLgFBqVMwIRh0MjYD1c2TSMd6ZB+4tPc83qn6dgk03CyxjEaz82RJU1NcHS8KAS2XMdAVWsyRKtldhps2uT4rMrXAjVP8PgijADtqL4kCqHxNu5U0+WOeczeIwvVUrB1IYPcrhXi+Kw6YXr0WVjuP+CYtDzrGuK+GFEBcwtfgmfmB77IF3RkUpUeBR0a6yVevQjYPeD0wDxG7uCdWTakV9/NvS/ru1/BqYo8tzUfxKVAymiiM3n7sFu0L1u9P+UivCtwH5+9Ts8et/KUYT46u8IgoQ+3Ax1UdPFm9jiHyH6Ix69wOXu/VskKPvqhHUARQ3a4s9YieVm+hMM3h9Typ1ZVvusK2D1bb9yUbGG+zM5vtCDAyutglARK3nzgDmheCkXz4C8B7czTdgGDch8EO1yavxTOC6LzwFmProtG6rd0ReEJcE4bet5txP0FiMyDh/rT9uvty3T2wQd11gh5fE1ueuseDARflqXKe6rw8jCEa6HiaVdUK2WrBvaeUOpaKJuSh8imUs7M2pFKpVKprbkex7aUNdSVJFKptBAilfIKwvdLRQhALCU58VSqElidSqVSKYcrSMnUgHRUSqVSs4D6VCrlCGVTqVQq1ZHHmytM6qUQvNkzS4V5kClMmUiF4CoFCoOo9aWH+uEcK37Xmzd5goK8FT+cDNuwxQMi+pwIh8R6Xcjw4FiS2egEP5w6BeJizTp3jbCiJNZjcscGe61M7K7fpaGNqlD+r5tsR6XaKo+PeGE9khOvhwlwl6EISRe8Myak35F6ew6o13y5yesHxE4nKGCucg40UoP1seVUhDgP53HIdaMkhipCyHF0DTh2KKb0q58GzO1Wjtv35qbgQVFSmIP3hp3Va+P/xM3+B3xkQZZWPjXFJFBgW6D/GuOYs94fuMMy3dzcnCUeSnNzc3Nz8/tCnGh2T1pobm5u952o5ElG9Kjm5v0BQtnm5uU2ZLUQbc1uEkKoHHjNo6rUsHT75DHVUG+uIPuZ1mMNHlc/yui+jeexdGSjbG7lglCysM4jSk6FD8t8jgl1cCIWLJJHvb7GuhVBMXgjoeg21Fdunj9XBRxBu3IfkbkITDwiIW3DtZt3ITT4hFMOAZWNwvK1FFRZ/4oi8G4Cbr7ZW2vVKh3H2WQWRlKleIAq3UPHmaDU7W/WweQIZX0Bc50natOT7DRCTjHzKEKW27HT0RHbDK/+YEcl8+ECjtEIOMVM7xr6YcBczSD1uFz4e0d8G62DLvp0eyl53pd93tdiLsjBbN3dG1jJJvCK72N10lZgoTwuaiuUXslTao/TVA0LikEJiLbKzY8KUr3VZYnsbFYmaX2ll5FafT7PNsHcb2po41T4uxKAd16Eu/ZA/WyYVxay+9hcxoPhHiHnTtXZj9khIBdad58uMD0xixeAOvzhI+NB+YlfWdqZfdgsBI/fzkKelZftvmZHL1SHvC/MTvLBfiX9CklJe1T92x+g4hc5CP4DFP5Gc9BZ0y9/Cb+yPNueUgHTXIuMZ5+FR6yF/c9XwYNhB9X99Ke2OM1OjmFUT0+PYx4lC9I+/ZxCd2sZlrLOh79cVgbYpNvwcAU9PT1bZE+OhgjF9HrS29Njnqhk99+osUxCioL94UpC8gE4JVnfTknedCjOveUpztFVD7AofGfmzCen3KyPy+7VeLE89nFdaSi0xiEZt/1YaL1T2SGn8PVQlhdVhJJUAXOtQ2Q96b56qJYhRGt2SUGZ1E8PXAmHfe52t2yC2kdMoVpvhb77ZYUmMHcaANsVF20fPbsSSyeudAWHzjMR1mzIPaH0NZV8Xz0bF6zONZ/IfZrjdLx0Or8Ezl8pDZVlYbAiZNDdObjMe6Jda/r7UpAl/SSrZBYuvzgniROPGRuo53VN4xJKvS8Pt/HjXrARvHXPCM8m7bJDcIMaT4eClCTvroAtF/Oj1V4P4Xu+a054HSskAeCVRTKrmt21S1NXkGm/DuqamvgOocNSb54BUQYdMt+cN9rsYfPGWzjAAESzHPt6rg8ScOLn8HK9162KeJ11JhS84+tEgKjyPF/+vH70zd20IYz7l0vB8XFABexRo1BN4T6ZacRdWq59Epav1dGjan0xQyrwxmA31qUOye4ryMuhC7zPVX/JY2c2obw5XFv5tRcAfM93+sJXvpI3tUnvwwprdhjv2qRtV9vLb8p4KGemtvjbUuAk4wjt/TC4yoegmOCpedB6BUZ4Z6PUa0r6ZHkjH4n1oYuv9O3hNgMRKjbDS8badbGWflXfJR0xNsMSqcSo9JlLRh/Wzhq115OslQTWf4nPzNcFQItqYO5O3fRY2NgA024P6prTrA0Bll3N6aX5PNz4mQADF8NLIUIzee7uomx+4ovd0MaLzUh6VwZE0HDTDQUGAYJlL9cGCmUX9y+deHD6PvDLbKyWGgpWmOL9ytrwxBIvdq8Lefppq+SzPpKfg/nLNeSfZ3NTJ1z+NdYb5t035ur/xmwBc8G0lNWcXDyedC1ljXQ0Ho+7nLjzzQkh4vF4bbjILh7XfuLxOMDueFxFj0rGJcR/jMbWeNw80DIe36e61iOjR53pxrkkdDxH+wj3lUZTNqSoKFQREg28i/Z5KejK/8G7zqq2g9vV5z+8K+ybm7gse8Xj44BlsEFeDF6g+nIJVQXFiHKVRRckyl0ELPQNUDNcn3q/DG0MOkfe2lajMz8MY2C4omNEVloGG8olgQLfN2cn/zdn+onvtALmVmc5RNa7/Ha7AXMxrdOFkEfXrPbqxD1H1/iTNgP2Bsz94EdsA6QVWLb0sBewKdg71qVz6iH4Qi5Z3UP6cuUYAjpin33T7BbeMMhL6o8yus9pi0CW9juGOPZ8nzoir22SK9g5l0tedr+51zmtIghV2wTcQ2SjCl06Gj5aCxyQ6Oqydzp/wYJkTc1a4XxQ6gf/sKLvi/gF+b3+ARLvZF8IXSB1VWPKe1yUYwAjhqb6MPJU6KA/9D+W5/8DrQAYw6R8LuUAAAAASUVORK5CYII=",
+                      "payment_method": {
+                          "code": "10",
+                          "name": "Efectivo"
+                      }
+                  },
+                  "items": [
+                      {
+                          "code_reference": "12345",
+                          "name": "producto de prueba",
+                          "quantity": 1,
+                          "discount_rate": "20.00",
+                          "discount": "10000.00",
+                          "gross_value": "40000.00",
+                          "tax_rate": "0.00",
+                          "taxable_amount": "0.00",
+                          "tax_amount": "0.00",
+                          "price": "50000.00",
+                          "is_excluded": 1,
+                          "unit_measure": {
+                              "id": 70,
+                              "code": "94",
+                              "name": "unidad"
+                          },
+                          "standard_code": {
+                              "id": 1,
+                              "code": "999",
+                              "name": "Estándar de adopción del contribuyente"
+                          },
+                          "total": 40000,
+                          "withholding_taxes": [
+                              {
+                                  "tribute_code": "06",
+                                  "name": "ReteRenta",
+                                  "value": "1400.00",
+                                  "rates": [
+                                      {
+                                          "code": "06",
+                                          "name": "ReteRenta",
+                                          "rate": "3.50"
+                                      }
+                                  ]
+                              }
+                          ]
+                      },
+                      {
+                          "code_reference": "54321",
+                          "name": "producto de prueba 2",
+                          "quantity": 1,
+                          "discount_rate": "0.00",
+                          "discount": "0.00",
+                          "gross_value": "50000.00",
+                          "tax_rate": "0.00",
+                          "taxable_amount": "0.00",
+                          "tax_amount": "0.00",
+                          "price": "50000.00",
+                          "is_excluded": 1,
+                          "unit_measure": {
+                              "id": 70,
+                              "code": "94",
+                              "name": "unidad"
+                          },
+                          "standard_code": {
+                              "id": 1,
+                              "code": "999",
+                              "name": "Estándar de adopción del contribuyente"
+                          },
+                          "total": 50000,
+                          "withholding_taxes": []
+                      }
+                  ],
+                  "withholding_taxes": [
+                      {
+                          "tribute_code": "06",
+                          "name": "ReteRenta",
+                          "value": "1400.00"
+                      }
+                  ],
+                  "adjustment_notes": [],
+                  "numbering_range": {
+                      "prefix": "SEDS",
+                      "from": 984000000,
+                      "to": 985000000,
+                      "resolution_number": "18760000009",
+                      "start_date": "01-01-2025",
+                      "end_date": "31-12-2025",
+                      "months": 11
+                  }
+              }
+          }
+  - name: 409-Crear y validar
+    request:
+      url: "{{url_api}}/v1/support-documents/validate"
+      method: POST
+      headers:
+        - name: Accept
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "numbering_range_id": 8,
+              "payment_method_code": "10",
+              "reference_code": "REF0015",
+              "observation": "",
+              "provider": {
+                  "identification": "123456789",
+                  "dv": 6,
+                  "trade_name": "",
+                  "names": "Alan Turing",
+                  "address": "calle 1 # 2-68",
+                  "email": "alanturing@enigmasas.com",
+                  "phone": "1234567890",
+                  "is_resident": 1,
+                  "country_code": "CO",
+                  "municipality_id": 980,
+                  "identification_document_id": 6
+              },
+              "items": [
+                  {
+                      "code_reference": "12345",
+                      "name": "producto de prueba",
+                      "quantity": 1,
+                      "discount_rate": 20,
+                      "price": 50000,
+                      "unit_measure_id": 70,
+                      "standard_code_id": 1,
+                      "withholding_taxes": [
+                          {
+                              "code": "06",
+                              "withholding_tax_rate": "3.50"
+                          }
+                      ]
+                  },
+                  {
+                      "code_reference": "54321",
+                      "name": "producto de prueba 2",
+                      "quantity": 1,
+                      "discount_rate": 0,
+                      "price": 50000,
+                      "unit_measure_id": 70,
+                      "standard_code_id": 1
+                  }
+              ]
+          }
+    response:
+      statusText: "409"
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "Conflict",
+              "message": "Se encontró un documento soporte por enviar a la DIAN"
+          }
+  - name: 422-Crear y validar
+    request:
+      url: "{{url_api}}/v1/support-documents/validate"
+      method: POST
+      headers:
+        - name: Accept
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "numbering_range_id": 8,
+              "payment_method_code": "10",
+              "observation": "",
+              "provider": {
+                  "identification": "123456789",
+                  "dv": 6,
+                  "trade_name": "",
+                  "names": "Alan Turing",
+                  "email": "alanturing@enigmasas.com",
+                  "phone": "1234567890",
+                  "is_resident": 1,
+                  "country_code": "CO",
+                  "municipality_id": 980,
+                  "identification_document_id": 6
+              },
+              "items": [
+                  {
+                      "code_reference": "12345",
+                      "name": "producto de prueba",
+                      "quantity": 1,
+                      "discount_rate": 20,
+                      "price": 50000,
+                      "unit_measure_id": 70,
+                      "standard_code_id": 1,
+                      "withholding_taxes": [
+                          {
+                              "code": "06",
+                              "withholding_tax_rate": "3.50"
+                          }
+                      ]
+                  },
+                  {
+                      "code_reference": "54321",
+                      "name": "producto de prueba 2",
+                      "quantity": 1,
+                      "discount_rate": 0,
+                      "price": 50000,
+                      "unit_measure_id": 70,
+                      "standard_code_id": 1
+                  }
+              ]
+          }
+    response:
+      statusText: "422"
+      headers:
+        - name: Content-Type
+          value: application/json
+      body:
+        type: json
+        data: |-
+          {
+              "status": "Validation error",
+              "message": "Error de validación",
+              "data": {
+                  "message": "Error de validación",
+                  "errors": {
+                      "reference_code": [
+                          "El campo código de referencia es obligatorio."
+                      ],
+                      "provider.address": [
+                          "El campo dirección es obligatorio."
+                      ]
+                  }
+              }
+          }
+
+docs: |-
+  ### Descripción del body
+
+  | ID | **Valor** |
+  | --- | --- |
+  | `reference_code` | Código único sirve para identificar cada documento soporte de manera unívoca en el sistema y garantizar que no haya duplicados. Esto nos ayuda a prevenir que se genere más de un documento soporte con la misma información. |
+  | `numbering_range_id` | ID del rango de numeración. Para conocer el ID de cada rango de numeración, consulta el siguiente endpoint: [Rangos de numeración ](https://developers.factus.com.co/rangos-de-numeracion/obtener-rangos/) Si en la API solo hay un rango de numeración activo para los documentos soporte, este campo es opcional. En caso de no enviarlo, la API utilizará automáticamente el único rango activo.  <br>Si existen múltiples rangos de numeración para los documentos soporte, este campo es obligatorio. |
+  | `payment_method_code` | (opcional) Código del método de pago. Si el medio de pago no se agrega, por defecto la API agrega el código 10 (efectivo).  <br>Para saber cual es el código de cada método de pago consulte el siguiente endpoint: [Códigos de métodos de pago.](https://developers.factus.com.co/tablas-de-referencia/tablas/#c%C3%B3digos-de-m%C3%A9todos-de-pago) |
+  | `observation` | Agrega una observación. No debe tener más de 250 caracteres. |
+  | `provider{}` | Este es un objeto que contendra la información del proveedor del bien o servicio del documento soporte. |
+  | `provider.identification_document_id` | ID que corresponda al tipo de identificacion. Para saber cual ID corresponde al tipo de identificación consulte la siguiente tabla [IDs tipos de documentos](https://developers.factus.com.co/tablas-de-referencia/tablas/#ids-de-tipos-de-documentos-de-identidad-para-documentos-soporte-y-notas-de-ajuste). |
+  | `provider.identification` | Número de identificación del proveedor. |
+  | `provider.dv` | (opcional) Digíto de verificación del proveedor. Requerido si el proveedor se identifica con NIT. |
+  | `provider.trade_name` | (opcional) Nombre comercial |
+  | `provider.names` | Nombre del proveedor. |
+  | `provider.address` | Dirección del proveedor. |
+  | `provider.email` | Dirección del correo electrónico del proveedor. |
+  | `provider.phone` | (opcional) Número de teléfono del proveedor. |
+  | `provider.country_code` | Código del país donde reside el proveedor. Para saber cual código corresponde a cada país consulte el siguiente endpoint: [Países](https://developers.factus.com.co/paises/obtener-paises/) |
+  | `provider.municipality_id` | (opcional) ID que corresponda al municipio donde reside el proveedor. Para saber cual ID corresponde al municipio consulte el siguiente endpoint: [Municipios<br>](https://developers.factus.com.co/municipios/obtener-municipios/)**Nota:** Se debe enviar ID del municipio únicamente si el campo `provider.country_code` es igual a `CO`, de lo contrario este campo es opocional. |
+  | `items{}` | (El array de items, corresponde a los productos o servicios de documento soporte, se debe enviar un objeto por cada producto o servicio). |
+  | `item.`\*`.code_reference` | Código de referencia del producto o servicio. |
+  | `item.`\*`.name` | Nombre del producto o servicio. |
+  | `item.`\*`.quantity` | Candidad del producto o servicio. Debe ser un número entero. |
+  | `item.`\*`.discount_rate` | Porcentaje del descuento del producto o servicio. |
+  | `item.`\*`.price` | Precio del producto o servicio. |
+  | `item.`\*`.unit_measure_id` | ID que corresponda a la unidad de medida de item. Para saber que ID corresponde a cada unidad de medida consulte el siguiente endpoint: [Unidades de medida](https://developers.factus.com.co/unidades-de-medida/obtener-unidades/) |
+  | `item.`\*`.standard_code_id` | ID que corresponde al codigo de estandar que se adopto para los productos o servicios. Para saber que ID corresponde al código de estandar consulte la siguiente tabla: [IDs de códigos de estándar](https://developers.factus.com.co/tablas-de-referencia/tablas/#ids-de-est%C3%A1ndar-de-identificaci%C3%B3n-del-producto). |
+  | `items.`\*`withholding_taxes[]` | (opcional) Array de objetos (autorretenciones) Este campo sirve para informar las retenciones en la fuente que se aplican al producto o servicio.  <br>No son retenciones que otra persona o empresa te hace a ti, sino retenciones que tú mismo te aplicas como contribuyente.  <br>Por cada retención que te apliques a ti mismo, debes enviar un objeto. |
+  | `items.`\*`.withholding_taxes.`\*`.code` | Código de la retención aplicada al producto o servicio.  <br>Para saber el código de la retención consulte el siguiente endpoint: [Tributos de productos](https://developers.factus.com.co/tributos/tributos-de-productos/) |
+  | `items.`\*`.withholding_taxes.`\*`.withhoding_tax_rate` | Porcentaje de la retención aplicada al item. |
