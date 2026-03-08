@@ -8,8 +8,10 @@ import {
     Query,
     Param,
     BadRequestException,
+    UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { S3Service } from '@common/services/s3.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
@@ -18,6 +20,7 @@ import { ApiTags, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
 
 @ApiTags('Upload')
 @Controller('upload')
+@UseGuards(JwtAuthGuard)
 export class UploadController {
     constructor(
         private readonly s3Service: S3Service,
