@@ -506,6 +506,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
       this.fileInputRef = document.createElement('input');
       this.fileInputRef.type = 'file';
       this.fileInputRef.accept = 'image/*';
+      this.fileInputRef.multiple = true; // Allow multiple file selection
       this.fileInputRef.addEventListener('change', (e) =>
         this.onSliderImageUpload(e),
       );
@@ -521,58 +522,83 @@ export class EcommerceComponent implements OnInit, OnDestroy {
     const files = input.files;
 
     if (!files || files.length === 0) return;
-    if (this.sliderImages.length >= 5) {
+
+    // Calculate how many more images can be uploaded (max 5)
+    const remainingSlots = 5 - this.sliderImages.length;
+    if (remainingSlots <= 0) {
       this.toastService.warning('Máximo 5 imágenes permitidas');
       input.value = '';
       return;
     }
 
-    const file = files[0];
-    if (!file.type.startsWith('image/')) {
-      this.toastService.warning('Solo se permiten archivos de imagen');
+    // Process files - respect the 5 image limit
+    const filesToUpload = Array.from(files).slice(0, remainingSlots);
+    
+    // Validate each file before creating placeholders
+    const validFiles: File[] = [];
+    for (const file of filesToUpload) {
+      if (!file.type.startsWith('image/')) {
+        this.toastService.warning(`El archivo "${file.name}" no es una imagen válida`);
+        continue;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        this.toastService.warning(`El archivo "${file.name}" excede el tamaño máximo de 5MB`);
+        continue;
+      }
+      validFiles.push(file);
+    }
+
+    if (validFiles.length === 0) {
       input.value = '';
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      this.toastService.warning('El archivo excede el tamaño máximo de 5MB');
-      input.value = '';
-      return;
-    }
-
-    // Create placeholder with uploading state
-    const placeholder: SliderImage = { url: '', uploading: true };
-    this.sliderImages.push(placeholder);
+    // Create placeholders with uploading state
+    const placeholders: SliderImage[] = validFiles.map(() => ({ url: '', uploading: true }));
+    this.sliderImages.push(...placeholders);
     this.isUploadingImage = true;
 
-    // Upload
-    this.ecommerceService
-      .uploadSliderImage(file)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (result) => {
-          const index = this.sliderImages.findIndex((img) => img.uploading);
-          if (index !== -1) {
-            this.sliderImages[index] = {
-              url: result.url || result.key, // Usar la URL firmada para previsualización
-              key: result.key, // Guardar la KEY para persistencia
-              thumbnail: result.thumbKey,
-              title: '',
-              caption: '',
-            };
-          }
-          this.isUploadingImage = false;
-          this.updateSliderPhotosForm();
-          this.toastService.success('Imagen subida exitosamente');
-        },
-        error: (error) => {
-          this.sliderImages = this.sliderImages.filter((img) => !img.uploading);
-          this.isUploadingImage = false;
-          this.toastService.error('Error al subir imagen: ' + error.message);
-        },
-      });
+    // Upload each file sequentially to avoid overwhelming the server
+    let uploadedCount = 0;
+    const uploadNext = (index: number) => {
+      if (index >= validFiles.length) {
+        // All uploads completed
+        this.isUploadingImage = false;
+        this.updateSliderPhotosForm();
+        this.toastService.success(`Imagen${uploadedCount > 1 ? 'es' : ''} subida${uploadedCount > 1 ? 's' : ''} exitosamente`);
+        input.value = '';
+        return;
+      }
 
-    input.value = '';
+      const file = validFiles[index];
+      this.ecommerceService
+        .uploadSliderImage(file)
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: (result) => {
+            const placeholderIndex = this.sliderImages.findIndex((img) => img.uploading);
+            if (placeholderIndex !== -1) {
+              this.sliderImages[placeholderIndex] = {
+                url: result.url || result.key,
+                key: result.key,
+                thumbnail: result.thumbKey,
+                title: '',
+                caption: '',
+              };
+              uploadedCount++;
+            }
+            uploadNext(index + 1);
+          },
+          error: (error) => {
+            // Remove failed placeholder
+            this.sliderImages = this.sliderImages.filter((img) => !img.uploading);
+            this.toastService.error(`Error al subir "${file.name}": ${error.message}`);
+            uploadNext(index + 1);
+          },
+        });
+    };
+
+    uploadNext(0);
   }
 
   /**
