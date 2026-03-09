@@ -163,12 +163,16 @@ export class PosTicketService {
           <tbody>
     `;
 
-    ticketData.items.forEach((item) => {
+    ticketData.items.forEach((item: any) => {
+      const isWeightItem = item.weight && item.weight > 0;
+      const qtyDisplay = isWeightItem
+        ? `${item.weight} ${item.weight_unit || 'kg'}`
+        : `${item.quantity}`;
       html += `
         <tr>
           <td style="padding: 2px; vertical-align: top;">${item.name}</td>
-          <td style="text-align: center; padding: 2px;">${item.quantity}</td>
-          <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.unitPrice)}</td>
+          <td style="text-align: center; padding: 2px;">${qtyDisplay}</td>
+          <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.unitPrice)}${isWeightItem ? '/' + (item.weight_unit || 'kg') : ''}</td>
           <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.totalPrice)}</td>
         </tr>
       `;

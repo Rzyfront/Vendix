@@ -115,4 +115,12 @@ export class S3PathHelper {
     buildReceiptPath(org: S3OrgContext, store: S3StoreContext): string {
         return `${this.buildStorePath(org, store)}/receipts`;
     }
+
+    /**
+     * Builds the path for global help center article images (no org/store scope)
+     * @returns global/help-center/articles
+     */
+    buildHelpCenterPath(): string {
+        return 'global/help-center/articles';
+    }
 }

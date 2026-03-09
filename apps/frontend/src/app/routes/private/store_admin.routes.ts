@@ -311,6 +311,22 @@ export const storeAdminRoutes: Routes = [
           },
           {
             path: 'support',
+            redirectTo: '/admin/help/support',
+            pathMatch: 'full',
+          },
+        ],
+      },
+      // Help Routes
+      {
+        path: 'help',
+        children: [
+          {
+            path: '',
+            redirectTo: 'support',
+            pathMatch: 'full',
+          },
+          {
+            path: 'support',
             children: [
               {
                 path: '',
@@ -328,6 +344,20 @@ export const storeAdminRoutes: Routes = [
                   ).then((c) => c.TicketDetailComponent),
               },
             ],
+          },
+          {
+            path: 'center',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/help/help-center/help-center.component'
+              ).then((c) => c.HelpCenterComponent),
+          },
+          {
+            path: 'center/:slug',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/help/help-center/help-center.component'
+              ).then((c) => c.HelpCenterComponent),
           },
         ],
       },

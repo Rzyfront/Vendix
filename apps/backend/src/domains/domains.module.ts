@@ -7,6 +7,7 @@ import { PublicDomainModule } from './public/public.module';
 import { UploadModule } from './upload/upload.module';
 import { EcommerceDomainModule } from './ecommerce/ecommerce.module';
 import { SupportModule } from './support/support.module';
+import { HelpCenterModule } from './help-center/help-center.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { SupportModule } from './support/support.module';
     UploadModule,
     EcommerceDomainModule,
     SupportModule,
+    HelpCenterModule,
   ],
 })
 export class DomainsModule { }

@@ -20,6 +20,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
+import { PosScaleService } from '../services/pos-scale.service';
 
 @Component({
   selector: 'app-pos-cart',
@@ -356,6 +357,7 @@ export class PosCartComponent implements OnInit, OnDestroy {
     private toastService: ToastService,
     private dialogService: DialogService,
     private currencyService: CurrencyFormatService,
+    private scaleService: PosScaleService,
   ) {
     this.cartState$ = this.cartService.cartState;
     this.isEmpty$ = this.cartService.isEmpty;
@@ -451,21 +453,34 @@ export class PosCartComponent implements OnInit, OnDestroy {
 
   async editWeight(item: CartItem): Promise<void> {
     const unit = item.weight_unit || 'kg';
-    const weightStr = await this.dialogService.prompt(
-      {
+    let newWeight: number;
+
+    if (this.scaleService.isConnected()) {
+      const scaleWeight = await this.scaleService.showWeightModal({
         title: 'Editar Peso',
         message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${unit}`,
-        placeholder: `Peso en ${unit}`,
-        defaultValue: item.weight?.toString() || '1.0',
-        confirmText: 'Actualizar',
-        cancelText: 'Cancelar',
-      },
-      { size: 'sm' }
-    );
+        weightUnit: unit,
+        allowManualFallback: true,
+      });
+      if (scaleWeight === undefined) return;
+      newWeight = scaleWeight;
+    } else {
+      const weightStr = await this.dialogService.prompt(
+        {
+          title: 'Editar Peso',
+          message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${unit}`,
+          placeholder: `Peso en ${unit}`,
+          defaultValue: item.weight?.toString() || '1.0',
+          confirmText: 'Actualizar',
+          cancelText: 'Cancelar',
+        },
+        { size: 'sm' }
+      );
 
-    if (!weightStr) return;
+      if (!weightStr) return;
+      newWeight = parseFloat(weightStr.replace(',', '.'));
+    }
 
-    const newWeight = parseFloat(weightStr.replace(',', '.'));
     if (isNaN(newWeight) || newWeight <= 0) {
       this.toastService.warning('El peso debe ser mayor a 0');
       return;

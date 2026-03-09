@@ -96,6 +96,9 @@ export class DefaultPanelUIService {
         settings_shipping: true,
         settings_legal_documents: true,
         settings_support: true,
+        help: true,
+        help_support: true,
+        help_center: true,
       },
       STORE_ECOMMERCE: {
         profile: true,

@@ -295,6 +295,22 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       route: '/admin/expenses',
     },
     {
+      label: 'Ayuda',
+      icon: 'help-circle',
+      children: [
+        {
+          label: 'Soporte',
+          icon: 'circle',
+          route: '/admin/help/support',
+        },
+        {
+          label: 'Centro de Ayuda',
+          icon: 'circle',
+          route: '/admin/help/center',
+        },
+      ],
+    },
+    {
       label: 'Configuración',
       icon: 'settings',
       children: [
@@ -332,11 +348,6 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           label: 'Documentos Legales',
           icon: 'circle',
           route: '/admin/settings/legal-documents',
-        },
-        {
-          label: 'Soporte',
-          icon: 'circle',
-          route: '/admin/settings/support',
         },
       ],
     },
@@ -383,6 +394,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     this.menuItems$.pipe(takeUntil(this.destroy$)).subscribe((items) => {
       this.filteredMenuItems = items;
     });
+
 
     // Subscribe to domain hostname for sidebar vlink
     this.storeDomainHostname$

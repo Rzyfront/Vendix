@@ -94,7 +94,14 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
               <div *ngFor="let item of orderItems" class="flex justify-between text-sm">
                 <div class="flex flex-col">
                   <span class="font-medium text-text-primary">{{ item.name }}</span>
-                  <span class="text-xs text-text-secondary">{{ item.quantity }}x {{ formatCurrency(item.unitPrice) }}</span>
+                  <span class="text-xs text-text-secondary">
+                    <ng-container *ngIf="item.is_weight_product; else unitDetail">
+                      {{ item.weight }} {{ item.weight_unit }} x {{ formatCurrency(item.unitPrice) }}/{{ item.weight_unit }}
+                    </ng-container>
+                    <ng-template #unitDetail>
+                      {{ item.quantity }}x {{ formatCurrency(item.unitPrice) }}
+                    </ng-template>
+                  </span>
                 </div>
                 <span class="font-bold text-text-primary">{{ formatCurrency(item.totalPrice) }}</span>
               </div>
@@ -322,12 +329,18 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
       const quantity = Number(item.quantity || 0);
       const totalPrice = Number(item.total_price || item.totalPrice || 0);
       const tax = Number(item.tax_amount || item.tax || 0) || (totalPrice - (unitPrice * quantity));
+      const weight = Number(item.weight || 0);
+      const weight_unit = item.weight_unit || 'kg';
+      const is_weight_product = weight > 0;
       return {
         name: item.product_name || item.name || 'Producto',
         quantity,
         unitPrice,
         totalPrice,
         tax,
+        weight,
+        weight_unit,
+        is_weight_product,
       };
     });
 
@@ -371,6 +384,8 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
         totalPrice: item.totalPrice,
         discount: 0,
         tax: item.tax,
+        weight: item.weight || undefined,
+        weight_unit: item.weight_unit || undefined,
       })),
       subtotal: this.orderSubtotal,
       tax: this.orderTax,

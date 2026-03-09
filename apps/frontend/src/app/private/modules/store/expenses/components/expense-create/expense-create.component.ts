@@ -1,4 +1,4 @@
-import { Component, Output, EventEmitter, Input, inject } from '@angular/core';
+import { Component, Output, EventEmitter, Input, ViewChild, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
@@ -12,6 +12,7 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { SelectorComponent, SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
+import { FileUploadDropzoneComponent } from '../../../../../../shared/components/file-upload-dropzone/file-upload-dropzone.component';
 
 @Component({
   selector: 'vendix-expense-create',
@@ -23,7 +24,8 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
     ButtonComponent,
     InputComponent,
     SelectorComponent,
-    TextareaComponent
+    TextareaComponent,
+    FileUploadDropzoneComponent
   ],
   template: `
     <app-modal
@@ -90,33 +92,13 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
           <!-- Receipt Upload -->
           <div class="space-y-2">
             <label class="text-sm font-medium text-text-primary">Comprobante</label>
-            <div class="flex items-center gap-3">
-              <input
-                #fileInput
-                type="file"
-                accept="image/*,application/pdf"
-                class="hidden"
-                (change)="onFileSelected($event)"
-              />
-              <app-button
-                variant="outline"
-                size="sm"
-                type="button"
-                (clicked)="fileInput.click()"
-              >
-                {{ receiptFile ? 'Cambiar archivo' : 'Seleccionar archivo' }}
-              </app-button>
-              <span *ngIf="receiptFile" class="text-sm text-text-secondary truncate max-w-[200px]">
-                {{ receiptFile.name }}
-              </span>
-            </div>
-            <!-- Preview for images -->
-            <img
-              *ngIf="receiptPreview"
-              [src]="receiptPreview"
-              alt="Preview"
-              class="mt-2 max-h-32 rounded-lg border border-border object-contain"
-            />
+            <app-file-upload-dropzone
+              label="Subir comprobante"
+              helperText="Imagenes o PDF"
+              accept="image/*,application/pdf"
+              (fileSelected)="onFileSelected($event)"
+              (fileRemoved)="onFileRemoved()"
+            ></app-file-upload-dropzone>
           </div>
 
         </form>
@@ -155,8 +137,9 @@ export class ExpenseCreateComponent {
   loading$: Observable<boolean>;
 
   receiptFile: File | null = null;
-  receiptPreview: string | null = null;
   submitting = false;
+
+  @ViewChild('dropzone') dropzoneRef!: FileUploadDropzoneComponent;
 
   constructor(
     private fb: FormBuilder,
@@ -183,22 +166,12 @@ export class ExpenseCreateComponent {
     });
   }
 
-  onFileSelected(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    if (input.files && input.files[0]) {
-      this.receiptFile = input.files[0];
+  onFileSelected(file: File): void {
+    this.receiptFile = file;
+  }
 
-      // Generate preview for images
-      if (this.receiptFile.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          this.receiptPreview = e.target?.result as string;
-        };
-        reader.readAsDataURL(this.receiptFile);
-      } else {
-        this.receiptPreview = null;
-      }
-    }
+  onFileRemoved(): void {
+    this.receiptFile = null;
   }
 
   onSubmit() {
@@ -250,7 +223,7 @@ export class ExpenseCreateComponent {
       expense_date: new Date().toISOString().split('T')[0],
     });
     this.receiptFile = null;
-    this.receiptPreview = null;
+    this.dropzoneRef?.clear();
   }
 
   onClose() {

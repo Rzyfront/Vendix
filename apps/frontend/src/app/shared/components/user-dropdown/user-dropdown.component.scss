@@ -203,6 +203,40 @@
       background: var(--color-border);
     }
 
+    .new-modules-banner {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      margin: 0.5rem 0.5rem 0;
+      padding: 0.5rem 0.625rem;
+      background: rgba(249, 115, 22, 0.08);
+      border: 1px solid rgba(249, 115, 22, 0.25);
+      border-radius: 0.5rem;
+      animation: fadeInBanner 0.3s ease;
+
+      .banner-icon {
+        color: #f97316;
+        flex-shrink: 0;
+        margin-top: 1px;
+      }
+
+      .banner-text {
+        font-size: var(--fs-xs);
+        color: var(--color-text-secondary);
+        line-height: 1.4;
+
+        strong {
+          color: var(--color-text-primary);
+          font-weight: 600;
+        }
+      }
+    }
+
+    @keyframes fadeInBanner {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
     .dropdown-content {
       padding: 8px;
 

@@ -106,6 +106,27 @@ export const superAdminRoutes: Routes = [
             '../../private/modules/super-admin/legal-documents/legal-documents.component'
           ).then((c) => c.LegalDocumentsComponent),
       },
+      {
+        path: 'help-center',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/help-center/help-center-admin.component'
+          ).then((c) => c.HelpCenterAdminComponent),
+      },
+      {
+        path: 'help-center/articles/new',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/help-center/pages/article-form/article-form.component'
+          ).then((c) => c.ArticleFormComponent),
+      },
+      {
+        path: 'help-center/articles/:id/edit',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/help-center/pages/article-form/article-form.component'
+          ).then((c) => c.ArticleFormComponent),
+      },
       // Placeholder routes - modules under construction
       {
         path: 'billing',

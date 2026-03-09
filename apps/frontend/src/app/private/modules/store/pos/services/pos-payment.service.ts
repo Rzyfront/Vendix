@@ -249,6 +249,8 @@ export class PosPaymentService {
         product_variant_id: item.variant_id || null,
         variant_sku: item.variant_sku || null,
         variant_attributes: item.variant_attributes || null,
+        weight: item.weight || undefined,
+        weight_unit: item.weight_unit || undefined,
       })),
       subtotal: Number(
         parseFloat(cartState.summary.subtotal.toString()).toFixed(2),
@@ -372,6 +374,8 @@ export class PosPaymentService {
         product_variant_id: item.variant_id || null,
         variant_sku: item.variant_sku || null,
         variant_attributes: item.variant_attributes || null,
+        weight: item.weight || undefined,
+        weight_unit: item.weight_unit || undefined,
       })),
       subtotal: Number(
         parseFloat(cartState.summary.subtotal.toString()).toFixed(2),
@@ -565,6 +569,8 @@ export class PosPaymentService {
         product_variant_id: item.variant_id || null,
         variant_sku: item.variant_sku || null,
         variant_attributes: item.variant_attributes || null,
+        weight: item.weight || undefined,
+        weight_unit: item.weight_unit || undefined,
       })),
       subtotal: Number(cartState.summary.subtotal.toFixed(2)),
       tax_amount: Number(cartState.summary.taxAmount.toFixed(2)),

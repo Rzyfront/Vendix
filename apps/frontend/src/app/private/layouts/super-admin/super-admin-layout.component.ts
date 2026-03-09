@@ -159,6 +159,11 @@ export class SuperAdminLayoutComponent implements OnInit, OnDestroy {
       route: '/super-admin/legal-documents',
     },
     {
+      label: 'Centro de Ayuda',
+      icon: 'book-open',
+      route: '/super-admin/help-center',
+    },
+    {
       label: 'Monedas',
       icon: 'dollar-sign',
       route: '/super-admin/currencies',
