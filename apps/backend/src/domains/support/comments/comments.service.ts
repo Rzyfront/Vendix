@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { S3Service } from '@common/services/s3.service';
@@ -112,7 +112,7 @@ export class CommentsService {
 
       // Validate organization matches
       if (ticket.organization_id !== organizationId) {
-        throw new Error('Unauthorized access to ticket comments');
+        throw new ForbiddenException('You do not have permission to access these comments');
       }
 
       const comments = await this.prisma.support_comments.findMany({
@@ -155,7 +155,7 @@ export class CommentsService {
 
       // Verify the comment belongs to the user's organization
       if (comment.ticket.organization_id !== organizationId) {
-        throw new NotFoundException('Comment not found');
+        throw new ForbiddenException('You do not have permission to delete this comment');
       }
 
       await this.prisma.support_comments.delete({
