@@ -76,7 +76,11 @@ export class TicketsController {
   @ApiOperation({ summary: 'Get a single support ticket by ID' })
   @ApiResponse({ status: 200, description: 'Ticket retrieved successfully' })
   async findOne(@Param('id') id: string) {
-    return this.ticketsService.findOne(+id);
+    const organizationId = RequestContextService.getOrganizationId();
+    if (!organizationId) {
+      return { success: false, message: 'Authentication required' };
+    }
+    return this.ticketsService.findOne(+id, organizationId);
   }
 
   @Patch(':id')

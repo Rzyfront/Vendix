@@ -137,20 +137,25 @@ export class CommentsService {
     }
   }
 
-  async delete(commentId: number, userId: number) {
+  async delete(commentId: number, organizationId: number) {
     try {
+      // First get the comment with its ticket to verify organization
       const comment = await this.prisma.support_comments.findUnique({
         where: { id: commentId },
+        include: {
+          ticket: {
+            select: { organization_id: true },
+          },
+        },
       });
 
       if (!comment) {
         throw new NotFoundException('Comment not found');
       }
 
-      // Only author or admin can delete
-      if (comment.author_id !== userId) {
-        // TODO: Add role check for admin
-        throw new Error('You can only delete your own comments');
+      // Verify the comment belongs to the user's organization
+      if (comment.ticket.organization_id !== organizationId) {
+        throw new NotFoundException('Comment not found');
       }
 
       await this.prisma.support_comments.delete({

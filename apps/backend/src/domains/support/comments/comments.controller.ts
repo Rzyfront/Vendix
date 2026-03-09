@@ -62,11 +62,16 @@ export class CommentsController {
   @ApiResponse({ status: 200, description: 'Comment deleted successfully' })
   async delete(@Param('id') id: string) {
     const userId = RequestContextService.getUserId();
+    const organizationId = RequestContextService.getOrganizationId();
 
     if (!userId) {
       return { success: false, message: 'Authentication required' };
     }
 
-    return this.commentsService.delete(+id, userId);
+    if (!organizationId) {
+      return { success: false, message: 'Organization context required' };
+    }
+
+    return this.commentsService.delete(+id, organizationId);
   }
 }

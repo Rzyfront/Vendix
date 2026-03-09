@@ -245,10 +245,10 @@ export class TicketsService {
     }
   }
 
-  async findOne(ticketId: number) {
+  async findOne(ticketId: number, organizationId: number) {
     try {
       const ticket = await this.prisma.support_tickets.findUnique({
-        where: { id: ticketId },
+        where: { id: ticketId, organization_id: organizationId },
         include: {
           created_by: {
             select: {
