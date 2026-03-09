@@ -41,8 +41,14 @@ export class CommentsController {
   @Get('ticket/:ticketId')
   @ApiOperation({ summary: 'Get all comments for a ticket' })
   @ApiResponse({ status: 200, description: 'Comments retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Authentication required' })
   async findByTicket(@Param('ticketId') ticketId: string) {
+    const userId = RequestContextService.getUserId();
     const organizationId = RequestContextService.getOrganizationId();
+
+    if (!userId) {
+      return { success: false, message: 'Authentication required' };
+    }
 
     if (!organizationId) {
       return { success: false, message: 'Organization context required' };
