@@ -18,7 +18,12 @@
       <div class="product-list">
         <div *ngFor="let item of cartState?.items" class="product-item">
           <span class="product-name">{{ item.product.name }}<span *ngIf="item.variant_display_name" style="font-size: 0.85em; opacity: 0.7;"> - {{ item.variant_display_name }}</span></span>
-          <span class="product-qty">x{{ item.quantity }}</span>
+          <span class="product-qty" *ngIf="item.is_weight_product; else unitQty">
+            {{ item.weight }} {{ item.weight_unit || 'kg' }}
+          </span>
+          <ng-template #unitQty>
+            <span class="product-qty">x{{ item.quantity }}</span>
+          </ng-template>
         </div>
         <div *ngIf="!cartState?.items?.length" class="empty-cart">
           El carrito está vacío

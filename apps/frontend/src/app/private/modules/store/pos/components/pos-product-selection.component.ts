@@ -30,6 +30,7 @@ import {
   PosProductVariant,
   SearchResult,
 } from '../services/pos-product.service';
+import { PosScaleService } from '../services/pos-scale.service';
 import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
 import { environment } from '../../../../../../environments/environment';
 import {
@@ -94,12 +95,29 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
               (clearAllFilters)="onClearFilters()"
               class="shrink-0"
             ></app-options-dropdown>
+
+            <!-- Scale connect/disconnect button -->
+            <button
+              *ngIf="showScaleButton"
+              (click)="toggleScaleConnection()"
+              class="shrink-0 p-2 rounded-lg border border-border transition-colors"
+              [ngClass]="{
+                'bg-green-50 border-green-300 text-green-600': scaleConnectionStatus === 'connected',
+                'bg-red-50 border-red-300 text-red-500': scaleConnectionStatus === 'error',
+                'bg-surface text-text-secondary hover:border-primary': scaleConnectionStatus === 'disconnected',
+                'bg-yellow-50 border-yellow-300 text-yellow-600 cursor-wait': scaleConnectionStatus === 'connecting'
+              }"
+              [disabled]="scaleConnectionStatus === 'connecting'"
+              [title]="scaleConnectionStatus === 'connected' ? 'Báscula conectada — clic para desconectar' : 'Conectar báscula'"
+            >
+              <app-icon name="scale" [size]="18"></app-icon>
+            </button>
           </div>
         </div>
       </div>
 
       <!-- Products Content -->
-      <div class="flex-1 overflow-y-auto p-3 lg:p-6 relative z-0">
+      <div class="flex-1 overflow-y-auto min-h-0 p-3 lg:p-6 relative z-0">
         <!-- Loading State -->
         <div *ngIf="loading" class="p-8 text-center">
           <div
@@ -441,6 +459,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
     private router: Router,
     private store: Store,
     private currencyService: CurrencyFormatService,
+    private scaleService: PosScaleService,
   ) { }
 
   ngOnInit(): void {
@@ -739,29 +758,12 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
     // If product is weight-based and scale is enabled, prompt for weight
     const isWeightProduct = product.pricing_type === 'weight' && this.scaleEnabled;
     if (isWeightProduct) {
-      if (!this.allowManualWeightEntry) {
-        this.toastService.warning('El pesado manual está deshabilitado para este punto de venta');
-        return;
-      }
-
       const unit = this.defaultWeightUnit;
       const variantPrice = variant.price_override ?? product.final_price;
-      const weightStr = await this.dialogService.prompt(
-        {
-          title: 'Ingresar Peso',
-          message: `${product.name}\nPrecio: ${this.formatPrice(variantPrice)}/${unit}`,
-          placeholder: `Peso en ${unit}`,
-          defaultValue: '1.0',
-          confirmText: 'Agregar',
-          cancelText: 'Cancelar',
-        },
-        { size: 'sm' }
-      );
+      const weight = await this.getWeightFromScaleOrManual(product.name, variantPrice, unit);
+      if (weight === undefined) return;
 
-      if (!weightStr) return;
-
-      const weight = parseFloat(weightStr.replace(',', '.'));
-      if (isNaN(weight) || weight <= 0) {
+      if (weight <= 0) {
         this.toastService.warning('El peso debe ser mayor a 0');
         return;
       }
@@ -836,35 +838,14 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
 
     // For weight products, require weight input
     if (isWeightProduct) {
-      if (!this.allowManualWeightEntry) {
-        this.toastService.warning('El pesado manual está deshabilitado para este punto de venta');
-        return;
-      }
-
       const unit = this.defaultWeightUnit;
-      const weightStr = await this.dialogService.prompt(
-        {
-          title: 'Ingresar Peso',
-          message: `${product.name}\nPrecio: ${this.formatPrice(product.final_price)}/${unit}`,
-          placeholder: `Peso en ${unit}`,
-          defaultValue: '1.0',
-          confirmText: 'Agregar',
-          cancelText: 'Cancelar',
-        },
-        { size: 'sm' }
-      );
+      const weight = await this.getWeightFromScaleOrManual(product.name, product.final_price, unit);
+      if (weight === undefined) return;
 
-      if (!weightStr) {
-        return; // User cancelled
-      }
-
-      const weight = parseFloat(weightStr.replace(',', '.'));
-
-      if (isNaN(weight) || weight <= 0) {
+      if (weight <= 0) {
         this.toastService.warning('El peso debe ser mayor a 0');
         return;
       }
-
       if (weight > 999) {
         this.toastService.warning('El peso máximo permitido es 999 ' + unit);
         return;
@@ -923,6 +904,64 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
           this.toastService.warning(error.message || 'Error al agregar producto al carrito');
         },
       });
+  }
+
+  private async getWeightFromScaleOrManual(
+    productName: string,
+    price: number,
+    unit: string,
+  ): Promise<number | undefined> {
+    if (this.scaleService.isConnected()) {
+      return this.scaleService.showWeightModal({
+        title: 'Lectura de Báscula',
+        message: `${productName}\nPrecio: ${this.formatPrice(price)}/${unit}`,
+        weightUnit: unit,
+        allowManualFallback: this.allowManualWeightEntry,
+      });
+    }
+
+    if (this.allowManualWeightEntry) {
+      const weightStr = await this.dialogService.prompt(
+        {
+          title: 'Ingresar Peso',
+          message: `${productName}\nPrecio: ${this.formatPrice(price)}/${unit}`,
+          placeholder: `Peso en ${unit}`,
+          defaultValue: '1.0',
+          confirmText: 'Agregar',
+          cancelText: 'Cancelar',
+        },
+        { size: 'sm' },
+      );
+
+      if (!weightStr) return undefined;
+      const weight = parseFloat(weightStr.replace(',', '.'));
+      return isNaN(weight) ? undefined : weight;
+    }
+
+    this.toastService.warning('Báscula no conectada y pesado manual deshabilitado');
+    return undefined;
+  }
+
+  async toggleScaleConnection(): Promise<void> {
+    if (this.scaleService.isConnected()) {
+      await this.scaleService.disconnect();
+      this.toastService.info('Báscula desconectada');
+    } else {
+      const connected = await this.scaleService.connect();
+      if (connected) {
+        this.toastService.success('Báscula conectada');
+      } else {
+        this.toastService.warning('No se pudo conectar la báscula');
+      }
+    }
+  }
+
+  get scaleConnectionStatus() {
+    return this.scaleService.status$.value;
+  }
+
+  get showScaleButton(): boolean {
+    return this.scaleEnabled && this.scaleService.isWebSerialSupported();
   }
 
   onImageError(event: any): void {
@@ -985,6 +1024,10 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
         this.scaleEnabled = storeSettings.pos.scale.enabled ?? false;
         this.defaultWeightUnit = storeSettings.pos.scale.default_weight_unit || 'kg';
         this.allowManualWeightEntry = storeSettings.pos.scale.allow_manual_weight_entry ?? true;
+
+        if (storeSettings.pos.scale.device) {
+          this.scaleService.configure(storeSettings.pos.scale.device);
+        }
       }
     });
   }

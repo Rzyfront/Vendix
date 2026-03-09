@@ -10,7 +10,9 @@ import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
-import { PosSettings, BusinessHours, ScaleSettings } from '../../../../../../../core/models/store-settings.interface';
+import { PosSettings, BusinessHours, ScaleSettings, ScaleDeviceConfig } from '../../../../../../../core/models/store-settings.interface';
+import { PosScaleService } from '../../../../pos/services/pos-scale.service';
+import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 
 
 @Component({
@@ -23,6 +25,11 @@ import { PosSettings, BusinessHours, ScaleSettings } from '../../../../../../../
 export class PosSettingsForm implements OnInit, OnChanges {
   @Input() settings!: PosSettings;
   @Output() settingsChange = new EventEmitter<PosSettings>();
+
+  constructor(
+    private scaleService: PosScaleService,
+    private toastService: ToastService,
+  ) {}
 
   form: FormGroup = new FormGroup({
     allow_anonymous_sales: new FormControl(false),
@@ -40,6 +47,13 @@ export class PosSettingsForm implements OnInit, OnChanges {
       enabled: new FormControl(false),
       allow_manual_weight_entry: new FormControl(true),
       default_weight_unit: new FormControl('kg'),
+      device: new FormGroup({
+        baud_rate: new FormControl(9600),
+        data_bits: new FormControl(8),
+        stop_bits: new FormControl(1),
+        parity: new FormControl('none'),
+        protocol: new FormControl('generic'),
+      }),
     }),
   });
 
@@ -102,6 +116,40 @@ export class PosSettingsForm implements OnInit, OnChanges {
 
   get allowManualWeightEntryControl(): FormControl<boolean> {
     return this.form.get('scale.allow_manual_weight_entry') as FormControl<boolean>;
+  }
+
+  get defaultWeightUnitControl(): FormControl<string> {
+    return this.form.get('scale.default_weight_unit') as FormControl<string>;
+  }
+
+  get baudRateControl(): FormControl<number> {
+    return this.form.get('scale.device.baud_rate') as FormControl<number>;
+  }
+
+  get protocolControl(): FormControl<string> {
+    return this.form.get('scale.device.protocol') as FormControl<string>;
+  }
+
+  get isWebSerialSupported(): boolean {
+    return this.scaleService.isWebSerialSupported();
+  }
+
+  testingConnection = false;
+
+  async testScaleConnection(): Promise<void> {
+    this.testingConnection = true;
+    const deviceGroup = this.form.get('scale.device') as FormGroup;
+    this.scaleService.configure(deviceGroup.value);
+
+    const connected = await this.scaleService.connect();
+    this.testingConnection = false;
+
+    if (connected) {
+      this.toastService.success('Báscula conectada correctamente');
+      setTimeout(() => this.scaleService.disconnect(), 3000);
+    } else {
+      this.toastService.warning('No se pudo conectar a la báscula');
+    }
   }
 
   ngOnInit() {

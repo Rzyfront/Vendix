@@ -236,6 +236,15 @@ export interface ScaleSettings {
   enabled: boolean;
   allow_manual_weight_entry: boolean;
   default_weight_unit: 'kg' | 'g' | 'lb';
+  device?: ScaleDeviceConfig;
+}
+
+export interface ScaleDeviceConfig {
+  baud_rate: number;
+  data_bits: 7 | 8;
+  stop_bits: 1 | 2;
+  parity: 'none' | 'even' | 'odd';
+  protocol: 'generic' | 'cas' | 'ohaus';
 }
 
 export interface ReceiptsSettings {

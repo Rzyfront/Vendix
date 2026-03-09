@@ -6,13 +6,10 @@
   overflow: hidden;
 }
 
+// Layout is controlled by Tailwind classes in the template (h-full flex flex-col gap-4).
+// Only non-layout styles here to avoid SCSS ↔ Tailwind conflicts.
 .pos-container {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
   background-color: var(--color-background);
-  padding: var(--spacing-lg);
-  gap: var(--spacing-lg);
 }
 
 // Header Card Styles
@@ -520,11 +517,6 @@
 // Responsive Design
 @media (max-width: 64em) {
   /* 1024px */
-  .pos-container {
-    padding: var(--spacing-md);
-    gap: var(--spacing-md);
-  }
-
   .header-content {
     flex-direction: column;
     align-items: flex-start;
@@ -550,11 +542,6 @@
 
 @media (max-width: 48em) {
   /* 768px */
-  .pos-container {
-    padding: var(--spacing-sm);
-    gap: var(--spacing-sm);
-  }
-
   .pos-header {
     padding: var(--spacing-md);
   }

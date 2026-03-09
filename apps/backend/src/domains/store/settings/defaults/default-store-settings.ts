@@ -87,6 +87,13 @@ export function getDefaultStoreSettings(): StoreSettings {
         enabled: false,
         allow_manual_weight_entry: true,
         default_weight_unit: 'kg',
+        device: {
+          baud_rate: 9600,
+          data_bits: 8,
+          stop_bits: 1,
+          parity: 'none',
+          protocol: 'generic',
+        },
       },
     },
     receipts: {
@@ -153,6 +160,11 @@ export function getDefaultStoreSettings(): StoreSettings {
         settings_domains: true,
         settings_shipping: true,
         settings_legal_documents: true,
+
+        // Ayuda
+        help: true,
+        help_support: true,
+        help_center: true,
       },
       STORE_ECOMMERCE: {
         profile: true,

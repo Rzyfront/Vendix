@@ -159,6 +159,36 @@ export class NotificationsSettingsDto {
   new_order_alerts_phone?: string;
 }
 
+export class ScaleDeviceConfigDto {
+  @ApiProperty({ example: 9600, required: false })
+  @IsOptional()
+  @IsNumber()
+  @IsIn([9600, 19200, 38400, 115200])
+  baud_rate?: number;
+
+  @ApiProperty({ example: 8, required: false, enum: [7, 8] })
+  @IsOptional()
+  @IsNumber()
+  @IsIn([7, 8])
+  data_bits?: 7 | 8;
+
+  @ApiProperty({ example: 1, required: false, enum: [1, 2] })
+  @IsOptional()
+  @IsNumber()
+  @IsIn([1, 2])
+  stop_bits?: 1 | 2;
+
+  @ApiProperty({ example: 'none', required: false, enum: ['none', 'even', 'odd'] })
+  @IsOptional()
+  @IsIn(['none', 'even', 'odd'])
+  parity?: 'none' | 'even' | 'odd';
+
+  @ApiProperty({ example: 'generic', required: false, enum: ['generic', 'cas', 'ohaus'] })
+  @IsOptional()
+  @IsIn(['generic', 'cas', 'ohaus'])
+  protocol?: 'generic' | 'cas' | 'ohaus';
+}
+
 export class ScaleSettingsDto {
   @ApiProperty({ example: false, required: false })
   @IsOptional()
@@ -174,6 +204,12 @@ export class ScaleSettingsDto {
   @IsOptional()
   @IsIn(['kg', 'g', 'lb'])
   default_weight_unit?: 'kg' | 'g' | 'lb';
+
+  @ApiProperty({ type: ScaleDeviceConfigDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ScaleDeviceConfigDto)
+  device?: ScaleDeviceConfigDto;
 }
 
 export class PosSettingsDto {

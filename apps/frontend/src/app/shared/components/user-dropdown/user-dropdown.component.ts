@@ -9,11 +9,12 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
-import { Observable, Subject, takeUntil } from 'rxjs';
+import { Observable, Subject, take, takeUntil } from 'rxjs';
 
 import { IconComponent } from '../icon/icon.component';
 import { UserUiService } from '../../services/user-ui.service';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
+import { AuthService } from '../../../core/services/auth.service';
 import { GlobalFacade } from '../../../core/store/global.facade';
 import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
 import { EnvironmentContextService } from '../../../core/services/environment-context.service';
@@ -81,6 +82,18 @@ export interface UserMenuOption {
 
         <div class="dropdown-divider"></div>
 
+        <!-- New Modules Info Banner -->
+        <div
+          class="new-modules-banner"
+          *ngIf="(newModuleCount$ | async) as count"
+        >
+          <app-icon name="info" [size]="16" class="banner-icon"></app-icon>
+          <span class="banner-text">
+            Tienes <strong>{{ count }}</strong> {{ count === 1 ? 'módulo nuevo disponible' : 'módulos nuevos disponibles' }}.
+            Actívalos en <strong>Configuración</strong>.
+          </span>
+        </div>
+
         <div class="dropdown-content">
           <button
             *ngFor="let option of visibleMenuOptions"
@@ -116,6 +129,7 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
 
   private router = inject(Router);
   private authFacade = inject(AuthFacade);
+  private authService = inject(AuthService);
   private globalFacade = inject(GlobalFacade);
   private environmentSwitchService = inject(EnvironmentSwitchService);
   private environmentContextService = inject(EnvironmentContextService);
@@ -148,6 +162,17 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
         this.isFullscreen = isFullscreen;
         this.updateFullscreenOption();
       });
+
+    // Refresh default_panel_ui from API to detect new modules accurately
+    // This ensures badges work even if localStorage has stale defaults
+    this.authService.getSettings().pipe(take(1)).subscribe({
+      next: (response) => {
+        const settings = response.data || response;
+        if (settings.default_panel_ui) {
+          this.authFacade.setDefaultPanelUi(settings.default_panel_ui);
+        }
+      },
+    });
   }
 
   ngOnDestroy() {
@@ -267,7 +292,6 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
   }
 
   private goToProfile() {
-    console.log('UserDropdown: goToProfile clicked');
     this.userUiService.openProfile();
     this.isOpen = false;
     this.closeDropdown.emit();

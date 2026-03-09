@@ -68,7 +68,7 @@ import { StoreSettingsService } from '../settings/general/services/store-setting
     PosShippingModalComponent,
   ],
   template: `
-    <div class="h-full flex flex-col gap-4 overflow-hidden pos-container">
+    <div class="h-full flex flex-col gap-3 lg:gap-4 p-3 lg:p-4 overflow-hidden pos-container">
       <!-- POS Stats (hidden on mobile) -->
       <div class="flex-none hidden lg:block">
         <app-pos-stats [cartState]="cartState"></app-pos-stats>
@@ -184,7 +184,7 @@ import { StoreSettingsService } from '../settings/general/services/store-setting
         </div>
 
         <!-- Main Content Grid -->
-        <div class="flex-1 p-3 lg:p-6 min-h-0 overflow-hidden pos-main-content relative">
+        <div class="flex-1 h-0 p-3 lg:p-6 min-h-0 overflow-hidden pos-main-content relative">
           
           @if (isOutOfHours && !canBypassSchedule) {
             <!-- Out of hours overlay -->
@@ -705,6 +705,8 @@ export class PosComponent implements OnInit, OnDestroy {
             variant_sku: item.variant_sku,
             variant_attributes: item.variant_attributes,
             variant_display_name: item.variant_display_name,
+            weight: item.weight || undefined,
+            weight_unit: item.weight_unit || undefined,
           })),
         subtotal: paymentData.order?.subtotal || this.cartSummary.subtotal,
         tax_amount: paymentData.order?.tax_amount || this.cartSummary.taxAmount,
@@ -870,6 +872,8 @@ export class PosComponent implements OnInit, OnDestroy {
             variant_sku: item.variant_sku,
             variant_attributes: item.variant_attributes,
             variant_display_name: item.variant_display_name,
+            weight: item.weight || undefined,
+            weight_unit: item.weight_unit || undefined,
           })),
         subtotal: shippingData.order?.subtotal || this.cartSummary.subtotal,
         tax_amount: shippingData.order?.tax_amount || this.cartSummary.taxAmount,

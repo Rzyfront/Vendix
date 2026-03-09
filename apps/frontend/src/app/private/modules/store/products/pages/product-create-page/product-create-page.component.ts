@@ -134,6 +134,52 @@ interface GeneratedVariant {
       animation: ai-shimmer 1.5s ease-in-out infinite;
     }
 
+    /* ── Hover propagation: button hover → label + textarea ── */
+    .ai-description-wrapper .ai-label {
+      transition: all 0.4s ease;
+    }
+
+    .ai-description-wrapper .ai-textarea-wrapper {
+      transition: all 0.4s ease;
+      border-radius: 12px;
+      padding: 2px;
+      background: transparent;
+    }
+
+    .ai-description-wrapper:has(.ai-generate-btn:hover:not(:disabled)) .ai-label {
+      background: linear-gradient(90deg,
+        rgba(var(--color-primary-rgb), 1) 0%,
+        rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 1) 50%,
+        rgba(var(--color-primary-rgb), 1) 100%
+      );
+      background-size: 200% 100%;
+      animation: ai-shimmer 2s ease-in-out infinite;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      font-weight: 600;
+    }
+
+    .ai-description-wrapper:has(.ai-generate-btn:hover:not(:disabled)) .ai-textarea-wrapper {
+      position: relative;
+      border-radius: 12px;
+      padding: 2px;
+      background: linear-gradient(135deg,
+        rgba(var(--color-primary-rgb), 0.4) 0%,
+        rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.6) 25%,
+        rgba(var(--color-primary-rgb), 0.3) 50%,
+        rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.6) 75%,
+        rgba(var(--color-primary-rgb), 0.4) 100%
+      );
+      background-size: 300% 300%;
+      animation: ai-outline-flow 2s ease-in-out infinite;
+    }
+
+    .ai-description-wrapper:has(.ai-generate-btn:hover:not(:disabled)) .ai-textarea-wrapper ::ng-deep textarea {
+      border: none !important;
+      border-radius: 10px;
+    }
+
     /* ── Tooltip ── */
     .ai-tooltip {
       position: absolute;

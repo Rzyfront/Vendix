@@ -19,6 +19,7 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { SelectorComponent, SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
+import { FileUploadDropzoneComponent } from '../../../../../../shared/components/file-upload-dropzone/file-upload-dropzone.component';
 
 @Component({
   selector: 'vendix-expense-edit',
@@ -30,7 +31,8 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
     ButtonComponent,
     InputComponent,
     SelectorComponent,
-    TextareaComponent
+    TextareaComponent,
+    FileUploadDropzoneComponent
   ],
   template: `
     <app-modal
@@ -110,32 +112,14 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
               </a>
             </div>
             <!-- Upload new receipt (only for pending) -->
-            <div *ngIf="expense?.state === 'pending'" class="flex items-center gap-3">
-              <input
-                #editFileInput
-                type="file"
-                accept="image/*,application/pdf"
-                class="hidden"
-                (change)="onFileSelected($event)"
-              />
-              <app-button
-                variant="outline"
-                size="sm"
-                type="button"
-                (clicked)="editFileInput.click()"
-              >
-                {{ receiptFile ? 'Cambiar archivo' : 'Subir comprobante' }}
-              </app-button>
-              <span *ngIf="receiptFile" class="text-sm text-text-secondary truncate max-w-[200px]">
-                {{ receiptFile.name }}
-              </span>
-            </div>
-            <img
-              *ngIf="receiptPreview"
-              [src]="receiptPreview"
-              alt="Preview"
-              class="mt-2 max-h-32 rounded-lg border border-border object-contain"
-            />
+            <app-file-upload-dropzone
+              *ngIf="expense?.state === 'pending'"
+              label="Subir comprobante"
+              helperText="Imagenes o PDF"
+              accept="image/*,application/pdf"
+              (fileSelected)="onFileSelected($event)"
+              (fileRemoved)="onFileRemoved()"
+            ></app-file-upload-dropzone>
           </div>
 
         </form>
@@ -262,7 +246,6 @@ export class ExpenseEditComponent implements OnChanges {
   loading$: Observable<boolean>;
 
   receiptFile: File | null = null;
-  receiptPreview: string | null = null;
   submitting = false;
 
   private expensesService = inject(ExpensesService);
@@ -318,20 +301,12 @@ export class ExpenseEditComponent implements OnChanges {
     });
   }
 
-  onFileSelected(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    if (input.files && input.files[0]) {
-      this.receiptFile = input.files[0];
-      if (this.receiptFile.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          this.receiptPreview = e.target?.result as string;
-        };
-        reader.readAsDataURL(this.receiptFile);
-      } else {
-        this.receiptPreview = null;
-      }
-    }
+  onFileSelected(file: File): void {
+    this.receiptFile = file;
+  }
+
+  onFileRemoved(): void {
+    this.receiptFile = null;
   }
 
   onSubmit() {
@@ -359,7 +334,6 @@ export class ExpenseEditComponent implements OnChanges {
       }));
       this.submitting = false;
       this.receiptFile = null;
-      this.receiptPreview = null;
       this.onClose();
     };
 
