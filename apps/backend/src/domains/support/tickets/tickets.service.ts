@@ -1,6 +1,7 @@
 import {
   Injectable,
   NotFoundException,
+  ForbiddenException,
   Logger,
 } from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
@@ -247,8 +248,23 @@ export class TicketsService {
 
   async findOne(ticketId: number, organizationId: number) {
     try {
+      // First verify the ticket exists
+      const ticketCheck = await this.prisma.support_tickets.findUnique({
+        where: { id: ticketId },
+        select: { id: true, organization_id: true },
+      });
+
+      if (!ticketCheck) {
+        throw new NotFoundException('Ticket not found');
+      }
+
+      // Validate organization matches
+      if (ticketCheck.organization_id !== organizationId) {
+        throw new ForbiddenException('You do not have permission to access this ticket');
+      }
+
       const ticket = await this.prisma.support_tickets.findUnique({
-        where: { id: ticketId, organization_id: organizationId },
+        where: { id: ticketId },
         include: {
           created_by: {
             select: {
