@@ -8,6 +8,7 @@ import {
     Query,
     Param,
     BadRequestException,
+    ForbiddenException,
     UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -165,6 +166,31 @@ export class UploadController {
     @Get('presigned-url')
     @ApiOperation({ summary: 'Get a temporary URL for a file' })
     async getUrl(@Query('key') key: string) {
+        if (!key) {
+            throw new BadRequestException('key is required');
+        }
+
+        const context = RequestContextService.getContext();
+        const orgId = context?.organization_id;
+
+        if (!orgId) {
+            throw new BadRequestException('Organization context is required');
+        }
+
+        const org = await this.prisma.organizations.findUnique({
+            where: { id: orgId },
+            select: { id: true, slug: true },
+        });
+
+        if (!org) {
+            throw new BadRequestException('Organization not found');
+        }
+
+        const orgPrefix = this.s3PathHelper.buildOrgPath(org);
+        if (!key.startsWith(`${orgPrefix}/`)) {
+            throw new ForbiddenException('You do not have access to this resource');
+        }
+
         const url = await this.s3Service.getPresignedUrl(key);
         return { url };
     }
