@@ -553,9 +553,12 @@ export class EcommerceComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // Create placeholders with uploading state
-    const placeholders: SliderImage[] = validFiles.map(() => ({ url: '', uploading: true }));
-    this.sliderImages.push(...placeholders);
+    // Create placeholders with uploading state - store the index for each placeholder
+    const placeholderIndices: number[] = [];
+    for (const file of validFiles) {
+      placeholderIndices.push(this.sliderImages.length);
+      this.sliderImages.push({ url: '', uploading: true });
+    }
     this.isUploadingImage = true;
 
     // Upload each file sequentially to avoid overwhelming the server
@@ -571,13 +574,14 @@ export class EcommerceComponent implements OnInit, OnDestroy {
       }
 
       const file = validFiles[index];
+      const placeholderIndex = placeholderIndices[index];
       this.ecommerceService
         .uploadSliderImage(file)
         .pipe(takeUntil(this.destroy$))
         .subscribe({
           next: (result) => {
-            const placeholderIndex = this.sliderImages.findIndex((img) => img.uploading);
-            if (placeholderIndex !== -1) {
+            // Replace the specific placeholder at the stored index
+            if (placeholderIndex < this.sliderImages.length) {
               this.sliderImages[placeholderIndex] = {
                 url: result.url || result.key,
                 key: result.key,
@@ -590,8 +594,10 @@ export class EcommerceComponent implements OnInit, OnDestroy {
             uploadNext(index + 1);
           },
           error: (error) => {
-            // Remove failed placeholder
-            this.sliderImages = this.sliderImages.filter((img) => !img.uploading);
+            // Remove failed placeholder at specific index
+            if (placeholderIndex < this.sliderImages.length) {
+              this.sliderImages.splice(placeholderIndex, 1);
+            }
             this.toastService.error(`Error al subir "${file.name}": ${error.message}`);
             uploadNext(index + 1);
           },

@@ -1,9 +1,10 @@
-import { IsInt, IsOptional, IsArray, ValidateNested, Min } from 'class-validator';
+import { IsInt, IsOptional, IsArray, ValidateNested, Min, IsNotEmpty } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class AddToCartDto {
+    @IsNotEmpty()
     @IsInt()
-    @Min(1)
+    @Min(0)
     product_id: number;
 
     @IsOptional()
@@ -22,7 +23,9 @@ export class UpdateCartItemDto {
 }
 
 export class SyncCartItemDto {
+    @IsNotEmpty()
     @IsInt()
+    @Min(0)
     product_id: number;
 
     @IsOptional()

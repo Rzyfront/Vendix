@@ -29,10 +29,14 @@ export class CatalogQueryDto {
 
   @IsOptional()
   @Type(() => Number)
+  @IsInt()
+  @Min(0)
   min_price?: number;
 
   @IsOptional()
   @Type(() => Number)
+  @IsInt()
+  @Min(0)
   max_price?: number;
 
   @IsOptional()
