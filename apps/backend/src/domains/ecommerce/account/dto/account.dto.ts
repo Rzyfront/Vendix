@@ -47,6 +47,7 @@ export class EcommerceAccountChangePasswordDto {
 @ApiSchema({ name: 'EcommerceAccountCreateAddressDto' })
 export class EcommerceAccountCreateAddressDto {
     @IsString()
+    @IsNotEmpty({ message: 'La dirección es requerida' })
     address_line1: string;
 
     @IsOptional()
@@ -54,6 +55,7 @@ export class EcommerceAccountCreateAddressDto {
     address_line2?: string;
 
     @IsString()
+    @IsNotEmpty({ message: 'La ciudad es requerida' })
     city: string;
 
     @IsOptional()
@@ -61,6 +63,7 @@ export class EcommerceAccountCreateAddressDto {
     state_province?: string;
 
     @IsString()
+    @IsNotEmpty({ message: 'El código de país es requerido' })
     country_code: string;
 
     @IsOptional()
@@ -82,6 +85,7 @@ export class EcommerceAccountCreateAddressDto {
 
 export class UpdateAddressDto {
     @IsString()
+    @IsNotEmpty({ message: 'La dirección es requerida' })
     address_line1: string;
 
     @IsOptional()
@@ -89,6 +93,7 @@ export class UpdateAddressDto {
     address_line2?: string;
 
     @IsString()
+    @IsNotEmpty({ message: 'La ciudad es requerida' })
     city: string;
 
     @IsOptional()
@@ -96,6 +101,7 @@ export class UpdateAddressDto {
     state_province?: string;
 
     @IsString()
+    @IsNotEmpty({ message: 'El código de país es requerido' })
     country_code: string;
 
     @IsOptional()
