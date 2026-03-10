@@ -143,6 +143,24 @@ export class ProductImageDto {
   sort_order?: number;
 }
 
+// DTO para dimensiones del producto
+export class DimensionsDto {
+  @IsNumber()
+  @Type(() => Number)
+  @Min(0, { message: 'La longitud no puede ser negativa' })
+  length: number;
+
+  @IsNumber()
+  @Type(() => Number)
+  @Min(0, { message: 'El ancho no puede ser negativo' })
+  width: number;
+
+  @IsNumber()
+  @Type(() => Number)
+  @Min(0, { message: 'La altura no puede ser negativa' })
+  height: number;
+}
+
 export class CreateProductDto {
   @IsOptional()
   @IsInt()
@@ -224,12 +242,9 @@ export class CreateProductDto {
   weight?: number;
 
   @IsOptional()
-  @IsObject()
-  dimensions?: {
-    length: number;
-    width: number;
-    height: number;
-  };
+  @ValidateNested()
+  @Type(() => DimensionsDto)
+  dimensions?: DimensionsDto;
 
   @IsOptional()
   @IsBoolean()
@@ -392,12 +407,9 @@ export class UpdateProductDto {
   weight?: number;
 
   @IsOptional()
-  @IsObject()
-  dimensions?: {
-    length: number;
-    width: number;
-    height: number;
-  };
+  @ValidateNested()
+  @Type(() => DimensionsDto)
+  dimensions?: DimensionsDto;
 
   @IsOptional()
   @IsEnum(ProductState)
@@ -703,12 +715,9 @@ export class UpdateProductWithVariantsDto {
   weight?: number;
 
   @IsOptional()
-  @IsObject()
-  dimensions?: {
-    length: number;
-    width: number;
-    height: number;
-  };
+  @ValidateNested()
+  @Type(() => DimensionsDto)
+  dimensions?: DimensionsDto;
 
   @IsOptional()
   @IsBoolean()
