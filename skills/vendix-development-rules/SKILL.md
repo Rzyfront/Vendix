@@ -7,7 +7,7 @@ metadata:
 ---
 # Vendix Development Rules
 
-> **CRITICAL SKILL - ALWAYS ACTIVE** - Estas reglas son MANDATORIAS para toda interacción con el código base.
+> **CRITICAL SKILL - ALWAYS ACTIVE** - These rules are MANDATORY for all interactions with the codebase.
 
 ## 🚨 MANDATORY REQUIREMENTS
 

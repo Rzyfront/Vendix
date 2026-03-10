@@ -1,8 +1,8 @@
 ---
 name: how-to-dev
 description: >
-  Establece el flujo obligatorio de desarrollo de software utilizando el sistema de skills.
-  Trigger: SIEMPRE que el usuario solicite cambios, nuevas funcionalidades o desarrollo general.
+  Establishes the mandatory software development flow using the skills system.
+  Trigger: ALWAYS when the user requests changes, new features, or general development.
 license: MIT
 metadata:
   author: rzyfront
@@ -11,43 +11,43 @@ metadata:
 
 ## When to Use
 
-Esta skill debe regir **CADA** interacción de desarrollo en el repositorio Vendix. Es la guía maestra de cómo el agente de IA debe abordar las peticiones del usuario.
+This skill must govern **EVERY** development interaction in the Vendix repository. It is the master guide for how the AI agent should approach user requests.
 
-## Flujo de Desarrollo (Standard Changes)
+## Development Flow (Standard Changes)
 
-Cuando el usuario solicita cambios específicos o mejoras:
+When the user requests specific changes or improvements:
 
-1.  **Analizar la Petición**: Entender profundamente qué desea el usuario.
-2.  **Búsqueda en el Routing de Skills**: Consultar `AGENTS.md` o el archivo de configuración del proveedor (`GEMINI.md`, `CLAUDE.md`) para encontrar skills relacionadas con el cambio.
-3.  **Adquirir Contexto**: Leer las skills identificadas ANTES de realizar cualquier acción para asegurar que se sigan los patrones del proyecto.
-4.  **Ejecutar con Contexto**: Realizar el cambio aplicando el conocimiento de las skills.
-5.  **Manejo de Knowledge Gaps**: Si el cambio sigue un patrón nuevo no documentado, preguntar al usuario si se debe crear una nueva skill.
+1.  **Analyze the Request**: Deeply understand what the user wants.
+2.  **Search the Skills Routing**: Check `AGENTS.md` or the provider configuration file (`GEMINI.md`, `CLAUDE.md`) to find skills related to the change.
+3.  **Acquire Context**: Read the identified skills BEFORE performing any action to ensure the project's patterns are followed.
+4.  **Execute with Context**: Make the change applying the knowledge from the skills.
+5.  **Handle Knowledge Gaps**: If the change follows a new undocumented pattern, ask the user whether a new skill should be created.
 
-## Flujo de Desarrollo (Structural Changes / Plans)
+## Development Flow (Structural Changes / Plans)
 
-Cuando la petición implica cambios estructurales, flujos completos, amplios, o un plan de desarrollo:
+When the request involves structural changes, complete flows, broad scope, or a development plan:
 
-1.  **Pre-análisis**: Leer y realizar un pre-análisis de la petición que te da el usuario.
-2.  **Análisis de Código**: Hacer un pequeño plan de análisis de código en base a la petición y luego planificarla.
-3.  **Planificación por Etapas**: Analizar el plan en diversas etapas y puntos de desarrollo.
-4.  **Búsqueda y Mapeo de Skills**: Ir al listado de skills (`AGENTS.md` o routing de skills) en busca de la información correcta basada en skills por etapa o punto de desarrollo. Debes terminar TODAS las skills sin falta que te puedan servir en cada etapa del plan, dejándolas específicamente resaltadas en el plan o desarrollo a continuación.
-5.  **Ejecución Estricta**: En las fases de ejecución o desarrollo SIEMPRE se debe usar esta misma estrategia pre-diseñada basándose en los puntos y las skills del plan.
-6.  **Cierre de Gap**: Al final, si alguna etapa del plan no contaba con una skill para seguir este patrón, entonces se diseña ese patrón y se le plantea al usuario la posibilidad de crear esta nueva skill para suplir un knowledge gap.
+1.  **Pre-analysis**: Read and perform a pre-analysis of the user's request.
+2.  **Code Analysis**: Create a small code analysis plan based on the request and then plan it out.
+3.  **Stage-based Planning**: Break down the plan into various stages and development points.
+4.  **Skills Search and Mapping**: Go to the skills listing (`AGENTS.md` or skills routing) to find the correct information based on skills per stage or development point. You must finish ALL skills without exception that may be useful at each stage of the plan, leaving them specifically highlighted in the plan or development below.
+5.  **Strict Execution**: During execution or development phases, you must ALWAYS use this same pre-designed strategy based on the plan's points and skills.
+6.  **Gap Closure**: At the end, if any stage of the plan did not have a skill to follow this pattern, then design that pattern and propose to the user the possibility of creating a new skill to address the knowledge gap.
 
-## 🚨 REGLAS ULTRA-OBLIGATORIAS
+## ULTRA-MANDATORY RULES
 
-- **NUNCA** se debe crear o iniciar un plan sin referenciar detalladamente las skills requeridas por etapas y por puntos.
-- **NUNCA, ABSOLUTAMENTE NUNCA** debes empezar el desarrollo de un plan que aún no tiene referencias a las skills en sus etapas o puntos. Siempre, _antes_ de empezar a planificar o desarrollar, debes verificar qué skills cubren cada etapa o punto y referenciarlas correctamente en cada uno.
-- **Siempre usar este estándar** pre-diseñado para todos los desarrollos.
-- **Consultar antes de Actuar**: Nunca asumas un patrón ni avances sin mapear la skill pertinente frente a los puntos de cambio.
+- **NEVER** create or start a plan without referencing in detail the required skills by stages and points.
+- **NEVER, ABSOLUTELY NEVER** start the development of a plan that does not yet have references to skills in its stages or points. Always, _before_ starting to plan or develop, you must verify which skills cover each stage or point and reference them correctly in each one.
+- **Always use this pre-designed standard** for all development.
+- **Check before Acting**: Never assume a pattern or proceed without mapping the relevant skill to the change points.
 
-## Commands de Verificación
+## Verification Commands
 
 ```bash
-# Sincronizar skills después de crear/modificar una
+# Sync skills after creating/modifying one
 ./skills/setup.sh --sync
 
-# Verificar logs de los contenedores para asegurar que el desarrollo no rompió el build
+# Check container logs to ensure the development did not break the build
 docker logs --tail 40 vendix_backend
 docker logs --tail 40 vendix_frontend
 ```

@@ -7,7 +7,7 @@ metadata:
 ---
 # Vendix Frontend Component Pattern
 
-> **CRITICAL RULE** - **TODOS** los componentes Angular DEBEN estar en carpetas, sin importar si son standalone o modulares, por muy pequeños que sean.
+> **CRITICAL RULE** - **ALL** Angular components MUST be in folders, regardless of whether they are standalone or module-based, no matter how small they are.
 
 ## 🚨 THE GOLDEN RULE
 
@@ -42,10 +42,10 @@ metadata:
 ```
 
 **Naming Rules:**
-- Folder: **kebab-case** (ej: `product-list/`)
-- Files: **kebab-case** with suffix (ej: `product-list.component.ts`)
-- Class: **PascalCase** (ej: `export class ProductListComponent`)
-- Selector: **kebab-case** with `app-` prefix (ej: `app-product-list`)
+- Folder: **kebab-case** (e.g.: `product-list/`)
+- Files: **kebab-case** with suffix (e.g.: `product-list.component.ts`)
+- Class: **PascalCase** (e.g.: `export class ProductListComponent`)
+- Selector: **kebab-case** with `app-` prefix (e.g.: `app-product-list`)
 
 ---
 

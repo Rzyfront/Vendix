@@ -138,11 +138,6 @@ export function getDefaultStoreSettings(): StoreSettings {
 
         // Gastos
         expenses: true,
-        expenses_overview: true,
-        expenses_all: true,
-        expenses_create: true,
-        expenses_categories: true,
-        expenses_reports: true,
 
         // Configuración
         settings: true,

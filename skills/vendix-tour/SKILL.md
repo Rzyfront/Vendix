@@ -1,46 +1,46 @@
 # Vendix Tour System
 
-Guía para implementar tours interactivos en la aplicación Vendix con soporte completo para **mobile y desktop**.
+Guide for implementing interactive tours in the Vendix application with full support for **mobile and desktop**.
 
-## Descripción
+## Description
 
-El sistema de tours permite guiar a los usuarios a través de features importantes la primera vez que los visitan. Los tours consisten en pasos secuenciales que resaltan elementos específicos de la UI con un spotlight y muestran un tooltip explicativo.
+The tour system allows guiding users through important features the first time they visit them. Tours consist of sequential steps that highlight specific UI elements with a spotlight and display an explanatory tooltip.
 
-**Características clave:**
-- ✅ Soporte responsive específico para mobile y desktop
-- ✅ Tooltip minimizable por defecto en mobile
-- ✅ Posicionamiento inteligente que no bloquea interacciones
-- ✅ Detección de elementos dinámicos (ngFor)
-- ✅ Safe area insets para devices con notch
-- ✅ Auto-avance al hacer click en elementos target
+**Key features:**
+- ✅ Specific responsive support for mobile and desktop
+- ✅ Tooltip minimizable by default on mobile
+- ✅ Smart positioning that does not block interactions
+- ✅ Dynamic element detection (ngFor)
+- ✅ Safe area insets for devices with notch
+- ✅ Auto-advance on click on target elements
 
-## Arquitectura
+## Architecture
 
 ```
 apps/frontend/src/app/shared/components/tour/
 ├── services/
-│   └── tour.service.ts           # Gestiona estado de tours (user_settings)
+│   └── tour.service.ts           # Manages tour state (user_settings)
 ├── tour-modal/
-│   ├── tour-modal.component.ts   # Modal con spotlight + tooltips responsive
+│   ├── tour-modal.component.ts   # Modal with spotlight + responsive tooltips
 │   └── tour-modal.component.scss
 └── configs/
-    ├── pos-tour.config.ts        # Tour del POS
-    └── ecommerce-tour.config.ts  # Tour de configuración ecommerce
+    ├── pos-tour.config.ts        # POS Tour
+    └── ecommerce-tour.config.ts  # Ecommerce configuration tour
 ```
 
 ## TourService
 
-Servicio singleton que gestiona:
+Singleton service that manages:
 
-- **Estado de tours**: Guarda en `user_settings.config.tours` qué tours están completados/saltados
-- **Métodos**:
-  - `canShowTour(tourId)` - Verifica si el tour puede mostrarse
-  - `completeTour(tourId)` - Marca tour como completado
-  - `skipTour(tourId)` - Marca tour como saltado
-  - `resetTour(tourId)` - Resetea tour para testing
-  - `resetAllTours()` - Resetea todos los tours (solo para development)
+- **Tour state**: Stores in `user_settings.config.tours` which tours are completed/skipped
+- **Methods**:
+  - `canShowTour(tourId)` - Checks if the tour can be shown
+  - `completeTour(tourId)` - Marks tour as completed
+  - `skipTour(tourId)` - Marks tour as skipped
+  - `resetTour(tourId)` - Resets tour for testing
+  - `resetAllTours()` - Resets all tours (development only)
 
-## TourStep Interface (Actualizada)
+## TourStep Interface (Updated)
 
 ```typescript
 export interface TourStep {
@@ -49,20 +49,20 @@ export interface TourStep {
   description: string;
   action?: string;
 
-  // Selectores CSS
+  // CSS Selectors
   target?: string;                     // Fallback selector
-  targetMobile?: string;               // Selector específico para mobile (< 768px)
-  targetDesktop?: string;              // Selector específico para desktop (≥ 768px)
+  targetMobile?: string;               // Mobile-specific selector (< 768px)
+  targetDesktop?: string;              // Desktop-specific selector (≥ 768px)
 
-  // Click detection (sin spotlight)
+  // Click detection (without spotlight)
   autoAdvanceTarget?: string;          // Fallback
-  autoAdvanceTargetMobile?: string;    // Mobile específico
-  autoAdvanceTargetDesktop?: string;   // Desktop específico
+  autoAdvanceTargetMobile?: string;    // Mobile-specific
+  autoAdvanceTargetDesktop?: string;   // Desktop-specific
 
-  // Hooks de ciclo de vida
+  // Lifecycle hooks
   beforeShow?: () => Promise<void>;
   afterShow?: () => Promise<void>;
-  beforeNext?: () => Promise<boolean>; // Validación antes de avanzar
+  beforeNext?: () => Promise<boolean>; // Validation before advancing
 }
 ```
 
@@ -73,34 +73,34 @@ export interface TourConfig {
   id: string;
   name: string;
   steps: TourStep[];
-  showProgress?: boolean;              // Muestra "X de Y" (desktop)
-  showSkipButton?: boolean;            // Muestra botón "Saltar"
+  showProgress?: boolean;              // Shows "X of Y" (desktop)
+  showSkipButton?: boolean;            // Shows "Skip" button
 }
 ```
 
 ## Mobile-First Tour Design
 
-### Comportamiento en Mobile vs Desktop
+### Behavior on Mobile vs Desktop
 
-| Característica | Mobile (< 768px) | Desktop (≥ 768px) |
+| Feature | Mobile (< 768px) | Desktop (≥ 768px) |
 |----------------|------------------|-------------------|
-| **Tooltip por defecto** | Minimizado (50px alto) | Expandido completo |
-| **Botón minimizar** | Visible (flecha) | No visible |
-| **Posicionamiento** | Inteligente, evita bloquear | Cerca del target |
-| **Progreso** | Oculto (ahorra espacio) | Visible "X de Y" |
-| **Spotlight** | Con shadow pulsante | Con shadow pulsante |
-| **Safe areas** | Respeta notch/insets | No aplica |
+| **Default tooltip** | Minimized (50px height) | Fully expanded |
+| **Minimize button** | Visible (arrow) | Not visible |
+| **Positioning** | Smart, avoids blocking | Near the target |
+| **Progress** | Hidden (saves space) | Visible "X of Y" |
+| **Spotlight** | With pulsating shadow | With pulsating shadow |
+| **Safe areas** | Respects notch/insets | Not applicable |
 
-### Selectores Específicos por Dispositivo
+### Device-Specific Selectors
 
-Para elementos que están en diferentes posiciones según el dispositivo:
+For elements that are in different positions depending on the device:
 
 ```typescript
 {
   id: 'checkout-step',
   target: 'app-pos-cart button.checkout-btn',  // Fallback (desktop)
-  targetMobile: 'app-pos-mobile-footer button.checkout-btn',  // Footer en mobile
-  targetDesktop: 'app-pos-cart button.checkout-btn',  // Cart en desktop
+  targetMobile: 'app-pos-mobile-footer button.checkout-btn',  // Footer on mobile
+  targetDesktop: 'app-pos-cart button.checkout-btn',  // Cart on desktop
 
   autoAdvanceTarget: 'app-pos-cart button.checkout-btn',
   autoAdvanceTargetMobile: 'app-pos-mobile-footer button.checkout-btn',
@@ -108,16 +108,16 @@ Para elementos que están en diferentes posiciones según el dispositivo:
 }
 ```
 
-### Detección de Elementos Dinámicos (ngFor)
+### Dynamic Element Detection (ngFor)
 
-Para elementos generados dinámicamente con `*ngFor` (como cards de productos):
+For elements dynamically generated with `*ngFor` (such as product cards):
 
 ```typescript
 {
   id: 'add-product-to-cart',
-  // Selector base
+  // Base selector
   target: 'app-pos-product-selection .product-card',
-  // Mobile: múltiples fallbacks por si Angular aún no renderizó
+  // Mobile: multiple fallbacks in case Angular has not yet rendered
   targetMobile: 'app-pos-product-selection .product-card, ' +
                  'app-pos-product-selection .group.rounded-2xl, ' +
                  '.product-card, ' +
@@ -125,80 +125,80 @@ Para elementos generados dinámicamente con `*ngFor` (como cards de productos):
 }
 ```
 
-**El sistema automáticamente:**
-- Detecta si el selector incluye `.product-card` o `pos-product-selection`
-- Usa timeout más largo (10s vs 6s) para esperar la respuesta de API + renderizado de Angular
-- NO hace scroll a `top: 0` para mantener elementos en viewport
-- Verifica cada 50ms (vs 100ms) para detectar más rápido cuando Angular renderiza
+**The system automatically:**
+- Detects if the selector includes `.product-card` or `pos-product-selection`
+- Uses a longer timeout (10s vs 6s) to wait for the API response + Angular rendering
+- Does NOT scroll to `top: 0` to keep elements in the viewport
+- Checks every 50ms (vs 100ms) to detect faster when Angular renders
 
-### Posicionamiento Inteligente en Mobile
+### Smart Positioning on Mobile
 
-El tooltip se posiciona automáticamente para NO bloquear el elemento target:
+The tooltip is automatically positioned so it does NOT block the target element:
 
-1. **Footer targets** (botón cobrar): Se posiciona **ENCIMA** del botón
-2. **Sidebar targets**: Se posiciona **DEBAJO** del link
-3. **Productos/cards**: Se posiciona **DEBAJO** del card
-4. **Sin target**: Se centra en parte superior de la pantalla
+1. **Footer targets** (checkout button): Positioned **ABOVE** the button
+2. **Sidebar targets**: Positioned **BELOW** the link
+3. **Products/cards**: Positioned **BELOW** the card
+4. **No target**: Centered at the top of the screen
 
-## Implementación de un Nuevo Tour
+## Implementing a New Tour
 
-### 1. Crear el config del tour
+### 1. Create the tour config
 
-**Archivo**: `apps/frontend/src/app/shared/components/tour/configs/my-feature-tour.config.ts`
+**File**: `apps/frontend/src/app/shared/components/tour/configs/my-feature-tour.config.ts`
 
 ```typescript
 import { TourConfig } from '../services/tour.service';
 
 export const MY_FEATURE_TOUR_CONFIG: TourConfig = {
   id: 'my-feature-first-visit',
-  name: 'Tour de Mi Feature',
+  name: 'My Feature Tour',
   showProgress: true,
   showSkipButton: true,
   steps: [
     {
       id: 'welcome',
-      title: '¡Bienvenido a Mi Feature! 🎉',
-      description: 'Descripción de lo que hace el feature.',
-      action: 'Haz clic en "Comenzar"',
+      title: 'Welcome to My Feature! 🎉',
+      description: 'Description of what the feature does.',
+      action: 'Click "Get Started"',
     },
     {
       id: 'important-element',
-      title: 'Elemento Importante',
-      description: 'Explicación de este elemento.',
-      action: 'Revisa este elemento',
-      target: '[data-tour="important-element"]', // Usar data-tour attributes
+      title: 'Important Element',
+      description: 'Explanation of this element.',
+      action: 'Review this element',
+      target: '[data-tour="important-element"]', // Use data-tour attributes
     },
     {
       id: 'congratulations',
-      title: '¡Tour Completado!',
-      description: 'Has completado el tour.',
-      action: '¡Comienza a usar el feature!',
+      title: 'Tour Completed!',
+      description: 'You have completed the tour.',
+      action: 'Start using the feature!',
     },
   ],
 };
 ```
 
-### 2. Agregar data-tour attributes al HTML
+### 2. Add data-tour attributes to HTML
 
-**IMPORTANTE**: Usa atributos `data-tour` en lugar de selectores CSS complejos con `:has()`:
+**IMPORTANT**: Use `data-tour` attributes instead of complex CSS selectors with `:has()`:
 
 ```html
-<!-- ✅ CORRECTO -->
+<!-- ✅ CORRECT -->
 <div class="bg-white rounded-xl" data-tour="important-section">
   ...
 </div>
 
-<!-- ❌ EVITAR - no soportado en todos los navegadores -->
+<!-- ❌ AVOID - not supported in all browsers -->
 <div class="bg-white:has(.fa-icon)">
 ```
 
-Selectores recomendados:
-- `[data-tour="section-id"]` - Attribute selector (más confiable)
+Recommended selectors:
+- `[data-tour="section-id"]` - Attribute selector (most reliable)
 - `app-my-component` - Component selector
-- `.specific-class` - Class selector simple
+- `.specific-class` - Simple class selector
 - `#element-id` - ID selector
 
-### 3. Integrar en el componente
+### 3. Integrate into the component
 
 ```typescript
 import { TourModalComponent } from '../../../../shared/components/tour/tour-modal/tour-modal.component';
@@ -209,7 +209,7 @@ import { MY_FEATURE_TOUR_CONFIG } from '../../../../shared/components/tour/confi
   standalone: true,
   imports: [TourModalComponent, /* ... */],
   template: `
-    <!-- ... contenido del componente ... -->
+    <!-- ... component content ... -->
 
     <!-- Tour Modal -->
     <app-tour-modal
@@ -234,7 +234,7 @@ export class MyFeatureComponent implements OnInit {
     if (this.tourService.canShowTour(tourId)) {
       setTimeout(() => {
         this.showTourModal = true;
-      }, 1500); // Delay para que la página se asiente
+      }, 1500); // Delay so the page settles
     }
   }
 
@@ -248,97 +248,97 @@ export class MyFeatureComponent implements OnInit {
 }
 ```
 
-## Buenas Prácticas
+## Best Practices
 
-### 1. Selectores de Target
-- ✅ Usa `[data-tour="..."]` attributes para elementos específicos
-- ✅ Usa selectores de componente `app-my-component`
-- ✅ Usa clases únicas con prefijo `.my-feature-section`
-- ✅ Para mobile: múltiples fallbacks separados por coma
-- ❌ Evita `:has()` pseudo-selector (no soportado universalmente)
-- ❌ Evita selectores muy genéricos (`.btn`, `.card`) sin contexto
+### 1. Target Selectors
+- ✅ Use `[data-tour="..."]` attributes for specific elements
+- ✅ Use component selectors `app-my-component`
+- ✅ Use unique classes with prefix `.my-feature-section`
+- ✅ For mobile: multiple fallbacks separated by comma
+- ❌ Avoid `:has()` pseudo-selector (not universally supported)
+- ❌ Avoid very generic selectors (`.btn`, `.card`) without context
 
-### 2. Selectores Mobile vs Desktop
+### 2. Mobile vs Desktop Selectors
 
-**Cuándo usar selectores específicos:**
-- Elementos en diferentes posiciones (sidebar vs footer)
-- Diferente estructura DOM entre mobile y desktop
-- Elementos con clases diferentes según breakpoint
+**When to use specific selectors:**
+- Elements in different positions (sidebar vs footer)
+- Different DOM structure between mobile and desktop
+- Elements with different classes depending on breakpoint
 
 ```typescript
-// ✅ CORRECTO - Selector específico cuando difiere
+// ✅ CORRECT - Specific selector when it differs
 {
   targetMobile: 'app-pos-mobile-footer button.checkout-btn',
   targetDesktop: 'app-pos-cart button.checkout-btn',
 }
 
-// ✅ CORRECTO - Compartido cuando es igual
+// ✅ CORRECT - Shared when identical
 {
   target: 'app-sidebar a[href="/admin/products"]',
 }
 ```
 
-### 3. Estructura de Pasos
-- Primer paso: Welcome sin target (tooltip centrado)
-- Pasos intermedios: Con target específico
-- Último paso: Congratulations sin target
+### 3. Step Structure
+- First step: Welcome without target (centered tooltip)
+- Intermediate steps: With specific target
+- Last step: Congratulations without target
 
-### 4. Elementos Dinámicos (ngFor)
+### 4. Dynamic Elements (ngFor)
 
-**Patrón para detectar elementos generados por Angular:**
+**Pattern for detecting Angular-generated elements:**
 
 ```typescript
 {
   id: 'select-product',
-  // Base selector (funciona en ambos)
+  // Base selector (works on both)
   target: 'app-pos-product-selection .product-card',
-  // Mobile: múltiples fallbacks por orden de preferencia
+  // Mobile: multiple fallbacks in order of preference
   targetMobile: 'app-pos-product-selection .product-card, ' +
                  'app-pos-product-selection .group.rounded-2xl, ' +
                  '.product-card',
 }
 ```
 
-**Clases comunes en cards dinámicos:**
-- `.product-card` - clase principal del card
-- `.group` - clase de Tailwind para interacciones
-- `.rounded-2xl` - border-radius del card
-- Combinaciones: `.group.rounded-2xl`
+**Common classes in dynamic cards:**
+- `.product-card` - main card class
+- `.group` - Tailwind class for interactions
+- `.rounded-2xl` - card border-radius
+- Combinations: `.group.rounded-2xl`
 
-### 5. Validación con beforeNext
+### 5. Validation with beforeNext
 ```typescript
 {
   id: 'action-required',
   target: '[data-tour="action-section"]',
   beforeNext: async () => {
-    // Verificar que el usuario completó la acción
+    // Verify that the user completed the action
     const element = document.querySelector('[data-tour="action-section"]');
     return element?.classList.contains('completed') ?? false;
   }
 }
 ```
 
-### 6. Testing de Tours en Mobile
+### 6. Testing Tours on Mobile
 
-**Para resetear un tour:**
+**To reset a tour:**
 ```typescript
 this.tourService.resetTour('my-feature-first-visit');
-// O todos:
+// Or all:
 this.tourService.resetAllTours();
 ```
 
-**Desde consola:**
+**From the console:**
 ```javascript
-// Ver estado actual
+// View current state
 JSON.parse(localStorage.getItem('user_settings')).config.tours
 
-// Resetear tours completados
+// Reset completed tours
 const settings = JSON.parse(localStorage.getItem('user_settings'));
 settings.config.tours.completedTours = [];
 localStorage.setItem('user_settings', JSON.stringify(settings));
 ```
 
-**Debug logging en browser console:**
+**Debug logging in browser console:**
 ```
 [TourModal] Mobile check: true, minimized: true
 [TourModal] Waiting for element: app-pos-product-selection .product-card, isMobile: true
@@ -349,81 +349,81 @@ localStorage.setItem('user_settings', JSON.stringify(settings));
 
 ### 7. Safe Area Insets (Notched Devices)
 
-El tour respeta automáticamente safe areas en mobile:
+The tour automatically respects safe areas on mobile:
 - `env(safe-area-inset-top)` - notch/punch hole
 - `env(safe-area-inset-bottom)` - home indicator
 - `env(safe-area-inset-left/right)` - landscape notch
 
-No necesitas configurar nada, el sistema lo maneja.
+No configuration needed, the system handles it.
 
-### 8. Timeout para Elementos Dinámicos
+### 8. Timeout for Dynamic Elements
 
-| Tipo de elemento | Mobile Timeout | Desktop Timeout |
+| Element type | Mobile Timeout | Desktop Timeout |
 |-----------------|----------------|-----------------|
-| Estático (sidebar, header) | 6s | 8s |
-| Dinámico (ngFor, API) | 10s | 8s |
-| Con scroll para lazy-loading | 6s + scroll | 8s |
+| Static (sidebar, header) | 6s | 8s |
+| Dynamic (ngFor, API) | 10s | 8s |
+| With scroll for lazy-loading | 6s + scroll | 8s |
 
 ## Troubleshooting
 
-### El tooltip tapa el elemento target en mobile
+### The tooltip covers the target element on mobile
 
-**Problema**: El tooltip se posiciona encima del elemento que el usuario debe clickear.
+**Problem**: The tooltip is positioned on top of the element the user needs to click.
 
-**Solución**: El sistema de posicionamiento automático debería manejar esto. Si no:
-- Verifica que el selector incluye el componente contenedor correcto
-- Para footer buttons, asegúrate que el selector incluye `pos-mobile-footer` o `checkout-btn`
-- El sistema detecta automáticamente estos keywords y posiciona arriba
+**Solution**: The automatic positioning system should handle this. If not:
+- Verify that the selector includes the correct container component
+- For footer buttons, make sure the selector includes `pos-mobile-footer` or `checkout-btn`
+- The system automatically detects these keywords and positions above
 
-### Las cards de productos no se detectan en mobile
+### Product cards are not detected on mobile
 
-**Problema**: `waitForElement` termina sin encontrar las cards.
+**Problem**: `waitForElement` finishes without finding the cards.
 
-**Causas posibles**:
-1. Angular aún no renderizó (ngFor dinámico)
-2. El scroll a `top: 0` las sacó del viewport
-3. El selector no coincide con las clases reales
+**Possible causes**:
+1. Angular has not yet rendered (dynamic ngFor)
+2. Scrolling to `top: 0` moved them out of the viewport
+3. The selector does not match the actual classes
 
-**Solución**:
+**Solution**:
 ```typescript
-// Usa múltiples fallbacks
+// Use multiple fallbacks
 targetMobile: 'app-pos-product-selection .product-card, ' +
                'app-pos-product-selection .group.rounded-2xl, ' +
                '.product-card',
 ```
 
-### El tour avanza sin esperar la acción del usuario
+### The tour advances without waiting for the user's action
 
-**Problema**: El tour avanza automáticamente sin que el usuario complete la acción.
+**Problem**: The tour advances automatically without the user completing the action.
 
-**Solución**: Usa `beforeNext` para validar:
+**Solution**: Use `beforeNext` to validate:
 ```typescript
 beforeNext: async () => {
-  // Verifica que la acción se completó
+  // Verify that the action was completed
   const cartBadge = document.querySelector('.cart-badge');
   return cartBadge?.textContent !== '0';
 }
 ```
 
-## Tours Existentes
+## Existing Tours
 
 | Tour ID | Config | Component | Features |
 |---------|--------|-----------|----------|
 | `pos-first-sale` | `POS_TOUR_CONFIG` | `PosSaleComponent` | Mobile + Desktop, dynamic elements |
-| `ecommerce-config-first-visit` | `ECOMMERCE_TOUR_CONFIG` | `EcommerceComponent` | Config ecommerce |
+| `ecommerce-config-first-visit` | `ECOMMERCE_TOUR_CONFIG` | `EcommerceComponent` | Ecommerce config |
 
-## Archivos Clave
+## Key Files
 
-| Archivo | Descripción |
+| File | Description |
 |---------|-------------|
-| `tour.service.ts` | Gestión de estado de tours en user_settings |
-| `tour-modal.component.ts` | Modal responsive con spotlight + tooltip |
-| `pos-tour.config.ts` | Config del tour POS con selectores mobile/desktop |
-| `pos-product-selection.component.ts` | Cards dinámicas con ngFor (*ejemplo de elementos que requieren detección especial*) |
+| `tour.service.ts` | Tour state management in user_settings |
+| `tour-modal.component.ts` | Responsive modal with spotlight + tooltip |
+| `pos-tour.config.ts` | POS tour config with mobile/desktop selectors |
+| `pos-product-selection.component.ts` | Dynamic cards with ngFor (*example of elements requiring special detection*) |
 
-## Referencias de Implementación
+## Implementation References
 
 - [TourService](apps/frontend/src/app/shared/components/tour/services/tour.service.ts)
 - [TourModalComponent](apps/frontend/src/app/shared/components/tour/tour-modal/tour-modal.component.ts)
 - [POS Tour Config](apps/frontend/src/app/shared/components/tour/configs/pos-tour.config.ts)
-- [POS Product Selection](apps/frontend/src/app/private/modules/store/pos/components/pos-product-selection.component.ts) - Ejemplo de elementos dinámicos
+- [POS Product Selection](apps/frontend/src/app/private/modules/store/pos/components/pos-product-selection.component.ts) - Example of dynamic elements

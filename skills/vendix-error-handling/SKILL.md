@@ -83,7 +83,7 @@ export const ErrorCodes = {
 ```typescript
 export const ERROR_MESSAGES: Record<string, string> = {
   // ... existing messages
-  ORD_FIND_001: 'La orden no fue encontrada.',
+  ORD_FIND_001: 'The order was not found.',
 };
 ```
 
@@ -128,7 +128,7 @@ The `extractApiErrorMessage()` function (used by 14+ files) automatically detect
 ```typescript
 // This already works - parseApiError is called internally
 const msg = extractApiErrorMessage(httpError);
-this.toast_service.error(msg); // Shows Spanish UX message, NOT devMessage
+this.toast_service.error(msg); // Shows UX message, NOT devMessage
 ```
 
 ### For advanced error handling (e.g., conditional actions):

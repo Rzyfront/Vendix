@@ -111,7 +111,7 @@ aiLimitReached = computed(() => this.aiUsesLeft() <= 0);
 generateWithAI(): void {
   // Check UI limit FIRST — before any processing
   if (this.aiLimitReached()) {
-    this.toastService.warning('Límite de generaciones alcanzado (3 por producto)');
+    this.toastService.warning('Generation limit reached (3 per product)');
     return;
   }
   // ... rest of logic
@@ -121,7 +121,7 @@ generateWithAI(): void {
 **Rules:**
 - Default limit: **3 uses** per component instance (resets on navigation)
 - Decrement only on **success** (failed calls don't consume uses)
-- Show remaining uses in the tooltip: `"Generar con IA (2/3)"`
+- Show remaining uses in the tooltip: `"Generate with AI (2/3)"`
 - Disable the button when limit reached: `[disabled]="isGenerating() || aiLimitReached()"`
 - Toast feedback with remaining count after each successful generation
 
@@ -159,15 +159,15 @@ return { result: response.content };
 
 Go to `/superadmin/ai-engine` → Apps tab → Create Application:
 
-| Field           | Example                                    |
-| --------------- | ------------------------------------------ |
-| Key             | `product_description_creator`              |
-| Name            | Generador de Descripcion de Producto       |
-| System Prompt   | `Eres un experto en marketing...`          |
-| Prompt Template | `Genera una descripcion para: {{context}}` |
-| Temperature     | 0.7                                        |
-| Max Tokens      | 400                                        |
-| Output Format   | text                                       |
+| Field           | Example                                       |
+| --------------- | --------------------------------------------- |
+| Key             | `product_description_creator`                 |
+| Name            | Product Description Generator                 |
+| System Prompt   | `You are a marketing expert...`               |
+| Prompt Template | `Generate a description for: {{context}}`     |
+| Temperature     | 0.7                                           |
+| Max Tokens      | 400                                           |
+| Output Format   | text                                          |
 
 **Template variables** use `{{variable}}` syntax. They are interpolated at runtime.
 
@@ -227,10 +227,10 @@ async generateXxx(dto: GenerateXxxDto) {
 async generateXxx(@Body() dto: GenerateXxxDto) {
   try {
     const result = await this.service.generateXxx(dto);
-    return this.responseService.success(result, 'Generado exitosamente');
+    return this.responseService.success(result, 'Generated successfully');
   } catch (error) {
     return this.responseService.error(
-      error.message || 'Error al generar',
+      error.message || 'Generation error',
       error.response?.message || error.message,
       error.status || 400,
     );
@@ -262,13 +262,13 @@ aiLimitReached = computed(() => this.aiUsesLeft() <= 0);
 generateWithAI(): void {
   // UI rate limit check
   if (this.aiLimitReached()) {
-    this.toastService.warning('Límite de generaciones alcanzado (3 por producto)');
+    this.toastService.warning('Generation limit reached (3 per product)');
     return;
   }
 
   const name = this.form.get('name')?.value;
   if (!name?.trim()) {
-    this.toastService.warning('Ingresa el nombre primero');
+    this.toastService.warning('Enter the name first');
     return;
   }
 
@@ -288,15 +288,15 @@ generateWithAI(): void {
       const left = this.aiUsesLeft();
       this.toastService.success(
         left > 0
-          ? `Generado con IA (${left} uso${left !== 1 ? 's' : ''} restante${left !== 1 ? 's' : ''})`
-          : 'Generado con IA (último uso)',
+          ? `Generated with AI (${left} use${left !== 1 ? 's' : ''} remaining)`
+          : 'Generated with AI (last use)',
       );
       this.isGenerating.set(false);
     },
     error: (err: any) => {
       // Failed calls do NOT decrement the counter
       const message = extractApiErrorMessage(err);
-      this.toastService.error(message, 'Error al generar');
+      this.toastService.error(message, 'Generation error');
       this.isGenerating.set(false);
     },
   });
@@ -328,9 +328,9 @@ The gradient uses three layers:
 >
   <span class="ai-tooltip">
     @if (aiLimitReached()) {
-      Límite alcanzado (0/3)
+      Limit reached (0/3)
     } @else {
-      Generar con IA ({{ aiUsesLeft() }}/3)
+      Generate with AI ({{ aiUsesLeft() }}/3)
     }
   </span>
   @if (isGenerating()) {
@@ -338,7 +338,7 @@ The gradient uses three layers:
   } @else {
   <app-icon name="sparkles" [size]="11" />
   }
-  <span class="text-xs font-medium hidden sm:inline ml-1">IA</span>
+  <span class="text-xs font-medium hidden sm:inline ml-1">AI</span>
 </button>
 ```
 
@@ -432,7 +432,7 @@ When AI is processing, wrap the target field with an animated gradient border:
 <div class="ai-description-wrapper" [class.ai-generating]="isGenerating()">
   <div class="flex items-center justify-between mb-1">
     <label class="block text-sm font-medium text-text-secondary ai-label"
-      >Campo</label
+      >Field</label
     >
     <!-- AI button here -->
   </div>

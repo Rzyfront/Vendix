@@ -7,26 +7,26 @@ metadata:
 ---
 # Vendix Frontend Theme & Branding
 
-> **ThemeService, Branding Configuration & Visual Styling** - Gestión de temas, branding y variables CSS para multi-tenancia.
+> **ThemeService, Branding Configuration & Visual Styling** - Theme management, branding, and CSS variables for multi-tenancy.
 
 ## 🎯 Theme Management
 
-**Vendix usa un sistema centralizado de branding:**
-- **ThemeService** - Transforma y aplica configuración visual
-- **Variables CSS** - Aplicadas dinámicamente por dominio
-- **BrandingGeneratorHelper** (Backend) - Genera branding estándar
-- **Formato snake_case → camelCase** - Transformación automática
+**Vendix uses a centralized branding system:**
+- **ThemeService** - Transforms and applies visual configuration
+- **CSS Variables** - Dynamically applied per domain
+- **BrandingGeneratorHelper** (Backend) - Generates standard branding
+- **snake_case → camelCase format** - Automatic transformation
 
 ---
 
-## 📋 Formato Estándar de Branding
+## 📋 Standard Branding Format
 
 ### Backend (snake_case)
 
 ```typescript
-// Retornado por /public/domains/resolve/:hostname
+// Returned by /public/domains/resolve/:hostname
 {
-  name: "Mi Tienda",
+  name: "My Store",
   theme: "light",
   logo_url: "https://...",
   favicon_url: "https://...",
@@ -45,7 +45,7 @@ metadata:
 ### Frontend (camelCase)
 
 ```typescript
-// BrandingConfig - usado internamente
+// BrandingConfig - used internally
 {
   colors: {
     primary: "#7ED7A5",
@@ -66,7 +66,7 @@ metadata:
   },
   logo: {
     url: "https://...",
-    alt: "Mi Tienda"
+    alt: "My Store"
   },
   favicon: "https://...",
   customCSS: string
@@ -88,34 +88,34 @@ import { BrandingConfig } from '../models/tenant-config.interface';
 
 @Injectable({ providedIn: 'root' })
 export class ThemeService {
-  // Aplica configuración completa de branding
+  // Applies full branding configuration
   async applyAppConfiguration(appConfig: AppConfig): Promise<void>
 
-  // Aplica solo branding
+  // Applies branding only
   async applyBranding(brandingConfig: BrandingConfig): Promise<void>
 
-  // Transforma formato backend → frontend (CRÍTICO)
+  // Transforms backend → frontend format (CRITICAL)
   transformBrandingFromApi(apiBranding: any): BrandingConfig
 
-  // Carga fuentes externas
+  // Loads external fonts
   async loadFont(fontFamily: string): Promise<void>
 
-  // Inyecta CSS personalizado
+  // Injects custom CSS
   injectCustomCSS(css: string, id: string): void
 
-  // Actualiza favicon
+  // Updates favicon
   updateFavicon(faviconUrl: string): void
 
-  // Resetea todo al default
+  // Resets everything to default
   resetTheme(): void
 }
 ```
 
-### CSS Variables Aplicadas
+### Applied CSS Variables
 
 ```css
 :root {
-  /* Colores */
+  /* Colors */
   --color-primary: #7ED7A5;
   --color-secondary: #2F6F4E;
   --color-accent: #FFFFFF;
@@ -125,7 +125,7 @@ export class ThemeService {
   --color-text-secondary: #555555;
   --color-text-muted: #AAAAAA;
 
-  /* Fuentes */
+  /* Fonts */
   --font-primary: "Inter, sans-serif";
   --font-secondary: string;
   --font-headings: string;
@@ -134,36 +134,36 @@ export class ThemeService {
 
 ---
 
-## 🔄 Flujo de Branding
+## 🔄 Branding Flow
 
 ```
 1. Backend: BrandingGeneratorHelper.generateBranding()
-   → Genera config en snake_case
+   → Generates config in snake_case
 
 2. Domain Settings (DB)
-   → Almacena config.branding
+   → Stores config.branding
 
 3. API: /public/domains/resolve/:hostname
-   → Retorna domain_resolution con config
+   → Returns domain_resolution with config
 
 4. AppConfigService.setupConfig()
-   → Obtiene domain_config
+   → Retrieves domain_config
 
 5. ThemeService.transformBrandingFromApi()
-   → Transforma snake_case → camelCase
+   → Transforms snake_case → camelCase
 
 6. ThemeService.applyBranding()
-   → Aplica CSS variables a :root
+   → Applies CSS variables to :root
 
-7. Componentes
-   → Usan var(--color-primary)
+7. Components
+   → Use var(--color-primary)
 ```
 
 ---
 
-## 💡 Uso en Componentes
+## 💡 Usage in Components
 
-### ✅ CORRECTO - Usando CSS Variables
+### ✅ CORRECT - Using CSS Variables
 
 ```scss
 // component.scss
@@ -179,21 +179,21 @@ export class ThemeService {
 }
 ```
 
-### ❌ WRONG - Colores hardcoded
+### ❌ WRONG - Hardcoded colors
 
 ```scss
-// NO hacer esto
+// DO NOT do this
 .my-button {
   background-color: #7ED7A5;  // ❌ Hardcoded
-  color: #222222;              // ❌ No dinámico
+  color: #222222;              // ❌ Not dynamic
 }
 ```
 
 ---
 
-## 🔧 Integración con AppConfigService
+## 🔧 Integration with AppConfigService
 
-### En app-config.service.ts
+### In app-config.service.ts
 
 ```typescript
 import { ThemeService } from './theme.service';
@@ -209,7 +209,7 @@ export class AppConfigService {
       domainConfig,
       routes: this.resolveRoutes(domainConfig),
       layouts: [],
-      // ✅ Usa ThemeService para transformación
+      // ✅ Uses ThemeService for transformation
       branding: this.themeService.transformBrandingFromApi(
         domainConfig.customConfig?.branding || {}
       ),
@@ -218,7 +218,7 @@ export class AppConfigService {
 }
 ```
 
-### En config.effects.ts
+### In config.effects.ts
 
 ```typescript
 import { ThemeService } from '../../services/theme.service';
@@ -232,7 +232,7 @@ export class ConfigEffects {
       this.actions$.pipe(
         ofType(ConfigActions.initializeAppSuccess),
         tap(({ config }) => {
-          // ✅ Aplica branding al cargar config
+          // ✅ Applies branding when config loads
           this.themeService.applyAppConfiguration(config);
         }),
       ),
@@ -248,7 +248,7 @@ export class ConfigEffects {
 ### Location
 `apps/backend/src/common/helpers/branding-generator.helper.ts`
 
-### Uso en Servicios
+### Usage in Services
 
 ```typescript
 import { BrandingGeneratorHelper } from '@common/helpers/branding-generator.helper';
@@ -258,21 +258,21 @@ export class OnboardingWizardService {
   private brandingGeneratorHelper = inject(BrandingGeneratorHelper);
 
   async setupAppConfig(dto: SetupAppConfigDto) {
-    // ✅ Genera branding estándar
+    // ✅ Generates standard branding
     const branding = this.brandingGeneratorHelper.generateBranding({
-      name: 'Mi Tienda',
+      name: 'My Store',
       primaryColor: '#7ED7A5',
       secondaryColor: '#2F6F4E',
       theme: 'light',
     });
 
-    // Guarda en DB con formato snake_case
+    // Saves to DB in snake_case format
     await this.prisma.domain_settings.create({
       data: {
-        hostname: 'mitienda-org.vendix.com',
+        hostname: 'mystore-org.vendix.com',
         config: {
           app: 'ORG_LANDING',
-          branding: branding, // ✅ Formato estándar
+          branding: branding, // ✅ Standard format
         },
       },
     });
@@ -282,50 +282,50 @@ export class OnboardingWizardService {
 
 ---
 
-## 🚨 Reglas Críticas
+## 🚨 Critical Rules
 
-### ✅ SIEMPRE HACER
+### ✅ ALWAYS DO
 
-1. **Usar ThemeService.transformBrandingFromApi()** - Single source of truth
-2. **Usar variables CSS en componentes** - Con fallback values
-3. **Usar BrandingGeneratorHelper en backend** - Para generar branding
-4. **Proporcionar fallbacks** - `var(--color-primary, #7ED7A5)`
-5. **Formatear colores como hex** - `#RRGGBB` o `#RGB`
+1. **Use ThemeService.transformBrandingFromApi()** - Single source of truth
+2. **Use CSS variables in components** - With fallback values
+3. **Use BrandingGeneratorHelper in backend** - To generate branding
+4. **Provide fallbacks** - `var(--color-primary, #7ED7A5)`
+5. **Format colors as hex** - `#RRGGBB` or `#RGB`
 
-### ❌ NUNCA HACER
+### ❌ NEVER DO
 
-1. **NO duplicar lógica de transformación** - Usar ThemeService
-2. **NO hardcodear colores** - Usar var(--color-*)
-3. **NO crear formatos custom** - Usar el estándar
-4. **NO omitir fallbacks** - Siempre dar valor default
-5. **NO transformar manualmente** - Dejar que ThemeService lo haga
+1. **DO NOT duplicate transformation logic** - Use ThemeService
+2. **DO NOT hardcode colors** - Use var(--color-*)
+3. **DO NOT create custom formats** - Use the standard
+4. **DO NOT omit fallbacks** - Always provide a default value
+5. **DO NOT transform manually** - Let ThemeService handle it
 
 ---
 
-## 🔍 Archivos Clave
+## 🔍 Key Files
 
-| Archivo | Propósito |
-|---------|-----------|
-| `core/services/theme.service.ts` | Servicio de temas |
-| `core/services/app-config.service.ts` | Configuración de app |
-| `core/store/config/config.effects.ts` | Aplica branding |
+| File | Purpose |
+|------|---------|
+| `core/services/theme.service.ts` | Theme service |
+| `core/services/app-config.service.ts` | App configuration |
+| `core/store/config/config.effects.ts` | Applies branding |
 | `core/models/tenant-config.interface.ts` | BrandingConfig |
-| Backend: `common/helpers/branding-generator.helper.ts` | Genera branding |
+| Backend: `common/helpers/branding-generator.helper.ts` | Generates branding |
 
 ---
 
 ## 🧪 Testing
 
-### Verificar Variables CSS
+### Verify CSS Variables
 
 ```typescript
-// En consola del navegador
+// In browser console
 getComputedStyle(document.documentElement)
   .getPropertyValue('--color-primary')
 // → "#7ED7A5"
 ```
 
-### Verificar Transformación
+### Verify Transformation
 
 ```typescript
 // theme.service.ts
@@ -344,7 +344,7 @@ console.log(transformed.colors.primary);
 
 ## 📚 Related Skills
 
-- `vendix-frontend-domain` - Domain resolution y config
+- `vendix-frontend-domain` - Domain resolution and config
 - `vendix-frontend-state` - State management
 - `vendix-frontend-component` - Component structure
 - `vendix-naming-conventions` - Naming conventions (CRITICAL)

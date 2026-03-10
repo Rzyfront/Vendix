@@ -7,7 +7,7 @@ metadata:
 ---
 # Vendix Prisma Seed Pattern
 
-> **Seed Data Structure** - Seeds estructurados con orden de eliminación y creación consistente.
+> **Seed Data Structure** - Structured seeds with consistent deletion and creation order.
 
 ## 🎯 Seed Structure
 

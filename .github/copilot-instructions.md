@@ -73,9 +73,14 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with notifications, SSE, or adding new event-driven alerts | `vendix-notifications-system` |
 | Writing Code (Naming) | `vendix-naming-conventions` |
 | Writing Validation Logic | `vendix-validation` |
-| cambios con migraciones de base de datos | `git-workflow` |
-| git commit, git push, crear PR, crear rama | `git-workflow` |
-| resolver conflictos de merge | `git-workflow` |
+| Changes involving database migrations | `git-workflow` |
+| git commit, git push, create PR, create branch | `git-workflow` |
+| Resolve merge conflicts | `git-workflow` |
+| Complex tasks spanning multiple domains or layers (backend + frontend + DB) | `agent-teams` |
+| Full end-to-end feature development | `agent-teams` |
+| Broad refactors touching multiple modules | `agent-teams` |
+| User requests agent teams, team of agents, or parallel work | `agent-teams` |
+| agent team, team of agents, parallel agents, split task, divide task | `agent-teams` |
 
 ---
 
@@ -127,6 +132,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | ------------------------ | ------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | `Vendix-core`            | Core patterns and conventions                           | [skills/Vendix-core/SKILL.md](skills/Vendix-core/SKILL.md)                       |
 | `vendix-product-pricing` | Advanced product pricing logic and rentability patterns | [skills/vendix-product-pricing/SKILL.md](skills/vendix-product-pricing/SKILL.md) |
+| `agent-teams`            | Agent team orchestration for complex composite tasks    | [skills/agent-teams/SKILL.md](skills/agent-teams/SKILL.md)                       |
 
 ## ⚙️ Configuration & Sync
 

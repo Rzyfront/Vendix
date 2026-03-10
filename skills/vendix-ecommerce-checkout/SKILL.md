@@ -141,8 +141,8 @@ model orders {
 | 400 | Empty cart | "Cart is empty" |
 | 400 | Invalid payment | "Invalid payment method" |
 | 400 | Stock issue | "Insufficient stock for {product}" |
-| 400 | Bad shipping | "Método de envío inválido" |
-| 400 | Wrong store | "Método de envío no disponible para esta tienda" |
+| 400 | Bad shipping | "Invalid shipping method" |
+| 400 | Wrong store | "Shipping method not available for this store" |
 
 ---
 

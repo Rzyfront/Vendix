@@ -7,7 +7,7 @@ metadata:
 ---
 # Vendix Backend API Patterns
 
-> **API Response Pattern** - Respuestas estandarizadas, DTOs y estructura de controladores.
+> **API Response Pattern** - Standardized responses, DTOs, and controller structure.
 
 ## 🎯 Standard API Response
 

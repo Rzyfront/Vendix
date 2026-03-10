@@ -114,15 +114,15 @@ In standard admin modules, stats cards should be sticky on mobile:
 
 ### 4. StatsComponent Props
 
-| Prop          | Type               | Default           | Description                        |
-| ------------- | ------------------ | ----------------- | ---------------------------------- |
-| `title`       | `string`           | required          | Card title (e.g., "Órdenes")       |
-| `value`       | `string \| number` | `''`              | Main value (formatted)             |
-| `smallText`   | `string`           | optional          | Secondary text (e.g., growth rate) |
-| `iconName`    | `string`           | `'info'`          | Lucide icon name                   |
-| `iconBgColor` | `string`           | `'bg-primary/10'` | Tailwind bg class                  |
-| `iconColor`   | `string`           | `'text-primary'`  | Tailwind text class                |
-| `clickable`   | `boolean`          | `true`            | Enable hover effects               |
+| Prop          | Type               | Default           | Description                       |
+| ------------- | ------------------ | ----------------- | --------------------------------- |
+| `title`       | `string`           | required          | Card title (e.g., "Orders")       |
+| `value`       | `string \| number` | `''`              | Main value (formatted)            |
+| `smallText`   | `string`           | optional          | Secondary text (e.g., growth rate)|
+| `iconName`    | `string`           | `'info'`          | Lucide icon name                  |
+| `iconBgColor` | `string`           | `'bg-primary/10'` | Tailwind bg class                 |
+| `iconColor`   | `string`           | `'text-primary'`  | Tailwind text class               |
+| `clickable`   | `boolean`          | `true`            | Enable hover effects              |
 
 ### 5. Color Palette (Standard)
 
@@ -221,7 +221,7 @@ interface OrderStats {
   template: `
     <div class="stats-container">
       <app-stats
-        title="Órdenes"
+        title="Orders"
         [value]="formatNumber(stats.total_orders)"
         [smallText]="getGrowthText(stats.ordersGrowthRate)"
         iconName="shopping-cart"
@@ -230,7 +230,7 @@ interface OrderStats {
       />
 
       <app-stats
-        title="Pendientes"
+        title="Pending"
         [value]="formatNumber(stats.pending_orders)"
         [smallText]="getGrowthText(stats.pendingGrowthRate)"
         iconName="clock"
@@ -239,7 +239,7 @@ interface OrderStats {
       />
 
       <app-stats
-        title="Completadas"
+        title="Completed"
         [value]="formatNumber(stats.completed_orders)"
         [smallText]="getGrowthText(stats.completedGrowthRate)"
         iconName="check-circle"
@@ -248,7 +248,7 @@ interface OrderStats {
       />
 
       <app-stats
-        title="Ingresos"
+        title="Revenue"
         [value]="formatCurrency(stats.total_revenue)"
         [smallText]="getGrowthText(stats.revenueGrowthRate)"
         iconName="dollar-sign"
@@ -281,7 +281,7 @@ export class OrderStatsComponent {
   getGrowthText(rate?: number): string {
     if (rate === undefined) return "";
     const sign = rate >= 0 ? "+" : "";
-    return `${sign}${rate.toFixed(1)}% vs mes ant.`;
+    return `${sign}${rate.toFixed(1)}% vs prev. month`;
   }
 }
 ```
@@ -342,7 +342,7 @@ For simple cases, use `<app-stats>` directly:
     iconColor="text-blue-500"
   />
   <app-stats
-    title="Activos"
+    title="Active"
     [value]="activeCount"
     iconName="check"
     iconBgColor="bg-emerald-100"
@@ -378,19 +378,19 @@ formatCurrency(value: number): string {
 ### Growth Rate Text
 
 ```typescript
-// Returns "+5.2% vs mes ant." or "-2.1% vs mes ant."
+// Returns "+5.2% vs prev. month" or "-2.1% vs prev. month"
 getGrowthText(rate?: number): string {
   if (rate === undefined) return '';
   const sign = rate >= 0 ? '+' : '';
-  return `${sign}${rate.toFixed(1)}% vs mes ant.`;
+  return `${sign}${rate.toFixed(1)}% vs prev. month`;
 }
 ```
 
-## Common Implementation Mistakes ⚠️
+## Common Implementation Mistakes
 
 **NEVER use these classes for stats containers:**
 
-| ❌ Incorrect Class                                     | ✅ Correct Class  |
+| Incorrect Class                                        | Correct Class     |
 | ------------------------------------------------------ | ----------------- |
 | `grid grid-cols-4 gap-2 md:gap-4 lg:gap-6`             | `stats-container` |
 | `grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4` | `stats-container` |

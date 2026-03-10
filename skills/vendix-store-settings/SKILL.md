@@ -6,37 +6,37 @@
 
 ---
 
-> **Store Settings Module** - Sistema de configuración multi-sección para tiendas con sincronización cross-domain.
+> **Store Settings Module** - Multi-section configuration system for stores with cross-domain synchronization.
 
-## 🎯 Cuándo Usar
+## 🎯 When to Use
 
-Usa esta skill cuando:
-- Trabajes en el módulo de configuración general de tiendas (`/admin/settings/general`)
-- Crees o modifiques secciones de configuración (general, inventory, notifications, pos, receipts, app, checkout, shipping)
-- Modifies la sincronización entre `store_settings`, `stores`, y `store_settings.settings.branding` (source of truth)
-- Implementes funcionalidad de auto-guardado con debounce
-- Trabajes con plantillas de configuración (`default_templates`)
+Use this skill when:
+- Working on the store general settings module (`/admin/settings/general`)
+- Creating or modifying configuration sections (general, inventory, notifications, pos, receipts, app, checkout, shipping)
+- Modifying synchronization between `store_settings`, `stores`, and `store_settings.settings.branding` (source of truth)
+- Implementing auto-save functionality with debounce
+- Working with configuration templates (`default_templates`)
 
 ---
 
-## 📊 Arquitectura del Módulo
+## 📊 Module Architecture
 
-### Estructura de Datos
+### Data Structure
 
-El módulo de configuración de tiendas gestiona **8 secciones**:
+The store settings module manages **8 sections**:
 
-1. **General** - Configuración básica (timezone, currency, language, tax_included, name, logo_url, store_type)
-2. **Inventory** - Control de stock (low_stock_threshold, out_of_stock_action, track_inventory)
-3. **Notifications** - Alertas (email_enabled, sms_enabled, low_stock_alerts, new_order_alerts)
-4. **POS** - Punto de Venta (allow_anonymous_sales, business_hours, offline_mode_enabled)
-5. **Receipts** - Recibos (print_receipt, email_receipt, receipt_header, receipt_footer)
-6. **App** - Branding visual (name, primary_color, secondary_color, accent_color, theme, logo_url, favicon_url)
-7. **Checkout** - Flujo de pago (require_customer_data, allow_guest_checkout, allow_partial_payments)
-8. **Shipping** - Envíos (enabled, free_shipping_threshold, shipping_zones, shipping_types)
+1. **General** - Basic configuration (timezone, currency, language, tax_included, name, logo_url, store_type)
+2. **Inventory** - Stock control (low_stock_threshold, out_of_stock_action, track_inventory)
+3. **Notifications** - Alerts (email_enabled, sms_enabled, low_stock_alerts, new_order_alerts)
+4. **POS** - Point of Sale (allow_anonymous_sales, business_hours, offline_mode_enabled)
+5. **Receipts** - Receipts (print_receipt, email_receipt, receipt_header, receipt_footer)
+6. **App** - Visual branding (name, primary_color, secondary_color, accent_color, theme, logo_url, favicon_url)
+7. **Checkout** - Payment flow (require_customer_data, allow_guest_checkout, allow_partial_payments)
+8. **Shipping** - Shipping (enabled, free_shipping_threshold, shipping_zones, shipping_types)
 
-### Base de Datos
+### Database
 
-#### Tabla Principal: `store_settings`
+#### Main Table: `store_settings`
 
 ```prisma
 model store_settings {
@@ -49,23 +49,23 @@ model store_settings {
 }
 ```
 
-#### Sincronización con otras tablas:
+#### Synchronization with other tables:
 
-1. **`stores`** - Campos sincronizados desde `general`:
+1. **`stores`** - Fields synchronized from `general`:
    - `name`, `logo_url`, `store_type`, `timezone`
 
-2. **`domain_settings`** - Campos sincronizados desde `app`:
+2. **`domain_settings`** - Fields synchronized from `app`:
    - `config.branding.name`, `logo_url`, `favicon_url`, `primary_color`, `secondary_color`, `accent_color`, `theme`
-   - **IMPORTANTE**: Actualiza TODOS los dominios de la tienda
+   - **IMPORTANT**: Updates ALL domains for the store
 
-3. **`organizations`** - Campo sincronizado:
-   - `name` (se sincroniza con el nombre de la tienda)
+3. **`organizations`** - Synchronized field:
+   - `name` (synchronized with the store name)
 
 ---
 
-## 🔧 Patrón Frontend: Auto-guardado con Feedback
+## 🔧 Frontend Pattern: Auto-save with Feedback
 
-### Servicio con BehaviorSubject
+### Service with BehaviorSubject
 
 **File:** `apps/frontend/src/app/private/modules/store/settings/general/services/store-settings.service.ts`
 
@@ -80,16 +80,16 @@ export class StoreSettingsService {
   private http = inject(HttpClient);
   private readonly api_base_url = `${environment.apiUrl}/store`;
 
-  // Subject para auto-guardado con debounce
+  // Subject for auto-save with debounce
   private save_settings$$ = new Subject<Partial<StoreSettings>>();
 
-  // BehaviorSubject para estado global
+  // BehaviorSubject for global state
   private settings$$ = new BehaviorSubject<StoreSettings | null>(null);
   settings$ = this.settings$$.asObservable();
 
   /**
-   * Guarda configuración con debounce de 2.5s
-   * RETORNA Observable para que el componente pueda recibir feedback
+   * Saves settings with a 2.5s debounce
+   * RETURNS Observable so the component can receive feedback
    */
   saveSettings(settings: Partial<StoreSettings>): Observable<ApiResponse<StoreSettings>> {
     return this.save_settings$$.pipe(
@@ -102,7 +102,7 @@ export class StoreSettingsService {
   }
 
   /**
-   * Guardado inmediato (sin debounce)
+   * Immediate save (no debounce)
    */
   saveSettingsNow(settings: Partial<StoreSettings>): Observable<ApiResponse<StoreSettings>> {
     return this.update_settings_api(settings);
@@ -132,7 +132,7 @@ export class StoreSettingsService {
 
 ---
 
-### Componente con Feedback
+### Component with Feedback
 
 **File:** `apps/frontend/src/app/private/modules/store/settings/general/general-settings.component.ts`
 
@@ -178,13 +178,13 @@ export class GeneralSettingsComponent {
         this.hasUnsavedChanges = false;
         this.lastSaved = new Date();
         this.isAutoSaving = false;
-        this.toast_service.success('Cambios guardados automáticamente');
+        this.toast_service.success('Changes saved automatically');
       },
       error: (error) => {
         this.hasUnsavedChanges = true;
-        this.saveError = error.message || 'Error al guardar cambios';
+        this.saveError = error.message || 'Error saving changes';
         this.isAutoSaving = false;
-        this.toast_service.error('Error al guardar cambios');
+        this.toast_service.error('Error saving changes');
       }
     });
   }
@@ -199,7 +199,7 @@ export class GeneralSettingsComponent {
         this.isSaving = false;
         this.hasUnsavedChanges = false;
         this.lastSaved = new Date();
-        this.toast_service.success('Configuración guardada');
+        this.toast_service.success('Settings saved');
       },
       error: (error) => {
         this.isSaving = false;
@@ -213,9 +213,9 @@ export class GeneralSettingsComponent {
 
 ---
 
-## 🔧 Patrón Backend: Multi-Table Sync
+## 🔧 Backend Pattern: Multi-Table Sync
 
-### Servicio con RequestContext
+### Service with RequestContext
 
 **File:** `apps/backend/src/domains/store/settings/settings.service.ts`
 
@@ -272,9 +272,9 @@ export class SettingsService {
         ...getDefaultStoreSettings(),
         general: {
           ...getDefaultStoreSettings().general,
-          name: store?.name,              // ✅ From stores table
-          logo_url: store?.logo_url,      // ✅ From stores table
-          store_type: store?.store_type,  // ✅ From stores table
+          name: store?.name,              // From stores table
+          logo_url: store?.logo_url,      // From stores table
+          store_type: store?.store_type,  // From stores table
           timezone: store?.timezone || getDefaultStoreSettings().general.timezone,
         },
         app: {
@@ -292,7 +292,7 @@ export class SettingsService {
       ...settings,
       general: {
         ...settings.general,
-        name: store?.name,              // ✅ Override with stores table
+        name: store?.name,              // Override with stores table
         logo_url: store?.logo_url,
         store_type: store?.store_type,
         timezone: store?.timezone || settings.general.timezone,
@@ -421,9 +421,9 @@ export class SettingsService {
 
 ---
 
-## 📋 DTOs de Validación
+## 📋 Validation DTOs
 
-### UpdateSettingsDto Principal
+### Main UpdateSettingsDto
 
 **File:** `apps/backend/src/domains/store/settings/dto/update-settings.dto.ts`
 
@@ -450,7 +450,7 @@ export class UpdateSettingsDto {
 }
 ```
 
-### Ejemplo de Section DTO
+### Section DTO Example
 
 ```typescript
 import { IsString, IsBoolean, IsOptional, IsEnum, Matches } from 'class-validator';
@@ -512,68 +512,68 @@ export class AppSettingsDto {
 ## 🎯 Decision Tree
 
 ```
-Trabajando en settings de tienda?
+Working on store settings?
 ├── Frontend
-│   ├── Usar BehaviorSubject para estado global
-│   ├── Implementar debounce (2500ms) para auto-guardado
-│   ├── Retornar Observable para feedback al usuario
-│   └── Mostrar confirmación con ToastService
+│   ├── Use BehaviorSubject for global state
+│   ├── Implement debounce (2500ms) for auto-save
+│   ├── Return Observable for user feedback
+│   └── Show confirmation with ToastService
 │
 └── Backend
-    ├── Usar RequestContextService para store_id
-    ├── Obtener datos de stores table para general section
-    ├── Sincronizar app section con domain_settings (TODOS los dominios)
-    ├── Sincronizar general section con stores table
-    ├── Sincronizar name con organizations table
-    └── Generar favicon si logo cambió
+    ├── Use RequestContextService for store_id
+    ├── Get data from stores table for general section
+    ├── Sync app section with domain_settings (ALL domains)
+    ├── Sync general section with stores table
+    ├── Sync name with organizations table
+    └── Generate favicon if logo changed
 ```
 
 ---
 
-## 🔍 Archivos Clave
+## 🔍 Key Files
 
-| Archivo | Propósito |
-|---------|-----------|
-| `apps/frontend/src/app/private/modules/store/settings/general/general-settings.component.ts` | Componente principal |
-| `apps/frontend/src/app/private/modules/store/settings/general/services/store-settings.service.ts` | Servicio con BehaviorSubject |
-| `apps/backend/src/domains/store/settings/settings.service.ts` | Servicio backend |
-| `apps/backend/src/domains/store/settings/settings.controller.ts` | Controlador API |
-| `apps/backend/src/domains/store/settings/dto/update-settings.dto.ts` | DTOs de validación |
+| File | Purpose |
+|------|---------|
+| `apps/frontend/src/app/private/modules/store/settings/general/general-settings.component.ts` | Main component |
+| `apps/frontend/src/app/private/modules/store/settings/general/services/store-settings.service.ts` | Service with BehaviorSubject |
+| `apps/backend/src/domains/store/settings/settings.service.ts` | Backend service |
+| `apps/backend/src/domains/store/settings/settings.controller.ts` | API controller |
+| `apps/backend/src/domains/store/settings/dto/update-settings.dto.ts` | Validation DTOs |
 
 ---
 
-## ⚠️ Errores Comunes
+## ⚠️ Common Mistakes
 
-### ❌ Error: Auto-guardado sin feedback
+### ❌ Error: Auto-save without feedback
 
 ```typescript
-// MAL: Fire-and-forget
+// BAD: Fire-and-forget
 onSectionChange(section: string, settings: any) {
   this.settings_service.saveSettings({ [section]: settings });
-  // ❌ No hay feedback al usuario
+  // ❌ No user feedback
 }
 ```
 
 ```typescript
-// ✅ BIEN: Con feedback
+// ✅ GOOD: With feedback
 onSectionChange(section: string, settings: any) {
   this.settings_service.saveSettings({ [section]: settings }).subscribe({
-    next: () => this.toast_service.success('Guardado'),
+    next: () => this.toast_service.success('Saved'),
     error: () => this.toast_service.error('Error')
   });
 }
 ```
 
-### ❌ Error: Campo `name` no se carga
+### ❌ Error: `name` field not loading
 
 ```typescript
-// MAL: Solo usar store_settings.settings
+// BAD: Only using store_settings.settings
 const settings = storeSettings.settings as StoreSettings;
-return settings; // ❌ name no está aquí
+return settings; // ❌ name is not here
 ```
 
 ```typescript
-// ✅ BIEN: Merge con stores table
+// ✅ GOOD: Merge with stores table
 const store = await this.prisma.stores.findUnique({ where: { id: store_id } });
 return {
   ...settings,
@@ -586,27 +586,27 @@ return {
 
 ---
 
-## 🚀 Comandos Útiles
+## 🚀 Useful Commands
 
 ```bash
-# Verificar logs de frontend
+# Check frontend logs
 docker logs --tail 40 vendix_frontend
 
-# Verificar logs de backend
+# Check backend logs
 docker logs --tail 40 vendix_backend
 
-# Buscar errores
+# Search for errors
 docker logs --tail 40 vendix_frontend | grep -i "error"
 docker logs --tail 40 vendix_backend | grep -i "error"
 ```
 
 ---
 
-## 📚 Skills Relacionadas
+## 📚 Related Skills
 
-- `vendix-frontend-state` - Patrón BehaviorSubject + ToastService
-- `vendix-backend-domain` - Arquitectura hexagonal
+- `vendix-frontend-state` - BehaviorSubject + ToastService pattern
+- `vendix-backend-domain` - Hexagonal architecture
 - `vendix-prisma-scopes` - Prisma scoping system and model registration
 - `vendix-multi-tenant-context` - RequestContextService
-- `buildcheck-dev` - Verificación OBLIGATORIA de build
-- `vendix-validation` - Validación con class-validator
+- `buildcheck-dev` - MANDATORY build verification
+- `vendix-validation` - Validation with class-validator

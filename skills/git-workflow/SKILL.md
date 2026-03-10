@@ -1,117 +1,117 @@
 ---
 name: git-workflow
 description: >
-  Reglas y patrones para commits, PRs, branching y resolución de conflictos.
-  Trigger: Cuando se hacen commits, se crean PRs, se trabaja con ramas, o se resuelven conflictos en git.
+  Rules and patterns for commits, PRs, branching, and conflict resolution.
+  Trigger: When making commits, creating PRs, working with branches, or resolving git conflicts.
 license: Apache-2.0
 metadata:
   author: rzyfront
   version: "1.0"
   scope: [root]
   auto_invoke:
-    - "git commit, git push, crear PR, crear rama"
-    - "resolver conflictos de merge"
-    - "cambios con migraciones de base de datos"
+    - "git commit, git push, create PR, create branch"
+    - "resolve merge conflicts"
+    - "changes with database migrations"
 ---
 
 ## When to Use
 
-- Al hacer cualquier commit en el proyecto
-- Al crear o actualizar Pull Requests
-- Al crear o nombrar ramas
-- Al resolver conflictos de merge con main/master
-- Al hacer push de cambios
+- When making any commit in the project
+- When creating or updating Pull Requests
+- When creating or naming branches
+- When resolving merge conflicts with main/master
+- When pushing changes
 
 ---
 
-## Preferencia de Herramientas: GitHub MCP (PRIORITARIO)
+## Tool Preference: GitHub MCP (PRIORITY)
 
-**Si el servidor MCP de GitHub está disponible, SIEMPRE preferir usar las herramientas MCP sobre comandos bash de git.** Esto aplica especialmente para:
+**If the GitHub MCP server is available, ALWAYS prefer using MCP tools over bash git commands.** This applies especially to:
 
-| Operación              | MCP Tool preferido                                        | Evitar                                |
-| ---------------------- | --------------------------------------------------------- | ------------------------------------- |
-| Crear PR               | `mcp__github__create_pull_request`                        | `gh pr create` vía Bash               |
-| Crear rama             | `mcp__github__create_branch`                              | `git checkout -b` + `git push`        |
-| Ver PRs                | `mcp__github__list_pull_requests`                         | `gh pr list` vía Bash                 |
-| Ver issues             | `mcp__github__list_issues` / `mcp__github__search_issues` | `gh issue list` vía Bash              |
-| Leer archivos del repo | `mcp__github__get_file_contents`                          | `gh api` vía Bash                     |
-| Ver diff de PR         | `mcp__github__pull_request_read` (method: get_diff)       | `gh pr diff` vía Bash                 |
-| Comentar en PR/issue   | `mcp__github__add_issue_comment`                          | `gh pr comment` vía Bash              |
-| Crear review           | `mcp__github__pull_request_review_write`                  | `gh pr review` vía Bash               |
-| Push archivos          | `mcp__github__push_files`                                 | `git add` + `git commit` + `git push` |
-| Merge PR               | `mcp__github__merge_pull_request`                         | `gh pr merge` vía Bash                |
+| Operation            | Preferred MCP Tool                                        | Avoid                                 |
+| -------------------- | --------------------------------------------------------- | ------------------------------------- |
+| Create PR            | `mcp__github__create_pull_request`                        | `gh pr create` via Bash               |
+| Create branch        | `mcp__github__create_branch`                              | `git checkout -b` + `git push`        |
+| View PRs             | `mcp__github__list_pull_requests`                         | `gh pr list` via Bash                 |
+| View issues          | `mcp__github__list_issues` / `mcp__github__search_issues` | `gh issue list` via Bash              |
+| Read repo files      | `mcp__github__get_file_contents`                          | `gh api` via Bash                     |
+| View PR diff         | `mcp__github__pull_request_read` (method: get_diff)       | `gh pr diff` via Bash                 |
+| Comment on PR/issue  | `mcp__github__add_issue_comment`                          | `gh pr comment` via Bash              |
+| Create review        | `mcp__github__pull_request_review_write`                  | `gh pr review` via Bash               |
+| Push files           | `mcp__github__push_files`                                 | `git add` + `git commit` + `git push` |
+| Merge PR             | `mcp__github__merge_pull_request`                         | `gh pr merge` via Bash                |
 
-**Razón:** Las herramientas MCP proveen acceso estructurado, tipado y con mejor manejo de errores que los comandos CLI. Solo usar `git` vía Bash para operaciones locales que no tengan equivalente MCP (ej: `git status`, `git diff` local, `git stash`).
+**Reason:** MCP tools provide structured, typed access with better error handling than CLI commands. Only use `git` via Bash for local operations that have no MCP equivalent (e.g., `git status`, local `git diff`, `git stash`).
 
 ---
 
 ## Critical Patterns
 
-### REGLA 1: Protección de main/master (BLOQUEANTE)
+### RULE 1: main/master Protection (BLOCKING)
 
-**NUNCA** hacer push directo a `main` o `master`. Todo cambio debe ir por rama de desarrollo + PR.
+**NEVER** push directly to `main` or `master`. All changes must go through a development branch + PR.
 
 ```
-PROHIBIDO:
+FORBIDDEN:
   git push origin main
   git push origin master
   git checkout main && git commit
 
-CORRECTO:
-  git checkout -b feature/mi-cambio
-  # ... hacer cambios y commits ...
-  git push origin feature/mi-cambio
-  # crear PR hacia main
+CORRECT:
+  git checkout -b feature/my-change
+  # ... make changes and commits ...
+  git push origin feature/my-change
+  # create PR targeting main
 ```
 
-### REGLA 2: Sin co-autores de IA (MANDATORIO)
+### RULE 2: No AI Co-authors (MANDATORY)
 
-**NUNCA** agregar líneas `Co-Authored-By` de IA o herramientas automatizadas en los mensajes de commit. Esta regla es **absoluta e innegociable**.
+**NEVER** add `Co-Authored-By` lines from AI or automated tools in commit messages. This rule is **absolute and non-negotiable**.
 
 ```
-PROHIBIDO (nunca incluir):
+FORBIDDEN (never include):
   Co-Authored-By: Claude <noreply@anthropic.com>
   Co-Authored-By: GitHub Copilot <noreply@github.com>
-  Co-Authored-By: [cualquier IA o bot]
+  Co-Authored-By: [any AI or bot]
 
-CORRECTO:
-  git commit -m "feat: agregar validación de formulario"
-  (sin líneas de co-autoría automatizada)
+CORRECT:
+  git commit -m "feat: add form validation"
+  (no automated co-authorship lines)
 ```
 
-Solo se permiten co-autores que sean **personas reales** del equipo.
+Only co-authors who are **real people** on the team are allowed.
 
-### REGLA 3: Migraciones de BD requieren alerta en commit y PR
+### RULE 3: DB Migrations Require Alerts in Commit and PR
 
-Cuando un cambio incluya migraciones de base de datos (ALTER TABLE, CREATE TABLE, DROP, etc.), el commit y el PR **deben** documentar los cambios en la descripción.
+When a change includes database migrations (ALTER TABLE, CREATE TABLE, DROP, etc.), the commit and PR **must** document the changes in the description.
 
-Formato para commits con migraciones:
+Format for commits with migrations:
 
 ```
-feat: agregar campo status a tabla orders
+feat: add status field to orders table
 
-⚠️ MIGRACIÓN DE BASE DE DATOS ⚠️
+⚠️ DATABASE MIGRATION ⚠️
 - ALTER TABLE orders ADD COLUMN status VARCHAR(50) DEFAULT 'pending'
 - CREATE INDEX idx_orders_status ON orders(status)
 ```
 
-Formato para PRs con migraciones:
+Format for PRs with migrations:
 
 ````markdown
 ## Summary
 
-Agrega campo de status a órdenes
+Add status field to orders
 
-## ⚠️ MIGRACIÓN DE BASE DE DATOS
+## ⚠️ DATABASE MIGRATION
 
-> **ATENCIÓN**: Este PR requiere ejecutar migraciones antes del deploy.
+> **ATTENTION**: This PR requires running migrations before deployment.
 
-| Operación    | Tabla  | Detalle                                         |
+| Operation    | Table  | Details                                         |
 | ------------ | ------ | ----------------------------------------------- |
 | ALTER TABLE  | orders | ADD COLUMN status VARCHAR(50) DEFAULT 'pending' |
 | CREATE INDEX | orders | idx_orders_status ON orders(status)             |
 
-### Comandos de migración
+### Migration Commands
 
 ```bash
 npx prisma migrate deploy
@@ -120,21 +120,21 @@ npx prisma migrate deploy
 
 ````
 
-### REGLA 4: Resolución de conflictos
+### RULE 4: Conflict Resolution
 
-Los conflictos con main **siempre** se resuelven en la rama de desarrollo, nunca en main directamente.
+Conflicts with main must **always** be resolved in the development branch, never directly in main.
 
 ```bash
-# CORRECTO: traer main a tu rama y resolver ahí
-git checkout feature/mi-rama
+# CORRECT: bring main into your branch and resolve there
+git checkout feature/my-branch
 git merge main
-# resolver conflictos en la rama de desarrollo
+# resolve conflicts in the development branch
 git add .
-git commit -m "merge: resolver conflictos con main"
+git commit -m "merge: resolve conflicts with main"
 
-# PROHIBIDO: resolver conflictos en main
+# FORBIDDEN: resolve conflicts in main
 git checkout main
-git merge feature/mi-rama  # NO hacer esto directamente
+git merge feature/my-branch  # Do NOT do this directly
 ````
 
 ---
@@ -142,69 +142,69 @@ git merge feature/mi-rama  # NO hacer esto directamente
 ## Decision Tree
 
 ```
-¿Dónde estoy haciendo el cambio?
-  → En main/master         → DETENER. Crear rama primero.
-  → En rama de desarrollo  → Continuar.
+Where am I making the change?
+  → On main/master          → STOP. Create a branch first.
+  → On a development branch → Continue.
 
-¿El cambio incluye migraciones de BD?
-  → Sí → Agregar bloque ⚠️ MIGRACIÓN en commit y PR.
-  → No → Commit normal.
+Does the change include DB migrations?
+  → Yes → Add ⚠️ MIGRATION block in commit and PR.
+  → No  → Normal commit.
 
-¿Hay conflictos con main?
-  → Sí, son claros     → Resolver en rama de desarrollo a favor de los cambios nuevos sin romper lo existente.
-  → Sí, son ambiguos   → Preguntar al usuario qué opción de resolución prefiere.
-  → No                  → Continuar normalmente.
+Are there conflicts with main?
+  → Yes, they are clear    → Resolve in development branch in favor of the new changes without breaking existing ones.
+  → Yes, they are ambiguous → Ask the user which resolution option they prefer.
+  → No                      → Continue normally.
 
-¿El commit tiene co-autor de IA?
-  → SIEMPRE eliminar. Sin excepciones.
+Does the commit have an AI co-author?
+  → ALWAYS remove. No exceptions.
 ```
 
 ---
 
-## Conflictos: Reglas de Resolución
+## Conflicts: Resolution Rules
 
-| Situación                               | Acción                                                   |
-| --------------------------------------- | -------------------------------------------------------- |
-| Conflicto claro (solo formato, imports) | Resolver a favor del cambio nuevo                        |
-| Conflicto en lógica de negocio          | Mantener ambos cambios si es posible, priorizar el nuevo |
-| Conflicto ambiguo o riesgoso            | Preguntar al usuario mostrando las opciones              |
-| Conflicto en archivos de config         | Merge manual, preservar ambas configuraciones            |
-| Conflicto en migraciones                | Preguntar siempre al usuario (alto riesgo)               |
-
----
-
-## Branching: Convenciones de Nombres
-
-```
-feature/descripcion-corta    # Nueva funcionalidad
-fix/descripcion-del-bug      # Corrección de bug
-hotfix/descripcion-urgente   # Fix urgente para producción
-refactor/que-se-refactoriza  # Refactorización
-chore/tarea-tecnica          # Tareas técnicas (deps, config)
-migration/nombre-migracion   # Cambios que incluyen migraciones
-```
+| Situation                                | Action                                                    |
+| ---------------------------------------- | --------------------------------------------------------- |
+| Clear conflict (formatting only, imports)| Resolve in favor of the new change                        |
+| Conflict in business logic               | Keep both changes if possible, prioritize the new one     |
+| Ambiguous or risky conflict              | Ask the user showing the options                          |
+| Conflict in config files                 | Manual merge, preserve both configurations                |
+| Conflict in migrations                   | Always ask the user (high risk)                           |
 
 ---
 
-## Commits: Formato
+## Branching: Naming Conventions
 
 ```
-<tipo>: <descripción corta en imperativo>
-
-[cuerpo opcional con más detalle]
-
-[⚠️ MIGRACIÓN DE BASE DE DATOS si aplica]
+feature/short-description       # New functionality
+fix/bug-description              # Bug fix
+hotfix/urgent-description        # Urgent fix for production
+refactor/what-is-refactored      # Refactoring
+chore/technical-task             # Technical tasks (deps, config)
+migration/migration-name         # Changes that include migrations
 ```
 
-Tipos válidos: `feat`, `fix`, `refactor`, `chore`, `docs`, `test`, `style`, `perf`, `hotfix`, `migration`
+---
+
+## Commits: Format
+
+```
+<type>: <short description in imperative>
+
+[optional body with more detail]
+
+[⚠️ DATABASE MIGRATION if applicable]
+```
+
+Valid types: `feat`, `fix`, `refactor`, `chore`, `docs`, `test`, `style`, `perf`, `hotfix`, `migration`
 
 ---
 
 ## Commands
 
 ```bash
-git checkout -b feature/nombre    # Crear rama nueva
-git push origin feature/nombre    # Push a rama (nunca a main)
-git merge main                    # Traer main a tu rama para resolver conflictos
-git log --oneline -10             # Ver últimos commits
+git checkout -b feature/name     # Create new branch
+git push origin feature/name     # Push to branch (never to main)
+git merge main                   # Bring main into your branch to resolve conflicts
+git log --oneline -10            # View latest commits
 ```

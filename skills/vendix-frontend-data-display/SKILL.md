@@ -74,11 +74,11 @@ These are passed to BOTH components:
 
 ```
 ┌─────────────────────────────────────┐
-│ [■ Img] Título         [Badge] [⋮] │
-│         Subtítulo                   │
+│ [■ Img] Title            [Badge] [⋮] │
+│         Subtitle                    │
 ├─────────────────────────────────────┤
 │ LABEL 1        │ LABEL 2           │
-│ Valor 1        │ Valor 2           │
+│ Value 1        │ Value 2           │
 ├─────────────────────────────────────┤
 │ FOOTER LABEL         [Edit][Delete]│
 │ $1,200.00 (prominent)              │
@@ -89,11 +89,11 @@ These are passed to BOTH components:
 
 ```
 ┌─────────────────────────────────────┐
-│ [● Img] Título         [Badge] [⋮] │
-│         Subtítulo                   │
+│ [● Img] Title            [Badge] [⋮] │
+│         Subtitle                    │
 ├─────────────────────────────────────┤
 │ LABEL 1        │ LABEL 2           │
-│ Valor 1        │ Valor 2           │
+│ Value 1        │ Value 2           │
 ├─────────────────────────────────────┤
 │ FOOTER LABEL         [Edit][Delete]│
 │ $1,200.00                          │
@@ -104,7 +104,7 @@ These are passed to BOTH components:
 
 ### 4. New Card Config Properties
 
-#### avatarShape - Avatar Form
+#### avatarShape - Avatar Shape
 
 - `'circle'` (default): For users, customers, people
 - `'square'`: For products with images
@@ -122,7 +122,7 @@ cardConfig: ItemListCardConfig = {
   avatarShape: "square", // Square for product images
   badgeKey: "state",
   footerKey: "base_price",
-  footerLabel: "Precio",
+  footerLabel: "Price",
   footerStyle: "prominent", // Large price display
   detailKeys: [
     { key: "sku", label: "SKU" },
@@ -148,8 +148,8 @@ Action buttons have colors based on their variant:
 
 ```typescript
 actions: TableAction[] = [
-  { label: 'Editar', icon: 'edit', variant: 'primary', action: (item) => this.edit(item) },
-  { label: 'Eliminar', icon: 'trash-2', variant: 'danger', action: (item) => this.delete(item) },
+  { label: 'Edit', icon: 'edit', variant: 'primary', action: (item) => this.edit(item) },
+  { label: 'Delete', icon: 'trash-2', variant: 'danger', action: (item) => this.delete(item) },
   // If 3+ actions, a menu button appears
 ];
 ```
@@ -177,7 +177,7 @@ import {
       [cardConfig]="cardConfig"
       [actions]="actions"
       [loading]="loading"
-      [emptyMessage]="'No hay datos'"
+      [emptyMessage]="'No data available'"
       [emptyIcon]="'inbox'"
     ></app-responsive-data-view>
   `,
@@ -185,11 +185,11 @@ import {
 export class MyListComponent {
   // Table columns (desktop)
   columns: TableColumn[] = [
-    { key: "name", label: "Nombre", sortable: true, priority: 1 },
-    { key: "email", label: "Correo", priority: 2 },
+    { key: "name", label: "Name", sortable: true, priority: 1 },
+    { key: "email", label: "Email", priority: 2 },
     {
       key: "status",
-      label: "Estado",
+      label: "Status",
       badge: true,
       badgeConfig: { type: "status" },
     },
@@ -204,10 +204,10 @@ export class MyListComponent {
     badgeKey: "status",
     badgeConfig: { type: "status", size: "sm" },
     detailKeys: [
-      { key: "phone", label: "Teléfono", icon: "phone" },
+      { key: "phone", label: "Phone", icon: "phone" },
       {
         key: "created_at",
-        label: "Fecha",
+        label: "Date",
         transform: (v) => new Date(v).toLocaleDateString(),
       },
     ],
@@ -220,13 +220,13 @@ export class MyListComponent {
   // Shared actions - with colored variants
   actions: TableAction[] = [
     {
-      label: "Editar",
+      label: "Edit",
       icon: "edit",
       variant: "primary",
       action: (item) => this.edit(item),
     },
     {
-      label: "Eliminar",
+      label: "Delete",
       icon: "trash-2",
       variant: "danger",
       action: (item) => this.delete(item),
@@ -295,14 +295,14 @@ cardConfig: ItemListCardConfig = {
   detailKeys: [
     {
       key: "created_at",
-      label: "Registrado",
+      label: "Registered",
       transform: (v) => (v ? new Date(v).toLocaleDateString() : "-"),
     },
   ],
 
   // Status badge
   badgeKey: "state",
-  badgeTransform: (v) => (v === "active" ? "Activo" : "Inactivo"),
+  badgeTransform: (v) => (v === "active" ? "Active" : "Inactive"),
 };
 ```
 

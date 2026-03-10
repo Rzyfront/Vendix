@@ -85,6 +85,11 @@ const APP_MODULES = {
       label: 'Órdenes',
       description: 'Gestionar órdenes de todas las tiendas',
     },
+    {
+      key: 'expenses',
+      label: 'Gastos',
+      description: 'Gestión de gastos de la organización',
+    },
   ],
   STORE_ADMIN: [
     // Módulos principales (standalone - sin hijos)
@@ -707,7 +712,9 @@ export class SettingsModalComponent implements OnInit {
     this.newModuleKeys.clear();
     if (!this.defaultPanelUi) return;
 
-    for (const appType of Object.keys(this.defaultPanelUi)) {
+    // Only check editable app types (not STORE_ECOMMERCE or VENDIX_LANDING)
+    const editableAppTypes = ['ORG_ADMIN', 'STORE_ADMIN'];
+    for (const appType of editableAppTypes) {
       const userKeys = config.panel_ui?.[appType] || {};
       const defaultKeys = this.defaultPanelUi[appType] || {};
       for (const key of Object.keys(defaultKeys)) {

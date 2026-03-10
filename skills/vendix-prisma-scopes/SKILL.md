@@ -60,8 +60,8 @@ export abstract class BasePrismaService implements OnModuleInit {
   }
 
   /**
-   * Escape hatch: raw PrismaClient sin scope.
-   * SOLO para jobs, seeders, migraciones. NUNCA en request handlers.
+   * Escape hatch: raw PrismaClient without scope.
+   * ONLY for jobs, seeders, migrations. NEVER in request handlers.
    */
   withoutScope() {
     return this.baseClient;

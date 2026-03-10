@@ -7,7 +7,7 @@ metadata:
 ---
 # Vendix Frontend Routing Pattern
 
-> **Public vs Private Routing** - Sistema de enrutamiento con guards, lazy loading y detección de dominios.
+> **Public vs Private Routing** - Routing system with guards, lazy loading, and domain detection.
 
 ## 🗂️ Routing Structure
 

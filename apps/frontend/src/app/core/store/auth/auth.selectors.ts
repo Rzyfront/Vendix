@@ -296,15 +296,20 @@ export const selectNewModuleKeys = createSelector(
   },
 );
 
+// Only count new modules for editable app types (ORG_ADMIN, STORE_ADMIN)
+// STORE_ECOMMERCE and VENDIX_LANDING are not editable in settings modal
+const EDITABLE_APP_TYPES = ['ORG_ADMIN', 'STORE_ADMIN'];
+
 export const selectAllNewModuleCount = createSelector(
   selectPanelUiConfig,
   selectDefaultPanelUi,
   (panelUi: any, defaults: Record<string, Record<string, boolean>> | null) => {
     if (!defaults) return 0;
     let count = 0;
-    for (const appType of Object.keys(defaults)) {
+    for (const appType of EDITABLE_APP_TYPES) {
+      if (!defaults[appType]) continue;
       const userKeys = panelUi?.[appType] || {};
-      const defaultKeys = defaults[appType] || {};
+      const defaultKeys = defaults[appType];
       count += Object.keys(defaultKeys).filter((key) => !userKeys.hasOwnProperty(key)).length;
     }
     return count;

@@ -7,17 +7,17 @@ metadata:
 ---
 # Vendix Backend Domain Architecture
 
-> **Backend Domain Pattern** - Arquitectura hexagonal basada en dominios con separación clara de responsabilidades.
+> **Backend Domain Pattern** - Hexagonal domain-based architecture with clear separation of responsibilities.
 
 ## 🏗️ Domain Architecture
 
-Vendix backend sigue una **arquitectura hexagonal basada en dominios**, donde cada dominio representa un área de negocio claramente delimitada.
+Vendix backend follows a **hexagonal domain-based architecture**, where each domain represents a clearly defined business area.
 
 ### Structure
 
 ```
 apps/backend/src/domains/
-├── auth/                    # Autenticación y JWT
+├── auth/                    # Authentication and JWT
 │   ├── auth.module.ts
 │   ├── auth.controller.ts
 │   ├── auth.service.ts
@@ -28,18 +28,18 @@ apps/backend/src/domains/
 │   └── interfaces/
 │       └── auth.interface.ts
 │
-├── organization/            # Organizaciones y usuarios
+├── organization/            # Organizations and users
 │   ├── organization.module.ts
 │   ├── organization.controller.ts
 │   ├── organization.service.ts
 │   ├── dto/
 │   └── interfaces/
 │
-├── store/                   # Tiendas
+├── store/                   # Stores
 │   ├── store.module.ts
 │   ├── store.controller.ts
 │   ├── store.service.ts
-│   ├── settings/            # NUEVO: Store settings (branding, fonts, ecommerce)
+│   ├── settings/            # NEW: Store settings (branding, fonts, ecommerce)
 │   │   ├── settings.service.ts
 │   │   ├── interfaces/
 │   │   │   └── store-settings.interface.ts
@@ -50,25 +50,25 @@ apps/backend/src/domains/
 │   ├── categories/
 │   └── ecommerce/           # Ecommerce operations
 │
-├── ecommerce/               # Catálogo público de e-commerce
+├── ecommerce/               # Public e-commerce catalog
 │   ├── catalog/
 │   ├── cart/
 │   ├── checkout/
 │   ├── wishlist/
 │   └── account/
 │
-├── superadmin/              # Administración global del sistema
+├── superadmin/              # Global system administration
 │   ├── superadmin.module.ts
 │   ├── system-management.controller.ts
 │   └── system.service.ts
 │
-├── public/                  # Dominios públicos (landing pages)
+├── public/                  # Public domains (landing pages)
 │   └── domains/
 │       ├── public-domains.module.ts
 │       ├── public-domains.controller.ts
 │       └── public-domains.service.ts
 │
-└── common/                  # Utilidades compartidas
+└── common/                  # Shared utilities
     ├── middleware/
     ├── guards/
     ├── decorators/
@@ -128,7 +128,7 @@ metadata:
 
 ## 📦 Domain Module Pattern
 
-Cada dominio sigue este patrón estándar:
+Each domain follows this standard pattern:
 
 ### 1. Module File
 

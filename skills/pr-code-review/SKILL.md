@@ -1,9 +1,9 @@
 ---
 name: pr-code-review
 description: >
-  Skill para revisar Pull Requests de cualquier repositorio GitHub usando MCP tools.
-  Analiza seguridad, lógica, sintaxis, archivos core y calidad de código.
-  Trigger: Cuando el usuario pide revisar PRs, analizar código de un PR, o hacer code review.
+  Skill for reviewing Pull Requests from any GitHub repository using MCP tools.
+  Analyzes security, logic, syntax, core files, and code quality.
+  Trigger: When the user asks to review PRs, analyze PR code, or do code review.
 license: Apache-2.0
 metadata:
   author: rzyfront
@@ -23,30 +23,30 @@ metadata:
 
 Use this skill when:
 
-- El usuario pide revisar PRs abiertos de uno o más repositorios
-- Se necesita analizar código de un PR antes de aprobarlo
-- Se quiere evaluar la calidad y seguridad de cambios propuestos
-- El usuario pide hacer code review sistemático
+- The user asks to review open PRs from one or more repositories
+- Code from a PR needs to be analyzed before approving it
+- You want to evaluate the quality and security of proposed changes
+- The user asks for systematic code review
 
 ---
 
-## Requisitos: GitHub MCP Server
+## Requirements: GitHub MCP Server
 
-Esta skill **requiere** el MCP server de GitHub (`github`) para funcionar. Antes de iniciar cualquier revisión, verifica que esté disponible.
+This skill **requires** the GitHub MCP server (`github`) to work. Before starting any review, verify that it is available.
 
-### Cómo detectar si está instalado
+### How to detect if it is installed
 
-Intenta ejecutar `mcp__github__get_me`. Si funciona, el MCP está listo. Si falla o el tool no existe, el usuario necesita instalarlo.
+Try running `mcp__github__get_me`. If it works, the MCP is ready. If it fails or the tool does not exist, the user needs to install it.
 
-### Si NO está instalado — Ofrecer ayuda
+### If it is NOT installed — Offer help
 
-Dile al usuario:
+Tell the user:
 
-> Para revisar PRs necesito el MCP server de GitHub. ¿Quieres que te ayude a instalarlo?
+> To review PRs I need the GitHub MCP server. Would you like me to help you install it?
 
-#### Instalación
+#### Installation
 
-El GitHub MCP server se configura en `~/.claude/settings.json` (global) o `.claude/settings.json` (proyecto):
+The GitHub MCP server is configured in `~/.claude/settings.json` (global) or `.claude/settings.json` (project):
 
 ```json
 {
@@ -62,309 +62,309 @@ El GitHub MCP server se configura en `~/.claude/settings.json` (global) o `.clau
 }
 ```
 
-#### Pasos para el usuario
+#### Steps for the user
 
-1. **Crear un Personal Access Token (PAT)** en GitHub:
-   - Ir a GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens
-   - Crear token con permisos: `repo` (full), `read:org`, `read:user`
-   - Para repos privados es indispensable el scope `repo`
+1. **Create a Personal Access Token (PAT)** on GitHub:
+   - Go to GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens
+   - Create a token with permissions: `repo` (full), `read:org`, `read:user`
+   - For private repos, the `repo` scope is essential
 
-2. **Agregar la config** al archivo de settings:
+2. **Add the config** to the settings file:
 
    ```bash
-   # Global (funciona en todos los proyectos)
+   # Global (works across all projects)
    ~/.claude/settings.json
 
-   # O por proyecto (solo este repo)
+   # Or per project (this repo only)
    .claude/settings.json
    ```
 
-3. **Reiniciar Claude Code** para que cargue el MCP server
+3. **Restart Claude Code** so it loads the MCP server
 
-4. **Verificar** ejecutando: `mcp__github__get_me` — debe devolver el usuario autenticado
+4. **Verify** by running: `mcp__github__get_me` — it should return the authenticated user
 
-#### Permisos mínimos del token por funcionalidad
+#### Minimum token permissions by functionality
 
-| Funcionalidad                 | Permisos necesarios   |
+| Functionality                 | Required permissions  |
 | ----------------------------- | --------------------- |
-| Listar PRs / ver diffs        | `repo` (read)         |
-| Postear reviews / comentarios | `repo` (write)        |
-| Buscar repos de una org       | `read:org`            |
-| Ver info del usuario          | `read:user`           |
-| Repos privados                | `repo` (full control) |
+| List PRs / view diffs         | `repo` (read)         |
+| Post reviews / comments       | `repo` (write)        |
+| Search repos from an org      | `read:org`            |
+| View user info                | `read:user`           |
+| Private repos                 | `repo` (full control) |
 
 #### Troubleshooting
 
 ```
 Error: "Resource not accessible by personal access token"
-→ El token no tiene scope `repo` o no tiene acceso a ese repo/org
+→ The token does not have the `repo` scope or does not have access to that repo/org
 
 Error: "Bad credentials"
-→ El token expiró o fue revocado, crear uno nuevo
+→ The token expired or was revoked, create a new one
 
-Error: Tool `mcp__github__*` no existe
-→ El MCP server no está configurado o Claude Code necesita reiniciarse
+Error: Tool `mcp__github__*` does not exist
+→ The MCP server is not configured or Claude Code needs to be restarted
 ```
 
 ---
 
 ## Critical Patterns
 
-### Pattern 1: Flujo Completo de Revisión (paso a paso)
+### Pattern 1: Complete Review Flow (step by step)
 
 ```
-PASO 1 → Identificar repos y listar PRs abiertos
-PASO 2 → Tomar el primer PR y obtener metadata + archivos
-PASO 3 → Obtener el diff completo y analizarlo
-PASO 4 → Presentar hallazgos al usuario con calificación
-PASO 5 → Esperar decisión: aprobar, request changes, o siguiente PR
-PASO 6 → Si se postea review, usar MCP tools para dejar el comentario
-PASO 7 → Repetir con el siguiente PR
+STEP 1 → Identify repos and list open PRs
+STEP 2 → Take the first PR and get metadata + files
+STEP 3 → Get the full diff and analyze it
+STEP 4 → Present findings to the user with a rating
+STEP 5 → Wait for decision: approve, request changes, or next PR
+STEP 6 → If a review is posted, use MCP tools to leave the comment
+STEP 7 → Repeat with the next PR
 ```
 
-### Pattern 2: Las 6 Categorías de Análisis (SIEMPRE revisar todas)
+### Pattern 2: The 6 Analysis Categories (ALWAYS review all of them)
 
-| #   | Categoría         | Qué buscar                                                                                                           | Severidad |
-| --- | ----------------- | -------------------------------------------------------------------------------------------------------------------- | --------- |
-| 1   | **Seguridad**     | XSS (innerHTML sin sanitizar), SQL injection, auth faltante, secrets expuestos, inputs sin validar                   | ALTA      |
-| 2   | **Lógica**        | Race conditions, estados inconsistentes, valores falsy (`\|\| 0` vs `?? 0`), memory leaks, llamadas duplicadas a API | ALTA      |
-| 3   | **Sintaxis**      | Typos, brackets faltantes, imports incorrectos, código que no compila                                                | ALTA      |
-| 4   | **Archivos Core** | Cambios en router, store, package.json, configs — evaluar impacto en otros módulos                                   | MEDIA     |
-| 5   | **Scope del PR**  | Features mezcladas, cambios no relacionados con el título, cambios "sneaky" enterrados                               | MEDIA     |
-| 6   | **Calidad**       | Hardcoded values, error handling faltante, console.logs de debug, código duplicado, patrones inconsistentes          | BAJA      |
+| #   | Category          | What to look for                                                                                                     | Severity |
+| --- | ----------------- | -------------------------------------------------------------------------------------------------------------------- | -------- |
+| 1   | **Security**      | XSS (unsanitized innerHTML), SQL injection, missing auth, exposed secrets, unvalidated inputs                        | HIGH     |
+| 2   | **Logic**         | Race conditions, inconsistent states, falsy values (`\|\| 0` vs `?? 0`), memory leaks, duplicate API calls          | HIGH     |
+| 3   | **Syntax**        | Typos, missing brackets, incorrect imports, code that does not compile                                               | HIGH     |
+| 4   | **Core Files**    | Changes in router, store, package.json, configs — evaluate impact on other modules                                   | MEDIUM   |
+| 5   | **PR Scope**      | Mixed features, changes unrelated to the title, "sneaky" changes buried in the diff                                  | MEDIUM   |
+| 6   | **Quality**       | Hardcoded values, missing error handling, debug console.logs, duplicated code, inconsistent patterns                 | LOW      |
 
-### Pattern 3: Sistema de Calificación
+### Pattern 3: Rating System
 
 ```
-90-100%  → APPROVE — Limpio, sin issues
-70-89%   → APPROVE con comentarios menores — Issues de calidad baja
-50-69%   → REQUEST CHANGES — Bugs de lógica o issues medias
-30-49%   → REQUEST CHANGES — Issues de seguridad o bugs críticos
- 0-29%   → REQUEST CHANGES — Múltiples issues críticas, PR necesita reescritura
+90-100%  → APPROVE — Clean, no issues
+70-89%   → APPROVE with minor comments — Low-quality issues
+50-69%   → REQUEST CHANGES — Logic bugs or medium issues
+30-49%   → REQUEST CHANGES — Security issues or critical bugs
+ 0-29%   → REQUEST CHANGES — Multiple critical issues, PR needs a rewrite
 ```
 
-### Pattern 4: Formato de Presentación al Usuario
+### Pattern 4: Presentation Format for the User
 
-Siempre presentar cada PR en este formato:
+Always present each PR in this format:
 
 ```markdown
-# PR #NNN — `repo` — "título del PR"
+# PR #NNN — `repo` — "PR title"
 
-**Autor:** username | **Archivos:** N | **+adds / -dels** | **Branch:** head → base
+**Author:** username | **Files:** N | **+adds / -dels** | **Branch:** head → base
 
-## Archivos modificados
+## Modified files
 
-(tabla con archivo, cambios, qué hace)
+(table with file, changes, what it does)
 
-## Hallazgos
+## Findings
 
-(organizados por severidad: CRITICO > ALTO > MEDIO > BAJO)
-(cada hallazgo con: archivo, línea aproximada, código relevante, explicación, fix sugerido)
+(organized by severity: CRITICAL > HIGH > MEDIUM > LOW)
+(each finding with: file, approximate line, relevant code, explanation, suggested fix)
 
-## Archivos Core tocados
+## Core files touched
 
-(tabla con archivo, nivel de riesgo, nota)
+(table with file, risk level, note)
 
-## Calificación: XX/100
+## Rating: XX/100
 
-(lo bueno, lo malo, recomendación: APPROVE o REQUEST CHANGES)
+(the good, the bad, recommendation: APPROVE or REQUEST CHANGES)
 ```
 
-### Pattern 5: Formato del Review Message para GitHub
+### Pattern 5: Review Message Format for GitHub
 
-Cuando el usuario aprueba postear el review, usar lenguaje natural y directo:
+When the user approves posting the review, use natural and direct language:
 
 ```markdown
-Hola [autor], [comentario positivo breve sobre el PR].
-Hay [N] cosas que revisar antes de merge:
+Hi [author], [brief positive comment about the PR].
+There are [N] things to review before merging:
 
-**1. [Título del issue] ([severidad])**
-`archivo.ext` ~L[línea] — [explicación clara y concisa]. [Fix sugerido con código si aplica]:
+**1. [Issue title] ([severity])**
+`file.ext` ~L[line] — [clear and concise explanation]. [Suggested fix with code if applicable]:
 \`\`\`typescript
-// código sugerido
+// suggested code
 \`\`\`
 
-**2. [Título del issue] ([severidad])**
-`archivo.ext` ~L[línea] — [explicación].
+**2. [Issue title] ([severity])**
+`file.ext` ~L[line] — [explanation].
 
-[Resumen final: qué es lo más importante de arreglar]
+[Final summary: what is most important to fix]
 ```
 
-Reglas del mensaje:
+Message rules:
 
-- Lenguaje natural, no robótico
-- Empezar con algo positivo del PR
-- Issues ordenados por severidad (crítico primero)
-- Referencias a archivos abreviadas: `archivo.ext ~LNNN`
-- Incluir código de fix solo cuando es corto y claro
-- Cerrar con resumen de qué es lo más urgente
+- Natural language, not robotic
+- Start with something positive about the PR
+- Issues ordered by severity (critical first)
+- Abbreviated file references: `file.ext ~LNNN`
+- Include fix code only when it is short and clear
+- Close with a summary of what is most urgent
 
 ---
 
 ## Decision Tree
 
 ```
-¿El usuario pidió revisar PRs?
+Did the user ask to review PRs?
 │
-├─ ¿Especificó repos? → Usar esos repos
-│  └─ NO → Preguntar o buscar repos del usuario/org
+├─ Did they specify repos? → Use those repos
+│  └─ NO → Ask or search for the user's/org's repos
 │
-├─ ¿Especificó PR number? → Ir directo a ese PR
-│  └─ NO → Listar PRs abiertos y revisar uno por uno
+├─ Did they specify a PR number? → Go directly to that PR
+│  └─ NO → List open PRs and review one by one
 │
-├─ ¿El diff es muy grande (>3000 líneas)?
-│  └─ SÍ → Usar subagent (Task tool) para analizar el diff completo
-│  └─ NO → Analizar inline
+├─ Is the diff very large (>3000 lines)?
+│  └─ YES → Use subagent (Task tool) to analyze the full diff
+│  └─ NO → Analyze inline
 │
-├─ Después de presentar hallazgos:
-│  ├─ Usuario dice "aprueba" / "approve" → Postear APPROVE review
-│  ├─ Usuario dice "postea" / "deja review" → Postear REQUEST_CHANGES review
-│  ├─ Usuario dice "siguiente" / "next" → Ir al siguiente PR
-│  └─ Usuario pide plan de fixes → Crear plan detallado de correcciones
+├─ After presenting findings:
+│  ├─ User says "approve" → Post APPROVE review
+│  ├─ User says "post" / "leave review" → Post REQUEST_CHANGES review
+│  ├─ User says "next" → Go to the next PR
+│  └─ User asks for a fix plan → Create a detailed correction plan
 │
-└─ ¿Hay PR del mismo autor en frontend Y backend?
-   └─ SÍ → Mencionar posible relación entre PRs (feature completa front+back)
+└─ Are there PRs from the same author in both frontend AND backend?
+   └─ YES → Mention possible relationship between PRs (complete front+back feature)
 ```
 
 ---
 
 ## MCP Tools Reference
 
-### Descubrir repos y PRs
+### Discover repos and PRs
 
 ```
-# Obtener usuario actual
+# Get current user
 mcp__github__get_me
 
-# Buscar repos de una org
+# Search repos from an org
 mcp__github__search_repositories  query="org:ORGNAME"
 
-# Listar PRs abiertos
+# List open PRs
 mcp__github__list_pull_requests  owner, repo, state="open"
 ```
 
-### Analizar un PR específico
+### Analyze a specific PR
 
 ```
-# Metadata del PR (título, autor, branch, mergeable)
+# PR metadata (title, author, branch, mergeable)
 mcp__github__pull_request_read  method="get", owner, repo, pullNumber
 
-# Lista de archivos cambiados (+adds, -dels, status)
+# List of changed files (+adds, -dels, status)
 mcp__github__pull_request_read  method="get_files", owner, repo, pullNumber
 
-# Diff completo (CLAVE para el análisis de código)
+# Full diff (KEY for code analysis)
 mcp__github__pull_request_read  method="get_diff", owner, repo, pullNumber
 
-# Reviews existentes (para no duplicar)
+# Existing reviews (to avoid duplicates)
 mcp__github__pull_request_read  method="get_reviews", owner, repo, pullNumber
 ```
 
-### Postear review
+### Post a review
 
 ```
-# Review simple (un comentario general)
+# Simple review (one general comment)
 mcp__github__pull_request_review_write
   method="create"
   owner, repo, pullNumber
   event="APPROVE" | "REQUEST_CHANGES" | "COMMENT"
-  body="mensaje del review"
+  body="review message"
 
-# Review con comentarios en líneas específicas (avanzado)
-# Paso 1: Crear review pendiente (sin event)
+# Review with comments on specific lines (advanced)
+# Step 1: Create a pending review (without event)
 mcp__github__pull_request_review_write  method="create", owner, repo, pullNumber
 
-# Paso 2: Agregar comentarios a líneas específicas
+# Step 2: Add comments to specific lines
 mcp__github__add_comment_to_pending_review  owner, repo, pullNumber, path, line, body, subjectType="LINE", side="RIGHT"
 
-# Paso 3: Enviar el review
-mcp__github__pull_request_review_write  method="submit_pending", owner, repo, pullNumber, event="REQUEST_CHANGES", body="resumen"
+# Step 3: Submit the review
+mcp__github__pull_request_review_write  method="submit_pending", owner, repo, pullNumber, event="REQUEST_CHANGES", body="summary"
 ```
 
 ---
 
-## Checklist de Análisis por Archivo
+## Analysis Checklist by File
 
 ### Frontend (Angular/TypeScript)
 
 ```
-[ ] innerHTML / [innerHTML] → ¿Sanitizado con DomSanitizer?
-[ ] HTTP calls directos → ¿Debería usar el servicio/interceptor del proyecto?
-[ ] Subscriptions → ¿Se limpian en ngOnDestroy o usan takeUntilDestroyed?
-[ ] Async operations → ¿Tienen manejo de errores?
-[ ] @Output sin tipo explícito
-[ ] console.log de debug que quedó
-[ ] Hardcoded URLs, IDs, o strings mágicos
-[ ] Cambios en routing/store/package.json → ¿Impacto en otros módulos?
-[ ] Dependencias nuevas en package.json → ¿Son confiables? ¿Bundle size?
-[ ] Signals vs Observables → ¿Se usa el patrón correcto del proyecto?
+[ ] innerHTML / [innerHTML] → Sanitized with DomSanitizer?
+[ ] Direct HTTP calls → Should it use the project's service/interceptor?
+[ ] Subscriptions → Are they cleaned up in ngOnDestroy or using takeUntilDestroyed?
+[ ] Async operations → Do they have error handling?
+[ ] @Output without explicit type
+[ ] Leftover debug console.log
+[ ] Hardcoded URLs, IDs, or magic strings
+[ ] Changes in routing/store/package.json → Impact on other modules?
+[ ] New dependencies in package.json → Are they reliable? Bundle size?
+[ ] Signals vs Observables → Is the correct project pattern used?
 ```
 
 ### Backend (NestJS/TypeScript)
 
 ```
-[ ] Raw SQL queries sin Prisma → Posible SQL injection
-[ ] Input del usuario sin validar (falta DTO con class-validator)
-[ ] Rutas/endpoints sin guards de auth (@Public faltante o @UseGuards faltante)
-[ ] Secrets/credenciales hardcodeadas
-[ ] try/catch faltante en operaciones de DB/filesystem
-[ ] Cambios en migraciones Prisma → ¿Son reversibles?
-[ ] Cambios en config/rutas → ¿Rompen otros endpoints?
-[ ] N+1 queries en loops (usar include/select de Prisma)
-[ ] File uploads sin validación de tipo/tamaño
-[ ] Error responses que exponen info interna (stack traces, paths)
-[ ] Prisma scoped service → ¿Se usa el servicio correcto para el dominio?
-[ ] withoutScope() → ¿Es realmente necesario? (ver vendix-prisma-scopes)
+[ ] Raw SQL queries without Prisma → Possible SQL injection
+[ ] Unvalidated user input (missing DTO with class-validator)
+[ ] Routes/endpoints without auth guards (missing @Public or missing @UseGuards)
+[ ] Hardcoded secrets/credentials
+[ ] Missing try/catch in DB/filesystem operations
+[ ] Changes in Prisma migrations → Are they reversible?
+[ ] Changes in config/routes → Do they break other endpoints?
+[ ] N+1 queries in loops (use Prisma include/select)
+[ ] File uploads without type/size validation
+[ ] Error responses that expose internal info (stack traces, paths)
+[ ] Prisma scoped service → Is the correct service used for the domain?
+[ ] withoutScope() → Is it really necessary? (see vendix-prisma-scopes)
 ```
 
 ### General
 
 ```
-[ ] El título del PR describe lo que realmente cambia
-[ ] No hay features mezcladas no relacionadas
-[ ] No hay cambios "sneaky" de configuración enterrados
-[ ] || vs ?? para valores falsy (0, '', false)
-[ ] error.message vs error.msg (objetos Error nativos usan .message)
-[ ] Métodos llamados múltiples veces en template (debería ser computed/signal)
+[ ] The PR title describes what actually changes
+[ ] No unrelated mixed features
+[ ] No "sneaky" configuration changes buried in the diff
+[ ] || vs ?? for falsy values (0, '', false)
+[ ] error.message vs error.msg (native Error objects use .message)
+[ ] Methods called multiple times in template (should be computed/signal)
 ```
 
 ---
 
-## Common Issues (Patrones que se repiten)
+## Common Issues (Recurring patterns)
 
 ### Issue 1: `|| 0` vs `?? 0`
 
-**Problema**: `value || 0` falla cuando value es legítimamente `0`, `''`, o `false`
-**Fix**: Usar `value ?? 0` (nullish coalescing — solo reemplaza `null`/`undefined`)
+**Problem**: `value || 0` fails when value is legitimately `0`, `''`, or `false`
+**Fix**: Use `value ?? 0` (nullish coalescing — only replaces `null`/`undefined`)
 
-### Issue 2: Lógica repetida sin helper
+### Issue 2: Repeated logic without a helper
 
-**Problema**: La misma comparación/cálculo copiado en 3+ lugares
-**Fix**: Extraer a una función helper/utility reutilizable
+**Problem**: The same comparison/calculation copied in 3+ places
+**Fix**: Extract to a reusable helper/utility function
 
-### Issue 3: HTTP call directo sin interceptor
+### Issue 3: Direct HTTP call without interceptor
 
-**Problema**: Usar `fetch()` nativo o `HttpClient` sin el interceptor del proyecto que incluye auth tokens
-**Fix**: Usar el servicio HTTP del proyecto que ya maneja headers y auth
+**Problem**: Using native `fetch()` or `HttpClient` without the project's interceptor that includes auth tokens
+**Fix**: Use the project's HTTP service that already handles headers and auth
 
-### Issue 4: Subscriptions sin cleanup
+### Issue 4: Subscriptions without cleanup
 
-**Problema**: `.subscribe()` en componentes sin `takeUntilDestroyed()` o `ngOnDestroy`
-**Fix**: Agregar cleanup con `DestroyRef` + `takeUntilDestroyed()` o usar `async` pipe
+**Problem**: `.subscribe()` in components without `takeUntilDestroyed()` or `ngOnDestroy`
+**Fix**: Add cleanup with `DestroyRef` + `takeUntilDestroyed()` or use `async` pipe
 
-### Issue 5: Cambios sneaky no documentados
+### Issue 5: Undocumented sneaky changes
 
-**Problema**: Cambiar un default, desactivar una feature, o modificar un config sin mención en el PR
-**Fix**: Separar en su propio commit/PR o documentar explícitamente en la descripción
+**Problem**: Changing a default, disabling a feature, or modifying a config without mention in the PR
+**Fix**: Separate into its own commit/PR or explicitly document in the description
 
-### Issue 6: Prisma scope incorrecto
+### Issue 6: Incorrect Prisma scope
 
-**Problema**: Usar `GlobalPrismaService` en un dominio de store, o `withoutScope()` innecesariamente
-**Fix**: Usar el scoped service correcto para el dominio (ver `vendix-prisma-scopes`)
+**Problem**: Using `GlobalPrismaService` in a store domain, or unnecessary `withoutScope()`
+**Fix**: Use the correct scoped service for the domain (see `vendix-prisma-scopes`)
 
 ---
 
 ## Resources
 
-- **GitHub MCP Tools**: Disponibles via `mcp__github__*`
-- **OWASP Top 10**: Referencia para análisis de seguridad web
-- **Angular Style Guide**: Para convenciones de Angular (signals, standalone components)
+- **GitHub MCP Tools**: Available via `mcp__github__*`
+- **OWASP Top 10**: Reference for web security analysis
+- **Angular Style Guide**: For Angular conventions (signals, standalone components)

@@ -7,17 +7,17 @@ metadata:
 ---
 # Vendix Backend Middleware & Domain Resolution
 
-> **Middleware Pattern** - Resolución de dominios dinámicos, contexto multi-tenant y middlewares personalizados.
+> **Middleware Pattern** - Dynamic domain resolution, multi-tenant context, and custom middlewares.
 
 ## 🌐 Domain Resolution Middleware
 
 ### Purpose
 
-El **DomainResolverMiddleware** es responsable de:
-1. **Resolver subdominios** (ej: `tienda.tiendavendix.com`)
-2. **Extraer store_id y organization_id** del dominio
-3. **Inyectar contexto** en la solicitud para multi-tenancy
-4. **Cachear resultados** para optimizar rendimiento
+The **DomainResolverMiddleware** is responsible for:
+1. **Resolving subdomains** (e.g.: `tienda.tiendavendix.com`)
+2. **Extracting store_id and organization_id** from the domain
+3. **Injecting context** into the request for multi-tenancy
+4. **Caching results** to optimize performance
 
 ---
 metadata:

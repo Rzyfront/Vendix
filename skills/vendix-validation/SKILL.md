@@ -7,15 +7,15 @@ metadata:
 ---
 # Vendix Validation Pattern
 
-> **Early Return Pattern** - Validación con retorno temprano para código limpio y legible.
+> **Early Return Pattern** - Validation with early return for clean and readable code.
 
 ## 🎯 Early Return Principle
 
-**SIEMPRE usar early return para validaciones:**
-- Retorna temprano si hay errores
-- Reduce anidación de código
-- Hace el código más legible
-- Separa validación de lógica de negocio
+**ALWAYS use early return for validations:**
+- Return early if there are errors
+- Reduces code nesting
+- Makes the code more readable
+- Separates validation from business logic
 
 ---
 

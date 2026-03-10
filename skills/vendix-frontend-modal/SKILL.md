@@ -1,6 +1,6 @@
 ---
 name: vendix-frontend-modal
-description: Patrones de implementación de modales en el frontend de Vendix.
+description: Implementation patterns for modals in the Vendix frontend.
 metadata:
   scope: [root]
   auto_invoke: "Creating or modifying modals in frontend"
@@ -8,41 +8,41 @@ metadata:
 
 # Vendix Frontend Modal Pattern
 
-Este skill describe el patrón estándar para implementar modales en Vendix, utilizando `app-modal` y la arquitectura Modal-First.
+This skill describes the standard pattern for implementing modals in Vendix, using `app-modal` and the Modal-First architecture.
 
-## 🚨 Reglas Críticas (Best Practices)
+## Critical Rules (Best Practices)
 
-1.  **System Components Only**: Dentro del modal, usa SIEMPRE los componentes del sistema (`app-input`, `app-selector`, `app-textarea`). Evita inputs HTML crudos para mantener la consistencia y evitar conflictos de eventos.
-2.  **Propagación de Estado (Prevent NG0100)**: Al manejar `isOpenChange`, **SIEMPRE** emite el evento crudo (`$event`).
-    *   ✅ **Correcto**: `(isOpenChange)="isOpenChange.emit($event)"`
-    *   ❌ **Incorrecto**: `(isOpenChange)="closeModal()"` (Si `closeModal` fuerza `false` inmediatamente, causa un loop `ExpressionChangedAfterItHasBeenCheckedError` cuando el modal intenta abrirse).
-3.  **Arquitectura Single-View**: Para módulos CRUD simples, evita crear rutas hijas (`/create`, `/edit/:id`). Usa una única vista "Lista" y maneja Creación/Edición mediante modales sobre la misma vista.
+1.  **System Components Only**: Inside the modal, ALWAYS use system components (`app-input`, `app-selector`, `app-textarea`). Avoid raw HTML inputs to maintain consistency and prevent event conflicts.
+2.  **State Propagation (Prevent NG0100)**: When handling `isOpenChange`, **ALWAYS** emit the raw event (`$event`).
+    *   Correct: `(isOpenChange)="isOpenChange.emit($event)"`
+    *   Incorrect: `(isOpenChange)="closeModal()"` (If `closeModal` forces `false` immediately, it causes an `ExpressionChangedAfterItHasBeenCheckedError` loop when the modal tries to open).
+3.  **Single-View Architecture**: For simple CRUD modules, avoid creating child routes (`/create`, `/edit/:id`). Use a single "List" view and handle Creation/Editing through modals on the same view.
 
 ---
 
-## 🏗️ Estructura del Componente (Modal Wrapper)
+## Component Structure (Modal Wrapper)
 
-Sigue este template para crear modales robustos:
+Follow this template to create robust modals:
 
-**Archivo:** `feature-create/feature-create.component.ts`
+**File:** `feature-create/feature-create.component.ts`
 
 ```typescript
 import { Component, Input, Output, EventEmitter } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { ReactiveFormsModule, FormGroup, FormBuilder, Validators } from "@angular/forms";
-import { 
-  ModalComponent, 
-  ButtonComponent, 
-  InputComponent, 
-  SelectorComponent, 
-  TextareaComponent 
+import {
+  ModalComponent,
+  ButtonComponent,
+  InputComponent,
+  SelectorComponent,
+  TextareaComponent
 } from "@/shared/components";
 
 @Component({
-  selector: "app-feature-create", // O vendix-feature-create
+  selector: "app-feature-create", // Or vendix-feature-create
   standalone: true,
   imports: [
-    CommonModule, 
+    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -53,29 +53,29 @@ import {
   template: `
     <app-modal
       [isOpen]="isOpen"
-      (isOpenChange)="isOpenChange.emit($event)" 
+      (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
-      title="Nuevo Elemento"
+      title="New Item"
       size="md"
     >
       <!-- Body -->
       <div class="p-4 space-y-4">
         <form [formGroup]="form">
           <app-input
-            label="Nombre"
+            label="Name"
             formControlName="name"
             [control]="form.get('name')"
             [required]="true"
           ></app-input>
-          
+
           <app-selector
-            label="Categoría"
+            label="Category"
             formControlName="categoryId"
             [options]="categories"
           ></app-selector>
-          
+
           <app-textarea
-            label="Notas"
+            label="Notes"
             formControlName="notes"
             rows="3"
           ></app-textarea>
@@ -85,18 +85,18 @@ import {
       <!-- Footer -->
       <div slot="footer">
         <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
-          <app-button 
-            variant="outline" 
+          <app-button
+            variant="outline"
             (clicked)="onClose()">
-            Cancelar
+            Cancel
           </app-button>
-          
-          <app-button 
-            variant="primary" 
-            (clicked)="onSubmit()" 
+
+          <app-button
+            variant="primary"
+            (clicked)="onSubmit()"
             [disabled]="form.invalid || isSubmitting"
             [loading]="isSubmitting">
-            Guardar
+            Save
           </app-button>
         </div>
       </div>
@@ -106,7 +106,7 @@ import {
 export class FeatureCreateComponent {
   @Input() isOpen = false;
   @Output() isOpenChange = new EventEmitter<boolean>();
-  
+
   form: FormGroup;
   isSubmitting = false;
 
@@ -133,65 +133,65 @@ export class FeatureCreateComponent {
 
 ---
 
-## ⚙️ Propiedades de `app-modal`
+## `app-modal` Properties
 
-| Propiedad         | Tipo                           | Descripción                                                               |
-| ----------------- | ------------------------------ | ------------------------------------------------------------------------- |
-| `isOpen`          | `boolean`                      | Controla la visibilidad del modal.                                        |
-| `size`            | `'sm' \| 'md' \| 'lg' \| 'xl'` | Define el ancho máximo del modal.                                         |
-| `title`           | `string`                       | Título principal en el header.                                            |
-| `subtitle`        | `string`                       | Descripción secundaria bajo el título.                                    |
-| `showCloseButton` | `boolean`                      | Muestra el botón 'X' en la esquina superior derecha (por defecto `true`). |
-
----
-
-## 🎨 Estilo del Footer
-
-El footer suele tener las siguientes características:
-
-- Fondo gris claro: `bg-gray-50`.
-- Bordes redondeados inferiores: `rounded-b-xl`.
-- Contenedor Flex: `flex items-center justify-end gap-3`.
-- Botones: Siempre incluir un botón de cancelar (outline) y uno de acción principal (primary).
+| Property          | Type                           | Description                                                          |
+| ----------------- | ------------------------------ | -------------------------------------------------------------------- |
+| `isOpen`          | `boolean`                      | Controls the modal visibility.                                       |
+| `size`            | `'sm' \| 'md' \| 'lg' \| 'xl'` | Defines the maximum width of the modal.                              |
+| `title`           | `string`                       | Main title in the header.                                            |
+| `subtitle`        | `string`                       | Secondary description below the title.                               |
+| `showCloseButton` | `boolean`                      | Shows the 'X' button in the top-right corner (defaults to `true`).   |
 
 ---
 
-## 📋 Mejores Prácticas
+## Footer Styling
 
-1.  **Uso de Slots**: Utiliza `slot="footer"` para el área de acciones inferiores.
-2.  **Two-Way Binding**: Implementa `isOpen` y `isOpenChange` para permitir el uso de `[(isOpen)]` en el componente padre.
-3.  **Manejo de Cierre**: Escucha el evento `(cancel)` de `app-modal` para limpiar el estado o cerrar el modal correctamente cuando el usuario presiona Escape o hace clic fuera.
-4.  **Validación de Formularios**: Deshabilita el botón de acción principal si el formulario es inválido o si hay una operación en curso (`isSubmitting`).
-5.  **Responsividad**: Utiliza clases de Tailwind como `p-2 md:p-4` para ajustar el padding según el tamaño de la pantalla.
+The footer typically has the following characteristics:
+
+- Light gray background: `bg-gray-50`.
+- Bottom rounded corners: `rounded-b-xl`.
+- Flex container: `flex items-center justify-end gap-3`.
+- Buttons: Always include a cancel button (outline) and a primary action button (primary).
 
 ---
 
-## 🧠 Solución de Problemas Comunes
+## Best Practices
 
-### El modal se cierra al hacer clic dentro (Click Propagation)
-**Causa**: Event bubbling desde elementos internos hacia el backdrop.
-**Solución**: El componente `app-modal` ya implementa una verificación robusta (`contains` check) en su manejador de clics.
-1. Asegúrate de usar la última versión de `app-modal`.
-2. **NO uses hacks de `stopPropagation`** en tus contenedores internos; el modal lo maneja nativamente.
-3. Usa `app-input` y componentes del sistema, ya que tienen un manejo de eventos predecible.
+1.  **Using Slots**: Use `slot="footer"` for the bottom action area.
+2.  **Two-Way Binding**: Implement `isOpen` and `isOpenChange` to allow `[(isOpen)]` usage in the parent component.
+3.  **Close Handling**: Listen to the `(cancel)` event from `app-modal` to clean up state or properly close the modal when the user presses Escape or clicks outside.
+4.  **Form Validation**: Disable the primary action button if the form is invalid or if an operation is in progress (`isSubmitting`).
+5.  **Responsiveness**: Use Tailwind classes like `p-2 md:p-4` to adjust padding based on screen size.
 
-### Error NG0100 (ExpressionChangedAfterItHasBeenCheckedError)
-**Causa**: Mapear el evento `isOpenChange` (que emite `true` al abrirse) a una función que setea la variable a `false` inmediatamente.
-**Solución**: En el template del modal, usa:
+---
+
+## Troubleshooting Common Issues
+
+### Modal closes when clicking inside (Click Propagation)
+**Cause**: Event bubbling from inner elements to the backdrop.
+**Solution**: The `app-modal` component already implements a robust verification (`contains` check) in its click handler.
+1. Make sure you are using the latest version of `app-modal`.
+2. **Do NOT use `stopPropagation` hacks** in your inner containers; the modal handles this natively.
+3. Use `app-input` and system components, as they have predictable event handling.
+
+### NG0100 Error (ExpressionChangedAfterItHasBeenCheckedError)
+**Cause**: Mapping the `isOpenChange` event (which emits `true` on open) to a function that sets the variable to `false` immediately.
+**Solution**: In the modal template, use:
 ```html
 (isOpenChange)="isOpenChange.emit($event)"
 ```
-Esto asegura que el padre reciba el valor real (`true`) al inicio, manteniendo la sincronización. Solo emite `false` cuando realmente se cierra.
+This ensures the parent receives the actual value (`true`) at the start, maintaining synchronization. It only emits `false` when it actually closes.
 
-### Bordes dobles o estilos extraños
-**Causa**: Envolver componentes como `app-table` en divs con bordes adicionales dentro del modal.
-**Solución**: Los componentes del sistema (`app-table`) ya tienen sus bordes. Colócalos directamente en el contenedor del modal sin wrappers decorativos extra.
+### Double borders or strange styles
+**Cause**: Wrapping components like `app-table` in divs with additional borders inside the modal.
+**Solution**: System components (`app-table`) already have their own borders. Place them directly in the modal container without extra decorative wrappers.
 
 ---
 
-## 🔍 Referencia de Archivos Clave
+## Key File Reference
 
-| Archivo                                                                                             | Propósito                        |
-| --------------------------------------------------------------------------------------------------- | -------------------------------- |
-| `apps/frontend/src/app/shared/components/modal/modal.component.ts`                                  | Implementación base del modal.   |
-| `apps/frontend/src/app/private/modules/store/products/components/product-create-modal.component.ts` | Ejemplo de referencia analizado. |
+| File                                                                                                | Purpose                            |
+| --------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `apps/frontend/src/app/shared/components/modal/modal.component.ts`                                  | Base modal implementation.         |
+| `apps/frontend/src/app/private/modules/store/products/components/product-create-modal.component.ts` | Analyzed reference example.        |
