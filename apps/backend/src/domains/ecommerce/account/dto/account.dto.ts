@@ -1,4 +1,4 @@
-import { IsString, IsEmail, IsOptional, MinLength, Matches } from 'class-validator';
+import { IsString, IsEmail, IsOptional, MinLength, Matches, IsNotEmpty } from 'class-validator';
 import { ApiSchema } from '@nestjs/swagger';
 
 @ApiSchema({ name: 'EcommerceAccountUpdateProfileDto' })
@@ -36,10 +36,12 @@ export class EcommerceAccountUpdateProfileDto {
 @ApiSchema({ name: 'EcommerceAccountChangePasswordDto' })
 export class EcommerceAccountChangePasswordDto {
     @IsString()
+    @IsNotEmpty({ message: 'La contraseña actual es requerida' })
     @MinLength(1)
     current_password: string;
 
     @IsString()
+    @IsNotEmpty({ message: 'La nueva contraseña es requerida' })
     @MinLength(8)
     new_password: string;
 }

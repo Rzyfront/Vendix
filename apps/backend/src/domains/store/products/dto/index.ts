@@ -145,17 +145,17 @@ export class ProductImageDto {
 
 // DTO para dimensiones del producto
 export class DimensionsDto {
-  @IsNumber()
+  @IsInt()
   @Type(() => Number)
   @Min(0, { message: 'La longitud no puede ser negativa' })
   length: number;
 
-  @IsNumber()
+  @IsInt()
   @Type(() => Number)
   @Min(0, { message: 'El ancho no puede ser negativo' })
   width: number;
 
-  @IsNumber()
+  @IsInt()
   @Type(() => Number)
   @Min(0, { message: 'La altura no puede ser negativa' })
   height: number;
