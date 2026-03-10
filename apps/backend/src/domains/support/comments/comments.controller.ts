@@ -23,7 +23,7 @@ export class CommentsController {
   @ApiOperation({ summary: 'Create a new comment on a ticket' })
   @ApiResponse({ status: 201, description: 'Comment created successfully' })
   async create(
-    @Body() createCommentDto: CreateCommentDto & { ticket_id: number },
+    @Body() createCommentDto: CreateCommentDto,
   ) {
     const userId = RequestContextService.getUserId();
 
