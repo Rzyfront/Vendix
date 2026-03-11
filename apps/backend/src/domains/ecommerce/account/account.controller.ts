@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { AccountService } from './account.service';
 import { UpdateProfileDto, ChangePasswordDto, CreateAddressDto, UpdateAddressDto } from './dto/account.dto';
+import { PaginationQueryDto } from './dto/pagination-query.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 @Controller('ecommerce/account')
@@ -42,13 +43,12 @@ export class AccountController {
 
     @Get('orders')
     async getOrders(
-        @Query('page') page?: string,
-        @Query('limit') limit?: string,
+        @Query() query: PaginationQueryDto,
     ) {
         // store_id y user_id se resuelven automáticamente
         const data = await this.account_service.getOrders(
-            page ? parseInt(page, 10) : 1,
-            limit ? parseInt(limit, 10) : 10,
+            query.page ?? 1,
+            query.limit ?? 10,
         );
         return { success: true, ...data };
     }

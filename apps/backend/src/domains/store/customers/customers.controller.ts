@@ -14,6 +14,7 @@ import {
 import { CustomersService } from './customers.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
+import { CustomerSearchQueryDto } from './dto/customer-search-query.dto';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
@@ -39,14 +40,12 @@ export class CustomersController {
     @Permissions('store:customers:read')
     findAll(
         @Req() req: AuthenticatedRequest,
-        @Query('search') search?: string,
-        @Query('page') page?: string,
-        @Query('limit') limit?: string,
+        @Query() query: CustomerSearchQueryDto,
     ) {
         if (!req.user.store_id) throw new Error('Store context required');
-        const pageNum = page ? parseInt(page, 10) : 1;
-        const limitNum = limit ? parseInt(limit, 10) : 20;
-        return this.customersService.findAll(req.user.store_id, { search, page: pageNum, limit: limitNum });
+        const pageNum = query.page ?? 1;
+        const limitNum = query.limit ?? 20;
+        return this.customersService.findAll(req.user.store_id, { search: query.search, page: pageNum, limit: limitNum });
     }
 
     @Get(':id')
