@@ -14,6 +14,7 @@ import { Subscription, Observable } from 'rxjs';
 import { IconComponent } from '../icon/icon.component';
 import { UserDropdownComponent } from '../user-dropdown/user-dropdown.component';
 import { NotificationsDropdownComponent } from '../notifications-dropdown/notifications-dropdown.component';
+import { HelpSearchOverlayComponent } from '../help-search-overlay/help-search-overlay.component';
 
 import { BreadcrumbService } from '../../../core/services/breadcrumb.service';
 import { BreadcrumbItem } from '../../../core/services/breadcrumb.service';
@@ -29,6 +30,7 @@ import { ConfigFacade } from '../../../core/store/config';
     IconComponent,
     UserDropdownComponent,
     NotificationsDropdownComponent,
+    HelpSearchOverlayComponent,
   ],
   template: `
     <header
@@ -135,6 +137,7 @@ import { ConfigFacade } from '../../../core/store/config';
 
         <!-- Notifications + User Dropdown -->
         <div class="flex-shrink-0 flex items-center gap-2">
+          <app-help-search-overlay></app-help-search-overlay>
           <app-notifications-dropdown></app-notifications-dropdown>
           <app-user-dropdown
             (closeDropdown)="onDropdownClose()"

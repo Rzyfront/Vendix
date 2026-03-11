@@ -290,6 +290,25 @@ const APP_MODULES = {
         },
       ],
     },
+    // Ayuda (padre con hijos)
+    {
+      key: 'help',
+      label: 'Ayuda',
+      description: 'Sección de ayuda y soporte',
+      isParent: true,
+      children: [
+        {
+          key: 'help_support',
+          label: 'Soporte',
+          description: 'Acceso a la sección de soporte',
+        },
+        {
+          key: 'help_center',
+          label: 'Centro de Ayuda',
+          description: 'Artículos y guías del centro de ayuda',
+        },
+      ],
+    },
   ],
 };
 

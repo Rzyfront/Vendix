@@ -338,6 +338,7 @@ export class PosProductService {
         tax_assignments: product.product_tax_assignments || [],
         has_variants: product.has_variants ?? productVariants.length > 0,
         product_variants: productVariants,
+        pricing_type: product.pricing_type || 'unit',
         _rawStockLevels: product.stock_levels,
         _rawStockQuantity: product.stock_quantity,
         _rawImageUrl: product.image_url,

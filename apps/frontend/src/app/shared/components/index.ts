@@ -41,6 +41,9 @@ export { TimelineComponent } from './timeline/timeline.component';
 export { TourModalComponent } from './tour/tour-modal/tour-modal.component';
 export { ImageLightboxComponent } from './image-lightbox/image-lightbox.component';
 export { PaginationComponent } from './pagination/pagination.component';
+export { FileUploadDropzoneComponent } from './file-upload-dropzone/file-upload-dropzone.component';
+export { HelpSearchOverlayComponent } from './help-search-overlay/help-search-overlay.component';
+export { MarkdownEditorComponent } from './markdown-editor/markdown-editor.component';
 
 // Services
 export { TourService } from './tour/services/tour.service';

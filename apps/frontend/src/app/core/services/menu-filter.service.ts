@@ -81,7 +81,11 @@ export class MenuFilterService {
     Dominios: ['domains', 'settings_domains'],
     Envíos: 'settings_shipping',
     'Documentos Legales': 'settings_legal_documents',
-    Soporte: 'settings_support',
+
+    // Ayuda (padre + submódulos)
+    Ayuda: 'help',
+    Soporte: ['help_support', 'settings_support'],
+    'Centro de Ayuda': 'help_center',
   };
 
   /**

@@ -330,4 +330,13 @@ export class GlobalPrismaService extends BasePrismaService {
   get ai_engine_applications() {
     return this.baseClient.ai_engine_applications;
   }
+
+  // Help Center models (global - no scoping)
+  get help_article_categories() {
+    return this.baseClient.help_article_categories;
+  }
+
+  get help_articles() {
+    return this.baseClient.help_articles;
+  }
 }

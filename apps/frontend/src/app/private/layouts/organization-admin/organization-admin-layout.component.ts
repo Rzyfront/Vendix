@@ -219,6 +219,7 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
 
     // Load stores for sidebar
     this.loadStores();
+
   }
 
   private checkOnboardingWithRoleValidation(): void {

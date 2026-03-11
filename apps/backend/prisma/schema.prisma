@@ -68,6 +68,7 @@ model users {
   comments                   support_comments[]          @relation("comment_author")
   status_changes             support_status_history[]   @relation("status_changed_by")
   support_notifications      support_notifications[]    @relation("notification_user")
+  help_articles_authored      help_articles[]            @relation("help_article_author")
 
   // Campos de tracking de términos
   terms_accepted_version String?   @db.VarChar(20)
@@ -2196,4 +2197,64 @@ model ai_engine_applications {
   config ai_engine_configs? @relation(fields: [config_id], references: [id], onDelete: SetNull)
 
   @@index([config_id])
+}
+
+// ── Help Center ──────────────────────────────────────────────────
+
+enum help_article_type_enum {
+  TUTORIAL
+  FAQ
+  GUIDE
+  ANNOUNCEMENT
+  RELEASE_NOTE
+}
+
+enum help_article_status_enum {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model help_article_categories {
+  id          Int       @id @default(autoincrement())
+  name        String    @db.VarChar(100)
+  slug        String    @unique @db.VarChar(120)
+  description String?   @db.VarChar(500)
+  icon        String?   @db.VarChar(50)
+  sort_order  Int       @default(0)
+  is_active   Boolean   @default(true)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  updated_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  articles help_articles[]
+}
+
+model help_articles {
+  id              Int                      @id @default(autoincrement())
+  title           String                   @db.VarChar(255)
+  slug            String                   @unique @db.VarChar(280)
+  summary         String                   @db.VarChar(500)
+  content         String                   @db.Text
+  type            help_article_type_enum   @default(GUIDE)
+  status          help_article_status_enum @default(DRAFT)
+  category_id     Int
+  module          String?                  @db.VarChar(50)
+  tags            String[]
+  cover_image_url String?                  @db.Text
+  view_count      Int                      @default(0)
+  created_by_id   Int?
+  is_featured     Boolean                  @default(false)
+  sort_order      Int                      @default(0)
+  created_at      DateTime?                @default(now()) @db.Timestamp(6)
+  updated_at      DateTime?                @default(now()) @db.Timestamp(6)
+
+  category   help_article_categories @relation(fields: [category_id], references: [id])
+  created_by users?                  @relation("help_article_author", fields: [created_by_id], references: [id], onDelete: SetNull)
+
+  @@index([category_id])
+  @@index([status])
+  @@index([type])
+  @@index([module])
+  @@index([is_featured])
+  @@index([created_by_id])
 }

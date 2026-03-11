@@ -229,6 +229,7 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
             settings_domains: true,
             settings_shipping: true,
             settings_legal_documents: true,
+            settings_support: true,
             help: false,
             help_support: false,
             help_center: false,
