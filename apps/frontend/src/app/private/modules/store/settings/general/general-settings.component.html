@@ -7,18 +7,12 @@
 
   <!-- Section Navigation (mobile: compact horizontal scroll, desktop: hidden) -->
   <div class="sticky top-[41px] z-10 bg-background py-1.5 md:static md:bg-transparent md:py-0 lg:hidden">
-    <nav class="flex items-center gap-1 xs:gap-1.5 overflow-x-auto scrollbar-hide" aria-label="Secciones de configuración">
-      @for (section of sections; track section.id) {
-        <button type="button"
-          class="flex items-center gap-1 px-2.5 py-1.5 text-[10px] xs:text-xs font-medium rounded-lg whitespace-nowrap transition-all duration-150 shadow-[0_1px_4px_rgba(0,0,0,0.06)]"
-          [class.active-tab]="activeSection() === section.id"
-          [class.inactive-tab]="activeSection() !== section.id"
-          (click)="scrollToSection(section.id)">
-          <app-icon [name]="section.icon" [size]="12"></app-icon>
-          <span>{{ section.label }}</span>
-        </button>
-      }
-    </nav>
+    <app-scrollable-tabs
+      [tabs]="sections"
+      [activeTab]="activeSection()"
+      size="md"
+      ariaLabel="Secciones de configuración"
+      (tabChange)="scrollToSection($event)" />
   </div>
 
   <!-- Main Content Area -->

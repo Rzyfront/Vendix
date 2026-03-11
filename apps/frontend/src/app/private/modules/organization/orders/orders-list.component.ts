@@ -310,8 +310,16 @@ export class OrdersListComponent implements OnInit, OnDestroy {
         value.charAt(0).toUpperCase() + value.slice(1).toLowerCase(),
       detailKeys: [
         { key: 'store.name', label: 'Store', icon: 'shopping-bag' },
-        { key: 'total_amount', label: 'Total', transform: (v: number) => `$${v.toFixed(2)}` },
-        { key: 'order_date', label: 'Date', transform: (v: string) => this.formatDate(v) },
+        {
+          key: 'total_amount',
+          label: 'Total',
+          transform: (v: number) => `$${v.toFixed(2)}`,
+        },
+        {
+          key: 'order_date',
+          label: 'Date',
+          transform: (v: string) => this.formatDate(v),
+        },
       ],
     };
   }
@@ -395,9 +403,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     })
       .then((response) => response.json())
       .then((response: any) => {
-        console.log('API Response:', response); // Debug log
         if (response.data && response.data.length > 0) {
-          console.log('Using REAL data from API'); // Debug log
           // Transform backend data to frontend format
           this.orders = response.data.map((order: any) => ({
             id: order.id.toString(),
@@ -431,7 +437,6 @@ export class OrdersListComponent implements OnInit, OnDestroy {
             updated_at: order.updated_at,
           }));
         } else {
-          console.log('Using MOCK data - API returned no data'); // Debug log
           // Fallback to mock data if API fails
           this.orders = this.generateMockOrders();
         }
@@ -439,7 +444,6 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       })
       .catch((error) => {
         console.error('Error loading orders:', error);
-        console.log('Using MOCK data - API call failed'); // Debug log
         // Fallback to mock data
         this.orders = this.generateMockOrders();
         this.isLoading = false;
@@ -537,7 +541,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     this.stats.average_order_value =
       this.orders.length > 0
         ? this.orders.reduce((sum, order) => sum + order.total_amount, 0) /
-        this.orders.length
+          this.orders.length
         : 0;
   }
 
@@ -592,13 +596,10 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     this.loadOrders();
   }
 
-  viewOrderDetails(order: OrderListItem): void {
-    console.log('View order details:', order);
-  }
+  viewOrderDetails(order: OrderListItem): void {}
 
   exportOrders(): void {
     if (this.orders.length === 0) {
-      console.log('No orders to export');
       return;
     }
 
@@ -622,8 +623,6 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-
-      console.log('Orders exported successfully');
     } catch (error) {
       console.error('Error exporting orders:', error);
     }
@@ -697,15 +696,12 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     return colorMap[status] || 'text-gray-600 bg-gray-100';
   }
 
-  printInvoice(order: OrderListItem): void {
-    console.log(`Printing invoice for order ${order.order_number}`);
-  }
+  printInvoice(order: OrderListItem): void {}
 
   onTableSort(sortEvent: {
     column: string;
     direction: 'asc' | 'desc' | null;
   }): void {
-    console.log('Sort event:', sortEvent);
     // TODO: Implement server-side sorting
     this.loadOrders();
   }
@@ -738,8 +734,6 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   }
 
   onOrderCreated(orderData: any): void {
-    console.log('New order created:', orderData);
-
     // Transform the created order data to match frontend format
     const newOrder: OrderListItem = {
       id: orderData.id?.toString() || `order_${Date.now()}`,
@@ -766,7 +760,8 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       tax_amount: parseFloat(orderData.tax_amount) || 0,
       shipping_amount: parseFloat(orderData.shipping_cost) || 0,
       discount_amount: parseFloat(orderData.discount_amount) || 0,
-      currency: orderData.currency || this.currencyService.currencyCode() || 'USD',
+      currency:
+        orderData.currency || this.currencyService.currencyCode() || 'USD',
       order_date: orderData.created_at || new Date().toISOString(),
       items_count: orderData.order_items?.length || 1,
       notes: orderData.internal_notes || '',

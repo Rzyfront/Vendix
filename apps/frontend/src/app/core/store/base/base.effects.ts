@@ -74,7 +74,7 @@ export class BaseEffects {
       this.actions$.pipe(
         ofType(BaseActions.loadDataSuccess),
         tap(({ data, id }) => {
-          console.log(`[Base Effects] Data loaded successfully:`, { data, id });
+          // Data loaded successfully
         }),
       ),
     { dispatch: false },
@@ -96,7 +96,7 @@ export class BaseEffects {
       this.actions$.pipe(
         ofType(BaseActions.createDataSuccess),
         tap(({ data }) => {
-          console.log(`[Base Effects] Data created successfully:`, data);
+          // Data created successfully
         }),
       ),
     { dispatch: false },
@@ -118,7 +118,7 @@ export class BaseEffects {
       this.actions$.pipe(
         ofType(BaseActions.updateDataSuccess),
         tap(({ data }) => {
-          console.log(`[Base Effects] Data updated successfully:`, data);
+          // Data updated successfully
         }),
       ),
     { dispatch: false },
@@ -140,7 +140,7 @@ export class BaseEffects {
       this.actions$.pipe(
         ofType(BaseActions.deleteDataSuccess),
         tap(({ id }) => {
-          console.log(`[Base Effects] Data deleted successfully:`, id);
+          // Data deleted successfully
         }),
       ),
     { dispatch: false },

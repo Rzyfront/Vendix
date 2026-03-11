@@ -37,7 +37,6 @@ export class StoreAdminGuard implements CanActivate {
       // Verificar que estamos en el entorno correcto
       const currentEnv = this.environmentContextService.getCurrentEnvironment();
       if (currentEnv !== AppEnvironment.STORE_ADMIN) {
-        console.warn('Access denied: Not in store environment', { currentEnv });
         this.toastService.warning('No tienes permisos para ver esa ruta');
         this.router.navigate(['/']);
         return false;
@@ -51,9 +50,6 @@ export class StoreAdminGuard implements CanActivate {
       );
 
       if (!hasStoreRole) {
-        console.warn('Access denied: Insufficient store permissions', {
-          roles: user?.roles,
-        });
         this.toastService.warning('No tienes permisos para ver esa ruta');
         this.router.navigate(['/']);
         return false;
@@ -62,7 +58,6 @@ export class StoreAdminGuard implements CanActivate {
       // Verificar que tenemos el contexto de tienda
       const context = this.environmentContextService.getEnvironmentInfo();
       if (!context.store) {
-        console.warn('Access denied: No store context available');
         this.toastService.warning('Error de contexto de tienda');
         this.router.navigate(['/']);
         return false;
@@ -72,7 +67,6 @@ export class StoreAdminGuard implements CanActivate {
       const isConsistent =
         this.environmentContextService.validateEnvironmentConsistency();
       if (!isConsistent) {
-        console.warn('Environment inconsistency detected, redirecting to home');
         this.toastService.warning('Error de entorno');
         this.router.navigate(['/']);
         return false;

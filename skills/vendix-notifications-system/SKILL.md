@@ -358,8 +358,8 @@ async handleRefundIssued(event: RefundIssuedEvent) {
   await this.notifications_service.createAndBroadcast(
     event.store_id,
     'refund_issued',
-    'Reembolso Emitido',
-    `Reembolso de $${event.amount} ${event.currency} para orden #${event.order_number}`,
+    'Refund Issued',
+    `Refund of $${event.amount} ${event.currency} for order #${event.order_number}`,
     { order_id: event.order_id, reason: event.reason },
   );
 }

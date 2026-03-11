@@ -47,7 +47,6 @@ export class PosTicketService {
         if (printOptions.printReceipt) {
           const html = this.generateTicketHTML(ticketData);
           this.printHTML(html);
-          console.log('Ticket impreso:', ticketData.id);
         }
 
         if (printOptions.openCashDrawer) {
@@ -83,7 +82,6 @@ export class PosTicketService {
           }
           if (parsedUser.organizations) {
             organization = parsedUser.organizations;
-            console.log('Organization from localStorage:', organization);
           }
           if (parsedUser.addresses && parsedUser.addresses.length > 0) {
             const addr = parsedUser.addresses[0];
@@ -147,7 +145,9 @@ export class PosTicketService {
       // Show customer name, or "Consumidor Final" if empty/undefined (anonymous sale)
       const displayName = ticketData.customer.name || 'Consumidor Final';
       // For anonymous sales (empty name), show "000" as tax ID
-      const displayTaxId = ticketData.customer.name ? (ticketData.customer.taxId || '') : '000';
+      const displayTaxId = ticketData.customer.name
+        ? ticketData.customer.taxId || ''
+        : '000';
       html += `
         <div style="margin-bottom: 15px;">
           <p style="margin: 2px 0; font-size: 12px;"><strong>Cliente:</strong> ${displayName}</p>
@@ -187,10 +187,11 @@ export class PosTicketService {
 
     // Taxes breakdown
     ticketData.items.forEach((item, index) => {
-      const calculatedTax = item.totalPrice - (item.unitPrice * item.quantity);
+      const calculatedTax = item.totalPrice - item.unitPrice * item.quantity;
       const taxAmount = item.tax || calculatedTax;
-      const taxPercent = taxAmount ? ((taxAmount / item.totalPrice) * 100).toFixed(2) : '0.00';
-      console.log(`Item ${index + 1}: ${item.name}, unitPrice: ${item.unitPrice}, quantity: ${item.quantity}, totalPrice: ${item.totalPrice}, calculatedTax: ${calculatedTax}, taxAmount: ${taxAmount}, taxPercent: ${taxPercent}`);
+      const taxPercent = taxAmount
+        ? ((taxAmount / item.totalPrice) * 100).toFixed(2)
+        : '0.00';
       html += `<p style="margin: 2px 0; font-size: 11px;">A${index + 1}. ${item.name} - Imp: ${taxPercent}% - ${this.currencyService.format(taxAmount)}</p>`;
     });
 
@@ -302,17 +303,11 @@ export class PosTicketService {
     setTimeout(() => iframe.remove(), 1000);
   }
 
-  private openCashDrawer(): void {
-    console.log('Abriendo caja registradora...');
-  }
+  private openCashDrawer(): void {}
 
-  private emailTicket(ticketData: TicketData, email: string): void {
-    console.log(`Enviando ticket ${ticketData.id} por email a ${email}`);
-  }
+  private emailTicket(ticketData: TicketData, email: string): void {}
 
-  private smsTicket(ticketData: TicketData, phone: string): void {
-    console.log(`Enviando ticket ${ticketData.id} por SMS a ${phone}`);
-  }
+  private smsTicket(ticketData: TicketData, phone: string): void {}
 
   private getDefaultPrintOptions(): PrintOptions {
     return {
@@ -364,7 +359,6 @@ export class PosTicketService {
     return of(printerName).pipe(
       delay(2000),
       map(() => {
-        console.log(`Imprimiendo página de prueba en ${printerName}`);
         return true;
       }),
     );
@@ -378,7 +372,6 @@ export class PosTicketService {
     return of(template).pipe(
       delay(300),
       map(() => {
-        console.log('Plantilla de ticket guardada');
         return true;
       }),
     );

@@ -1,0 +1,158 @@
+:host {
+  display: block;
+  width: 100%;
+}
+
+// ── Wrapper ─────────────────────────────────
+.scrollable-tabs-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+// ── Scrollable nav ──────────────────────────
+.scrollable-tabs-nav {
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  width: 100%;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+// ── Scroll arrows ───────────────────────────
+.scroll-arrow {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  min-width: 44px;
+  min-height: 44px;
+  transition: opacity 150ms ease;
+
+  &--left {
+    left: 0;
+    background: linear-gradient(to right, var(--color-background) 60%, transparent);
+    padding-left: 4px;
+    padding-right: 12px;
+  }
+
+  &--right {
+    right: 0;
+    background: linear-gradient(to left, var(--color-background) 60%, transparent);
+    padding-right: 4px;
+    padding-left: 12px;
+  }
+
+  &:hover {
+    color: var(--color-text-primary);
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
+}
+
+// ── Tab buttons ─────────────────────────────
+.scrollable-tab {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+  border-radius: 0.75rem;
+  transition: all 150ms ease;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+
+  &--active {
+    background-color: var(--color-primary) !important;
+    color: white !important;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  }
+
+  &--inactive {
+    background-color: var(--color-surface);
+    color: var(--color-text-secondary);
+
+    &:hover {
+      background-color: #f9fafb;
+      color: var(--color-text-primary);
+    }
+  }
+}
+
+// ── Size variants ───────────────────────────
+
+// XS
+.scrollable-tabs--xs {
+  .scrollable-tabs-nav {
+    gap: 0.25rem;
+  }
+
+  .scrollable-tab {
+    gap: 0.125rem;
+    padding: 0.25rem 0.5rem;
+    font-size: 10px;
+  }
+}
+
+// SM
+.scrollable-tabs--sm {
+  .scrollable-tabs-nav {
+    gap: 0.25rem;
+  }
+
+  .scrollable-tab {
+    gap: 0.25rem;
+    padding: 0.375rem 0.625rem;
+    font-size: 11px;
+  }
+}
+
+// MD (default)
+.scrollable-tabs--md {
+  .scrollable-tabs-nav {
+    gap: 0.25rem;
+  }
+
+  .scrollable-tab {
+    gap: 0.25rem;
+    padding: 0.375rem 0.625rem;
+    font-size: 10px;
+  }
+
+  @media (min-width: 475px) {
+    .scrollable-tabs-nav {
+      gap: 0.375rem;
+    }
+
+    .scrollable-tab {
+      font-size: 12px;
+    }
+  }
+}
+
+// LG
+.scrollable-tabs--lg {
+  .scrollable-tabs-nav {
+    gap: 0.375rem;
+  }
+
+  .scrollable-tab {
+    gap: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 13px;
+  }
+}

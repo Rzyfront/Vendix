@@ -210,7 +210,6 @@ export class EnvironmentIndicatorComponent implements OnInit, OnDestroy {
 
   onSwitchEnvironment(): void {
     // Emitir evento para que el componente padre maneje el switch
-    console.log('Switch environment requested', this.context);
 
     // Opcional: disparar un evento personalizado
     const event = new CustomEvent('switchEnvironment', {

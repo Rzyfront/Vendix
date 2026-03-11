@@ -4,7 +4,10 @@ import { Store } from '@ngrx/store';
 import { ToastService } from '../../shared/components/toast/toast.service';
 import * as AuthActions from '../store/auth/auth.actions';
 
-export type LogoutReason = 'explicit' | 'session_expired' | 'token_refresh_failed';
+export type LogoutReason =
+  | 'explicit'
+  | 'session_expired'
+  | 'token_refresh_failed';
 
 /**
  * SessionService - Coordina el cierre de sesión de forma centralizada.
@@ -47,15 +50,12 @@ export class SessionService {
   terminateSession(reason: LogoutReason): void {
     // Evitar múltiples ejecuciones
     if (this.logoutInProgress || this._isTerminating()) {
-      console.log('[SessionService] Logout already in progress, ignoring');
       return;
     }
 
     this.logoutInProgress = true;
     this._isTerminating.set(true);
     this._terminationReason.set(reason);
-
-    console.log(`[SessionService] Terminating session. Reason: ${reason}`);
 
     // 1. Limpiar toasts existentes para evitar confusión
     this.toast.clear();
@@ -75,7 +75,6 @@ export class SessionService {
       this._isTerminating.set(false);
       this._terminationReason.set(null);
       this.logoutInProgress = false;
-      console.log('[SessionService] Session terminated, redirecting to landing');
 
       // Hard redirect para reiniciar la app con el environment del dominio
       window.location.href = '/';
@@ -90,7 +89,6 @@ export class SessionService {
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem('vendix_user_environment');
       localStorage.removeItem('vendix_app_config');
-      console.log('[SessionService] User environment cleared');
     }
   }
 

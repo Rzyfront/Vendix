@@ -180,7 +180,6 @@ export class ProductSelectorComponent implements ControlValueAccessor {
 
   private searchProducts(query: string): void {
     if (!this.storeId) {
-      console.warn('Store ID is required for product search');
       return;
     }
 

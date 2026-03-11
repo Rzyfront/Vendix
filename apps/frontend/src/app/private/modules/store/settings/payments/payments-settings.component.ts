@@ -72,7 +72,7 @@ import {
 
       <!-- Content Container: Transparent on mobile, surface on desktop -->
       <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-                  md:border md:border-border md:overflow-hidden">
+                  md:border md:border-border">
         <!-- Search Section: Sticky on mobile, static on desktop -->
         <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
                     md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">

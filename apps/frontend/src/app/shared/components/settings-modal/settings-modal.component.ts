@@ -85,6 +85,21 @@ const APP_MODULES = {
       label: 'Órdenes',
       description: 'Gestionar órdenes de todas las tiendas',
     },
+    {
+      key: 'expenses',
+      label: 'Gastos',
+      description: 'Gestión de gastos de la organización',
+    },
+    {
+      key: 'accounting',
+      label: 'Contabilidad',
+      description: 'Plan de cuentas y asientos contables',
+    },
+    {
+      key: 'payroll',
+      label: 'Nómina',
+      description: 'Gestión de nómina consolidada',
+    },
   ],
   STORE_ADMIN: [
     // Módulos principales (standalone - sin hijos)
@@ -241,6 +256,68 @@ const APP_MODULES = {
       description: 'Sección de gastos',
     },
 
+    // Facturación
+    {
+      key: 'invoicing',
+      label: 'Facturación',
+      description: 'Emisión y gestión de facturas electrónicas',
+    },
+
+    // Contabilidad (padre con hijos)
+    {
+      key: 'accounting',
+      label: 'Contabilidad',
+      description: 'Plan de cuentas y asientos contables',
+      isParent: true,
+      children: [
+        {
+          key: 'accounting_chart_of_accounts',
+          label: 'Plan de Cuentas',
+          description: 'Estructura de cuentas contables',
+        },
+        {
+          key: 'accounting_journal_entries',
+          label: 'Asientos Contables',
+          description: 'Registro de asientos contables',
+        },
+        {
+          key: 'accounting_fiscal_periods',
+          label: 'Periodos Fiscales',
+          description: 'Gestión de periodos fiscales',
+        },
+        {
+          key: 'accounting_reports',
+          label: 'Reportes',
+          description: 'Reportes contables y financieros',
+        },
+      ],
+    },
+
+    // Nómina (padre con hijos)
+    {
+      key: 'payroll',
+      label: 'Nómina',
+      description: 'Gestión de empleados y liquidación de nómina',
+      isParent: true,
+      children: [
+        {
+          key: 'payroll_employees',
+          label: 'Empleados',
+          description: 'Directorio de empleados',
+        },
+        {
+          key: 'payroll_runs',
+          label: 'Liquidaciones',
+          description: 'Liquidación y corridas de nómina',
+        },
+        {
+          key: 'payroll_settings',
+          label: 'Configuración Nómina',
+          description: 'Reglas y parámetros de nómina',
+        },
+      ],
+    },
+
     // Configuración (padre con hijos)
     {
       key: 'settings',
@@ -341,7 +418,10 @@ const APP_MODULES = {
               <app-icon name="app-window" [size]="20"></app-icon>
               Tipo de Aplicación
             </h4>
-            <div class="app-type-selection" [class.read-only]="!canChangeAppType">
+            <div
+              class="app-type-selection"
+              [class.read-only]="!canChangeAppType"
+            >
               <div
                 class="app-type-card"
                 [class.selected]="currentAppType === 'ORG_ADMIN'"
@@ -353,7 +433,10 @@ const APP_MODULES = {
                   <h3>Organización</h3>
                   <p>Gestión multi-tienda</p>
                 </div>
-                <div class="status-badge" *ngIf="currentAppType === 'ORG_ADMIN'">
+                <div
+                  class="status-badge"
+                  *ngIf="currentAppType === 'ORG_ADMIN'"
+                >
                   Actual
                 </div>
               </div>
@@ -368,12 +451,18 @@ const APP_MODULES = {
                   <h3>Tienda</h3>
                   <p>Operaciones locales</p>
                 </div>
-                <div class="status-badge" *ngIf="currentAppType === 'STORE_ADMIN'">
+                <div
+                  class="status-badge"
+                  *ngIf="currentAppType === 'STORE_ADMIN'"
+                >
                   Actual
                 </div>
               </div>
             </div>
-            <p class="text-[10px] text-gray-400 mt-2 flex items-center gap-1" *ngIf="!canChangeAppType">
+            <p
+              class="text-[10px] text-gray-400 mt-2 flex items-center gap-1"
+              *ngIf="!canChangeAppType"
+            >
               <app-icon name="lock" [size]="10"></app-icon>
               Cambio restringido a administradores
             </p>
@@ -385,25 +474,39 @@ const APP_MODULES = {
               <app-icon name="palette" [size]="20"></app-icon>
               Preferencias
             </h4>
-            
+
             <div class="flex flex-col gap-4">
               <!-- Inline Theme Selector -->
               <div class="theme-grid">
-                <div class="theme-box" 
-                     [class.active]="settingsForm.get('preferences.theme')?.value === 'default'"
-                     (click)="selectTheme('default')">
+                <div
+                  class="theme-box"
+                  [class.active]="
+                    settingsForm.get('preferences.theme')?.value === 'default'
+                  "
+                  (click)="selectTheme('default')"
+                >
                   <div class="theme-preview bg-gray-200"></div>
                   <span>Default</span>
                 </div>
-                <div class="theme-box" 
-                     [class.active]="settingsForm.get('preferences.theme')?.value === 'aura'"
-                     (click)="selectTheme('aura')">
-                  <div class="theme-preview bg-gradient-to-br from-purple-500 to-pink-500"></div>
+                <div
+                  class="theme-box"
+                  [class.active]="
+                    settingsForm.get('preferences.theme')?.value === 'aura'
+                  "
+                  (click)="selectTheme('aura')"
+                >
+                  <div
+                    class="theme-preview bg-gradient-to-br from-purple-500 to-pink-500"
+                  ></div>
                   <span>Aura</span>
                 </div>
-                <div class="theme-box" 
-                     [class.active]="settingsForm.get('preferences.theme')?.value === 'monocromo'"
-                     (click)="selectTheme('monocromo')">
+                <div
+                  class="theme-box"
+                  [class.active]="
+                    settingsForm.get('preferences.theme')?.value === 'monocromo'
+                  "
+                  (click)="selectTheme('monocromo')"
+                >
                   <div class="theme-preview bg-slate-700"></div>
                   <span>Mono</span>
                 </div>
@@ -421,15 +524,20 @@ const APP_MODULES = {
               <app-icon name="layout" [size]="20"></app-icon>
               Módulos del Panel: {{ getAppTypeLabel(currentAppType) }}
             </h4>
-            <span class="text-xs text-gray-400">Personaliza la visibilidad de tus herramientas</span>
+            <span class="text-xs text-gray-400"
+              >Personaliza la visibilidad de tus herramientas</span
+            >
           </div>
 
           <div formGroupName="panel_ui" class="relative">
             <div [formGroupName]="currentAppType" class="flex flex-col gap-6">
-              
               <!-- SECTION A: Modules WITH Children (larger cards/areas) -->
               <div class="compact-modules-grid">
-                <div *ngFor="let module of getModulesWithChildren(currentAppType)" class="module-group is-parent" [class.new-module]="isNewModule(module.key)">
+                <div
+                  *ngFor="let module of getModulesWithChildren(currentAppType)"
+                  class="module-group is-parent"
+                  [class.new-module]="isNewModule(module.key)"
+                >
                   <div class="toggle-wrapper">
                     <app-setting-toggle
                       [formControlName]="module.key"
@@ -441,7 +549,11 @@ const APP_MODULES = {
                   </div>
 
                   <div class="children-grid">
-                    <div *ngFor="let child of module.children" class="child-item" [class.new-module]="isNewModule(child.key)">
+                    <div
+                      *ngFor="let child of module.children"
+                      class="child-item"
+                      [class.new-module]="isNewModule(child.key)"
+                    >
                       <app-setting-toggle
                         [formControlName]="child.key"
                         [label]="child.label"
@@ -455,9 +567,17 @@ const APP_MODULES = {
 
               <!-- SECTION B: STANDALONE Modules (grouped together) -->
               <div class="standalone-container mt-2">
-                <h5 class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">Herramientas Directas</h5>
+                <h5
+                  class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3"
+                >
+                  Herramientas Directas
+                </h5>
                 <div class="compact-modules-grid">
-                  <div *ngFor="let module of getStandaloneModules(currentAppType)" class="module-group" [class.new-module]="isNewModule(module.key)">
+                  <div
+                    *ngFor="let module of getStandaloneModules(currentAppType)"
+                    class="module-group"
+                    [class.new-module]="isNewModule(module.key)"
+                  >
                     <app-setting-toggle
                       [formControlName]="module.key"
                       [label]="module.label"
@@ -467,18 +587,23 @@ const APP_MODULES = {
                   </div>
                 </div>
               </div>
-
             </div>
           </div>
 
-          <div *ngIf="hasModuleError()" class="text-xs text-red-500 mt-4 flex items-center gap-1">
+          <div
+            *ngIf="hasModuleError()"
+            class="text-xs text-red-500 mt-4 flex items-center gap-1"
+          >
             <app-icon name="alert-circle" [size]="14"></app-icon>
             Debes habilitar al menos un módulo para poder navegar
           </div>
         </div>
 
         <!-- Upgrade single store if applicable -->
-        <div class="mt-8 pt-6 border-t border-gray-100" *ngIf="isSingleStore && isOwner">
+        <div
+          class="mt-8 pt-6 border-t border-gray-100"
+          *ngIf="isSingleStore && isOwner"
+        >
           <div class="upgrade-banner">
             <div class="flex items-center gap-4">
               <div class="p-3 bg-primary/10 rounded-xl text-primary">
@@ -486,7 +611,10 @@ const APP_MODULES = {
               </div>
               <div class="flex-1">
                 <h5 class="font-bold text-gray-900">¿Necesitas más tiendas?</h5>
-                <p class="text-xs text-gray-500">Convierte tu cuenta en una Organización para gestionar múltiples sucursales y reportes consolidados.</p>
+                <p class="text-xs text-gray-500">
+                  Convierte tu cuenta en una Organización para gestionar
+                  múltiples sucursales y reportes consolidados.
+                </p>
               </div>
               <app-button
                 variant="primary"
@@ -588,7 +716,7 @@ export class SettingsModalComponent implements OnInit {
     this.checkPermissions();
   }
 
-  ngOnInit() { }
+  ngOnInit() {}
 
   onOpen() {
     this.loadSettings();
@@ -599,12 +727,12 @@ export class SettingsModalComponent implements OnInit {
     const userOrg = context?.user?.organizations;
     const accountType =
       context?.organization?.account_type ||
-      (Array.isArray(userOrg) ? userOrg[0]?.account_type : userOrg?.account_type);
+      (Array.isArray(userOrg)
+        ? userOrg[0]?.account_type
+        : userOrg?.account_type);
 
     this.isSingleStore = accountType === 'SINGLE_STORE';
     this.isOwner = this.authFacade.isOwner();
-
-    console.log('🔍 isSingleStore:', this.isSingleStore, 'AccountType:', accountType);
 
     // Forzar STORE_ADMIN si es SINGLE_STORE
     if (this.isSingleStore && this.currentAppType === 'ORG_ADMIN') {
@@ -707,7 +835,9 @@ export class SettingsModalComponent implements OnInit {
    * @returns Array of modules with children
    */
   getModulesWithChildren(appType: string): any[] {
-    return this.getParentModules(appType).filter(m => m.isParent && m.children && m.children.length > 0);
+    return this.getParentModules(appType).filter(
+      (m) => m.isParent && m.children && m.children.length > 0,
+    );
   }
 
   /**
@@ -716,7 +846,9 @@ export class SettingsModalComponent implements OnInit {
    * @returns Array of modules without children
    */
   getStandaloneModules(appType: string): any[] {
-    return this.getParentModules(appType).filter(m => !m.isParent || !m.children || m.children.length === 0);
+    return this.getParentModules(appType).filter(
+      (m) => !m.isParent || !m.children || m.children.length === 0,
+    );
   }
 
   /**
@@ -726,7 +858,9 @@ export class SettingsModalComponent implements OnInit {
     this.newModuleKeys.clear();
     if (!this.defaultPanelUi) return;
 
-    for (const appType of Object.keys(this.defaultPanelUi)) {
+    // Only check editable app types (not STORE_ECOMMERCE or VENDIX_LANDING)
+    const editableAppTypes = ['ORG_ADMIN', 'STORE_ADMIN'];
+    for (const appType of editableAppTypes) {
       const userKeys = config.panel_ui?.[appType] || {};
       const defaultKeys = this.defaultPanelUi[appType] || {};
       for (const key of Object.keys(defaultKeys)) {
@@ -771,8 +905,6 @@ export class SettingsModalComponent implements OnInit {
   }
 
   initializeForm(config: any) {
-    console.log('🔧 Updating form with config:', config);
-
     // Build patch object efficiently
     const patchObj: any = {
       app: this.currentAppType,
@@ -789,32 +921,44 @@ export class SettingsModalComponent implements OnInit {
     // Update ORG_ADMIN modules
     const orgDefaults = this.defaultPanelUi?.['ORG_ADMIN'] || {};
     APP_MODULES.ORG_ADMIN.forEach((module) => {
-      const isNewKey = !config.panel_ui?.ORG_ADMIN?.hasOwnProperty(module.key) && !config.panel_ui?.hasOwnProperty(module.key);
+      const isNewKey =
+        !config.panel_ui?.ORG_ADMIN?.hasOwnProperty(module.key) &&
+        !config.panel_ui?.hasOwnProperty(module.key);
       const defaultValue = orgDefaults[module.key] ?? false;
       const currentValue = isNewKey
         ? defaultValue
-        : (config.panel_ui?.ORG_ADMIN?.[module.key] ?? config.panel_ui?.[module.key] ?? false);
+        : (config.panel_ui?.ORG_ADMIN?.[module.key] ??
+          config.panel_ui?.[module.key] ??
+          false);
       patchObj.panel_ui.ORG_ADMIN[module.key] = currentValue;
     });
 
     // Update STORE_ADMIN modules (including children)
     const storeDefaults = this.defaultPanelUi?.['STORE_ADMIN'] || {};
     APP_MODULES.STORE_ADMIN.forEach((module: any) => {
-      const isNewKey = !config.panel_ui?.STORE_ADMIN?.hasOwnProperty(module.key) && !config.panel_ui?.hasOwnProperty(module.key);
+      const isNewKey =
+        !config.panel_ui?.STORE_ADMIN?.hasOwnProperty(module.key) &&
+        !config.panel_ui?.hasOwnProperty(module.key);
       const defaultValue = storeDefaults[module.key] ?? false;
       const currentValue = isNewKey
         ? defaultValue
-        : (config.panel_ui?.STORE_ADMIN?.[module.key] ?? config.panel_ui?.[module.key] ?? false);
+        : (config.panel_ui?.STORE_ADMIN?.[module.key] ??
+          config.panel_ui?.[module.key] ??
+          false);
       patchObj.panel_ui.STORE_ADMIN[module.key] = currentValue;
 
       // Also handle children if they exist
       if (module.isParent && module.children) {
         module.children.forEach((child: any) => {
-          const isChildNew = !config.panel_ui?.STORE_ADMIN?.hasOwnProperty(child.key) && !config.panel_ui?.hasOwnProperty(child.key);
+          const isChildNew =
+            !config.panel_ui?.STORE_ADMIN?.hasOwnProperty(child.key) &&
+            !config.panel_ui?.hasOwnProperty(child.key);
           const childDefault = storeDefaults[child.key] ?? false;
           const childValue = isChildNew
             ? childDefault
-            : (config.panel_ui?.STORE_ADMIN?.[child.key] ?? config.panel_ui?.[child.key] ?? false);
+            : (config.panel_ui?.STORE_ADMIN?.[child.key] ??
+              config.panel_ui?.[child.key] ??
+              false);
           patchObj.panel_ui.STORE_ADMIN[child.key] = childValue;
         });
       }
@@ -827,8 +971,6 @@ export class SettingsModalComponent implements OnInit {
 
     // Apply all patches at once
     this.settingsForm.patchValue(patchObj);
-
-    console.log('✅ Form updated:', this.settingsForm.value);
   }
 
   getModulesForAppType(appType: string): any[] {
@@ -905,12 +1047,6 @@ export class SettingsModalComponent implements OnInit {
 
         const dto = { config: configObj };
 
-        console.log('🔧 Debug - Saving settings:');
-        console.log('  - Current app type:', this.currentAppType);
-        console.log('  - User app (preserved):', currentConfig.app);
-        console.log('  - Updating panel_ui for:', this.currentAppType);
-        console.log('  - New config:', configObj);
-
         // Use AuthFacade to update settings through NgRx
         // This ensures the store is updated and the sidebar reacts immediately
         this.authFacade.updateUserSettings(dto);
@@ -977,10 +1113,8 @@ export class SettingsModalComponent implements OnInit {
               'ORG_ADMIN',
             );
           if (success) {
-            console.log('✅ Switch automático a ORG_ADMIN exitoso');
             this.closeModal();
           } else {
-            console.warn('⚠️ Switch falló, intentando recargar...');
             window.location.reload();
           }
         } catch (switchError: any) {
@@ -993,7 +1127,7 @@ export class SettingsModalComponent implements OnInit {
       console.error('❌ Error al actualizar tipo de cuenta:', error);
       this.toastService.error(
         error.error?.message ||
-        'Error al actualizar el tipo de cuenta. Por favor, intenta de nuevo.',
+          'Error al actualizar el tipo de cuenta. Por favor, intenta de nuevo.',
       );
     }
   }

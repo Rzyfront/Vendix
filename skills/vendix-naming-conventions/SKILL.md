@@ -7,7 +7,7 @@ metadata:
 ---
 # Vendix Naming Conventions
 
-> **CRITICAL SKILL - ALWAYS ACTIVE** - Las convenciones de nombres son la PRIORIDAD ABSOLUTA. CUALQUIER violación es un BUG CRÍTICO.
+> **CRITICAL SKILL - ALWAYS ACTIVE** - Naming conventions are the ABSOLUTE PRIORITY. ANY violation is a CRITICAL BUG.
 
 ## 🚨 CRITICAL RULE - ZERO TOLERANCE
 
@@ -211,9 +211,9 @@ sharedComponents/     // ❌ camelCase
 ### Database Tables - `snake_case`
 
 ```prisma
-model users { }                    // ✅ CORRECTO
-model product_variants { }         // ✅ CORRECTO
-model sales_order_items { }        // ✅ CORRECTO
+model users { }                    // ✅ CORRECT
+model product_variants { }         // ✅ CORRECT
+model sales_order_items { }        // ✅ CORRECT
 ```
 
 ```prisma
@@ -226,17 +226,17 @@ model salesOrderItems { }          // ❌ WRONG
 
 ```prisma
 model users {
-  id               Int       // ✅ CORRECTO
-  organization_id  Int       // ✅ CORRECTO
-  main_store_id    Int?      // ✅ CORRECTO
-  created_at       DateTime  // ✅ CORRECTO
+  id               Int       // ✅ CORRECT
+  organization_id  Int       // ✅ CORRECT
+  main_store_id    Int?      // ✅ CORRECT
+  created_at       DateTime  // ✅ CORRECT
 }
 ```
 
 ### API Endpoints - `kebab-case`
 
 ```typescript
-// ✅ CORRECTO
+// ✅ CORRECT
 @Controller('user-management')
 @Get('user-profile')
 @Post('create-order')
@@ -249,7 +249,7 @@ model users {
 ### Component Selectors - `kebab-case` with `app-` prefix
 
 ```typescript
-// ✅ CORRECTO
+// ✅ CORRECT
 @Component({
   selector: 'app-user-profile',
   selector: 'app-product-list',

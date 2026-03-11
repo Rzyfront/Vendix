@@ -1,7 +1,11 @@
 import { Component, OnInit, inject, DestroyRef, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
-import { CatalogService, EcommerceProduct, Category } from '../../services/catalog.service';
+import {
+  CatalogService,
+  EcommerceProduct,
+  Category,
+} from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 import { WishlistService } from '../../services/wishlist.service';
 import { StoreUiService } from '../../services/store-ui.service';
@@ -62,7 +66,7 @@ export class HomeComponent implements OnInit {
   constructor(
     private catalog_service: CatalogService,
     private cart_service: CartService,
-  ) { }
+  ) {}
 
   ngOnInit(): void {
     this.loadFeaturedProducts();
@@ -71,7 +75,7 @@ export class HomeComponent implements OnInit {
     // Subscribe to authentication state
     this.auth_facade.isAuthenticated$
       .pipe(takeUntilDestroyed(this.destroy_ref))
-      .subscribe(is_auth => {
+      .subscribe((is_auth) => {
         this.is_authenticated = is_auth;
         if (is_auth) {
           // Load wishlist when user is authenticated
@@ -85,9 +89,9 @@ export class HomeComponent implements OnInit {
     // Subscribe to wishlist changes
     this.wishlist_service.wishlist$
       .pipe(takeUntilDestroyed(this.destroy_ref))
-      .subscribe(wishlist => {
+      .subscribe((wishlist) => {
         this.wishlist_product_ids = new Set(
-          wishlist?.items.map(item => item.product_id) || []
+          wishlist?.items.map((item) => item.product_id) || [],
         );
       });
   }
@@ -138,17 +142,6 @@ export class HomeComponent implements OnInit {
             title: inicio.titulo || 'Bienvenido',
             paragraph: inicio.parrafo || 'Encuentra aquí todo lo que buscas...',
           };
-
-          console.log('Home Config (Resolved):', {
-            source: 'customConfig.ecommerce',
-            hasEcommerceConfig: !!customConfig.ecommerce,
-            slider: {
-              hasPhotos: hasPhotos,
-              photosCount: this.slider_config?.photos?.length || 0,
-              show: this.show_slider,
-            },
-            inicio: inicio,
-          });
         },
       });
   }

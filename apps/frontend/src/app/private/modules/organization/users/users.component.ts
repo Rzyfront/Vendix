@@ -88,10 +88,34 @@ export class UsersComponent implements OnInit, OnDestroy {
 
   // Table configuration
   tableColumns: TableColumn[] = [
-    { key: 'first_name', label: 'Nombre', sortable: true, width: '120px', priority: 1 },
-    { key: 'last_name', label: 'Apellido', sortable: true, width: '120px', priority: 1 },
-    { key: 'username', label: 'Usuario', sortable: true, width: '140px', priority: 2 },
-    { key: 'email', label: 'Email', sortable: true, width: '180px', priority: 2 },
+    {
+      key: 'first_name',
+      label: 'Nombre',
+      sortable: true,
+      width: '120px',
+      priority: 1,
+    },
+    {
+      key: 'last_name',
+      label: 'Apellido',
+      sortable: true,
+      width: '120px',
+      priority: 1,
+    },
+    {
+      key: 'username',
+      label: 'Usuario',
+      sortable: true,
+      width: '140px',
+      priority: 2,
+    },
+    {
+      key: 'email',
+      label: 'Email',
+      sortable: true,
+      width: '180px',
+      priority: 2,
+    },
     {
       key: 'state',
       label: 'Estado',
@@ -154,7 +178,11 @@ export class UsersComponent implements OnInit, OnDestroy {
     detailKeys: [
       { key: 'username', label: 'Usuario', icon: 'user' },
       { key: 'app', label: 'App', icon: 'grid' },
-      { key: 'created_at', label: 'Fecha', transform: (v) => this.formatDate(v) },
+      {
+        key: 'created_at',
+        label: 'Fecha',
+        transform: (v) => this.formatDate(v),
+      },
     ],
   };
 
@@ -262,10 +290,6 @@ export class UsersComponent implements OnInit, OnDestroy {
             };
           } else {
             // Si no hay paginación, mantener valores por defecto
-            console.warn(
-              'La respuesta no contiene información de paginación:',
-              response,
-            );
             this.pagination = {
               page: 1,
               limit: 10,
@@ -311,7 +335,7 @@ export class UsersComponent implements OnInit, OnDestroy {
         this.userStats = stats;
         this.updateStatsItems();
       },
-      error: (err) => console.error('Error loading user stats', err)
+      error: (err) => console.error('Error loading user stats', err),
     });
   }
 
@@ -412,7 +436,6 @@ export class UsersComponent implements OnInit, OnDestroy {
 
   onSortChange(column: string, direction: 'asc' | 'desc' | null): void {
     // TODO: Implement sorting logic
-    console.log('Sort changed:', column, direction);
     this.loadUsers();
   }
 

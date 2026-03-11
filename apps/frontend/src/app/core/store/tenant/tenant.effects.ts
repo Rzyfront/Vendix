@@ -15,11 +15,7 @@ export class TenantEffects {
       this.actions$.pipe(
         ofType(TenantActions.initTenantSuccess),
         tap(({ tenantConfig, domainConfig }) => {
-          console.log('[Tenant Effects] Tenant initialized successfully:', {
-            domain: domainConfig.hostname,
-            environment: domainConfig.environment,
-            hasConfig: !!tenantConfig,
-          });
+          // Tenant initialized successfully
         }),
       ),
     { dispatch: false },

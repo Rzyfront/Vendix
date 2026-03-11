@@ -7,29 +7,29 @@ metadata:
 ---
 # Buildcheck Dev
 
-> **CRITICAL SKILL - ALWAYS ACTIVE** - La verificación del build es la RESPONSABILIDAD MÁS CRÍTICA. Una tarea NUNCA está completa si hay errores de compilación.
+> **CRITICAL SKILL - ALWAYS ACTIVE** - Build verification is the MOST CRITICAL RESPONSIBILITY. A task is NEVER complete if there are compilation errors.
 
-## 🚨 THE MOST IMPORTANT RULE OF ALL
+## THE MOST IMPORTANT RULE OF ALL
 
 **BEFORE marking ANY task as complete, you are ABSOLUTELY REQUIRED TO:**
 
-1. ✅ **ALWAYS** use Docker logs with `--tail` to verify build watch in development
-2. ✅ Verify that **ZERO errors** exist in any container
-3. ✅ **ALWAYS** check container status (if running)
-4. ✅ **DO NOT finalize** until ALL errors are completely resolved
-5. ✅ Re-check logs **AFTER** applying fixes
-6. ✅ Verify **recursively** - check dependencies and related components
+1. **ALWAYS** use Docker logs with `--tail` to verify build watch in development
+2. Verify that **ZERO errors** exist in any container
+3. **ALWAYS** check container status (if running)
+4. **DO NOT finalize** until ALL errors are completely resolved
+5. Re-check logs **AFTER** applying fixes
+6. Verify **recursively** - check dependencies and related components
 
 ---
 
-## 📋 Verification Workflow
+## Verification Workflow
 
 ### Step 1: Make Code Changes
 Apply your changes to the codebase.
 
 ### Step 2: Check Docker Logs (WATCH MODE - Development)
 
-**⚠️ CRITICAL:** In development **ALWAYS** use watch mode with Docker logs. **DO NOT** run `npm run build` unless the human requests it EXPLICITLY for production.
+**CRITICAL:** In development **ALWAYS** use watch mode with Docker logs. **DO NOT** run `npm run build` unless the human requests it EXPLICITLY for production.
 
 Run the appropriate log commands based on what you modified:
 
@@ -58,13 +58,13 @@ docker ps
 ### Step 3: Analyze Results
 
 **If NO errors:**
-- ✅ Verify one more time
-- ✅ Only then mark task complete
+- Verify one more time
+- Only then mark task complete
 
 **If errors exist:**
-- ❌ DO NOT mark task complete
-- ⚠️ Fix the errors
-- 🔄 Return to Step 2
+- DO NOT mark task complete
+- Fix the errors
+- Return to Step 2
 
 ### Step 4: Recursive Check
 - Check not just the immediate component
@@ -74,7 +74,7 @@ docker ps
 
 ---
 
-## 🔍 Reading Docker Logs
+## Reading Docker Logs
 
 ### Backend Logs
 
@@ -83,13 +83,13 @@ docker logs --tail 40 vendix_backend
 ```
 
 **Look for:**
-- ❌ `ERROR` messages
-- ❌ `TypeError` or `ReferenceError`
-- ❌ Compilation errors
-- ❌ Missing dependencies
-- ❌ Type errors
-- ✅ `Successfully compiled` (good)
-- ✅ `Nest application successfully started` (good)
+- `ERROR` messages
+- `TypeError` or `ReferenceError`
+- Compilation errors
+- Missing dependencies
+- Type errors
+- `Successfully compiled` (good)
+- `Nest application successfully started` (good)
 
 **Example of GOOD output:**
 ```
@@ -114,13 +114,13 @@ docker logs --tail 40 vendix_frontend
 ```
 
 **Look for:**
-- ❌ `ERROR` messages
-- ❌ `ERROR in` compilation errors
-- ❌ Template parsing errors
-- ❌ Module not found errors
-- ❌ Type errors in `.ts` files
-- ✅ `Compiled successfully` (good)
-- ✅ `webpack: Compiled successfully` (good)
+- `ERROR` messages
+- `ERROR in` compilation errors
+- Template parsing errors
+- Module not found errors
+- Type errors in `.ts` files
+- `Compiled successfully` (good)
+- `webpack: Compiled successfully` (good)
 
 **Example of GOOD output:**
 ```
@@ -143,14 +143,14 @@ docker logs --tail 40 vendix_postgres
 ```
 
 **Look for:**
-- ❌ `ERROR:` messages
-- ❌ Connection refused
-- ❌ Syntax errors in queries
-- ✅ `database system is ready to accept connections` (good)
+- `ERROR:` messages
+- Connection refused
+- Syntax errors in queries
+- `database system is ready to accept connections` (good)
 
 ---
 
-## 🎯 Common Build Errors and Fixes
+## Common Build Errors and Fixes
 
 ### TypeScript Errors
 
@@ -211,7 +211,7 @@ NG2: Property 'user_name' does not exist on type 'Component'
 
 ---
 
-## 📊 Verification Checklist
+## Verification Checklist
 
 Before marking ANY task as complete:
 
@@ -227,27 +227,27 @@ Before marking ANY task as complete:
 
 ---
 
-## 🔴 CRITICAL UNDERSTANDING
+## CRITICAL UNDERSTANDING
 
 **A task is NEVER complete if there are:**
-- ❌ Build errors
-- ❌ Compilation errors
-- ❌ Runtime errors
-- ❌ Type errors
-- ❌ Missing dependencies
-- ❌ Template parsing errors
+- Build errors
+- Compilation errors
+- Runtime errors
+- Type errors
+- Missing dependencies
+- Template parsing errors
 
 **You must:**
-- ✅ ALWAYS verify build status recursively
-- ✅ ALWAYS fix ALL issues before considering work done
-- ✅ NEVER accept "it should work" - verify with logs
-- ✅ ALWAYS re-check after applying fixes
+- ALWAYS verify build status recursively
+- ALWAYS fix ALL issues before considering work done
+- NEVER accept "it should work" - verify with logs
+- ALWAYS re-check after applying fixes
 
 **Partial completion is NOT ACCEPTABLE**
 
 ---
 
-## 💻 Example Workflow
+## Example Workflow
 
 ### Scenario: Creating a new Angular component
 
@@ -268,11 +268,11 @@ docker logs --tail 40 vendix_frontend
 
 ---
 
-## 🔧 Development vs Production
+## Development vs Production
 
-### 🚨 DEVELOPMENT MODE (DEFAULT)
+### DEVELOPMENT MODE (DEFAULT)
 
-**⚠️ THIS IS THE DEFAULT MODE - ALWAYS ASSUME DEVELOPMENT**
+**THIS IS THE DEFAULT MODE - ALWAYS ASSUME DEVELOPMENT**
 
 In development, **ALWAYS** use:
 
@@ -288,16 +288,16 @@ docker restart <container>
 ```
 
 **Development mode characteristics:**
-- ✅ Watch mode enabled (hot-reload)
-- ✅ Changes reflect automatically
-- ✅ Compilation errors appear in logs
-- ✅ Check logs AFTER each change
+- Watch mode enabled (hot-reload)
+- Changes reflect automatically
+- Compilation errors appear in logs
+- Check logs AFTER each change
 
 ---
 
-### 🏭 PRODUCTION MODE (Only if human requests EXPLICITLY)
+### PRODUCTION MODE (Only if human requests EXPLICITLY)
 
-**⚠️ ONLY run production build when:**
+**ONLY run production build when:**
 - Human says it explicitly ("run production build")
 - Human asks if code compiles for production
 - Preparing for a deployment
@@ -312,7 +312,7 @@ cd apps/frontend && npm run build
 
 ---
 
-### 📋 DEFAULT WORKFLOW
+### DEFAULT WORKFLOW
 
 **ALWAYS follow this order:**
 
@@ -325,94 +325,94 @@ cd apps/frontend && npm run build
 
 ---
 
-## 🐳 Container Recreation (Cache Issues)
+## Container Recreation (Cache Issues)
 
 ### When to Recreate
 
-**Recrear el contenedor es NECESARIO cuando:**
+**Container recreation is NECESSARY when:**
 
-- ❌ Errores persisten después de múltiples intentos de fix
-- ❌ Cambios en `package.json` (nuevas dependencias)
-- ❌ Cambios en `docker-compose.yml` (volúmenes, redes, environment)
-- ❌ La imagen tiene caché corrupto o desactualizado
-- ❌ Errores extraños de módulos que "deberían" estar instalados
-- ❌ Problemas de permisos en archivos mapeados
-- ❌ El contenedor no responde después de `docker restart`
-- ❌ Cambios en el Dockerfile
+- Errors persist after multiple fix attempts
+- Changes in `package.json` (new dependencies)
+- Changes in `docker-compose.yml` (volumes, networks, environment)
+- Image has corrupt or outdated cache
+- Strange errors from modules that "should" be installed
+- Permission issues with mapped files
+- Container does not respond after `docker restart`
+- Changes in Dockerfile
 
 ### How to Recreate
 
-**Opción 1: Restart + Rebuild (Recomendado para cambios menores)**
+**Option 1: Restart + Rebuild (Recommended for minor changes)**
 ```bash
-# Restart y rebuild de un contenedor específico
+# Restart and rebuild a specific container
 docker-compose restart <service>
-# Ejemplo:
+# Example:
 docker-compose restart backend
 ```
 
-**Opción 2: Rebuild (Sin stop)**
+**Option 2: Rebuild (Without stopping)**
 ```bash
-# Rebuild sin detener otros servicios
+# Rebuild without stopping other services
 docker-compose build --no-cache <service>
 docker-compose up -d <service>
 ```
 
-**Opción 3: Full Recreate (Para cambios críticos)**
+**Option 3: Full Recreate (For critical changes)**
 ```bash
-# Detener, eliminar y recrear contenedor
+# Stop, remove, and recreate container
 docker-compose down
 docker-compose up -d
 
-# O para un servicio específico:
+# Or for a specific service:
 docker-compose down <service>
 docker-compose up -d <service>
 ```
 
-**Opción 4: Force Recreate (Limpia cache)**
+**Option 4: Force Recreate (Clears cache)**
 ```bash
-# Forzar recreate - elimina contenedores y recreatea
+# Force recreate - removes containers and recreates them
 docker-compose up -d --force-recreate
 
-# Para un servicio específico:
+# For a specific service:
 docker-compose up -d --force-recreate <service>
 ```
 
 ### Verification After Recreate
 
-**SIEMPRE verificar después de recrear:**
+**ALWAYS verify after recreating:**
 
 ```bash
-# 1. Verificar que el contenedor esté corriendo
+# 1. Verify the container is running
 docker ps
 
-# 2. Verificar logs del contenedor recreado
+# 2. Verify logs of the recreated container
 docker logs --tail 40 vendix_<service>
 
-# 3. Verificar que no haya errores
+# 3. Verify no errors exist
 docker logs --tail 40 vendix_backend
 docker logs --tail 40 vendix_frontend
 ```
 
 ### Common Scenarios
 
-| Problema | Solución |
-|----------|----------|
-| Nuevas dependencias en package.json | `docker-compose build --no-cache backend` |
-| Cambios en volumenes/docker-compose | `docker-compose down && docker-compose up -d` |
-| Caché corrupta de node_modules | `docker-compose build --no-cache frontend` |
-| Errores persistentes sin sentido | `docker-compose up -d --force-recreate` |
-| Cambios en Dockerfile | `docker-compose up -d --build` |
+| Problem | Solution |
+|---------|----------|
+| New dependencies in package.json | `docker-compose build --no-cache backend` |
+| Changes in volumes/docker-compose | `docker-compose down && docker-compose up -d` |
+| Corrupt node_modules cache | `docker-compose build --no-cache frontend` |
+| Persistent nonsensical errors | `docker-compose up -d --force-recreate` |
+| Changes in Dockerfile | `docker-compose up -d --build` |
 
 ---
 
-### 🎯 GOLDEN RULE
+### GOLDEN RULE
 
 **Development → Docker logs (watch mode)**
 **Production → npm run build (ONLY if human requests)**
 
 ---
 
-## 🎯 Quick Reference
+## Quick Reference
 
 | Component | Command |
 |-----------|---------|
@@ -423,7 +423,7 @@ docker logs --tail 40 vendix_frontend
 
 ---
 
-## 🔴 YOUR FINAL CHECKPOINT
+## YOUR FINAL CHECKPOINT
 
 **Remember: Code quality and consistency directly impact:**
 - Project success

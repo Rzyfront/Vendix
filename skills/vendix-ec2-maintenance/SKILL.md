@@ -18,7 +18,7 @@ Guidelines for troubleshooting and maintaining EC2 instances, specifically for d
 - **NEVER** assume the location or name of the SSH private key (`.pem`).
 - **ALWAYS** ask the user to provide the path to the SSH key for the specific environment (dev/prod).
 - **DO NOT** search for keys in `.ssh/` automatically unless explicitly instructed by the user in the current session.
-- Example: _"Para proceder, necesito que me indiques la ruta de la llave .pem para conectarme al servidor."_
+- Example: _"To proceed, I need you to provide the path to the .pem key to connect to the server."_
 
 ### 2. 🔍 Diagnosis
 

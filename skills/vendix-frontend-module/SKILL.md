@@ -7,7 +7,7 @@ metadata:
 ---
 # Vendix Frontend Module Pattern
 
-> **Standard Module Pattern** - Estructura estándar para crear módulos en Angular con todos los componentes necesarios.
+> **Standard Module Pattern** - Standard structure for creating Angular modules with all necessary components.
 
 ## 🚨 CRITICAL RULE - Components MUST Be in Folders
 

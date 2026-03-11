@@ -13,55 +13,55 @@ metadata:
 
 # Vendix UI/UX — Mobile-First Design Skill
 
-> **Skill principal de diseño mobile-first** — Filosofía de diseño, accesibilidad, patrones UX y checklist de calidad visual para todas las apps Vendix.
+> **Principal mobile-first design skill** — Design philosophy, accessibility, UX patterns, and visual quality checklist for all Vendix apps.
 
-Esta skill define los **principios y estándares de diseño** para Vendix. Para implementación técnica de componentes específicos, consulta las skills complementarias listadas en cada sección.
+This skill defines the **design principles and standards** for Vendix. For technical implementation of specific components, refer to the complementary skills listed in each section.
 
 ---
 
-## 1. Filosofía de Diseño
+## 1. Design Philosophy
 
-Antes de escribir código, define una dirección clara:
+Before writing code, define a clear direction:
 
-### Análisis de Contexto
+### Context Analysis
 
-- **QUIÉN** lo usa — persona, nivel de experiencia, contexto del dispositivo (móvil en tienda, desktop admin)
-- **QUÉ** acción debe tomar — un solo objetivo primario por pantalla
-- **POR QUÉ** debería confiar/interactuar — propuesta de valor clara
+- **WHO** uses it — persona, experience level, device context (mobile in-store, desktop admin)
+- **WHAT** action they should take — a single primary goal per screen
+- **WHY** they should trust/interact — clear value proposition
 
-### Compromiso Estético
+### Aesthetic Commitment
 
-Elige y COMPROMÉTETE con una dirección visual. El diseño tímido falla:
+Choose and COMMIT to a visual direction. Timid design fails:
 
-- **Minimal funcional** — Stripe, Linear (ideal para dashboards SaaS)
-- **Editorial maximista** — Bloomberg (dashboards de datos densos)
-- **Orgánico/natural** — terroso, texturas (ecommerce artesanal)
-- **Lujo/refinado** — marcas premium (ecommerce de moda)
-- **Playful** — Figma, Notion (apps interactivas)
-- **Industrial/utilitario** — denso en datos, funcional (POS, inventario)
+- **Functional minimal** — Stripe, Linear (ideal for SaaS dashboards)
+- **Maximalist editorial** — Bloomberg (dense data dashboards)
+- **Organic/natural** — earthy, textures (artisan ecommerce)
+- **Luxury/refined** — premium brands (fashion ecommerce)
+- **Playful** — Figma, Notion (interactive apps)
+- **Industrial/utilitarian** — data-dense, functional (POS, inventory)
 
-### El Test de Memorabilidad
+### The Memorability Test
 
-> ¿Qué UNA cosa recordarán los usuarios? Si no puedes responder esto, el diseño carece de foco.
+> What ONE thing will users remember? If you can't answer this, the design lacks focus.
 
 ### Vendix App Context
 
-| App               | Contexto de uso                       | Prioridad UX                                    |
-| ----------------- | ------------------------------------- | ----------------------------------------------- |
-| `STORE_ECOMMERCE` | Cliente en móvil, comprando           | Velocidad, simplicidad, conversión              |
-| `STORE_ADMIN`     | Dueño de tienda, móvil/tablet/desktop | Eficiencia, datos densos, acciones rápidas      |
-| `STORE_POS`       | Vendedor en tienda, tablet/desktop    | Velocidad extrema, touch-first, mínima fricción |
-| `ORG_ADMIN`       | Administrador, desktop                | Datos complejos, multi-tienda, reportes         |
+| App               | Usage Context                       | UX Priority                                     |
+| ----------------- | ----------------------------------- | ----------------------------------------------- |
+| `STORE_ECOMMERCE` | Customer on mobile, shopping        | Speed, simplicity, conversion                   |
+| `STORE_ADMIN`     | Store owner, mobile/tablet/desktop  | Efficiency, dense data, quick actions            |
+| `STORE_POS`       | In-store salesperson, tablet/desktop| Extreme speed, touch-first, minimal friction     |
+| `ORG_ADMIN`       | Administrator, desktop              | Complex data, multi-store, reports               |
 
-> **📎 Skill complementaria:** `vendix-app-architecture` — Detalles completos de cada app y su dominio.
+> **Complementary skill:** `vendix-app-architecture` — Full details of each app and its domain.
 
 ---
 
-## 2. Mobile-First como Estándar
+## 2. Mobile-First as Standard
 
-**REGLA ABSOLUTA:** Todo desarrollo en Vendix es mobile-first. Los estilos base son para móvil, y se añaden capas para pantallas más grandes.
+**ABSOLUTE RULE:** All development in Vendix is mobile-first. Base styles are for mobile, and layers are added for larger screens.
 
-### Principio de Diseño Responsivo
+### Responsive Design Principle
 
 ```
 Mobile (base)  →  Tablet (sm/md)  →  Desktop (lg+)
@@ -69,56 +69,56 @@ Mobile (base)  →  Tablet (sm/md)  →  Desktop (lg+)
   Simplify           Reveal             Enrich
 ```
 
-### Breakpoints Vendix (vía PrimeNG + CSS)
+### Vendix Breakpoints (via PrimeNG + CSS)
 
-| Breakpoint | Valor    | Uso                                 |
-| ---------- | -------- | ----------------------------------- |
-| Base       | `0px`    | Móvil — estilos por defecto         |
-| `sm`       | `640px`  | Móvil grande / tablet pequeña       |
-| `md`       | `768px`  | Tablet — cambio de layout principal |
-| `lg`       | `1024px` | Desktop                             |
-| `xl`       | `1280px` | Desktop grande                      |
+| Breakpoint | Value    | Usage                              |
+| ---------- | -------- | ---------------------------------- |
+| Base       | `0px`    | Mobile — default styles            |
+| `sm`       | `640px`  | Large mobile / small tablet        |
+| `md`       | `768px`  | Tablet — main layout change        |
+| `lg`       | `1024px` | Desktop                            |
+| `xl`       | `1280px` | Large desktop                      |
 
-### Patrón SCSS Mobile-First
+### Mobile-First SCSS Pattern
 
 ```scss
-// ✅ CORRECTO — Mobile-first
+// ✅ CORRECT — Mobile-first
 .my-component {
-  padding: 1rem; // Móvil: padding compacto
+  padding: 1rem; // Mobile: compact padding
   display: flex;
-  flex-direction: column; // Móvil: apilar verticalmente
+  flex-direction: column; // Mobile: stack vertically
 
   @media (min-width: 768px) {
     padding: 1.5rem;
-    flex-direction: row; // Tablet+: fila horizontal
+    flex-direction: row; // Tablet+: horizontal row
   }
 
   @media (min-width: 1024px) {
-    padding: 2rem; // Desktop: más espacio
+    padding: 2rem; // Desktop: more space
   }
 }
 
-// ❌ INCORRECTO — Desktop-first
+// ❌ INCORRECT — Desktop-first
 .my-component {
   padding: 2rem;
   flex-direction: row;
 
   @media (max-width: 768px) {
-    // Nunca usar max-width como base
+    // Never use max-width as base
     padding: 1rem;
     flex-direction: column;
   }
 }
 ```
 
-### Patrón de Responsive Data View (Mobile ↔ Desktop)
+### Responsive Data View Pattern (Mobile ↔ Desktop)
 
-Vendix tiene un sistema automático de cambio vista-tabla/vista-cards:
+Vendix has an automatic table-view/card-view switching system:
 
-- **Desktop (≥768px):** `TableComponent` — tabla completa
-- **Mobile (<768px):** `ItemListComponent` — cards con avatar, detalles y acciones
+- **Desktop (≥768px):** `TableComponent` — full table
+- **Mobile (<768px):** `ItemListComponent` — cards with avatar, details, and actions
 
-> **📎 Skill complementaria:** `vendix-frontend-data-display` — Configuración completa de `ResponsiveDataViewComponent`, `TableColumn`, `ItemListCardConfig`.
+> **Complementary skill:** `vendix-frontend-data-display` — Full configuration of `ResponsiveDataViewComponent`, `TableColumn`, `ItemListCardConfig`.
 
 ### Z-Index Stack System (Mobile Sticky)
 
@@ -130,42 +130,42 @@ Vendix tiene un sistema automático de cambio vista-tabla/vista-cards:
 ├──────────────────────────────────────────┤
 │  z-10  Search/Filter Bar (sticky)        │  ← vendix-frontend-standard-module
 ├──────────────────────────────────────────┤
-│  z-0   Content (scroll normal)           │
+│  z-0   Content (normal scroll)           │
 └──────────────────────────────────────────┘
 ```
 
-> **📎 Skills complementarias:**
+> **Complementary skills:**
 >
-> - `vendix-frontend-standard-module` — Layout completo del módulo estándar con sticky zones
-> - `vendix-frontend-stats-cards` — Stats con scroll horizontal en móvil, grid en desktop
-> - `vendix-frontend-sticky-header` — Header glassmorphism para páginas de detalle
+> - `vendix-frontend-standard-module` — Full standard module layout with sticky zones
+> - `vendix-frontend-stats-cards` — Stats with horizontal scroll on mobile, grid on desktop
+> - `vendix-frontend-sticky-header` — Glassmorphism header for detail pages
 
 ---
 
-## 3. Sistema de Tokens de Diseño
+## 3. Design Token System
 
-Vendix usa CSS custom properties gestionadas por `ThemeService`. **Nunca hardcodear colores.**
+Vendix uses CSS custom properties managed by `ThemeService`. **Never hardcode colors.**
 
-### Variables CSS (vía ThemeService)
+### CSS Variables (via ThemeService)
 
 ```scss
-// Colores — SIEMPRE usar variables
+// Colors — ALWAYS use variables
 color: var(--color-text-primary);
 background: var(--color-background);
 border-color: var(--color-border);
 
-// ❌ PROHIBIDO
+// ❌ FORBIDDEN
 color: #333;
 background: white;
 ```
 
-### Escala de Tipografía
+### Typography Scale
 
 ```
 12px — captions, labels (--font-size-xs)
-14px — texto secundario (--font-size-sm)
-16px — body text, MÍNIMO para móvil (--font-size-base)
-18px — párrafos lead (--font-size-lg)
+14px — secondary text (--font-size-sm)
+16px — body text, MINIMUM for mobile (--font-size-base)
+18px — lead paragraphs (--font-size-lg)
 20px — H4
 24px — H3
 32px — H2
@@ -173,161 +173,161 @@ background: white;
 56px — Display (landing pages)
 ```
 
-**Reglas de Tipografía:**
+**Typography Rules:**
 
-- Line height: `1.5–1.6` para body, `1.1–1.2` para headings
-- Longitud de línea: 45–75 caracteres (`max-width: 65ch` o similar)
-- Máximo 2–3 typefaces por diseño
-- Body text en móvil: **mínimo 16px** (previene zoom automático en iOS)
+- Line height: `1.5–1.6` for body, `1.1–1.2` for headings
+- Line length: 45–75 characters (`max-width: 65ch` or similar)
+- Maximum 2–3 typefaces per design
+- Body text on mobile: **minimum 16px** (prevents automatic zoom on iOS)
 
-### Escala de Espaciado (base 8px)
+### Spacing Scale (base 8px)
 
 ```
-4px   — space-1  (micro-separaciones)
-8px   — space-2  (entre elementos relacionados)
-12px  — space-3  (padding compacto)
-16px  — space-4  (padding estándar móvil)
-24px  — space-6  (padding estándar desktop)
-32px  — space-8  (separación de secciones)
-48px  — space-12 (gap entre secciones)
-64px  — space-16 (secciones landing)
-96px  — space-24 (secciones landing grandes)
+4px   — space-1  (micro-separations)
+8px   — space-2  (between related elements)
+12px  — space-3  (compact padding)
+16px  — space-4  (standard mobile padding)
+24px  — space-6  (standard desktop padding)
+32px  — space-8  (section separation)
+48px  — space-12 (gap between sections)
+64px  — space-16 (landing sections)
+96px  — space-24 (large landing sections)
 ```
 
-### Sombras Consistentes
+### Consistent Shadows
 
 ```scss
-// Sombra estándar Vendix (stats, cards, inputs en móvil)
+// Standard Vendix shadow (stats, cards, inputs on mobile)
 box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07);
 
-// Sombra elevada (modales, dropdowns)
+// Elevated shadow (modals, dropdowns)
 box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
 ```
 
-### Regla 60-30-10 para Color
+### 60-30-10 Color Rule
 
-- **60%** color dominante (background, surface)
-- **30%** color secundario (cards, secciones alternas)
-- **10%** color accent (CTAs, highlights, badges)
+- **60%** dominant color (background, surface)
+- **30%** secondary color (cards, alternating sections)
+- **10%** accent color (CTAs, highlights, badges)
 
-> **📎 Skill complementaria:** `vendix-frontend-theme` — Implementación completa de `ThemeService`, branding multi-tenant, fuentes y CSS custom.
+> **Complementary skill:** `vendix-frontend-theme` — Full implementation of `ThemeService`, multi-tenant branding, fonts, and custom CSS.
 
 ---
 
-## 4. Requerimientos de Accesibilidad (No Negociables)
+## 4. Accessibility Requirements (Non-Negotiable)
 
-Estos son requerimientos DUROS, no sugerencias.
+These are HARD requirements, not suggestions.
 
-### Contraste de Color (WCAG 2.1 AA)
+### Color Contrast (WCAG 2.1 AA)
 
-| Elemento                         | Ratio Mínimo |
-| -------------------------------- | ------------ |
-| Texto body                       | 4.5:1        |
-| Texto grande (18pt+ o 14pt bold) | 3:1          |
-| Componentes UI, iconos           | 3:1          |
-| Indicadores de foco              | 3:1          |
+| Element                          | Minimum Ratio |
+| -------------------------------- | ------------- |
+| Body text                        | 4.5:1         |
+| Large text (18pt+ or 14pt bold)  | 3:1           |
+| UI components, icons             | 3:1           |
+| Focus indicators                 | 3:1           |
 
-### Touch Targets (Crítico para Mobile-First)
+### Touch Targets (Critical for Mobile-First)
 
-- **Tamaño mínimo:** 44×44px (Apple/WCAG) o 48×48dp (Material)
-- **Espaciado mínimo:** 8px entre targets adyacentes
-- El touch target puede extenderse más allá del boundary visual via padding
+- **Minimum size:** 44×44px (Apple/WCAG) or 48×48dp (Material)
+- **Minimum spacing:** 8px between adjacent targets
+- The touch target can extend beyond the visual boundary via padding
 
 ```scss
-// ✅ Botón con touch target correcto
+// ✅ Button with correct touch target
 .action-button {
   min-height: 44px;
   min-width: 44px;
-  padding: 12px 16px; // Extiende el área táctil
+  padding: 12px 16px; // Extends the touch area
 }
 
-// ❌ Botón demasiado pequeño
+// ❌ Button too small
 .tiny-button {
-  height: 28px; // < 44px = FALLO de accesibilidad
+  height: 28px; // < 44px = accessibility FAILURE
   padding: 4px;
 }
 ```
 
-### Elementos Interactivos
+### Interactive Elements
 
-- TODOS los elementos interactivos DEBEN tener estados de foco visibles
-- NUNCA usar `outline: none` sin un reemplazo
-- Indicadores de foco: 3:1 contraste contra colores adyacentes
-- Tab order lógico (evitar `tabindex` > 0)
+- ALL interactive elements MUST have visible focus states
+- NEVER use `outline: none` without a replacement
+- Focus indicators: 3:1 contrast against adjacent colors
+- Logical tab order (avoid `tabindex` > 0)
 
-### Formularios
+### Forms
 
-- Cada input DEBE tener un `<label>` asociado (no solo placeholder)
-- Mensajes de error asociados programáticamente (`aria-describedby`)
-- No deshabilitar botones de submit antes del intento del usuario
-- Usar atributos `autocomplete` apropiadamente
+- Every input MUST have an associated `<label>` (not just placeholder)
+- Error messages programmatically associated (`aria-describedby`)
+- Do not disable submit buttons before the user's attempt
+- Use `autocomplete` attributes appropriately
 
-> **📎 Skill complementaria:** `vendix-angular-forms` — Implementación de Reactive Forms con tipado estricto y `FormControl<T>`.
+> **Complementary skill:** `vendix-angular-forms` — Reactive Forms implementation with strict typing and `FormControl<T>`.
 
-### Imágenes e Iconos
+### Images and Icons
 
-- Imágenes significativas: `alt` descriptivo
-- Imágenes decorativas: `alt=""` o `aria-hidden="true"`
-- Botones solo-icono: `aria-label` obligatorio
+- Meaningful images: descriptive `alt`
+- Decorative images: `alt=""` or `aria-hidden="true"`
+- Icon-only buttons: `aria-label` is mandatory
 
 ```html
-<!-- ✅ CORRECTO -->
-<button type="button" aria-label="Eliminar producto">
+<!-- ✅ CORRECT -->
+<button type="button" aria-label="Delete product">
   <app-icon name="trash-2" />
 </button>
 
-<!-- ❌ INCORRECTO -->
+<!-- ❌ INCORRECT -->
 <div (click)="delete()">
   <app-icon name="trash-2" />
 </div>
 ```
 
-> **📎 Skill complementaria:** `vendix-frontend-icons` — Protocolo para registrar y usar iconos Lucide con `<app-icon>`.
+> **Complementary skill:** `vendix-frontend-icons` — Protocol for registering and using Lucide icons with `<app-icon>`.
 
-### HTML Semántico
+### Semantic HTML
 
 ```html
-<!-- ✅ CORRECTO -->
-<button type="button" (click)="doAction()">Acción</button>
-<a [routerLink]="['/products']">Ver productos</a>
+<!-- ✅ CORRECT -->
+<button type="button" (click)="doAction()">Action</button>
+<a [routerLink]="['/products']">View products</a>
 
-<!-- ❌ INCORRECTO — Nunca hacer esto -->
-<div (click)="doAction()">Acción</div>
-<span class="link" (click)="navigate()">Ver productos</span>
+<!-- ❌ INCORRECT — Never do this -->
+<div (click)="doAction()">Action</div>
+<span class="link" (click)="navigate()">View products</span>
 ```
 
-**Primera regla de ARIA:** No uses ARIA si el HTML nativo funciona.
+**First rule of ARIA:** Don't use ARIA if native HTML works.
 
 ---
 
-## 5. Patrones de Animación
+## 5. Animation Patterns
 
-### Duraciones
+### Durations
 
 ```scss
-$duration-instant: 50ms; // Feedback inmediato
-$duration-fast: 100ms; // Clicks de botón, toggles
-$duration-normal: 200ms; // La mayoría de transiciones
-$duration-slow: 300ms; // Modales, drawers
-$duration-slower: 500ms; // Transiciones de página
+$duration-instant: 50ms; // Immediate feedback
+$duration-fast: 100ms; // Button clicks, toggles
+$duration-normal: 200ms; // Most transitions
+$duration-slow: 300ms; // Modals, drawers
+$duration-slower: 500ms; // Page transitions
 ```
 
-### Reglas de Animación
+### Animation Rules
 
-- Feedback de botón: 100–150ms (debe sentirse instantáneo)
-- **SOLO** animar `transform` y `opacity` (acelerado por GPU)
-- **NUNCA** animar `width`, `height`, `margin`, `padding` (provocan reflow)
-- Respetar `prefers-reduced-motion`
+- Button feedback: 100–150ms (must feel instantaneous)
+- **ONLY** animate `transform` and `opacity` (GPU-accelerated)
+- **NEVER** animate `width`, `height`, `margin`, `padding` (causes reflow)
+- Respect `prefers-reduced-motion`
 
 ```scss
-// ✅ Animación correcta
+// ✅ Correct animation
 .card-enter {
   transition:
     transform 200ms ease-out,
     opacity 200ms ease-out;
 }
 
-// ✅ Respetar preferencia de movimiento reducido
+// ✅ Respect reduced motion preference
 @media (prefers-reduced-motion: reduce) {
   * {
     animation-duration: 0.01ms !important;
@@ -335,291 +335,291 @@ $duration-slower: 500ms; // Transiciones de página
   }
 }
 
-// ❌ Animación que causa reflow
+// ❌ Animation that causes reflow
 .bad-animation {
   transition:
     width 300ms,
-    height 300ms; // NUNCA
+    height 300ms; // NEVER
 }
 ```
 
-### Curvas de Easing
+### Easing Curves
 
 ```scss
 $ease-default: cubic-bezier(0.4, 0, 0.2, 1); // General
-$ease-in: cubic-bezier(0.4, 0, 1, 1); // Elementos saliendo
-$ease-out: cubic-bezier(0, 0, 0.2, 1); // Elementos entrando
-$ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1); // Efecto rebote
+$ease-in: cubic-bezier(0.4, 0, 1, 1); // Elements exiting
+$ease-out: cubic-bezier(0, 0, 0.2, 1); // Elements entering
+$ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1); // Bounce effect
 ```
 
-> **📎 Skill complementaria:** `vendix-frontend-modal` — Patrones de apertura/cierre de modales con animación.
+> **Complementary skill:** `vendix-frontend-modal` — Modal open/close patterns with animation.
 
 ---
 
-## 6. Patrones SaaS Dashboard
+## 6. SaaS Dashboard Patterns
 
-### Arquitectura de Layout
+### Layout Architecture
 
 ```
 ┌──────────────────────────────────────────────────┐
 │ Top Bar (56-64px): Logo, Search, User Menu       │
 ├───────────┬──────────────────────────────────────┤
 │ Sidebar   │  Main Content Area                   │
-│ 240-280px │  (con breadcrumbs si hay deep nav)   │
+│ 240-280px │  (with breadcrumbs if deep nav)      │
 │ collapsed │                                      │
 │ 64-80px   │  Cards / Data / Forms                │
 │           │                                      │
 └───────────┴──────────────────────────────────────┘
 ```
 
-**Mobile:** Sidebar colapsa completamente, accesible via hamburger menu.
+**Mobile:** Sidebar collapses completely, accessible via hamburger menu.
 
-### Guías de Navegación
+### Navigation Guidelines
 
-| Escenario          | Patrón              |
-| ------------------ | ------------------- |
-| 10+ secciones      | Sidebar colapsable  |
-| 3–6 secciones      | Navegación superior |
-| Nav secundario     | Tabs (máx 6)        |
-| Jerarquía profunda | Breadcrumbs         |
+| Scenario           | Pattern              |
+| ------------------ | -------------------- |
+| 10+ sections       | Collapsible sidebar  |
+| 3–6 sections       | Top navigation       |
+| Secondary nav      | Tabs (max 6)         |
+| Deep hierarchy     | Breadcrumbs          |
 
-### Jerarquía de Contenido en Dashboard
+### Dashboard Content Hierarchy
 
-1. **Métricas value-first:** "Ahorraste 4 horas" > números crudos
-2. **Insights accionables:** ¿Qué debe hacer el usuario ahora?
-3. **Revelación progresiva:** Resumen → Detalle bajo demanda
-4. **Vistas por rol:** Diferentes personas necesitan diferentes datos
+1. **Value-first metrics:** "You saved 4 hours" > raw numbers
+2. **Actionable insights:** What should the user do now?
+3. **Progressive disclosure:** Summary → Detail on demand
+4. **Role-based views:** Different personas need different data
 
-### Visualización de Datos
+### Data Visualization
 
-- Colores semánticos: rojo=negativo, verde=positivo (con patrón/icono backup para daltonismo)
-- Siempre incluir leyendas
-- Labels de ejes son obligatorios
-- Truncar labels largos con tooltips
+- Semantic colors: red=negative, green=positive (with pattern/icon backup for color blindness)
+- Always include legends
+- Axis labels are mandatory
+- Truncate long labels with tooltips
 
 ### Empty States
 
 ```html
-<!-- ✅ BUENO: Útil, orientado a la acción -->
+<!-- ✅ GOOD: Helpful, action-oriented -->
 <div class="empty-state">
   <app-icon name="inbox" [size]="48" />
-  <h3>No hay mensajes aún</h3>
-  <p>Cuando recibas mensajes, aparecerán aquí.</p>
-  <app-button label="Componer mensaje" (onClick)="compose()" />
+  <h3>No messages yet</h3>
+  <p>When you receive messages, they will appear here.</p>
+  <app-button label="Compose message" (onClick)="compose()" />
 </div>
 
-<!-- ❌ MALO: Sin ayuda -->
-<p>No hay datos</p>
+<!-- ❌ BAD: No help -->
+<p>No data</p>
 ```
 
-### Páginas de Settings
+### Settings Pages
 
-- Layout bucket + side panel para settings complejos
-- Agrupar acciones destructivas en "Zona de Peligro" al fondo
-- Confirmaciones destructivas: requieren typing, labels específicos ("Eliminar cuenta" no "Sí")
+- Bucket + side panel layout for complex settings
+- Group destructive actions in a "Danger Zone" at the bottom
+- Destructive confirmations: require typing, specific labels ("Delete account" not "Yes")
 
-### Toast / Notificaciones
+### Toast / Notifications
 
-- Default: 4–5 segundos
-- Mínimo para accesibilidad: 6 segundos
-- Fórmula: 500ms por palabra + 3 segundos base
-- Siempre incluir botón de dismiss
+- Default: 4–5 seconds
+- Minimum for accessibility: 6 seconds
+- Formula: 500ms per word + 3 seconds base
+- Always include a dismiss button
 
-> **📎 Skills complementarias:**
+> **Complementary skills:**
 >
-> - `vendix-frontend-standard-module` — Layout completo de módulo admin con stats + table
-> - `vendix-frontend-stats-cards` — Implementación de `StatsComponent` con colores semánticos
-> - `vendix-settings-system` — Sistema de configuración `store_settings` / `organization_settings`
+> - `vendix-frontend-standard-module` — Full admin module layout with stats + table
+> - `vendix-frontend-stats-cards` — `StatsComponent` implementation with semantic colors
+> - `vendix-settings-system` — `store_settings` / `organization_settings` configuration system
 
 ---
 
-## 7. Patrones de Landing Page (Ecommerce)
+## 7. Landing Page Patterns (Ecommerce)
 
 ### Above-the-Fold Essentials
 
-Debe contener dentro del viewport:
+Must contain within the viewport:
 
-1. Headline claro (5–10 palabras)
-2. Subheadline de soporte (propuesta de valor)
-3. Un solo CTA primario
-4. Elemento visual (hero image, producto, ilustración)
+1. Clear headline (5–10 words)
+2. Supporting subheadline (value proposition)
+3. A single primary CTA
+4. Visual element (hero image, product, illustration)
 
-### Flujo de Secciones
+### Section Flow
 
 ```
 1. Hero (headline + CTA + visual)
-2. Social Proof (logos, snippet de testimonial)
-3. Problema/Solución
-4. Features/Beneficios (3–4 máximo)
-5. Testimonials detallados
-6. Pricing (si aplica)
+2. Social Proof (logos, testimonial snippet)
+3. Problem/Solution
+4. Features/Benefits (3–4 maximum)
+5. Detailed Testimonials
+6. Pricing (if applicable)
 7. FAQ
-8. CTA Final
+8. Final CTA
 9. Footer
 ```
 
-### Diseño de Botón CTA
+### CTA Button Design
 
-- **Tamaño:** Mínimo 44px de alto, padding 2× el font size
-- **Color:** Alto contraste, colores cálidos crean urgencia
-- **Copy:** Verbos de acción, primera persona ("Obtener mi prueba gratis" > "Registrarse")
-- **Longitud:** 2–5 palabras máximo
-- Un CTA primario por viewport
+- **Size:** Minimum 44px height, padding 2× the font size
+- **Color:** High contrast, warm colors create urgency
+- **Copy:** Action verbs, first person ("Get my free trial" > "Sign up")
+- **Length:** 2–5 words maximum
+- One primary CTA per viewport
 
-### Placement de Social Proof
+### Social Proof Placement
 
-- Logo bar: Inmediatamente después del hero
-- Testimonials: Cerca de puntos de objeción
-- Stats: Cerca de pricing
-- Trust badges: Cerca de formularios/checkout
+- Logo bar: Immediately after the hero
+- Testimonials: Near objection points
+- Stats: Near pricing
+- Trust badges: Near forms/checkout
 
-### Tablas de Pricing
+### Pricing Tables
 
-- 3–4 tiers máximo (más causa parálisis)
-- Destacar tier recomendado ("Más Popular")
-- Toggle anual/mensual con ahorro mostrado
-- Checkmarks para escaneo rápido de features
-- Botón CTA en cada tier
+- 3–4 tiers maximum (more causes paralysis)
+- Highlight recommended tier ("Most Popular")
+- Annual/monthly toggle with savings shown
+- Checkmarks for quick feature scanning
+- CTA button on each tier
 
-### Optimización de Formularios
+### Form Optimization
 
-- Layout de una sola columna (120% menos errores que multi-columna)
-- Minimizar campos (4 campos vs 11 = 120% más conversiones)
-- Nunca pedir teléfono si no es esencial (58% abandono)
-- Labels encima de inputs
-- Validar on blur, no mientras se escribe
+- Single-column layout (120% fewer errors than multi-column)
+- Minimize fields (4 fields vs 11 = 120% more conversions)
+- Never ask for phone if not essential (58% abandonment)
+- Labels above inputs
+- Validate on blur, not while typing
 
-> **📎 Skill complementaria:** `vendix-ecommerce-checkout` — Flujo completo de checkout para ecommerce.
+> **Complementary skill:** `vendix-ecommerce-checkout` — Full checkout flow for ecommerce.
 
 ---
 
-## 8. Anti-Patrones (NUNCA HACER)
+## 8. Anti-Patterns (NEVER DO)
 
-### Anti-Patrones Visuales
+### Visual Anti-Patterns
 
-- ❌ Gradientes púrpura/azul genéricos sobre blanco (cliché de IA)
-- ❌ Border-radius inconsistente (elige uno: 4px, 8px o 12px y mantenerlo)
-- ❌ Sombras que no coinciden con fuente de luz
-- ❌ Más de 3 font weights
-- ❌ Esquemas de color arcoíris sin propósito
-- ❌ Hardcodear colores en lugar de usar `var(--color-*)`
+- ❌ Generic purple/blue gradients on white (AI cliche)
+- ❌ Inconsistent border-radius (pick one: 4px, 8px, or 12px and stick with it)
+- ❌ Shadows that don't match light source
+- ❌ More than 3 font weights
+- ❌ Rainbow color schemes without purpose
+- ❌ Hardcoding colors instead of using `var(--color-*)`
 
-### Anti-Patrones UX
+### UX Anti-Patterns
 
-- ❌ Confirmshaming ("No gracias, odio ahorrar dinero")
-- ❌ Opciones pre-seleccionadas que benefician a la empresa sobre el usuario
-- ❌ Cancelación más difícil que registro
-- ❌ Indicadores falsos de urgencia/escasez
-- ❌ Scroll infinito sin opción de paginación (rompe botón atrás, nav por teclado)
-- ❌ Botones de submit deshabilitados antes del intento del usuario
-- ❌ Placeholder text como labels
+- ❌ Confirmshaming ("No thanks, I hate saving money")
+- ❌ Pre-selected options that benefit the company over the user
+- ❌ Cancellation harder than sign-up
+- ❌ False urgency/scarcity indicators
+- ❌ Infinite scroll without pagination option (breaks back button, keyboard nav)
+- ❌ Disabled submit buttons before the user's attempt
+- ❌ Placeholder text as labels
 
-### Anti-Patrones Técnicos
+### Technical Anti-Patterns
 
-- ❌ `outline: none` sin reemplazo de foco
-- ❌ `<div (click)>` en lugar de `<button>`
-- ❌ Animar propiedades de layout (`width`, `height`, `margin`)
-- ❌ Leer propiedades de layout en loops (causa thrashing)
-- ❌ `alt` faltante en imágenes
-- ❌ Formularios sin labels
-- ❌ Usar `max-width` media queries como base (desktop-first)
+- ❌ `outline: none` without focus replacement
+- ❌ `<div (click)>` instead of `<button>`
+- ❌ Animating layout properties (`width`, `height`, `margin`)
+- ❌ Reading layout properties in loops (causes thrashing)
+- ❌ Missing `alt` on images
+- ❌ Forms without labels
+- ❌ Using `max-width` media queries as base (desktop-first)
 
-### Anti-Patrones Mobile
+### Mobile Anti-Patterns
 
 - ❌ Touch targets < 44×44px
 - ❌ Body text < 16px
-- ❌ Scroll horizontal en contenido (excepto carousels explícitos como stats)
-- ❌ Sin feedback al tap (debe responder < 100ms)
-- ❌ Elementos `position: fixed` bloqueando la thumb zone
-- ❌ Modales que no son full-screen en viewport pequeño
-- ❌ Inputs que causan zoom (font-size < 16px en iOS)
+- ❌ Horizontal scroll on content (except explicit carousels like stats)
+- ❌ No tap feedback (must respond < 100ms)
+- ❌ `position: fixed` elements blocking the thumb zone
+- ❌ Modals that are not full-screen on small viewports
+- ❌ Inputs that cause zoom (font-size < 16px on iOS)
 
 ---
 
-## 9. Checklist Pre-Entrega
+## 9. Pre-Delivery Checklist
 
-Antes de entregar CUALQUIER código frontend, verificar:
+Before delivering ANY frontend code, verify:
 
-### Accesibilidad ✓
+### Accessibility ✓
 
-- [ ] Contraste de color ≥ 4.5:1 (texto) / 3:1 (UI)
+- [ ] Color contrast ≥ 4.5:1 (text) / 3:1 (UI)
 - [ ] Touch targets ≥ 44×44px
-- [ ] Todas las imágenes tienen `alt`
-- [ ] Todos los campos de formulario tienen `<label>`
-- [ ] Estados de foco visibles en todos los elementos interactivos
-- [ ] No hay información solo por color
+- [ ] All images have `alt`
+- [ ] All form fields have `<label>`
+- [ ] Visible focus states on all interactive elements
+- [ ] No color-only information
 
-### Diseño Visual ✓
+### Visual Design ✓
 
-- [ ] Jerarquía tipográfica clara (3–5 niveles)
-- [ ] Espaciado consistente desde la escala de tokens
-- [ ] Máximo 2–3 typefaces
-- [ ] Paleta de color cohesiva (60-30-10)
-- [ ] Usa `var(--color-*)` en vez de valores hardcodeados
+- [ ] Clear typographic hierarchy (3–5 levels)
+- [ ] Consistent spacing from token scale
+- [ ] Maximum 2–3 typefaces
+- [ ] Cohesive color palette (60-30-10)
+- [ ] Uses `var(--color-*)` instead of hardcoded values
 
 ### Mobile-First ✓
 
-- [ ] Estilos base son para móvil (no desktop)
-- [ ] Media queries usan `min-width` (no `max-width`)
-- [ ] Body text ≥ 16px en móvil
+- [ ] Base styles are for mobile (not desktop)
+- [ ] Media queries use `min-width` (not `max-width`)
+- [ ] Body text ≥ 16px on mobile
 - [ ] Touch targets ≥ 44px
-- [ ] Sin scroll horizontal no intencional
-- [ ] Inputs con `font-size: 16px` (previene zoom iOS)
-- [ ] Modales responsivos (full-screen en móvil si necesario)
+- [ ] No unintentional horizontal scroll
+- [ ] Inputs with `font-size: 16px` (prevents iOS zoom)
+- [ ] Responsive modals (full-screen on mobile if needed)
 
-### Técnico ✓
+### Technical ✓
 
-- [ ] Animaciones solo usan `transform` / `opacity`
-- [ ] `prefers-reduced-motion` respetado
-- [ ] HTML semántico (botones son `<button>`, links son `<a>`)
-- [ ] Sigue estructura de componente Angular (`vendix-frontend-component`)
+- [ ] Animations only use `transform` / `opacity`
+- [ ] `prefers-reduced-motion` respected
+- [ ] Semantic HTML (buttons are `<button>`, links are `<a>`)
+- [ ] Follows Angular component structure (`vendix-frontend-component`)
 
-### Integridad UX ✓
+### UX Integrity ✓
 
-- [ ] Un solo objetivo primario por pantalla
-- [ ] Sin dark patterns o confirmshaming
-- [ ] Footer siempre accesible
-- [ ] Estados de error son útiles y claros
-- [ ] Estados de carga existen (skeleton > spinner)
-- [ ] Empty states orientados a la acción
+- [ ] Single primary goal per screen
+- [ ] No dark patterns or confirmshaming
+- [ ] Footer always accessible
+- [ ] Error states are helpful and clear
+- [ ] Loading states exist (skeleton > spinner)
+- [ ] Action-oriented empty states
 
 ---
 
-## 10. Mapa de Skills Complementarias
+## 10. Complementary Skills Map
 
-Esta skill define **qué** hacer (principios y estándares). Las siguientes skills definen **cómo** implementarlo:
+This skill defines **what** to do (principles and standards). The following skills define **how** to implement it:
 
-### Implementación de Componentes
+### Component Implementation
 
-| Necesidad                | Skill                       | Descripción                               |
-| ------------------------ | --------------------------- | ----------------------------------------- |
-| Estructura de componente | `vendix-frontend-component` | Carpetas, naming, signals, OnPush         |
-| Formularios tipados      | `vendix-angular-forms`      | Reactive Forms, `FormControl<T>`, getters |
-| Modales                  | `vendix-frontend-modal`     | `ModalComponent`, apertura/cierre, NG0100 |
-| Iconos                   | `vendix-frontend-icons`     | Registro y uso de Lucide con `<app-icon>` |
+| Need                   | Skill                       | Description                                |
+| ---------------------- | --------------------------- | ------------------------------------------ |
+| Component structure    | `vendix-frontend-component` | Folders, naming, signals, OnPush           |
+| Typed forms            | `vendix-angular-forms`      | Reactive Forms, `FormControl<T>`, getters  |
+| Modals                 | `vendix-frontend-modal`     | `ModalComponent`, open/close, NG0100       |
+| Icons                  | `vendix-frontend-icons`     | Registration and usage of Lucide with `<app-icon>` |
 
-### Layout y Datos
+### Layout and Data
 
-| Necesidad                   | Skill                             | Descripción                               |
-| --------------------------- | --------------------------------- | ----------------------------------------- |
-| Módulo admin estándar       | `vendix-frontend-standard-module` | Stats + search + table, z-index stack     |
-| Tablas y cards responsivas  | `vendix-frontend-data-display`    | `ResponsiveDataViewComponent` auto-switch |
-| Stats con scroll horizontal | `vendix-frontend-stats-cards`     | `StatsComponent`, `.stats-container`      |
-| Headers sticky              | `vendix-frontend-sticky-header`   | Glassmorphism, z-30, páginas detalle      |
+| Need                        | Skill                             | Description                                |
+| --------------------------- | --------------------------------- | ------------------------------------------ |
+| Standard admin module       | `vendix-frontend-standard-module` | Stats + search + table, z-index stack      |
+| Responsive tables and cards | `vendix-frontend-data-display`    | `ResponsiveDataViewComponent` auto-switch  |
+| Stats with horizontal scroll | `vendix-frontend-stats-cards`    | `StatsComponent`, `.stats-container`       |
+| Sticky headers              | `vendix-frontend-sticky-header`  | Glassmorphism, z-30, detail pages          |
 
-### Theming y Estado
+### Theming and State
 
-| Necesidad               | Skill                          | Descripción                           |
-| ----------------------- | ------------------------------ | ------------------------------------- |
-| Variables CSS, branding | `vendix-frontend-theme`        | `ThemeService`, multi-tenant branding |
-| Estado NgRx             | `vendix-frontend-state`        | Reducers, actions, selectors, effects |
-| Routing lazy            | `vendix-frontend-lazy-routing` | Rutas lazy-loaded para sub-módulos    |
+| Need                  | Skill                          | Description                            |
+| --------------------- | ------------------------------ | -------------------------------------- |
+| CSS variables, branding | `vendix-frontend-theme`      | `ThemeService`, multi-tenant branding  |
+| NgRx state            | `vendix-frontend-state`        | Reducers, actions, selectors, effects  |
+| Lazy routing          | `vendix-frontend-lazy-routing` | Lazy-loaded routes for sub-modules     |
 
-### Contexto de Negocio
+### Business Context
 
-| Necesidad          | Skill                       | Descripción                                |
+| Need               | Skill                       | Description                                |
 | ------------------ | --------------------------- | ------------------------------------------ |
-| Apps y dominios    | `vendix-app-architecture`   | STORE_ADMIN, STORE_ECOMMERCE, POS, etc.    |
-| Checkout ecommerce | `vendix-ecommerce-checkout` | Flujo completo de checkout                 |
+| Apps and domains   | `vendix-app-architecture`   | STORE_ADMIN, STORE_ECOMMERCE, POS, etc.    |
+| Ecommerce checkout | `vendix-ecommerce-checkout` | Full checkout flow                         |
 | Settings           | `vendix-settings-system`    | `store_settings` / `organization_settings` |
-| Pricing avanzado   | `vendix-product-pricing`    | Cálculos de rentabilidad y precios         |
+| Advanced pricing   | `vendix-product-pricing`    | Profitability and pricing calculations     |

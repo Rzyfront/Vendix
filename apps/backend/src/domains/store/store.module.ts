@@ -22,6 +22,9 @@ import { ExpensesModule } from './expenses/expenses.module';
 import { StoreLegalDocumentsModule } from './legal-documents/legal-documents.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { InvoicingModule } from './invoicing/invoicing.module';
+import { AccountingModule } from './accounting/accounting.module';
+import { PayrollModule } from './payroll/payroll.module';
 
 @Module({
   imports: [
@@ -46,6 +49,9 @@ import { NotificationsModule } from './notifications/notifications.module';
     StoreLegalDocumentsModule,
     AnalyticsModule,
     NotificationsModule,
+    InvoicingModule,
+    AccountingModule,
+    PayrollModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],

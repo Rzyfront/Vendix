@@ -149,9 +149,6 @@ export class OrgLandingComponent implements OnInit {
   ngOnInit() {
     const appConfig = this.configFacade.getCurrentConfig();
     if (!appConfig) {
-      console.warn(
-        '[ORG-LANDING] App config not available, using default values',
-      );
       this.loadDefaultData();
       return;
     }

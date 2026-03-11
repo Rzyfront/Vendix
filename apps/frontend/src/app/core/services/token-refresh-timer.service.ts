@@ -29,7 +29,6 @@ export class TokenRefreshTimerService implements OnDestroy {
     this.stopTimer();
 
     if (!expiresInMs || expiresInMs <= 0) {
-      console.warn('[TokenRefreshTimer] Invalid expiration time, skipping timer setup');
       return;
     }
 
@@ -47,15 +46,9 @@ export class TokenRefreshTimerService implements OnDestroy {
 
     // Don't set timer if token expires in less than minimum time
     if (expiresInMs < minRefreshTime) {
-      console.warn('[TokenRefreshTimer] Token expiring too soon, triggering immediate refresh');
       this.proactiveRefresh();
       return;
     }
-
-    console.log(
-      `[TokenRefreshTimer] Starting timer. Token expires in ${Math.round(expiresInMs / 1000)}s, ` +
-        `will refresh in ${Math.round(finalRefreshTime / 1000)}s`,
-    );
 
     this.timerSubscription = timer(finalRefreshTime).subscribe(() => {
       this.proactiveRefresh();
@@ -69,12 +62,10 @@ export class TokenRefreshTimerService implements OnDestroy {
    */
   private proactiveRefresh(): void {
     if (this.isRefreshing) {
-      console.log('[TokenRefreshTimer] Refresh already in progress, skipping');
       return;
     }
 
     this.isRefreshing = true;
-    console.log('[TokenRefreshTimer] Performing proactive token refresh');
 
     this.authService
       .refreshToken()
@@ -84,8 +75,10 @@ export class TokenRefreshTimerService implements OnDestroy {
           this.isRefreshing = false;
 
           // Extract tokens from response (handle both direct and wrapped response)
-          const accessToken = response.data?.access_token || response.access_token;
-          const refreshToken = response.data?.refresh_token || response.refresh_token;
+          const accessToken =
+            response.data?.access_token || response.access_token;
+          const refreshToken =
+            response.data?.refresh_token || response.refresh_token;
           const expiresIn = response.data?.expires_in || response.expires_in;
 
           if (accessToken) {
@@ -103,16 +96,10 @@ export class TokenRefreshTimerService implements OnDestroy {
             if (expiresIn && expiresIn > 0) {
               this.startTimer(expiresIn);
             }
-
-            console.log('[TokenRefreshTimer] Token refreshed successfully');
-          } else {
-            console.warn('[TokenRefreshTimer] Invalid response, no access token received');
           }
         }),
         catchError((error) => {
           this.isRefreshing = false;
-          // Log warning but don't force logout - let the auth interceptor handle 401s
-          console.warn('[TokenRefreshTimer] Proactive refresh failed, will retry on 401:', error);
           return EMPTY;
         }),
       )
@@ -127,7 +114,6 @@ export class TokenRefreshTimerService implements OnDestroy {
     if (this.timerSubscription) {
       this.timerSubscription.unsubscribe();
       this.timerSubscription = undefined;
-      console.log('[TokenRefreshTimer] Timer stopped');
     }
   }
 

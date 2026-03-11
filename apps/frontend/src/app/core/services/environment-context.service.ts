@@ -203,7 +203,7 @@ export class EnvironmentContextService {
       localStorage.removeItem('vendix_user_environment');
       localStorage.removeItem('vendix_auth_state');
     } catch (error) {
-      console.warn('Error clearing environment context:', error);
+      // Silently fail
     }
   }
 
@@ -216,10 +216,6 @@ export class EnvironmentContextService {
       const currentEnv = this.getCurrentEnvironment();
 
       if (cachedEnv && cachedEnv !== currentEnv) {
-        console.warn('Environment inconsistency detected:', {
-          cached: cachedEnv,
-          current: currentEnv,
-        });
         return false;
       }
 
@@ -227,16 +223,11 @@ export class EnvironmentContextService {
         localStorage.getItem('vendix_auth_state') || '{}',
       );
       if (authState.environment && authState.environment !== currentEnv) {
-        console.warn('Auth state environment inconsistency:', {
-          authState: authState.environment,
-          current: currentEnv,
-        });
         return false;
       }
 
       return true;
     } catch (error) {
-      console.error('Error validating environment consistency:', error);
       return false;
     }
   }
@@ -273,9 +264,6 @@ export class EnvironmentContextService {
         { account_type: 'MULTI_STORE_ORG' },
       )
       .pipe(
-        tap((response) => {
-          console.log('Account type upgraded successfully:', response);
-        }),
         catchError((error) => {
           console.error('Error upgrading account type:', error);
           throw error;

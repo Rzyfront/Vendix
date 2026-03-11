@@ -363,11 +363,11 @@ onSectionChange(section: keyof StoreSettings, newSettings: any) {
     next: () => {
       this.hasUnsavedChanges = false;
       this.isAutoSaving = false;
-      this.toastService.success('Guardado automáticamente');
+      this.toastService.success('Saved automatically');
     },
     error: (err) => {
       this.isAutoSaving = false;
-      this.toastService.error('Error al guardar');
+      this.toastService.error('Error saving');
     }
   });
 }

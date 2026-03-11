@@ -12,114 +12,114 @@ metadata:
 ---
 # Vendix Monorepo Workspaces
 
-> **Trigger**: Siempre que trabajes con dependencias, instalación de paquetes, o configuración del monorepo.
+> **Trigger**: Whenever you work with dependencies, package installation, or monorepo configuration.
 
-## 📋 Resumen
+## Summary
 
-Vendix es un **monorepo usando npm workspaces** con múltiples apps (`apps/*`) y libs compartidas (`libs/*`). Cada workspace es auto-contenido para producción, pero comparten herramientas de desarrollo.
+Vendix is a **monorepo using npm workspaces** with multiple apps (`apps/*`) and shared libs (`libs/*`). Each workspace is self-contained for production, but they share development tools.
 
 ```
 Vendix/
-├── package.json              # Raíz: solo scripts, NO dependencias de producción
+├── package.json              # Root: scripts only, NO production dependencies
 ├── apps/
 │   ├── backend/              # NestJS API
-│   │   └── package.json      # Dependencias del backend
+│   │   └── package.json      # Backend dependencies
 │   └── frontend/             # Angular SPA
-│           └── package.json  # Dependencias del frontend
-└── libs/                     # Librerías compartidas (futuro)
+│           └── package.json  # Frontend dependencies
+└── libs/                     # Shared libraries (future)
 ```
 
-## 🚨 Regla CRÍTICA: Ubicación de Dependencias
+## CRITICAL Rule: Dependency Location
 
-### ✅ CORRECTO
+### CORRECT
 
 ```yaml
-# package.json (raíz)
-dependencies: {}  # VACÍO - solo scripts
+# package.json (root)
+dependencies: {}  # EMPTY - scripts only
 
 # apps/frontend/package.json
 dependencies:
-  - marked           # Solo frontend lo usa
-  - xlsx             # Frontend lo usa
+  - marked           # Only frontend uses it
+  - xlsx             # Frontend uses it
   - @types/xlsx
 
 # apps/backend/package.json
 dependencies:
-  - xlsx             # Backend lo usa
+  - xlsx             # Backend uses it
   - @types/xlsx
-  - @nestjs/common   # Solo backend lo usa
+  - @nestjs/common   # Only backend uses it
 ```
 
-### ❌ INCORRECTO
+### INCORRECT
 
 ```yaml
-# package.json (raíz)
+# package.json (root)
 dependencies:
-  - marked           # ❌ MAL: Solo frontend lo usa
-  - xlsx             # ❌ MAL: Causa duplicación
+  - marked           # WRONG: Only frontend uses it
+  - xlsx             # WRONG: Causes duplication
 
 # apps/frontend/package.json
-dependencies: {}     # ❌ MAL: Usa marked pero no lo declara
+dependencies: {}     # WRONG: Uses marked but doesn't declare it
 ```
 
-## 🎯 Principios
+## Principles
 
-### 1. Auto-contención
-**Cada workspace debe declarar TODAS las dependencias que usa.**
+### 1. Self-containment
+**Each workspace must declare ALL dependencies it uses.**
 
-Si `apps/frontend/src` hace `import { marked } from 'marked'`:
-- ✅ `marked` DEBE estar en `apps/frontend/package.json`
-- ❌ NO debe depender de la raíz para obtenerlo
+If `apps/frontend/src` does `import { marked } from 'marked'`:
+- `marked` MUST be in `apps/frontend/package.json`
+- It must NOT depend on the root to obtain it
 
 ### 2. Single Source of Truth
-**Una dependencia debe vivir en UN solo lugar.**
+**A dependency should live in ONE place only.**
 
-- **Compartida por frontend + backend**: Declarar en AMBOS `package.json`
-- **Usada solo por un app**: Declarar solo en ese app
-- **Nunca en la raíz**: A menos que sea una herramienta de desarrollo shared
+- **Shared by frontend + backend**: Declare in BOTH `package.json`
+- **Used by only one app**: Declare only in that app
+- **Never in root**: Unless it's a shared development tool
 
-### 3. Transparencia
-**Al leer `apps/frontend/package.json`, debo ver TODO lo que necesita.**
+### 3. Transparency
+**When reading `apps/frontend/package.json`, I should see EVERYTHING it needs.**
 
-No debería haber dependencias "ocultas" en la raíz que sean necesarias para producción.
+There should be no "hidden" dependencies in the root that are required for production.
 
-## 📦 Instalación de Dependencias
+## Installing Dependencies
 
-### Desarrollo Local
+### Local Development
 
 ```bash
-# Desde la raíz - instala TODOS los workspaces
+# From the root - installs ALL workspaces
 npm install
 
-# Instalar dependencia para un workspace específico
-npm install <paquete> -w apps/frontend
+# Install a dependency for a specific workspace
+npm install <package> -w apps/frontend
 
-# Instalar dependencia shared (ambos workspaces)
-npm install <paquete> -w apps/frontend
-npm install <paquete> -w apps/backend
+# Install a shared dependency (both workspaces)
+npm install <package> -w apps/frontend
+npm install <package> -w apps/backend
 ```
 
-### Ejemplos Prácticos
+### Practical Examples
 
 ```bash
-# Caso 1: Frontend necesita un nuevo paquete
+# Case 1: Frontend needs a new package
 npm install lucide-react -w apps/frontend
 
-# Caso 2: Ambos necesitan el mismo paquete
+# Case 2: Both need the same package
 npm install date-fns -w apps/frontend
 npm install date-fns -w apps/backend
 
-# Caso 3: Herramienta de desarrollo shared (eslint, prettier)
+# Case 3: Shared development tool (eslint, prettier)
 npm install -D -w apps/frontend eslint
 npm install -D -w apps/backend eslint
 ```
 
-## 🐳 Docker y Contenerización
+## Docker and Containerization
 
-### Dockerfile.dev Patrón Correcto
+### Correct Dockerfile.dev Pattern
 
 ```dockerfile
-# CORRECTO - Cada workspace se instala a sí mismo
+# CORRECT - Each workspace installs itself
 FROM node:20-alpine
 WORKDIR /app
 COPY package*.json ./
@@ -130,10 +130,10 @@ CMD ["npx", "ng", "serve", "--host", "0.0.0.0"]
 ```
 
 ```dockerfile
-# ❌ INCORRECTO - Depende de la raíz
+# INCORRECT - Depends on root
 FROM node:20-alpine
 WORKDIR /app
-COPY ../../package.json ./package.json  # No hacer esto
+COPY ../../package.json ./package.json  # Don't do this
 RUN npm install
 ```
 
@@ -150,22 +150,22 @@ services:
       - /app/node_modules
 ```
 
-**Importante**: El context debe ser el workspace, no la raíz.
+**Important**: The context must be the workspace, not the root.
 
-## 🚀 CI/CD Considerations
+## CI/CD Considerations
 
 ### GitHub Actions - Frontend
 
 ```yaml
 - name: Install dependencies
-  run: npm ci              # Instala desde raíz (workspaces)
+  run: npm ci              # Installs from root (workspaces)
 
 - name: Build frontend
   working-directory: apps/frontend
-  run: npm run build:prod  # Construye solo frontend
+  run: npm run build:prod  # Builds only frontend
 ```
 
-**Por qué funciona**: `npm ci` instala todos los workspaces, pero cada build es independiente.
+**Why it works**: `npm ci` installs all workspaces, but each build is independent.
 
 ### GitHub Actions - Backend
 
@@ -176,9 +176,9 @@ services:
     docker build -t app .
 ```
 
-**Por qué funciona**: El Dockerfile del backend incluye sus propias dependencias.
+**Why it works**: The backend Dockerfile includes its own dependencies.
 
-## ⚠️ Errores Comunes
+## Common Errors
 
 ### Error 1: "Cannot find module"
 
@@ -186,100 +186,100 @@ services:
 TS2307: Cannot find module 'marked' or its corresponding type declarations
 ```
 
-**Causa**: `marked` está en la raíz pero no en `apps/frontend/package.json`
+**Cause**: `marked` is in the root but not in `apps/frontend/package.json`
 
-**Solución**:
+**Solution**:
 ```bash
-# Mover la dependencia donde se usa
+# Move the dependency to where it's used
 npm install marked -w apps/frontend
-# Y eliminar de package.json raíz
+# And remove it from root package.json
 ```
 
-### Error 2: Dependencias Duplicadas
+### Error 2: Duplicate Dependencies
 
 ```
 node_modules/marked (v17.0.1)
 node_modules/apps/frontend/node_modules/marked (v16.0.0)
 ```
 
-**Causa**: La misma dependencia en raíz + workspace con versiones diferentes
+**Cause**: The same dependency in root + workspace with different versions
 
-**Solución**: Mantener solo en el workspace, eliminar de raíz
+**Solution**: Keep only in the workspace, remove from root
 
-### Error 3: Docker Build Falla
+### Error 3: Docker Build Fails
 
 ```
 Error: Cannot find module '@nestjs/common'
 ```
 
-**Causa**: Dockerfile intenta instalar desde raíz en lugar del workspace
+**Cause**: Dockerfile tries to install from root instead of the workspace
 
-**Solución**: Usar `COPY package*.json ./` del workspace, no de la raíz
+**Solution**: Use `COPY package*.json ./` from the workspace, not from the root
 
-## 🔍 Verificación
+## Verification
 
-### Comandos para Diagnóstico
+### Diagnostic Commands
 
 ```bash
-# Ver qué apps usan un paquete
-grep -r "from ['\"]<paquete>['\"]" apps/*/src
+# See which apps use a package
+grep -r "from ['\"]<package>['\"]" apps/*/src
 
-# Ver si un paquete está duplicado
-grep -r '"<paquete>"' package.json apps/*/package.json
+# See if a package is duplicated
+grep -r '"<package>"' package.json apps/*/package.json
 
-# Ver estructura de workspaces
+# See workspace structure
 npm workspaces list
 ```
 
-### Checklist Antes de Commits
+### Pre-Commit Checklist
 
-- [ ] Cada dependencia está en el package.json donde se usa
-- [ ] No hay dependencias de producción en la raíz
-- [ ] Dockerfiles instalan desde su propio workspace
-- [ ] `npm install` funciona sin errores
-- [ ] Build de cada app funciona individualmente
+- [ ] Each dependency is in the package.json where it's used
+- [ ] No production dependencies in the root
+- [ ] Dockerfiles install from their own workspace
+- [ ] `npm install` runs without errors
+- [ ] Each app's build works individually
 
-## 📚 Referencias Rápidas
+## Quick Reference
 
-| Comando | Descripción |
+| Command | Description |
 |---------|-------------|
-| `npm install` | Instala todos los workspaces desde raíz |
-| `npm install <pkg> -w <workspace>` | Instala en un workspace específico |
-| `npm run build -w apps/frontend` | Ejecuta script en workspace específico |
-| `npm workspaces list` | Lista todos los workspaces |
+| `npm install` | Installs all workspaces from root |
+| `npm install <pkg> -w <workspace>` | Installs in a specific workspace |
+| `npm run build -w apps/frontend` | Runs script in a specific workspace |
+| `npm workspaces list` | Lists all workspaces |
 
-## 🎓 Lecciones Aprendidas
+## Lessons Learned
 
-1. **marked** fue movido de raíz → frontend (solo frontend lo usa)
-2. **xlsx** está en frontend y backend (ambos lo usan independientemente)
-3. **@types/xlsx** lo necesitan ambos (TypeScript types por app)
-4. La raíz debe mantenerse limpia: solo scripts de orchestration
+1. **marked** was moved from root to frontend (only frontend uses it)
+2. **xlsx** is in frontend and backend (both use it independently)
+3. **@types/xlsx** is needed by both (TypeScript types per app)
+4. The root should stay clean: orchestration scripts only
 
-## 🔄 Mantenimiento
+## Maintenance
 
-### Agregando Nueva App al Monorepo
+### Adding a New App to the Monorepo
 
 ```bash
-# 1. Crear directorio
-mkdir apps/nueva-app
+# 1. Create directory
+mkdir apps/new-app
 
-# 2. Inicializar
-cd apps/nueva-app
+# 2. Initialize
+cd apps/new-app
 npm init -y
 
-# 3. La raíz lo detectará automáticamente (workspaces: ["apps/*"])
+# 3. The root will detect it automatically (workspaces: ["apps/*"])
 ```
 
-### Removiendo una App
+### Removing an App
 
 ```bash
-# 1. Eliminar directorio
-rm -rf apps/vieja-app
+# 1. Delete directory
+rm -rf apps/old-app
 
-# 2. Limpiar node_modules
+# 2. Clean node_modules
 npm install
 ```
 
 ---
 
-**Recuerda**: La clave es que cada workspace sea **auto-contenido**. Si un archivo hace `import X from 'Y'`, entonces `Y` debe estar en el `package.json` de ese workspace.
+**Remember**: The key is that each workspace should be **self-contained**. If a file does `import X from 'Y'`, then `Y` must be in the `package.json` of that workspace.

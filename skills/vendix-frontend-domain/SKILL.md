@@ -7,7 +7,7 @@ metadata:
 ---
 # Vendix Frontend Domain Detection
 
-> **Domain Configuration** - Detección automática de dominios, configuración de branding y routing dinámico.
+> **Domain Configuration** - Automatic domain detection, branding configuration, and dynamic routing.
 
 ## 🌐 Domain Types & App Types
 
@@ -18,18 +18,18 @@ metadata:
 ### App Type Enum (PRIMARY)
 
 ```typescript
-// NUEVO ESTÁNDAR UNIFICADO - Única fuente de verdad para el tipo de app
+// NEW UNIFIED STANDARD - Single source of truth for the app type
 export enum AppType {
-  VENDIX_LANDING = 'VENDIX_LANDING',   // Landing principal de Vendix
-  VENDIX_ADMIN = 'VENDIX_ADMIN',       // Admin super usuario de Vendix
-  ORG_LANDING = 'ORG_LANDING',         // Landing de organización
-  ORG_ADMIN = 'ORG_ADMIN',             // Admin de organización
-  STORE_LANDING = 'STORE_LANDING',     // Landing de tienda
-  STORE_ADMIN = 'STORE_ADMIN',         // Admin de tienda
-  STORE_ECOMMERCE = 'STORE_ECOMMERCE', // Ecommerce de tienda
+  VENDIX_LANDING = 'VENDIX_LANDING',   // Vendix main landing
+  VENDIX_ADMIN = 'VENDIX_ADMIN',       // Vendix super user admin
+  ORG_LANDING = 'ORG_LANDING',         // Organization landing
+  ORG_ADMIN = 'ORG_ADMIN',             // Organization admin
+  STORE_LANDING = 'STORE_LANDING',     // Store landing
+  STORE_ADMIN = 'STORE_ADMIN',         // Store admin
+  STORE_ECOMMERCE = 'STORE_ECOMMERCE', // Store ecommerce
 }
 
-// Alias para compatibilidad
+// Alias for compatibility
 export type AppEnvironment = AppType;
 export const AppEnvironment = AppType;
 ```
@@ -37,7 +37,7 @@ export const AppEnvironment = AppType;
 ### Domain Type Enum (LEGACY)
 
 ```typescript
-// Legacy - para compatibilidad con domain_type_enum del backend
+// Legacy - for compatibility with backend domain_type_enum
 export enum DomainType {
   VENDIX_CORE = 'vendix_core',
   ORGANIZATION = 'organization',
@@ -233,7 +233,7 @@ export interface PublicationConfig {
 export interface EcommerceConfig {
   enabled: boolean;
   slider?: { enable: boolean; photos: Array<...> };
-  inicio?: { titulo?: string; parrafo?: string; ... };
+  home?: { title?: string; paragraph?: string; ... };
   catalog?: { products_per_page: number; ... };
   cart?: { allow_guest_checkout: boolean; ... };
   checkout?: { require_registration: boolean; ... };
@@ -514,7 +514,7 @@ const routes: Routes = [
 
 ### Changes from Legacy `domain_config` approach:
 
-1. **Service renamed:** `DomainConfigService` → `AppConfigService`
+1. **Service renamed:** `DomainConfigService` -> `AppConfigService`
 2. **Primary enum:** `AppType` instead of `DomainType` for app selection
 3. **Config source:** `domain_settings.app_type` instead of `config.app`
 4. **Branding source:** `store_settings.branding` instead of `domain_settings.config.branding`

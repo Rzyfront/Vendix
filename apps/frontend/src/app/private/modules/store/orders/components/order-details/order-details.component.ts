@@ -9,7 +9,7 @@ import {
   SimpleChanges,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Subject, takeUntil } from 'rxjs';
+import { Subject, takeUntil, take } from 'rxjs';
 import { StoreOrdersService } from '../../services/store-orders.service';
 import {
   ModalComponent,
@@ -18,6 +18,9 @@ import {
 } from '../../../../../../shared/components';
 import { Order, OrderState } from '../../interfaces/order.interface';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { Store } from '@ngrx/store';
+import { Actions, ofType } from '@ngrx/effects';
+import * as InvoicingActions from '../../../invoicing/state/actions/invoicing.actions';
 
 @Component({
   selector: 'app-order-details',
@@ -56,6 +59,8 @@ export class OrderDetailsComponent implements OnInit, OnDestroy, OnChanges {
     private dialogService: DialogService,
     private toastService: ToastService,
     private currencyService: CurrencyFormatService,
+    private store: Store,
+    private actions$: Actions,
   ) {}
 
   ngOnInit(): void {
@@ -201,15 +206,31 @@ export class OrderDetailsComponent implements OnInit, OnDestroy, OnChanges {
 
     this.dialogService
       .confirm({
-        title: 'Descargar Factura',
-        message: '¿Deseas descargar la factura de esta orden?',
-        confirmText: 'Descargar',
+        title: 'Crear Factura',
+        message: '¿Deseas crear una factura electrónica para esta orden?',
+        confirmText: 'Crear Factura',
         cancelText: 'Cancelar',
         confirmVariant: 'primary',
       })
       .then((confirmed: boolean) => {
-        if (confirmed) {
-          this.toastService.info('Factura descargada exitosamente', 'Descarga');
+        if (confirmed && this.order) {
+          // Listen for result before dispatching
+          this.actions$.pipe(
+            ofType(InvoicingActions.createFromOrderSuccess, InvoicingActions.createFromOrderFailure),
+            take(1),
+            takeUntil(this.destroy$),
+          ).subscribe((action) => {
+            if (action.type === InvoicingActions.createFromOrderSuccess.type) {
+              this.toastService.success('Factura creada exitosamente', 'Facturación');
+            } else {
+              const errorAction = action as ReturnType<typeof InvoicingActions.createFromOrderFailure>;
+              this.toastService.error(errorAction.error || 'Error al crear la factura', 'Facturación');
+            }
+          });
+
+          this.store.dispatch(
+            InvoicingActions.createFromOrder({ orderId: this.order.id }),
+          );
         }
       });
   }

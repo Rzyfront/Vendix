@@ -1,4 +1,11 @@
-import { Component, OnInit, computed, signal, inject, ChangeDetectorRef } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  computed,
+  signal,
+  inject,
+  ChangeDetectorRef,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterModule, ActivatedRoute, Router, Params } from '@angular/router';
@@ -26,7 +33,10 @@ import {
   StickyHeaderComponent,
   StickyHeaderActionButton,
 } from '../../../../../../shared/components';
-import { CurrencyPipe, CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import {
+  CurrencyPipe,
+  CurrencyFormatService,
+} from '../../../../../../shared/pipes/currency';
 import {
   CreateProductDto,
   CreateProductImageDto,
@@ -93,46 +103,59 @@ interface GeneratedVariant {
     CurrencyPipe,
   ],
   templateUrl: './product-create-page.component.html',
-  styles: [`
-    /* ── AI Generate Button (subscription card style) ── */
-    .ai-generate-btn {
-      display: inline-flex;
-      align-items: center;
-      padding: 2px 6px;
-      border-radius: 5px;
-      border: 1px solid rgba(var(--color-primary-rgb), 0.4);
-      font-size: 8px;
-      background: linear-gradient(135deg,
-        rgba(var(--color-primary-rgb), 0.5) 0%,
-        rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.65) 25%,
-        rgba(var(--color-primary-rgb), 0.4) 50%,
-        rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.7) 75%,
-        rgba(var(--color-primary-rgb), 0.55) 100%
-      );
-      background-size: 200% 200%;
-      animation: ai-shimmer 3s ease-in-out infinite;
-      color: white;
-      cursor: pointer;
-      transition: all 0.3s ease;
-      box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.1),
-        0 2px 8px rgba(var(--color-primary-rgb), 0.3);
-      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-    }
+  styles: [
+    `
+      /* ── AI Generate Button (subscription card style) ── */
+      .ai-generate-btn {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 6px;
+        border-radius: 5px;
+        border: 1px solid rgba(var(--color-primary-rgb), 0.4);
+        font-size: 8px;
+        background: linear-gradient(
+          135deg,
+          rgba(var(--color-primary-rgb), 0.5) 0%,
+          rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.65) 25%,
+          rgba(var(--color-primary-rgb), 0.4) 50%,
+          rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.7) 75%,
+          rgba(var(--color-primary-rgb), 0.55) 100%
+        );
+        background-size: 200% 200%;
+        animation: ai-shimmer 3s ease-in-out infinite;
+        color: white;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.1),
+          0 2px 8px rgba(var(--color-primary-rgb), 0.3);
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+      }
 
-    .ai-generate-btn:hover {
-      box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.15),
-        0 4px 16px rgba(var(--color-primary-rgb), 0.5),
-        0 0 24px rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.25);
-      transform: translateY(-1px);
-    }
+      .ai-generate-btn:hover,
+      .ai-description-wrapper:hover .ai-generate-btn {
+        background: linear-gradient(
+          135deg,
+          var(--color-primary) 0%,
+          color-mix(in srgb, var(--color-primary), white 20%) 25%,
+          var(--color-primary) 50%,
+          color-mix(in srgb, var(--color-primary), black 15%) 75%,
+          var(--color-primary) 100%
+        );
+        background-size: 200% 200%;
+        animation: ai-shimmer 2s ease-in-out infinite;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.2),
+          0 4px 16px rgba(var(--color-primary-rgb), 0.5),
+          0 0 28px rgba(var(--color-primary-rgb), 0.5);
+        transform: translateY(-1px);
+      }
 
-    .ai-generate-btn:disabled {
-      cursor: not-allowed;
-      transform: none;
-      animation: ai-shimmer 1.5s ease-in-out infinite;
-    }
+      .ai-generate-btn:disabled {
+        cursor: not-allowed;
+        transform: none;
+        animation: ai-shimmer 1.5s ease-in-out infinite;
+      }
 
     /* ── Hover propagation: button hover → label + textarea ── */
     .ai-description-wrapper .ai-label {
@@ -207,58 +230,76 @@ interface GeneratedVariant {
         inset 0 1px 1px rgba(255, 255, 255, 0.15);
     }
 
-    .ai-generate-btn:hover .ai-tooltip {
-      opacity: 1;
-      transform: translateY(0);
-    }
+      .ai-generate-btn:hover .ai-tooltip {
+        opacity: 1;
+        transform: translateY(0);
+      }
 
-    /* ── Generating State: animated outline on textarea ── */
-    .ai-generating .ai-textarea-wrapper {
-      position: relative;
-      border-radius: 12px;
-      padding: 2px;
-      background: linear-gradient(135deg,
-        rgba(var(--color-primary-rgb), 0.6) 0%,
-        rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.8) 25%,
-        rgba(var(--color-primary-rgb), 0.4) 50%,
-        rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.9) 75%,
-        rgba(var(--color-primary-rgb), 0.5) 100%
-      );
-      background-size: 300% 300%;
-      animation: ai-outline-flow 2s ease-in-out infinite;
-    }
+      /* ── Generating State: animated outline on textarea ── */
+      .ai-generating .ai-textarea-wrapper,
+      .ai-description-wrapper:hover .ai-textarea-wrapper {
+        position: relative;
+        border-radius: 12px;
+        padding: 2px;
+        background: linear-gradient(
+          135deg,
+          rgba(var(--color-primary-rgb), 0.6) 0%,
+          rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.8) 25%,
+          rgba(var(--color-primary-rgb), 0.4) 50%,
+          rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.9) 75%,
+          rgba(var(--color-primary-rgb), 0.5) 100%
+        );
+        background-size: 300% 300%;
+        animation: ai-outline-flow 2s ease-in-out infinite;
+      }
 
-    .ai-generating .ai-textarea-wrapper ::ng-deep textarea {
-      border: none !important;
-      border-radius: 10px;
-    }
+      .ai-generating .ai-textarea-wrapper ::ng-deep textarea,
+      .ai-description-wrapper:hover .ai-textarea-wrapper ::ng-deep textarea {
+        border: none !important;
+        border-radius: 10px;
+      }
 
-    .ai-generating .ai-label {
-      background: linear-gradient(90deg,
-        rgba(var(--color-primary-rgb), 1) 0%,
-        rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 1) 50%,
-        rgba(var(--color-primary-rgb), 1) 100%
-      );
-      background-size: 200% 100%;
-      animation: ai-shimmer 2s ease-in-out infinite;
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-      font-weight: 600;
-    }
+      .ai-generating .ai-label,
+      .ai-description-wrapper:hover .ai-label {
+        background: linear-gradient(
+          90deg,
+          rgba(var(--color-primary-rgb), 1) 0%,
+          rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 1) 50%,
+          rgba(var(--color-primary-rgb), 1) 100%
+        );
+        background-size: 200% 100%;
+        animation: ai-shimmer 2s ease-in-out infinite;
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 600;
+      }
 
-    @keyframes ai-shimmer {
-      0% { background-position: 0% 50%; }
-      50% { background-position: 100% 50%; }
-      100% { background-position: 0% 50%; }
-    }
+      @keyframes ai-shimmer {
+        0% {
+          background-position: 0% 50%;
+        }
+        50% {
+          background-position: 100% 50%;
+        }
+        100% {
+          background-position: 0% 50%;
+        }
+      }
 
-    @keyframes ai-outline-flow {
-      0% { background-position: 0% 50%; }
-      50% { background-position: 100% 50%; }
-      100% { background-position: 0% 50%; }
-    }
-  `],
+      @keyframes ai-outline-flow {
+        0% {
+          background-position: 0% 50%;
+        }
+        50% {
+          background-position: 100% 50%;
+        }
+        100% {
+          background-position: 0% 50%;
+        }
+      }
+    `,
+  ],
 })
 export class ProductCreatePageComponent implements OnInit {
   private fb = inject(FormBuilder);
@@ -346,8 +387,12 @@ export class ProductCreatePageComponent implements OnInit {
 
   constructor() {
     // Sincronizar trigger con cambios del formulario
-    this.productForm.valueChanges.pipe(takeUntilDestroyed()).subscribe(() => this.formUpdateTrigger.update(v => v + 1));
-    this.productForm.statusChanges.pipe(takeUntilDestroyed()).subscribe(() => this.formUpdateTrigger.update(v => v + 1));
+    this.productForm.valueChanges
+      .pipe(takeUntilDestroyed())
+      .subscribe(() => this.formUpdateTrigger.update((v) => v + 1));
+    this.productForm.statusChanges
+      .pipe(takeUntilDestroyed())
+      .subscribe(() => this.formUpdateTrigger.update((v) => v + 1));
   }
 
   ngOnInit(): void {
@@ -393,7 +438,7 @@ export class ProductCreatePageComponent implements OnInit {
       dimensions: this.fb.group({
         length: [0, [Validators.min(0)]],
         width: [0, [Validators.min(0)]],
-        height: [0, [Validators.min(0)]]
+        height: [0, [Validators.min(0)]],
       }),
       state: [ProductState.ACTIVE],
       pricing_type: ['unit' as const],
@@ -504,13 +549,14 @@ export class ProductCreatePageComponent implements OnInit {
       brand_id: product.brand?.id ?? product.brand_id,
       tax_category_ids: taxCategoryIds,
       state: product.state,
-      pricing_type: (product.pricing_type as any)?.value || product.pricing_type || 'unit',
+      pricing_type:
+        (product.pricing_type as any)?.value || product.pricing_type || 'unit',
       weight: product.weight || 0,
       dimensions: {
         length: product.dimensions?.length || 0,
         width: product.dimensions?.width || 0,
-        height: product.dimensions?.height || 0
-      }
+        height: product.dimensions?.height || 0,
+      },
     });
 
     // Load images
@@ -551,7 +597,7 @@ export class ProductCreatePageComponent implements OnInit {
         }
       }
       this.variantAttributes = Array.from(attributeMap.entries()).map(
-        ([name, values]) => ({ name, values: Array.from(values) })
+        ([name, values]) => ({ name, values: Array.from(values) }),
       );
 
       this.removedVariantKeys.clear();
@@ -634,10 +680,7 @@ export class ProductCreatePageComponent implements OnInit {
   }
 
   get totalVariantStock(): number {
-    return this.generatedVariants.reduce(
-      (sum, v) => sum + (v.stock || 0),
-      0,
-    );
+    return this.generatedVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
   }
 
   toggleVariants(isChecked: boolean): void {
@@ -733,43 +776,45 @@ export class ProductCreatePageComponent implements OnInit {
     const baseMargin = this.productForm.get('profit_margin')?.value || 0;
     const baseSku = this.productForm.get('sku')?.value || '';
 
-    this.generatedVariants = combinations.map((combo) => {
-      const attributes: Record<string, string> = {};
-      let nameSuffix = '';
-      let skuSuffix = '';
+    this.generatedVariants = combinations
+      .map((combo) => {
+        const attributes: Record<string, string> = {};
+        let nameSuffix = '';
+        let skuSuffix = '';
 
-      validAttributes.forEach((attr, index) => {
-        const value = combo[index];
-        attributes[attr.name] = value;
-        nameSuffix += ` ${value}`; // e.g. " Red L"
-        skuSuffix += `-${value.toUpperCase().substring(0, 3)}`; // e.g. "-RED-L"
-      });
+        validAttributes.forEach((attr, index) => {
+          const value = combo[index];
+          attributes[attr.name] = value;
+          nameSuffix += ` ${value}`; // e.g. " Red L"
+          skuSuffix += `-${value.toUpperCase().substring(0, 3)}`; // e.g. "-RED-L"
+        });
 
-      // Skip variants that were manually removed by the user
-      const key = JSON.stringify(attributes);
-      if (this.removedVariantKeys.has(key)) {
-        return null;
-      }
+        // Skip variants that were manually removed by the user
+        const key = JSON.stringify(attributes);
+        if (this.removedVariantKeys.has(key)) {
+          return null;
+        }
 
-      // Check if this variant already exists to preserve custom values
-      const existing = this.generatedVariants.find(
-        (v) => JSON.stringify(v.attributes) === JSON.stringify(attributes),
-      );
+        // Check if this variant already exists to preserve custom values
+        const existing = this.generatedVariants.find(
+          (v) => JSON.stringify(v.attributes) === JSON.stringify(attributes),
+        );
 
-      if (existing) return existing;
+        if (existing) return existing;
 
-      return {
-        name: `${this.productForm.get('name')?.value || 'Product'}${nameSuffix}`,
-        sku: baseSku ? `${baseSku}${skuSuffix}` : '',
-        price: basePrice,
-        cost_price: baseCost,
-        profit_margin: baseMargin,
-        is_on_sale: false,
-        sale_price: 0,
-        stock: 0,
-        attributes,
-      };
-    }).filter(Boolean) as GeneratedVariant[];
+        return {
+          name: `${this.productForm.get('name')?.value || 'Product'}${nameSuffix}`,
+          sku: baseSku ? `${baseSku}${skuSuffix}` : '',
+          price: basePrice,
+          cost_price: baseCost,
+          profit_margin: baseMargin,
+          is_on_sale: false,
+          sale_price: 0,
+          stock: 0,
+          attributes,
+        };
+      })
+      .filter(Boolean) as GeneratedVariant[];
   }
 
   private cartesian(args: any[][]): any[] {
@@ -805,17 +850,21 @@ export class ProductCreatePageComponent implements OnInit {
     const cost = Number(variant.cost_price || 0);
     const price = Number(variant.price || 0);
     if (cost > 0) {
-      variant.profit_margin = Number((((price - cost) / cost) * 100).toFixed(2));
+      variant.profit_margin = Number(
+        (((price - cost) / cost) * 100).toFixed(2),
+      );
     }
     this.variantIsCalculating = false;
   }
 
   getVariantPriceWithTax(variant: GeneratedVariant): number {
-    const activePrice = variant.is_on_sale && variant.sale_price
-      ? Number(variant.sale_price)
-      : Number(variant.price || 0);
+    const activePrice =
+      variant.is_on_sale && variant.sale_price
+        ? Number(variant.sale_price)
+        : Number(variant.price || 0);
 
-    const selectedTaxIds = this.productForm.get('tax_category_ids')?.value || [];
+    const selectedTaxIds =
+      this.productForm.get('tax_category_ids')?.value || [];
     let totalTaxRate = 0;
     selectedTaxIds.forEach((id: number) => {
       const taxCat = this.allTaxCategories.find((tc) => tc.id === id);
@@ -916,7 +965,9 @@ export class ProductCreatePageComponent implements OnInit {
     // If the image exists in DB, delete it via API (also removes from S3)
     if (variant.image_id) {
       try {
-        await this.productsService.deleteProductImage(variant.image_id).toPromise();
+        await this.productsService
+          .deleteProductImage(variant.image_id)
+          .toPromise();
       } catch (err: any) {
         console.error('Error deleting variant image:', err);
         this.toastService.error('Error al eliminar la imagen de variante');
@@ -1020,12 +1071,14 @@ export class ProductCreatePageComponent implements OnInit {
         return;
       }
 
-      const filesToProcess = filesArray.slice(0, remainingSlots).filter((file) => 
-        file.type.startsWith('image/')
-      );
+      const filesToProcess = filesArray
+        .slice(0, remainingSlots)
+        .filter((file) => file.type.startsWith('image/'));
 
       if (filesToProcess.length === 0) {
-        this.toastService.warning('Por favor selecciona archivos de imagen válidos');
+        this.toastService.warning(
+          'Por favor selecciona archivos de imagen válidos',
+        );
         input.value = '';
         return;
       }
@@ -1043,14 +1096,19 @@ export class ProductCreatePageComponent implements OnInit {
           this.activeImageIndex = 0;
         }
         this.cdr.detectChanges();
-        this.toastService.success(`${filesToProcess.length} imagen(es) cargada(s) correctamente`);
+        this.toastService.success(
+          `${filesToProcess.length} imagen(es) cargada(s) correctamente`,
+        );
       });
 
       input.value = '';
     }
   }
 
-  private processImagesSequentially(files: File[], index: number): Promise<void> {
+  private processImagesSequentially(
+    files: File[],
+    index: number,
+  ): Promise<void> {
     return new Promise((resolve) => {
       if (index >= files.length) {
         resolve();
@@ -1064,7 +1122,7 @@ export class ProductCreatePageComponent implements OnInit {
         const result = e.target?.result as string;
         this.imageUrls.push(result);
         this.imageIds.push(null);
-        
+
         // Update progress
         this.loadingProgress = Math.round(((index + 1) / files.length) * 100);
         this.cdr.detectChanges();
@@ -1138,7 +1196,7 @@ export class ProductCreatePageComponent implements OnInit {
   onCancel(): void {
     const returnPage = this.route.snapshot.queryParams['fromPage'] || 1;
     this.router.navigate(['/admin/products'], {
-      queryParams: { page: returnPage }
+      queryParams: { page: returnPage },
     });
   }
 
@@ -1181,23 +1239,30 @@ export class ProductCreatePageComponent implements OnInit {
       available_for_ecommerce: !!formValue.available_for_ecommerce,
       sku: formValue.sku || undefined,
       track_inventory: !!formValue.track_inventory,
-      stock_quantity: formValue.track_inventory ? Number(formValue.stock_quantity) : undefined,
+      stock_quantity: formValue.track_inventory
+        ? Number(formValue.stock_quantity)
+        : undefined,
       category_ids: formValue.category_ids || [],
       tax_category_ids: formValue.tax_category_ids || [],
       brand_id: formValue.brand_id ? Number(formValue.brand_id) : null,
       state: formValue.state || ProductState.ACTIVE,
-      pricing_type: typeof formValue.pricing_type === 'object' ? formValue.pricing_type.value : (formValue.pricing_type || 'unit'),
+      pricing_type:
+        typeof formValue.pricing_type === 'object'
+          ? formValue.pricing_type.value
+          : formValue.pricing_type || 'unit',
       images: images.length > 0 ? images : undefined,
       weight: formValue.weight > 0 ? Number(formValue.weight) : undefined,
-      dimensions: formValue.dimensions && (
-        formValue.dimensions.length > 0 ||
-        formValue.dimensions.width > 0 ||
-        formValue.dimensions.height > 0
-      ) ? {
-        length: Number(formValue.dimensions.length),
-        width: Number(formValue.dimensions.width),
-        height: Number(formValue.dimensions.height)
-      } : undefined,
+      dimensions:
+        formValue.dimensions &&
+        (formValue.dimensions.length > 0 ||
+          formValue.dimensions.width > 0 ||
+          formValue.dimensions.height > 0)
+          ? {
+              length: Number(formValue.dimensions.length),
+              width: Number(formValue.dimensions.width),
+              height: Number(formValue.dimensions.height),
+            }
+          : undefined,
     };
 
     // Add Variants if enabled — always send the array (even empty) so the
@@ -1214,7 +1279,9 @@ export class ProductCreatePageComponent implements OnInit {
         sale_price: Number(v.sale_price),
         stock_quantity: formValue.track_inventory ? Number(v.stock) : undefined,
         attributes: v.attributes,
-        variant_image_url: v.image_url?.startsWith('data:') ? v.image_url : undefined,
+        variant_image_url: v.image_url?.startsWith('data:')
+          ? v.image_url
+          : undefined,
       }));
 
       // Set base stock_quantity to the sum of variant stocks for immediate UI consistency
@@ -1238,7 +1305,7 @@ export class ProductCreatePageComponent implements OnInit {
         );
         const returnPage = this.route.snapshot.queryParams['fromPage'] || 1;
         this.router.navigate(['/admin/products'], {
-          queryParams: { page: returnPage }
+          queryParams: { page: returnPage },
         });
       },
       error: (err: any) => {
@@ -1257,7 +1324,9 @@ export class ProductCreatePageComponent implements OnInit {
 
   generateAIDescription(): void {
     if (this.aiDescriptionLimitReached()) {
-      this.toastService.warning('Límite de generaciones alcanzado (3 por producto)');
+      this.toastService.warning(
+        'Límite de generaciones alcanzado (3 por producto)',
+      );
       return;
     }
 
@@ -1274,13 +1343,15 @@ export class ProductCreatePageComponent implements OnInit {
       ? this.brandOptions.find((b) => b.value === brandId)?.label
       : undefined;
 
-    const categoryIds: number[] = this.productForm.get('category_ids')?.value || [];
-    const category = categoryIds.length > 0
-      ? this.categoryOptions
-          .filter((c) => categoryIds.includes(c.value as number))
-          .map((c) => c.label)
-          .join(', ')
-      : undefined;
+    const categoryIds: number[] =
+      this.productForm.get('category_ids')?.value || [];
+    const category =
+      categoryIds.length > 0
+        ? this.categoryOptions
+            .filter((c) => categoryIds.includes(c.value as number))
+            .map((c) => c.label)
+            .join(', ')
+        : undefined;
 
     const payload: Record<string, any> = {
       name: name.trim(),
@@ -1292,7 +1363,8 @@ export class ProductCreatePageComponent implements OnInit {
 
     // Remove undefined values
     Object.keys(payload).forEach((key) => {
-      if (payload[key] === undefined || payload[key] === '') delete payload[key];
+      if (payload[key] === undefined || payload[key] === '')
+        delete payload[key];
     });
 
     this.productsService.generateDescription(payload).subscribe({

@@ -113,7 +113,7 @@ get priceWithTax(): number {
 <!-- Visual feedback that this is CALCULATED -->
 <div class="space-y-1.5">
   <label class="block text-sm font-bold text-text-primary">
-    Precio Final (PVP + Imp)
+    Final Price (PVP + Tax)
   </label>
   <div
     class="h-[42px] px-4 flex items-center bg-surface border-2 border-primary-500/20 rounded-lg text-xl font-black text-primary-600 shadow-sm"
@@ -121,7 +121,7 @@ get priceWithTax(): number {
     {{ priceWithTax | currency }}
   </div>
   <p class="text-[10px] text-text-secondary font-medium italic">
-    Calculado automáticamente
+    Automatically calculated
   </p>
 </div>
 ```
@@ -321,7 +321,7 @@ When implementing pricing:
 - [ ] Only `base_price` is stored in database
 - [ ] Tax rates are in `tax_rates` table (not hardcoded)
 - [ ] Frontend uses a getter for `priceWithTax`
-- [ ] Template shows "Calculado automáticamente" label
+- [ ] Template shows "Automatically calculated" label
 - [ ] DTO accepts `base_price`, NOT `price_with_tax`
 - [ ] API responses include calculated price for display
 - [ ] Tests cover single and composite tax scenarios

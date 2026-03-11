@@ -70,6 +70,18 @@ export class MenuFilterService {
     // Gastos
     Gastos: 'expenses',
 
+    // ERP Modules
+    Facturación: 'invoicing',
+    Contabilidad: 'accounting',
+    'Plan de Cuentas': 'accounting_chart_of_accounts',
+    'Asientos Contables': 'accounting_journal_entries',
+    'Periodos Fiscales': 'accounting_fiscal_periods',
+    Reportes: 'accounting_reports',
+    Nómina: 'payroll',
+    Empleados: 'payroll_employees',
+    Liquidaciones: 'payroll_runs',
+    'Configuración Nómina': 'payroll_settings',
+
     // Configuración (compartido por ORG_ADMIN y STORE_ADMIN)
     // El padre "Configuración" y sus sub-items:
     Configuración: 'settings',

@@ -121,14 +121,14 @@ The search section is sticky on mobile and positioned below the stats.
       class="text-[13px] font-bold text-gray-600 tracking-wide
                md:text-lg md:font-semibold md:text-text-primary"
     >
-      [Entidad] ({{ items.length }})
+      [Entity] ({{ items.length }})
     </h2>
 
     <!-- Search + Options Row -->
     <div class="flex items-center gap-2 w-full md:w-auto">
       <app-inputsearch
         class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-        placeholder="Buscar..."
+        placeholder="Search..."
         [debounceTime]="300"
         (searchChange)="onSearch($event)"
       />
@@ -196,7 +196,7 @@ Use `ResponsiveDataViewComponent` for automatic mobile/desktop switching:
     [cardConfig]="cardConfig"
     [actions]="actions"
     [loading]="loading"
-    emptyMessage="No hay datos"
+    emptyMessage="No data available"
     emptyIcon="inbox"
   />
 </div>
@@ -249,12 +249,12 @@ All new logic MUST use Angular Signals.
           class="text-[13px] font-bold text-gray-600 tracking-wide
                    md:text-lg md:font-semibold md:text-text-primary"
         >
-          Productos ({{ items().length }})
+          Products ({{ items().length }})
         </h2>
         <div class="flex items-center gap-2 w-full md:w-auto">
           <app-inputsearch
             class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-            placeholder="Buscar producto..."
+            placeholder="Search product..."
             (searchChange)="onSearch($event)"
           />
           <app-options-dropdown
@@ -294,7 +294,7 @@ export class ProductListComponent {
     avatarShape: "square",
     badgeKey: "state",
     footerKey: "base_price",
-    footerLabel: "Precio",
+    footerLabel: "Price",
     footerStyle: "prominent",
     detailKeys: [
       { key: "sku", label: "SKU" },
@@ -304,13 +304,13 @@ export class ProductListComponent {
 
   actions: TableAction[] = [
     {
-      label: "Editar",
+      label: "Edit",
       icon: "edit",
       variant: "primary",
       action: (item) => this.edit.emit(item),
     },
     {
-      label: "Eliminar",
+      label: "Delete",
       icon: "trash-2",
       variant: "danger",
       action: (item) => this.delete.emit(item),

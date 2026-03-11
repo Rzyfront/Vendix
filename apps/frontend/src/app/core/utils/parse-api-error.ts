@@ -17,10 +17,6 @@ export function parseApiError(error: any): ParsedApiError {
   const devMessage = body?.message ?? null;
   const details = body?.details ?? null;
 
-  if (devMessage) {
-    console.warn(`[API Error] ${errorCode ?? 'UNKNOWN'}: ${devMessage}`);
-  }
-
   return {
     errorCode,
     userMessage: errorCode

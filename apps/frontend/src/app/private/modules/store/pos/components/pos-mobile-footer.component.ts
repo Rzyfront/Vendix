@@ -29,7 +29,9 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
           </div>
           <div class="cart-totals">
             <span class="total-label">Total</span>
-            <span class="total-amount">{{ formatCurrency(cartSummary?.total || 0) }}</span>
+            <span class="total-amount">{{
+              formatCurrency(cartSummary?.total || 0)
+            }}</span>
           </div>
         </div>
 
@@ -267,10 +269,13 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         filter: brightness(1.1);
       }
 
-      /* Tablet: Respect collapsed sidebar */
+      /* Tablet: Sync with sidebar width */
       @media (min-width: 768px) and (max-width: 1023px) {
         .pos-mobile-footer {
-          left: var(--sidebar-width-collapsed, 4rem);
+          left: var(
+            --sidebar-width-current,
+            var(--sidebar-width-collapsed, 4rem)
+          );
         }
       }
 
@@ -305,6 +310,7 @@ export class PosMobileFooterComponent {
 
   @Input() cartSummary: CartSummary | null = null;
   @Input() itemCount: number = 0;
+  @Input() isTablet: boolean = false;
 
   @Output() viewCart = new EventEmitter<void>();
   @Output() saveDraft = new EventEmitter<void>();

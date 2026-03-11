@@ -67,7 +67,10 @@ export class ProductsService {
       context: JSON.stringify(productData),
     };
 
-    const response = await this.ai_engine.run('product_description_creator', variables);
+    const response = await this.ai_engine.run(
+      'product_description_creator',
+      variables,
+    );
 
     if (!response.success) {
       throw new VendixHttpException(ErrorCodes.AI_REQUEST_001);
@@ -1008,8 +1011,6 @@ export class ProductsService {
         ...productData
       } = updateProductDto;
 
-      console.log('Product update data:', productData);
-
       const result = await this.prisma.$transaction(
         async (prisma) => {
           // Actualizar producto
@@ -1131,9 +1132,7 @@ export class ProductsService {
                     this.s3Service.deleteFile(thumbKey).catch(() => {}),
                   ];
                 }),
-              ).catch((err) =>
-                console.warn('S3 cleanup error during product update:', err),
-              );
+              ).catch(() => {});
             }
           }
 
@@ -1557,8 +1556,7 @@ export class ProductsService {
         const thumbKey = [...parts, `thumb_${fileName}`].join('/');
         await this.s3Service.deleteFile(thumbKey).catch(() => {});
       } catch (error) {
-        // Log pero no bloquear — la imagen DB se elimina igual
-        console.warn(`Failed to delete S3 file for image ${imageId}:`, error);
+        // Silent - DB image deletion proceeds anyway
       }
     }
 

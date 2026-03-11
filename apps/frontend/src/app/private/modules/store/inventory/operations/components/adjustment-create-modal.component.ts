@@ -74,25 +74,25 @@ interface LocationStockOption {
       subtitle="Registra un ajuste de inventario"
     >
       <!-- Step Indicator -->
-      <div class="flex items-center justify-center mb-8 px-4">
+      <div class="flex items-center justify-center mb-6 px-2">
         <!-- Step 1 -->
-        <div class="flex flex-col items-center gap-2 relative z-10">
+        <div class="flex flex-col items-center gap-1.5 relative z-10">
           <div
-            class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300"
+            class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300"
             [class]="
               currentStep === 1
-                ? 'bg-primary text-white ring-4 ring-primary/20 shadow-lg scale-110'
-                : 'bg-success text-white ring-4 ring-success/20 shadow-md'
+                ? 'bg-primary text-white ring-2 ring-primary/20 shadow-lg'
+                : 'bg-success text-white ring-2 ring-success/20 shadow-md'
             "
           >
             @if (currentStep > 1) {
-              <app-icon name="check" [size]="18" class="text-white"></app-icon>
+              <app-icon name="check" [size]="14" class="text-white"></app-icon>
             } @else {
               1
             }
           </div>
           <span
-            class="text-xs font-bold uppercase tracking-wider transition-colors duration-300"
+            class="text-[10px] font-bold uppercase tracking-wider transition-colors duration-300"
             [class]="currentStep >= 1 ? 'text-primary' : 'text-text-muted'"
           >
             Seleccionar
@@ -100,7 +100,7 @@ interface LocationStockOption {
         </div>
 
         <!-- Connection Line -->
-        <div class="w-24 h-1 mx-2 relative -top-3">
+        <div class="w-16 h-0.5 mx-1 relative top-3">
           <div class="absolute inset-0 bg-gray-200 rounded-full"></div>
           <div
             class="absolute inset-0 bg-success rounded-full transition-all duration-500 ease-out"
@@ -109,19 +109,19 @@ interface LocationStockOption {
         </div>
 
         <!-- Step 2 -->
-        <div class="flex flex-col items-center gap-2 relative z-10">
+        <div class="flex flex-col items-center gap-1.5 relative z-10">
           <div
-            class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300 border-2"
+            class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 border-2"
             [class]="
               currentStep === 2
-                ? 'bg-primary border-primary text-white ring-4 ring-primary/20 shadow-lg scale-110'
+                ? 'bg-primary border-primary text-white ring-2 ring-primary/20 shadow-lg'
                 : 'bg-white border-gray-300 text-gray-400'
             "
           >
             2
           </div>
           <span
-            class="text-xs font-bold uppercase tracking-wider transition-colors duration-300"
+            class="text-[10px] font-bold uppercase tracking-wider transition-colors duration-300"
             [class]="currentStep === 2 ? 'text-primary' : 'text-text-muted'"
           >
             Registrar
@@ -595,10 +595,16 @@ interface LocationStockOption {
               variant="outline"
               type="button"
               (clicked)="goToStep(1)"
-              customClasses="!rounded-xl"
+              customClasses="!rounded-xl flex items-center"
             >
-              <app-icon name="arrow-left" [size]="16" class="mr-1"></app-icon>
-              Atras
+              <span class="flex items-center">
+                <app-icon
+                  name="arrow-left"
+                  [size]="14"
+                  class="mr-1.5"
+                ></app-icon>
+                Atras
+              </span>
             </app-button>
           }
         </div>
@@ -617,10 +623,16 @@ interface LocationStockOption {
               type="button"
               (clicked)="goToStep(2)"
               [disabled]="!selectedLocation"
-              customClasses="!rounded-xl font-bold shadow-md shadow-primary-200"
+              customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 flex items-center"
             >
-              Continuar
-              <app-icon name="arrow-right" [size]="16" class="ml-1"></app-icon>
+              <span class="flex items-center">
+                Continuar
+                <app-icon
+                  name="arrow-right"
+                  [size]="14"
+                  class="ml-1.5"
+                ></app-icon>
+              </span>
             </app-button>
           } @else {
             <app-button
@@ -629,9 +641,16 @@ interface LocationStockOption {
               (clicked)="onSubmit()"
               [loading]="isSubmitting"
               [disabled]="form.invalid || isSubmitting || !selected_type"
-              customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all"
+              customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all flex items-center"
             >
-              Crear Ajuste
+              <span class="flex items-center">
+                Crear Ajuste
+                <app-icon
+                  name="check-circle"
+                  [size]="14"
+                  class="ml-1.5"
+                ></app-icon>
+              </span>
             </app-button>
           }
         </div>

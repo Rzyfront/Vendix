@@ -67,20 +67,40 @@ export interface OrganizationCandidate {
       <div class="w-full max-w-sm mx-auto space-y-6 sm:space-y-8">
         <!-- Contextual Branding -->
         <div class="text-center">
-          <div class="mx-auto flex items-center justify-center space-x-2 sm:space-x-3 mb-3 sm:mb-4">
+          <div
+            class="mx-auto flex items-center justify-center space-x-2 sm:space-x-3 mb-3 sm:mb-4"
+          >
             @if (logoUrl) {
-              <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center overflow-hidden">
-                <img [src]="logoUrl" alt="Logo" class="w-full h-full object-contain" />
+              <div
+                class="w-8 h-8 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center overflow-hidden"
+              >
+                <img
+                  [src]="logoUrl"
+                  alt="Logo"
+                  class="w-full h-full object-contain"
+                />
               </div>
             } @else {
               <div
                 class="w-8 h-8 sm:w-10 sm:h-10 bg-[var(--color-primary)] rounded-xl flex items-center justify-center"
               >
-                <app-icon name="cart" [size]="20" class="sm:hidden" color="white"></app-icon>
-                <app-icon name="cart" [size]="24" class="hidden sm:block" color="white"></app-icon>
+                <app-icon
+                  name="cart"
+                  [size]="20"
+                  class="sm:hidden"
+                  color="white"
+                ></app-icon>
+                <app-icon
+                  name="cart"
+                  [size]="24"
+                  class="hidden sm:block"
+                  color="white"
+                ></app-icon>
               </div>
             }
-            <h1 class="text-lg sm:text-xl font-semibold text-[var(--color-text-primary)]">
+            <h1
+              class="text-lg sm:text-xl font-semibold text-[var(--color-text-primary)]"
+            >
               {{ displayName || 'Vendix' }}
             </h1>
           </div>
@@ -91,7 +111,9 @@ export interface OrganizationCandidate {
             {{ loginTitle }}
           </h2>
           @if (displayName) {
-            <p class="mt-1 sm:mt-2 mb-2 text-sm text-[var(--color-text-secondary)]">
+            <p
+              class="mt-1 sm:mt-2 mb-2 text-sm text-[var(--color-text-secondary)]"
+            >
               {{ contextDescription }}
             </p>
           }
@@ -103,7 +125,13 @@ export interface OrganizationCandidate {
         </div>
 
         <!-- Login Form -->
-        <app-card shadow="md" class="!mt-6 sm:!mt-8" [animateOnLoad]="true" [responsivePadding]="true" overflow="visible">
+        <app-card
+          shadow="md"
+          class="!mt-6 sm:!mt-8"
+          [animateOnLoad]="true"
+          [responsivePadding]="true"
+          overflow="visible"
+        >
           <form
             [formGroup]="loginForm"
             (ngSubmit)="onSubmit()"
@@ -112,7 +140,10 @@ export interface OrganizationCandidate {
             <div class="space-y-4">
               <!-- Vlink Field (only for Vendix context) -->
               @if (contextType === 'vendix') {
-                <div class="vlink-field" [class.show-tooltip]="showVlinkTooltip">
+                <div
+                  class="vlink-field"
+                  [class.show-tooltip]="showVlinkTooltip"
+                >
                   <app-input
                     label="V-link"
                     formControlName="vlink"
@@ -221,7 +252,9 @@ export interface OrganizationCandidate {
 
         <!-- Additional Links -->
         @if (contextType === 'vendix') {
-          <div class="text-center text-sm text-[var(--color-text-secondary)] mt-1">
+          <div
+            class="text-center text-sm text-[var(--color-text-secondary)] mt-1"
+          >
             <p>
               ¿Necesitas una cuenta corporativa?
               <a
@@ -236,7 +269,9 @@ export interface OrganizationCandidate {
 
         <!-- Context Info -->
         @if (displayName) {
-          <div class="text-center text-xs text-[var(--color-text-muted)] mt-2 sm:mt-3">
+          <div
+            class="text-center text-xs text-[var(--color-text-muted)] mt-2 sm:mt-3"
+          >
             <p>{{ contextFooter }}</p>
             <p class="mt-0.5">Powered by Vendix</p>
           </div>
@@ -246,7 +281,12 @@ export interface OrganizationCandidate {
 
     <!-- Disambiguation Modal -->
     @if (showDisambiguationModal && disambiguationCandidates.length > 0) {
-      <div class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+      <div
+        class="fixed inset-0 z-50 overflow-y-auto"
+        aria-labelledby="modal-title"
+        role="dialog"
+        aria-modal="true"
+      >
         <!-- Backdrop -->
         <div
           class="fixed inset-0 bg-black/50 transition-opacity"
@@ -261,11 +301,20 @@ export interface OrganizationCandidate {
             <!-- Header -->
             <div class="p-6 pb-4 border-b border-[var(--color-border)]">
               <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-full bg-[var(--color-primary)]/10 flex items-center justify-center">
-                  <app-icon name="building" [size]="20" color="var(--color-primary)"></app-icon>
+                <div
+                  class="w-10 h-10 rounded-full bg-[var(--color-primary)]/10 flex items-center justify-center"
+                >
+                  <app-icon
+                    name="building"
+                    [size]="20"
+                    color="var(--color-primary)"
+                  ></app-icon>
                 </div>
                 <div>
-                  <h3 class="text-lg font-semibold text-[var(--color-text-primary)]" id="modal-title">
+                  <h3
+                    class="text-lg font-semibold text-[var(--color-text-primary)]"
+                    id="modal-title"
+                  >
                     Selecciona tu organización
                   </h3>
                   <p class="text-sm text-[var(--color-text-secondary)]">
@@ -286,11 +335,19 @@ export interface OrganizationCandidate {
                       class="w-full flex items-center gap-3 p-3 rounded-xl border border-[var(--color-border)] hover:border-[var(--color-primary)] hover:bg-[var(--color-primary)]/5 transition-all group cursor-pointer"
                     >
                       <!-- Org Logo/Avatar -->
-                      <div class="w-10 h-10 rounded-lg bg-[var(--color-muted)] flex items-center justify-center overflow-hidden shrink-0">
+                      <div
+                        class="w-10 h-10 rounded-lg bg-[var(--color-muted)] flex items-center justify-center overflow-hidden shrink-0"
+                      >
                         @if (org.logo_url) {
-                          <img [src]="org.logo_url" [alt]="org.name" class="w-full h-full object-cover" />
+                          <img
+                            [src]="org.logo_url"
+                            [alt]="org.name"
+                            class="w-full h-full object-cover"
+                          />
                         } @else {
-                          <span class="text-lg font-semibold text-[var(--color-text-muted)]">
+                          <span
+                            class="text-lg font-semibold text-[var(--color-text-muted)]"
+                          >
                             {{ org.name.charAt(0).toUpperCase() }}
                           </span>
                         }
@@ -298,10 +355,14 @@ export interface OrganizationCandidate {
 
                       <!-- Org Info -->
                       <div class="flex-1 text-left min-w-0">
-                        <p class="font-medium text-[var(--color-text-primary)] truncate group-hover:text-[var(--color-primary)]">
+                        <p
+                          class="font-medium text-[var(--color-text-primary)] truncate group-hover:text-[var(--color-primary)]"
+                        >
                           {{ org.name }}
                         </p>
-                        <p class="text-xs text-[var(--color-text-muted)] truncate">
+                        <p
+                          class="text-xs text-[var(--color-text-muted)] truncate"
+                        >
                           ID: {{ org.slug }}
                         </p>
                       </div>
@@ -480,9 +541,6 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
   private loadAuthContext(): void {
     const appConfig = this.appConfigFacade.getCurrentConfig();
     if (!appConfig) {
-      console.warn(
-        '[CONTEXTUAL-LOGIN] App config not available, using default context',
-      );
       return;
     }
 
@@ -497,7 +555,9 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
       this.contextType = 'organization';
       this.displayName = domainConfig.organization_slug || '';
       this.loginForm.get('vlink')?.clearValidators();
-    } else if (['STORE_ADMIN', 'STORE_LANDING', 'STORE_ECOMMERCE'].includes(env)) {
+    } else if (
+      ['STORE_ADMIN', 'STORE_LANDING', 'STORE_ECOMMERCE'].includes(env)
+    ) {
       this.contextType = 'store';
       this.displayName = domainConfig.store_slug || '';
       this.loginForm.get('vlink')?.clearValidators();
@@ -515,13 +575,10 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
    */
   private verifyAllowedContext(): void {
     const allowedEnvs = ['VENDIX_LANDING', 'ORG_LANDING', 'STORE_LANDING'];
-    const env = this.appConfigFacade.getCurrentConfig()?.domainConfig?.environment;
+    const env =
+      this.appConfigFacade.getCurrentConfig()?.domainConfig?.environment;
 
     if (env && !allowedEnvs.includes(env)) {
-      console.warn(
-        '[CONTEXTUAL-LOGIN] Non-LANDING app type detected, redirecting to /',
-        { environment: env },
-      );
       this.router.navigate(['/']);
     }
   }

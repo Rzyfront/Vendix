@@ -56,7 +56,6 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
 
     // Always use default content for landing page
     this.initializeDefaultContent();
-    console.log('Planes initialized:', this.plans);
 
     // Subscribe to tenant configuration (includes branding and domain config)
     this.tenantFacade.tenantConfig$
@@ -64,7 +63,6 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
       .subscribe((tenantConfig) => {
         if (tenantConfig) {
           this.tenantConfig = tenantConfig;
-          console.log('Tenant config updated:', tenantConfig);
         }
       });
   }

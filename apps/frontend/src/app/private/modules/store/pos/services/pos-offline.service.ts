@@ -87,7 +87,6 @@ export class PosOfflineService {
     return of(data).pipe(
       map(() => {
         if (!this.isLocalStorageAvailable()) {
-          console.warn('LocalStorage no disponible');
           return false;
         }
 

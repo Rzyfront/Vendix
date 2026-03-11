@@ -9,7 +9,10 @@ import {
   CreateTemplateDto,
   UpdateTemplateDto,
 } from './services/templates.service';
-import { TemplateListItem, TemplateConfigType } from './interfaces/template.interface';
+import {
+  TemplateListItem,
+  TemplateConfigType,
+} from './interfaces/template.interface';
 
 // Import components
 import {
@@ -264,10 +267,18 @@ export class TemplatesComponent implements OnInit, OnDestroy {
     subtitleTransform: (value: string) => this.formatConfigurationType(value),
     badgeKey: 'is_active',
     badgeConfig: { type: 'status', size: 'sm' },
-    badgeTransform: (val: boolean) => val ? 'Active' : 'Inactive',
+    badgeTransform: (val: boolean) => (val ? 'Active' : 'Inactive'),
     detailKeys: [
-      { key: 'is_system', label: 'Type', transform: (val: boolean) => val ? 'System' : 'Custom' },
-      { key: 'created_at', label: 'Created', transform: (val: string) => this.formatDate(val) },
+      {
+        key: 'is_system',
+        label: 'Type',
+        transform: (val: boolean) => (val ? 'System' : 'Custom'),
+      },
+      {
+        key: 'created_at',
+        label: 'Created',
+        transform: (val: string) => this.formatDate(val),
+      },
     ],
   };
 
@@ -372,7 +383,6 @@ export class TemplatesComponent implements OnInit, OnDestroy {
     column: string;
     direction: 'asc' | 'desc' | null;
   }): void {
-    console.log('Sort event:', sortEvent);
     this.loadTemplates();
   }
 
@@ -481,9 +491,7 @@ export class TemplatesComponent implements OnInit, OnDestroy {
       });
   }
 
-  viewTemplate(template: TemplateListItem): void {
-    console.log('View template:', template);
-  }
+  viewTemplate(template: TemplateListItem): void {}
 
   formatConfigurationType(type: string): string {
     const typeMap: Record<string, string> = {

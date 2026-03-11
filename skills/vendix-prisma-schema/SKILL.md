@@ -7,7 +7,7 @@ metadata:
 ---
 # Vendix Prisma Schema Pattern
 
-> **Schema Editing & Migrations** - Edición de schema.prisma, relaciones y workflow de migraciones en desarrollo.
+> **Schema Editing & Migrations** - Editing schema.prisma, relationships, and migration workflow in development.
 
 ## 🎯 Schema Structure
 

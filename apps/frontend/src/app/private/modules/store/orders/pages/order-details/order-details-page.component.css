@@ -2,6 +2,15 @@
   display: block;
 }
 
+/* ── Mobile-first card rhythm ─────────────────────── */
+
+/* Ensure cards have consistent border-radius on mobile */
+@media (max-width: 639px) {
+  :host ::ng-deep app-card > div {
+    border-radius: 0.75rem;
+  }
+}
+
 /* ── Print styles ──────────────────────────────────── */
 
 @media print {

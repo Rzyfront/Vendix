@@ -1,57 +1,57 @@
 # Vendix Permissions System
 
-## Descripción General
+## General Description
 
-El sistema de permisos de Vendix es un sistema RBAC (Role-Based Access Control) granular que protege los endpoints de la API mediante el decorador `@Permissions()` de NestJS. Los permisos se definen tanto en el código (controladores) como en la base de datos (seed), permitiendo auditoría completa y gestión dinámica.
+The Vendix permissions system is a granular RBAC (Role-Based Access Control) system that protects API endpoints using the NestJS `@Permissions()` decorator. Permissions are defined both in code (controllers) and in the database (seed), enabling full auditing and dynamic management.
 
-**¿Por qué es importante mantenerlo sincronizado?**
-- Los endpoints sin permisos correctos pueden ser inaccesibles o exponer funcionalidad no autorizada
-- Los permisos obsoletos en el seed consumen memoria y confunden a los desarrolladores
-- La inconsistencia entre código y base de datos causa errores en producción
+**Why is it important to keep it synchronized?**
+- Endpoints without correct permissions can be inaccessible or expose unauthorized functionality
+- Obsolete permissions in the seed consume memory and confuse developers
+- Inconsistency between code and database causes production errors
 
-## Formato de Permisos
+## Permission Format
 
-### Patrones de Nomenclatura
+### Naming Patterns
 
-Los permisos siguen estos patrones:
+Permissions follow these patterns:
 
-1. **Formato estándar**: `domain:resource:action`
-   - Ejemplo: `store:products:create`
-   - Ejemplo: `organization:users:update`
+1. **Standard format**: `domain:resource:action`
+   - Example: `store:products:create`
+   - Example: `organization:users:update`
 
-2. **Con subrecurso**: `domain:resource:subresource:action`
-   - Ejemplo: `store:products:variants:create`
-   - Ejemplo: `organization:roles:permissions:read`
+2. **With subresource**: `domain:resource:subresource:action`
+   - Example: `store:products:variants:create`
+   - Example: `organization:roles:permissions:read`
 
-3. **Formato alternativo**: `domain.resource.action`
-   - Ejemplo: `auth.login`
-   - Ejemplo: `audit.logs`
-   - Ejemplo: `domains.create`
+3. **Alternative format**: `domain.resource.action`
+   - Example: `auth.login`
+   - Example: `audit.logs`
+   - Example: `domains.create`
 
-### Estructura de un Permiso en el Seed
+### Permission Structure in the Seed
 
 ```typescript
 {
   name: 'domain:resource:action',
-  description: 'Descripción clara en español',
-  path: '/api/ruta/completa',
+  description: 'Clear description in Spanish',
+  path: '/api/full/route',
   method: 'METHOD',  // GET, POST, PATCH, PUT, DELETE
 },
 ```
 
-### Acciones Estándar
+### Standard Actions
 
-- `create` - POST para crear recursos
-- `read` - GET para listar/ver recursos
-- `update` - PATCH/PUT para actualizar
-- `delete` - DELETE para eliminar
-- `stats` - GET para estadísticas
-- `search` - GET para búsquedas específicas
-- `admin_delete` - DELETE hard (solo admin)
+- `create` - POST to create resources
+- `read` - GET to list/view resources
+- `update` - PATCH/PUT to update
+- `delete` - DELETE to remove
+- `stats` - GET for statistics
+- `search` - GET for specific searches
+- `admin_delete` - Hard DELETE (admin only)
 
-## Cómo Agregar Nuevos Permisos
+## How to Add New Permissions
 
-### Paso 1: Agregar `@Permissions()` en el Controlador
+### Step 1: Add `@Permissions()` in the Controller
 
 ```typescript
 @Controller('store/products')
@@ -60,54 +60,54 @@ export class ProductsController {
   @Post()
   @Permissions('store:products:create')
   async create(@Body() createProductDto: CreateProductDto) {
-    // implementación
+    // implementation
   }
 
   @Get()
   @Permissions('store:products:read')
   async findAll(@Query() query: ProductQueryDto) {
-    // implementación
+    // implementation
   }
 }
 ```
 
-### Paso 2: Agregar el Permiso al Seed
+### Step 2: Add the Permission to the Seed
 
-Abrir `/home/rzyfront/Vendix/apps/backend/prisma/seeds/permissions-roles.seed.ts` y agregar en la posición correcta (manteniendo orden alfabético por dominio):
+Open `/home/rzyfront/Vendix/apps/backend/prisma/seeds/permissions-roles.seed.ts` and add in the correct position (maintaining alphabetical order by domain):
 
 ```typescript
 const permissions = [
-  // ... otros permisos ...
+  // ... other permissions ...
 
-  // Productos
+  // Products
   {
     name: 'store:products:create',
-    description: 'Crear producto',
+    description: 'Create product',
     path: '/api/store/products',
     method: 'POST',
   },
   {
     name: 'store:products:read',
-    description: 'Leer productos',
+    description: 'Read products',
     path: '/api/store/products',
     method: 'GET',
   },
-  // agregar nuevo permiso aquí en orden alfabético
+  // add new permission here in alphabetical order
 ];
 ```
 
-### Paso 3: Ejecutar el Seed
+### Step 3: Run the Seed
 
 ```bash
 cd /home/rzyfront/Vendix/apps/backend
 npx ts-node prisma/seeds/permissions-roles.seed.ts
 ```
 
-### Ejemplo Completo Paso a Paso
+### Complete Step-by-Step Example
 
-**Escenario**: Agregar permiso para exportar productos a CSV
+**Scenario**: Add permission to export products to CSV
 
-1. **En el controlador** (`store/products/products.controller.ts`):
+1. **In the controller** (`store/products/products.controller.ts`):
 ```typescript
 @Get('export/csv')
 @Permissions('store:products:export:csv')
@@ -116,135 +116,135 @@ async exportToCsv(@Query() query: ProductQueryDto) {
 }
 ```
 
-2. **En el seed** (`prisma/seeds/permissions-roles.seed.ts`):
+2. **In the seed** (`prisma/seeds/permissions-roles.seed.ts`):
 ```typescript
-// Agregar después de store:products:read y antes de store:products:update
+// Add after store:products:read and before store:products:update
 {
   name: 'store:products:export:csv',
-  description: 'Exportar productos a CSV',
+  description: 'Export products to CSV',
   path: '/api/store/products/export/csv',
   method: 'GET',
 },
 ```
 
-3. **Ejecutar seed**:
+3. **Run seed**:
 ```bash
 npx ts-node prisma/seeds/permissions-roles.seed.ts
 ```
 
-## Cómo Editar Permisos Existentes
+## How to Edit Existing Permissions
 
-### Cambiar Descripción
+### Change Description
 
 ```typescript
-// Antes
+// Before
 {
   name: 'store:products:read',
-  description: 'Leer productos',
+  description: 'Read products',
   path: '/api/store/products',
   method: 'GET',
 },
 
-// Después
+// After
 {
   name: 'store:products:read',
-  description: 'Leer productos de tienda (incluyendo variantes)',
+  description: 'Read store products (including variants)',
   path: '/api/store/products',
   method: 'GET',
 },
 ```
 
-### Corregir Path o Método
+### Fix Path or Method
 
-**Importante**: Si cambias la ruta en el controlador, debes actualizar el seed también.
+**Important**: If you change the route in the controller, you must update the seed as well.
 
 ```typescript
-// Controlador cambió de /store/products a /api/store/products
+// Controller changed from /store/products to /api/store/products
 {
   name: 'store:products:read',
-  description: 'Leer productos',
-  path: '/api/store/products',  // actualizado
+  description: 'Read products',
+  path: '/api/store/products',  // updated
   method: 'GET',
 },
 ```
 
-## Cómo Eliminar Permisos Obsoletos
+## How to Remove Obsolete Permissions
 
-### Paso 1: Verificar que no se usan en Controladores
+### Step 1: Verify They Are Not Used in Controllers
 
 ```bash
 grep -r "@Permissions('store:products:old')" /home/rzyfront/Vendix/apps/backend/src/domains --include="*.controller.ts"
 ```
 
-Si no hay resultados, el permiso no se usa y puede eliminarse.
+If there are no results, the permission is not in use and can be removed.
 
-### Paso 2: Eliminar del Seed
+### Step 2: Remove from the Seed
 
-Simplemente elimina el objeto del permiso del array en `prisma/seeds/permissions-roles.seed.ts`.
+Simply remove the permission object from the array in `prisma/seeds/permissions-roles.seed.ts`.
 
-### Paso 3: Ejecutar el Seed
+### Step 3: Run the Seed
 
 ```bash
 npx ts-node prisma/seeds/permissions-roles.seed.ts
 ```
 
-El seed eliminará automáticamente los permisos que ya no están en el array.
+The seed will automatically remove permissions that are no longer in the array.
 
-## Uso de Subagentes (Task Tool)
+## Using Subagents (Task Tool)
 
-Para agilizar el análisis de permisos, usa la herramienta `Task` con subagentes. Esto permite procesar múltiples dominios en paralelo.
+To speed up permission analysis, use the `Task` tool with subagents. This allows processing multiple domains in parallel.
 
-### Cuándo Usar Subagentes
+### When to Use Subagents
 
-- **Análisis completo de permisos**: Cuando necesites revisar todos los permisos de múltiples dominios
-- **Sincronización masiva**: Cuando necesites verificar la consistencia entre muchos controladores y el seed
-- **Refactorización de permisos**: Cuando cambies el nombre de muchos permisos a la vez
+- **Full permission analysis**: When you need to review all permissions across multiple domains
+- **Mass synchronization**: When you need to verify consistency between many controllers and the seed
+- **Permission refactoring**: When renaming many permissions at once
 
-### Ejemplos de Prompts para Subagentes
+### Example Prompts for Subagents
 
-#### Analizar un Dominio Completo
-
-```
-Analiza el dominio store en Vendix y extrae todos los @Permissions de sus controladores.
-Para cada controlador en /domains/store/, extrae:
-1. Nombre del permiso
-2. Path completo del endpoint
-3. Método HTTP
-4. Línea de código
-
-Organiza los resultados por subdominio (products, categories, brands, etc.)
-```
-
-#### Comparar con Seed Actual
+#### Analyze a Complete Domain
 
 ```
-Compara los permisos encontrados en los controladores con los permisos en el seed
-ubicado en /home/rzyfront/Vendix/apps/backend/prisma/seeds/permissions-roles.seed.ts
+Analyze the store domain in Vendix and extract all @Permissions from its controllers.
+For each controller in /domains/store/, extract:
+1. Permission name
+2. Full endpoint path
+3. HTTP method
+4. Line of code
 
-Identifica:
-1. Permisos faltantes (en controladores pero no en seed)
-2. Permisos sobrantes (en seed pero no usados en controladores)
-3. Permisos con paths o métodos incorrectos
-
-Genera un reporte con las diferencias encontradas.
+Organize the results by subdomain (products, categories, brands, etc.)
 ```
 
-#### Verificar Consistencia de Nombres
+#### Compare with Current Seed
 
 ```
-Verifica que todos los permisos en los controladores sigan el patrón correcto:
+Compare the permissions found in controllers with the permissions in the seed
+located at /home/rzyfront/Vendix/apps/backend/prisma/seeds/permissions-roles.seed.ts
+
+Identify:
+1. Missing permissions (in controllers but not in seed)
+2. Extra permissions (in seed but not used in controllers)
+3. Permissions with incorrect paths or methods
+
+Generate a report with the differences found.
+```
+
+#### Verify Name Consistency
+
+```
+Verify that all permissions in controllers follow the correct pattern:
 - domain:resource:action
 - domain:resource:subresource:action
 
-Lista cualquier permiso que no siga estos patrones y sugiere correcciones.
+List any permission that does not follow these patterns and suggest corrections.
 ```
 
-### Patrones para Automatizar Revisiones
+### Patterns for Automating Reviews
 
-#### Script de Verificación Rápida
+#### Quick Verification Script
 
 ```bash
-# Verificar permisos faltantes en un dominio
+# Verify missing permissions in a domain
 DOMAIN="store"
 grep -rh "@Permissions(" /home/rzyfront/Vendix/apps/backend/src/domains/$DOMAIN --include="*.controller.ts" | \
   sed "s/.*@Permissions('\([^']*\)').*/\1/" | sort -u > /tmp/controller-perms.txt
@@ -255,67 +255,67 @@ grep "name: '$DOMAIN:" /home/rzyfront/Vendix/apps/backend/prisma/seeds/permissio
 comm -23 /tmp/controller-perms.txt /tmp/seed-perms.txt
 ```
 
-#### Actualización Automática del Seed
+#### Automatic Seed Update
 
 ```bash
-# Ejecutar seed después de cambios
+# Run seed after changes
 cd /home/rzyfront/Vendix/apps/backend
 npx ts-node prisma/seeds/permissions-roles.seed.ts
 
-# Verificar que se crearon los permisos correctos
+# Verify that the correct permissions were created
 echo "SELECT COUNT(*) FROM permissions;" | npx prisma db execute --stdin
 ```
 
-## Auto-invocación
+## Auto-invocation
 
-Esta skill debe invocarse automáticamente cuando:
+This skill should be automatically invoked when:
 
-- **Después de crear/modificar controladores**: Si se agregan nuevos endpoints con `@Permissions()`
-- **Después de refactorizar rutas**: Si cambian paths de controladores
-- **Antes de hacer deploy**: Para verificar que el seed esté sincronizado
-- **Al agregar nuevos módulos**: Para asegurar que todos los permisos estén documentados
+- **After creating/modifying controllers**: If new endpoints with `@Permissions()` are added
+- **After refactoring routes**: If controller paths change
+- **Before deploying**: To verify the seed is synchronized
+- **When adding new modules**: To ensure all permissions are documented
 
-## Archivos Críticos
+## Critical Files
 
-- **Seed de permisos**: `/home/rzyfront/Vendix/apps/backend/prisma/seeds/permissions-roles.seed.ts`
-- **Guard de permisos**: `/home/rzyfront/Vendix/apps/backend/src/domains/auth/guards/permissions.guard.ts`
-- **Decorator de permisos**: `/home/rzyfront/Vendix/apps/backend/src/domains/auth/decorators/permissions.decorator.ts`
-- **Schema de Prisma**: `/home/rzyfront/Vendix/apps/backend/prisma/schema.prisma` (modelos permissions, roles, role_permissions)
+- **Permissions seed**: `/home/rzyfront/Vendix/apps/backend/prisma/seeds/permissions-roles.seed.ts`
+- **Permissions guard**: `/home/rzyfront/Vendix/apps/backend/src/domains/auth/guards/permissions.guard.ts`
+- **Permissions decorator**: `/home/rzyfront/Vendix/apps/backend/src/domains/auth/decorators/permissions.decorator.ts`
+- **Prisma schema**: `/home/rzyfront/Vendix/apps/backend/prisma/schema.prisma` (permissions, roles, role_permissions models)
 
-## Buenas Prácticas
+## Best Practices
 
-1. **SIEMPRE** agrega `@Permissions()` antes de implementar la lógica del endpoint
-2. **MANTÉN** el orden alfabético dentro de cada dominio en el seed
-3. **USA** descripciones claras y en español
-4. **VERIFICA** que el path coincida exactamente con la ruta del endpoint
-5. **EJECUTA** el seed después de cada cambio para validar
-6. **DOCUMENTA** permisos especiales (admin_delete, etc.) en comentarios si es necesario
+1. **ALWAYS** add `@Permissions()` before implementing the endpoint logic
+2. **MAINTAIN** alphabetical order within each domain in the seed
+3. **USE** clear descriptions in Spanish
+4. **VERIFY** that the path matches the endpoint route exactly
+5. **RUN** the seed after each change to validate
+6. **DOCUMENT** special permissions (admin_delete, etc.) in comments if necessary
 
 ## Troubleshooting
 
 ### Error: Permission not found
 
-**Causa**: El permiso está en el controlador pero no en el seed.
+**Cause**: The permission is in the controller but not in the seed.
 
-**Solución**: Agregar el permiso al seed y ejecutar `npx ts-node prisma/seeds/permissions-roles.seed.ts`.
+**Solution**: Add the permission to the seed and run `npx ts-node prisma/seeds/permissions-roles.seed.ts`.
 
-### Error: 403 Forbidden en endpoint
+### Error: 403 Forbidden on endpoint
 
-**Causa**: El usuario no tiene el permiso asignado a través de su rol.
+**Cause**: The user does not have the permission assigned through their role.
 
-**Solución**:
-1. Verificar que el permiso existe: `SELECT * FROM permissions WHERE name = 'permiso';`
-2. Verificar que el rol tiene el permiso: `SELECT * FROM role_permissions WHERE permission_id = X;`
-3. Si no está, ejecutar el seed de permisos o asignar manualmente.
+**Solution**:
+1. Verify the permission exists: `SELECT * FROM permissions WHERE name = 'permission';`
+2. Verify the role has the permission: `SELECT * FROM role_permissions WHERE permission_id = X;`
+3. If not, run the permissions seed or assign manually.
 
-### Permisos Duplicados
+### Duplicate Permissions
 
-**Causa**: Dos permisos con el mismo nombre en el seed.
+**Cause**: Two permissions with the same name in the seed.
 
-**Solución**: Los permisos tienen `@unique` en el schema. El seed usa `upsert` que actualiza si ya existe. Verificar que no haya duplicados en el array.
+**Solution**: Permissions have `@unique` in the schema. The seed uses `upsert` which updates if it already exists. Verify there are no duplicates in the array.
 
 ---
 
-**Última actualización**: 2026-01-27
-**Mantenedor**: Equipo Vendix
-**Versión del sistema**: 1.0
+**Last updated**: 2026-01-27
+**Maintainer**: Vendix Team
+**System version**: 1.0

@@ -4,10 +4,7 @@ import { Observable, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
-import {
-  PosShippingMethod,
-  PosShippingOption,
-} from '../models/shipping.model';
+import { PosShippingMethod, PosShippingOption } from '../models/shipping.model';
 
 @Injectable({
   providedIn: 'root',
@@ -30,14 +27,18 @@ export class PosShippingService {
         return [];
       }),
       catchError((error) => {
-        console.warn('Error fetching shipping methods:', error);
         return of([]);
       }),
     );
   }
 
   calculateShipping(
-    items: Array<{ product_id: number; quantity: number; weight?: number; price: number }>,
+    items: Array<{
+      product_id: number;
+      quantity: number;
+      weight?: number;
+      price: number;
+    }>,
     address: {
       country_code: string;
       state_province?: string;
@@ -58,7 +59,6 @@ export class PosShippingService {
           return Array.isArray(options) ? options : [];
         }),
         catchError((error) => {
-          console.warn('Error calculating shipping:', error);
           return of([]);
         }),
       );

@@ -1,4 +1,10 @@
-import { Injectable, NgZone, OnDestroy, PLATFORM_ID, Inject } from '@angular/core';
+import {
+  Injectable,
+  NgZone,
+  OnDestroy,
+  PLATFORM_ID,
+  Inject,
+} from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
 import { BehaviorSubject, fromEvent, Observable } from 'rxjs';
 import { map, startWith } from 'rxjs/operators';
@@ -60,7 +66,6 @@ export class FullscreenService implements OnDestroy {
         this.isFullscreen$.next(true);
       }
     } catch (error) {
-      console.warn('Error entering fullscreen:', error);
       throw error;
     }
   }
@@ -85,7 +90,6 @@ export class FullscreenService implements OnDestroy {
         this.isFullscreen$.next(false);
       }
     } catch (error) {
-      console.warn('Error exiting fullscreen:', error);
       throw error;
     }
   }

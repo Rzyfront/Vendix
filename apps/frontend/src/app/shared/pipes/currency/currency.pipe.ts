@@ -1,4 +1,11 @@
-import { Injectable, Pipe, PipeTransform, signal, computed, inject } from '@angular/core';
+import {
+  Injectable,
+  Pipe,
+  PipeTransform,
+  signal,
+  computed,
+  inject,
+} from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../environments/environment';
@@ -58,26 +65,32 @@ export class CurrencyFormatService {
   readonly loading = this.loadingSignal.asReadonly();
 
   // Computed: moneda formateada (por si se necesita en código TS)
-  readonly currencySymbol = computed(() => this.currentCurrency()?.symbol || '');
+  readonly currencySymbol = computed(
+    () => this.currentCurrency()?.symbol || '',
+  );
   readonly currencyCode = computed(() => this.currentCurrency()?.code || '');
-  readonly currencyPosition = computed(() => this.currentCurrency()?.position || 'after');
-  readonly currencyDecimals = computed(() => this.currentCurrency()?.decimal_places ?? 2);
+  readonly currencyPosition = computed(
+    () => this.currentCurrency()?.position || 'after',
+  );
+  readonly currencyDecimals = computed(
+    () => this.currentCurrency()?.decimal_places ?? 2,
+  );
 
   /**
    * Carga la moneda configurada en la tienda
    * @param force - Forza recarga ignorando caché
    */
   async loadCurrency(force = false): Promise<Currency | null> {
-    console.log('[CurrencyFormat] loadCurrency called, force:', force, 'current:', this.currentCurrency()?.code);
-
     // Verificar caché
-    if (!force && this.currentCurrency() !== null && Date.now() - this.lastFetchTime < this.CACHE_TTL) {
-      console.log('[CurrencyFormat] Using cached currency');
+    if (
+      !force &&
+      this.currentCurrency() !== null &&
+      Date.now() - this.lastFetchTime < this.CACHE_TTL
+    ) {
       return this.currentCurrency();
     }
 
     if (this.loading()) {
-      console.log('[CurrencyFormat] Already loading, skipping');
       return null;
     }
 
@@ -85,9 +98,9 @@ export class CurrencyFormatService {
 
     try {
       // 1. Try to get currency from domain config (injected at boot, no HTTP needed)
-      const domainCurrency = this.tenantFacade.getCurrentDomainConfig()?.customConfig?.currency;
+      const domainCurrency =
+        this.tenantFacade.getCurrentDomainConfig()?.customConfig?.currency;
       if (domainCurrency) {
-        console.log('[CurrencyFormat] Using currency from domain config:', domainCurrency.code);
         this.currentCurrencySignal.set(domainCurrency);
         this.lastFetchTime = Date.now();
         return domainCurrency;
@@ -96,17 +109,19 @@ export class CurrencyFormatService {
       // 2. Fallback: fetch via HTTP (for store-admin context where domain config may lack currency)
       // Only attempt /store/settings if the user is authenticated
       if (!this.hasValidAuthState()) {
-        console.warn('[CurrencyFormat] No domain currency and no auth state, skipping HTTP fetch');
         return null;
       }
 
-      console.log('[CurrencyFormat] Fetching store settings (admin fallback)...');
       const settingsResponse = await firstValueFrom(
-        this.http.get<ApiResponse<StoreSettings>>(`${environment.apiUrl}/store/settings`)
+        this.http.get<ApiResponse<StoreSettings>>(
+          `${environment.apiUrl}/store/settings`,
+        ),
       );
 
-      if (!settingsResponse.success || !settingsResponse.data?.general?.currency) {
-        console.warn('[CurrencyFormat] No currency in settings');
+      if (
+        !settingsResponse.success ||
+        !settingsResponse.data?.general?.currency
+      ) {
         return null;
       }
 
@@ -114,23 +129,22 @@ export class CurrencyFormatService {
 
       const currencyResponse = await firstValueFrom(
         this.http.get<{ success: boolean; data: Currency[]; message?: string }>(
-          `${environment.apiUrl}/public/currencies/active`
-        )
+          `${environment.apiUrl}/public/currencies/active`,
+        ),
       );
 
       if (!currencyResponse.success || !currencyResponse.data) {
-        console.warn('[CurrencyFormat] No active currencies found');
         return null;
       }
 
-      const currency = currencyResponse.data.find((c: Currency) => c.code === currencyCode);
+      const currency = currencyResponse.data.find(
+        (c: Currency) => c.code === currencyCode,
+      );
 
       if (!currency) {
-        console.warn(`[CurrencyFormat] Currency ${currencyCode} not found in active currencies`);
         return null;
       }
 
-      console.log('[CurrencyFormat] Found currency via HTTP:', currency.code);
       this.currentCurrencySignal.set(currency);
       this.lastFetchTime = Date.now();
 
@@ -206,7 +220,9 @@ export class CurrencyFormatService {
       formatted = Math.round(amount).toLocaleString('en-US');
     }
 
-    return position === 'before' ? `${symbol}${formatted}` : `${formatted}${symbol}`;
+    return position === 'before'
+      ? `${symbol}${formatted}`
+      : `${formatted}${symbol}`;
   }
 
   /**
@@ -226,7 +242,9 @@ export class CurrencyFormatService {
       formatted = `${Math.round(value)}`;
     }
 
-    return position === 'before' ? `${symbol}${formatted}` : `${formatted}${symbol}`;
+    return position === 'before'
+      ? `${symbol}${formatted}`
+      : `${formatted}${symbol}`;
   }
 
   /**
@@ -272,10 +290,7 @@ export class CurrencyPipe implements PipeTransform {
     this.currencyService.loadCurrency();
   }
 
-  transform(
-    value: number | null | undefined,
-    forceDecimals?: number
-  ): string {
+  transform(value: number | null | undefined, forceDecimals?: number): string {
     // Manejar valores nulos
     if (value === null || value === undefined) {
       return '';

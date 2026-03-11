@@ -109,8 +109,12 @@ export interface UserMenuOption {
             <span class="item-label">{{ option.label }}</span>
             <span
               class="settings-sync-badge"
-              *ngIf="option.label === 'Configuración' && (newModuleCount$ | async) as count"
-            >{{ count }}</span>
+              *ngIf="
+                option.label === 'Configuración' &&
+                (newModuleCount$ | async) as count
+              "
+              >{{ count }}</span
+            >
           </button>
         </div>
       </div>
@@ -351,14 +355,11 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
           'ORG_ADMIN',
         );
 
-      if (success) {
-        // El éxito se maneja en el servicio con la redirección
-        console.log('Switched to organization environment');
-      } else {
-        console.error('Failed to switch to organization environment');
+      if (!success) {
+        // El fallo se maneja en el servicio con la redirección
       }
     } catch (error) {
-      console.error('Error switching to organization environment:', error);
+      // Error al cambiar de entorno
     }
   }
 
@@ -369,7 +370,6 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
       const availableStores = user?.stores || [];
 
       if (availableStores.length === 0) {
-        console.warn('No stores available for switching');
         return;
       }
 
@@ -380,13 +380,11 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
           firstStore.slug,
         );
 
-      if (success) {
-        console.log('Switched to store environment');
-      } else {
-        console.error('Failed to switch to store environment');
+      if (!success) {
+        // El fallo se maneja en el servicio con la redirección
       }
     } catch (error) {
-      console.error('Error switching to store environment:', error);
+      // Error al cambiar de entorno
     }
   }
 
@@ -399,7 +397,7 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
     try {
       await this.fullscreenService.toggleFullscreen();
     } catch (error) {
-      console.error('Error toggling fullscreen:', error);
+      // Error al entrar en pantalla completa
     }
   }
 
@@ -407,7 +405,7 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
     try {
       await this.fullscreenService.exitFullscreen();
     } catch (error) {
-      console.error('Error exiting fullscreen:', error);
+      // Error al salir de pantalla completa
     }
   }
 

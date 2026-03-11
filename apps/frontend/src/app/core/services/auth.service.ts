@@ -96,8 +96,13 @@ export class AuthService {
             throw new Error(response.message || 'Login failed');
           }
 
-          const { user, user_settings, store_settings, access_token, refresh_token } =
-            response.data;
+          const {
+            user,
+            user_settings,
+            store_settings,
+            access_token,
+            refresh_token,
+          } = response.data;
 
           const decodedToken = this.decodeJwtToken(access_token);
           // Los roles ahora vienen directamente como array de strings desde la API
@@ -139,8 +144,6 @@ export class AuthService {
     // 🔒 LIMPIEZA DE SEGURIDAD
     this.checkAndCleanAuthResidues();
 
-    console.log('🔐 Iniciando login de customer');
-
     // Asegurar que no enviamos 'type' si viene de un action de NgRx
     const { type, ...cleanData } = loginData;
 
@@ -152,8 +155,13 @@ export class AuthService {
             throw new Error(response.message || 'Login failed');
           }
 
-          const { user, user_settings, store_settings, access_token, refresh_token } =
-            response.data;
+          const {
+            user,
+            user_settings,
+            store_settings,
+            access_token,
+            refresh_token,
+          } = response.data;
 
           const decodedToken = this.decodeJwtToken(access_token);
           user.roles = user.roles || [];
@@ -211,10 +219,6 @@ export class AuthService {
       localStorage.removeItem('vendix_app_config');
     }
 
-    console.log(
-      '🔐 Iniciando registro de owner con estado limpio y sin environment previo',
-    );
-
     return this.http
       .post<AuthResponse>(`${this.API_URL}/register-owner`, registerData)
       .pipe(
@@ -223,8 +227,13 @@ export class AuthService {
             return response;
           }
 
-          const { user, user_settings, store_settings, access_token, refresh_token } =
-            response.data;
+          const {
+            user,
+            user_settings,
+            store_settings,
+            access_token,
+            refresh_token,
+          } = response.data;
 
           const decodedToken = this.decodeJwtToken(access_token);
           // Los roles ahora vienen directamente como array de strings desde la API
@@ -278,8 +287,6 @@ export class AuthService {
       localStorage.setItem('vendix_logged_out_recently', Date.now().toString());
     }
 
-    console.log('[AuthService] Logout - local state cleared');
-
     // 2. Notificación Backend (Fire and forget)
     // No esperamos la respuesta para bloquear la UI
     if (refreshToken) {
@@ -288,13 +295,20 @@ export class AuthService {
         headers['Authorization'] = `Bearer ${accessToken}`;
       }
 
-      this.http.post(`${this.API_URL}/logout`, {
-        refresh_token: refreshToken,
-      }, { headers }).pipe(
-        take(1)
-      ).subscribe({
-        error: (err) => console.warn('[AuthService] Backend logout signaling failed', err)
-      });
+      this.http
+        .post(
+          `${this.API_URL}/logout`,
+          {
+            refresh_token: refreshToken,
+          },
+          { headers },
+        )
+        .pipe(take(1))
+        .subscribe({
+          error: () => {
+            // Silently fail - backend logout signaling is not critical
+          },
+        });
     }
 
     // NOTA: La navegación es manejada por SessionService
@@ -305,8 +319,6 @@ export class AuthService {
   ): Observable<AuthResponse & { updatedEnvironment?: string }> {
     // 🔒 LIMPIEZA DE SEGURIDAD: Eliminar cualquier residuo de sesión anterior antes de registrar
     this.checkAndCleanAuthResidues();
-
-    console.log('🔐 Iniciando registro de customer con estado limpio');
 
     // Asegurar que no enviamos 'type' si viene de un action de NgRx
     const { type, ...cleanData } = registerData;
@@ -319,14 +331,20 @@ export class AuthService {
             return response;
           }
 
-          const { user, user_settings, store_settings, access_token, refresh_token } =
-            response.data;
+          const {
+            user,
+            user_settings,
+            store_settings,
+            access_token,
+            refresh_token,
+          } = response.data;
 
           const decodedToken = this.decodeJwtToken(access_token);
           user.roles = user.roles || [];
 
           // NEW STANDARD: Read app_type directly
-          const userAppType = (user_settings as any).app_type || 'STORE_ECOMMERCE';
+          const userAppType =
+            (user_settings as any).app_type || 'STORE_ECOMMERCE';
 
           return {
             ...response,
@@ -463,8 +481,6 @@ export class AuthService {
       legacyKeysToRemove.forEach((key) => {
         localStorage.removeItem(key);
       });
-
-      console.log('🧹 Limpieza completa de datos de autenticación realizada');
     }
   }
 
@@ -484,7 +500,6 @@ export class AuthService {
     ].some((key) => localStorage.getItem(key) !== null);
 
     if (hasResidues) {
-      console.log('🔍 Detectados residuos de autenticación, limpiando...');
       this.clearAllAuthData();
       return true;
     }

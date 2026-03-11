@@ -4,6 +4,7 @@ import {
   ConflictException,
   Logger,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 
@@ -31,7 +32,10 @@ const EXPENSE_INCLUDE = {
 export class ExpenseFlowService {
   private readonly logger = new Logger(ExpenseFlowService.name);
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly event_emitter: EventEmitter2,
+  ) {}
 
   private getContext() {
     const context = RequestContextService.getContext();
@@ -81,6 +85,16 @@ export class ExpenseFlowService {
     });
 
     this.logger.log(`Expense #${id} approved by user #${context.user_id}`);
+
+    // Emit event for Accounting AutoEntryService to create automatic journal entries
+    this.event_emitter.emit('expense.approved', {
+      expense_id: updated.id,
+      organization_id: context.organization_id,
+      store_id: context.store_id,
+      amount: updated.amount,
+      category_id: updated.category_id,
+    });
+
     return updated;
   }
 
@@ -118,6 +132,15 @@ export class ExpenseFlowService {
     });
 
     this.logger.log(`Expense #${id} marked as paid by user #${context.user_id}`);
+
+    // Emit event for Accounting AutoEntryService to create automatic journal entries
+    this.event_emitter.emit('expense.paid', {
+      expense_id: updated.id,
+      organization_id: context.organization_id,
+      store_id: context.store_id,
+      amount: updated.amount,
+    });
+
     return updated;
   }
 

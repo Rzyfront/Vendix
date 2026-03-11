@@ -11,6 +11,7 @@ import { ReceiptsSettingsForm } from './components/receipts-settings-form/receip
 import { AppSettingsForm } from './components/app-settings-form/app-settings-form.component';
 import { LucideAngularModule } from "lucide-angular";
 import { IconComponent } from '../../../../../shared/components/index';
+import { ScrollableTabsComponent } from '../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
 import { StickyHeaderComponent, StickyHeaderBadgeColor, StickyHeaderActionButton } from '../../../../../shared/components/sticky-header/sticky-header.component';
 import { ConfigFacade } from '../../../../../core/store/config';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
@@ -30,6 +31,7 @@ import { take } from 'rxjs/operators';
     PosSettingsForm,
     ReceiptsSettingsForm,
     AppSettingsForm,
+    ScrollableTabsComponent,
     StickyHeaderComponent
   ],
   templateUrl: './general-settings.component.html',

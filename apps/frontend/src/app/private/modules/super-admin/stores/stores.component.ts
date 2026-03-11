@@ -202,10 +202,12 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
     detailKeys: [
       { key: 'slug', label: 'Slug' },
       {
-        key: 'addresses', label: 'Ciudad', transform: (v) => {
+        key: 'addresses',
+        label: 'Ciudad',
+        transform: (v) => {
           if (!v || v.length === 0) return 'N/A';
           return v[0].city || 'N/A';
-        }
+        },
       },
       { key: '_count.store_users', label: 'Usuarios', icon: 'users' },
     ],
@@ -312,7 +314,6 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['stores'] && !changes['stores'].firstChange) {
-      console.log('Stores changed:', changes['stores'].currentValue);
     }
   }
 
@@ -442,7 +443,9 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         next: (response: any) => {
           if (response.meta) {
             this.pagination.total = response.meta.total || 0;
-            this.pagination.totalPages = response.meta.totalPages || Math.ceil(this.pagination.total / this.pagination.limit);
+            this.pagination.totalPages =
+              response.meta.totalPages ||
+              Math.ceil(this.pagination.total / this.pagination.limit);
           }
           if (response.success && response.data) {
             this.stores = response.data.map((store: any) => ({
@@ -463,7 +466,11 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
                 slug: 'unknown',
               },
               addresses: store.addresses || [],
-              _count: store._count || { products: 0, orders: 0, store_users: 0 },
+              _count: store._count || {
+                products: 0,
+                orders: 0,
+                store_users: 0,
+              },
             }));
           } else {
             this.stores = [];
@@ -660,9 +667,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       });
   }
 
-  viewStore(store: StoreListItem): void {
-    console.log('View store:', store);
-  }
+  viewStore(store: StoreListItem): void {}
 
   editStore(store: StoreListItem): void {
     this.selectedStore = store;

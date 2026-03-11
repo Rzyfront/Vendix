@@ -2,15 +2,16 @@ import { Routes } from '@angular/router';
 import { provideState } from '@ngrx/store';
 import { provideEffects } from '@ngrx/effects';
 import { AuthGuard } from '../../core/guards/auth.guard';
-
+import { invoicingReducer } from '../../private/modules/store/invoicing/state/reducers/invoicing.reducer';
+import { InvoicingEffects } from '../../private/modules/store/invoicing/state/effects/invoicing.effects';
 
 export const storeAdminRoutes: Routes = [
   {
     path: 'admin',
     loadComponent: () =>
-      import(
-        '../../private/layouts/store-admin/store-admin-layout.component'
-      ).then((c) => c.StoreAdminLayoutComponent),
+      import('../../private/layouts/store-admin/store-admin-layout.component').then(
+        (c) => c.StoreAdminLayoutComponent,
+      ),
     canActivate: [AuthGuard],
     children: [
       {
@@ -21,13 +22,17 @@ export const storeAdminRoutes: Routes = [
       {
         path: 'dashboard',
         loadComponent: () =>
-          import(
-            '../../private/modules/store/dashboard/dashboard.component'
-          ).then((c) => c.DashboardComponent),
+          import('../../private/modules/store/dashboard/dashboard.component').then(
+            (c) => c.DashboardComponent,
+          ),
       },
       // POS Routes
       {
         path: 'pos',
+        providers: [
+          provideState({ name: 'invoicing', reducer: invoicingReducer }),
+          provideEffects(InvoicingEffects),
+        ],
         loadComponent: () =>
           import('../../private/modules/store/pos/pos.component').then(
             (c) => c.PosComponent,
@@ -41,30 +46,30 @@ export const storeAdminRoutes: Routes = [
             path: '',
             pathMatch: 'full',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/products/products.component'
-              ).then((c) => c.ProductsComponent),
+              import('../../private/modules/store/products/products.component').then(
+                (c) => c.ProductsComponent,
+              ),
           },
           {
             path: 'create',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/products/pages/product-create-page/product-create-page.component'
-              ).then((c) => c.ProductCreatePageComponent),
+              import('../../private/modules/store/products/pages/product-create-page/product-create-page.component').then(
+                (c) => c.ProductCreatePageComponent,
+              ),
           },
           {
             path: 'edit/:id',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/products/pages/product-create-page/product-create-page.component'
-              ).then((c) => c.ProductCreatePageComponent),
+              import('../../private/modules/store/products/pages/product-create-page/product-create-page.component').then(
+                (c) => c.ProductCreatePageComponent,
+              ),
           },
           {
             path: ':id',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/products/components/product-details/product-details.component'
-              ).then((c) => c.ProductDetailsComponent),
+              import('../../private/modules/store/products/components/product-details/product-details.component').then(
+                (c) => c.ProductDetailsComponent,
+              ),
           },
         ],
       },
@@ -72,9 +77,9 @@ export const storeAdminRoutes: Routes = [
       {
         path: 'inventory',
         loadComponent: () =>
-          import(
-            '../../private/modules/store/inventory/inventory.component'
-          ).then((c) => c.InventoryComponent),
+          import('../../private/modules/store/inventory/inventory.component').then(
+            (c) => c.InventoryComponent,
+          ),
         children: [
           {
             path: '',
@@ -84,57 +89,55 @@ export const storeAdminRoutes: Routes = [
           {
             path: 'dashboard',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/inventory/inventory-dashboard.component'
-              ).then((c) => c.InventoryDashboardComponent),
+              import('../../private/modules/store/inventory/inventory-dashboard.component').then(
+                (c) => c.InventoryDashboardComponent,
+              ),
           },
           // Punto de Compra (POP) - Creating purchase orders
           {
             path: 'pop',
             loadComponent: () => {
-              console.log('Attempting to load PopComponent for /pop');
-              return import(
-                '../../private/modules/store/inventory/pop/pop.component'
-              ).then((c) => c.PopComponent);
+              return import('../../private/modules/store/inventory/pop/pop.component').then(
+                (c) => c.PopComponent,
+              );
             },
           },
           {
             path: 'pop/:id',
             loadComponent: () => {
-              console.log('Attempting to load PopComponent for /pop/:id');
-              return import(
-                '../../private/modules/store/inventory/pop/pop.component'
-              ).then((c) => c.PopComponent);
+              return import('../../private/modules/store/inventory/pop/pop.component').then(
+                (c) => c.PopComponent,
+              );
             },
           },
           {
             path: 'suppliers',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/inventory/suppliers/suppliers.component'
-              ).then((c) => c.SuppliersComponent),
+              import('../../private/modules/store/inventory/suppliers/suppliers.component').then(
+                (c) => c.SuppliersComponent,
+              ),
           },
           /* Orders removed (moved to Orders module) */
           {
             path: 'locations',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/inventory/locations/locations.component'
-              ).then((c) => c.LocationsComponent),
+              import('../../private/modules/store/inventory/locations/locations.component').then(
+                (c) => c.LocationsComponent,
+              ),
           },
           {
             path: 'adjustments',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/inventory/operations/stock-adjustments.component'
-              ).then((c) => c.StockAdjustmentsComponent),
+              import('../../private/modules/store/inventory/operations/stock-adjustments.component').then(
+                (c) => c.StockAdjustmentsComponent,
+              ),
           },
           {
             path: 'movements',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/inventory/movements/movements.component'
-              ).then((c) => c.MovementsComponent),
+              import('../../private/modules/store/inventory/movements/movements.component').then(
+                (c) => c.MovementsComponent,
+              ),
           },
         ],
       },
@@ -150,30 +153,30 @@ export const storeAdminRoutes: Routes = [
           {
             path: 'sales',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/orders/orders/orders.component'
-              ).then((c) => c.OrdersComponent),
+              import('../../private/modules/store/orders/orders/orders.component').then(
+                (c) => c.OrdersComponent,
+              ),
           },
           {
             path: 'purchase-orders',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/orders/purchase-orders/purchase-orders.component'
-              ).then((c) => c.PurchaseOrdersComponent),
+              import('../../private/modules/store/orders/purchase-orders/purchase-orders.component').then(
+                (c) => c.PurchaseOrdersComponent,
+              ),
           },
           {
             path: 'purchase-orders',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/orders/purchase-orders/purchase-orders.component'
-              ).then((c) => c.PurchaseOrdersComponent),
+              import('../../private/modules/store/orders/purchase-orders/purchase-orders.component').then(
+                (c) => c.PurchaseOrdersComponent,
+              ),
           },
           {
             path: ':id',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/orders/pages/order-details/order-details-page.component'
-              ).then((c) => c.OrderDetailsPageComponent),
+              import('../../private/modules/store/orders/pages/order-details/order-details-page.component').then(
+                (c) => c.OrderDetailsPageComponent,
+              ),
           },
         ],
       },
@@ -189,23 +192,23 @@ export const storeAdminRoutes: Routes = [
           {
             path: 'all',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/customers/customers.component'
-              ).then((c) => c.CustomersComponent),
+              import('../../private/modules/store/customers/customers.component').then(
+                (c) => c.CustomersComponent,
+              ),
           },
           {
             path: 'reviews',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/customers/reviews/reviews.component'
-              ).then((c) => c.ReviewsComponent),
+              import('../../private/modules/store/customers/reviews/reviews.component').then(
+                (c) => c.ReviewsComponent,
+              ),
           },
           {
             path: ':id',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/customers/details/customer-details.component'
-              ).then((c) => c.CustomerDetailsComponent),
+              import('../../private/modules/store/customers/details/customer-details.component').then(
+                (c) => c.CustomerDetailsComponent,
+              ),
           },
         ],
       },
@@ -221,16 +224,16 @@ export const storeAdminRoutes: Routes = [
           {
             path: 'promotions',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/marketing/promotions/promotions.component'
-              ).then((c) => c.PromotionsComponent),
+              import('../../private/modules/store/marketing/promotions/promotions.component').then(
+                (c) => c.PromotionsComponent,
+              ),
           },
           {
             path: 'coupons',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/marketing/coupons/coupons.component'
-              ).then((c) => c.CouponsComponent),
+              import('../../private/modules/store/marketing/coupons/coupons.component').then(
+                (c) => c.CouponsComponent,
+              ),
           },
         ],
       },
@@ -246,9 +249,9 @@ export const storeAdminRoutes: Routes = [
       {
         path: 'ecommerce',
         loadComponent: () =>
-          import(
-            '../../private/modules/store/ecommerce/ecommerce.component'
-          ).then((c) => c.EcommerceComponent),
+          import('../../private/modules/store/ecommerce/ecommerce.component').then(
+            (c) => c.EcommerceComponent,
+          ),
       },
       // Settings Routes
       {
@@ -262,52 +265,52 @@ export const storeAdminRoutes: Routes = [
           {
             path: 'general',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/settings/general/general-settings.component'
-              ).then((c) => c.GeneralSettingsComponent),
+              import('../../private/modules/store/settings/general/general-settings.component').then(
+                (c) => c.GeneralSettingsComponent,
+              ),
           },
           {
             path: 'payments',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/settings/payments/payments-settings.component'
-              ).then((c) => c.PaymentsSettingsComponent),
+              import('../../private/modules/store/settings/payments/payments-settings.component').then(
+                (c) => c.PaymentsSettingsComponent,
+              ),
           },
           {
             path: 'shipping',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/settings/shipping/shipping-settings.component'
-              ).then((c) => c.ShippingSettingsComponent),
+              import('../../private/modules/store/settings/shipping/shipping-settings.component').then(
+                (c) => c.ShippingSettingsComponent,
+              ),
           },
           {
             path: 'appearance',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/settings/appearance/appearance-settings.component'
-              ).then((c) => c.AppearanceSettingsComponent),
+              import('../../private/modules/store/settings/appearance/appearance-settings.component').then(
+                (c) => c.AppearanceSettingsComponent,
+              ),
           },
           {
             path: 'security',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/settings/security/security-settings.component'
-              ).then((c) => c.SecuritySettingsComponent),
+              import('../../private/modules/store/settings/security/security-settings.component').then(
+                (c) => c.SecuritySettingsComponent,
+              ),
           },
           {
             path: 'domains',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/settings/domains/store-domains.component'
-              ).then((c) => c.StoreDomainsComponent),
+              import('../../private/modules/store/settings/domains/store-domains.component').then(
+                (c) => c.StoreDomainsComponent,
+              ),
           },
 
           {
             path: 'legal-documents',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/settings/legal-documents/legal-documents.component'
-              ).then((c) => c.LegalDocumentsComponent),
+              import('../../private/modules/store/settings/legal-documents/legal-documents.component').then(
+                (c) => c.LegalDocumentsComponent,
+              ),
           },
           {
             path: 'support',
@@ -332,16 +335,16 @@ export const storeAdminRoutes: Routes = [
                 path: '',
                 pathMatch: 'full',
                 loadComponent: () =>
-                  import(
-                    '../../private/modules/store/settings/support/support-settings.component'
-                  ).then((c) => c.SupportSettingsComponent),
+                  import('../../private/modules/store/settings/support/support-settings.component').then(
+                    (c) => c.SupportSettingsComponent,
+                  ),
               },
               {
                 path: ':id',
                 loadComponent: () =>
-                  import(
-                    '../../private/modules/store/settings/support/components/ticket-detail/ticket-detail.component'
-                  ).then((c) => c.TicketDetailComponent),
+                  import('../../private/modules/store/settings/support/components/ticket-detail/ticket-detail.component').then(
+                    (c) => c.TicketDetailComponent,
+                  ),
               },
             ],
           },
@@ -366,7 +369,31 @@ export const storeAdminRoutes: Routes = [
         path: 'expenses',
         loadChildren: () =>
           import('../../private/modules/store/expenses/expenses.routes').then(
-            (m) => m.expensesRoutes
+            (m) => m.expensesRoutes,
+          ),
+      },
+      // Invoicing Routes
+      {
+        path: 'invoicing',
+        loadChildren: () =>
+          import('../../private/modules/store/invoicing/invoicing.routes').then(
+            (m) => m.invoicingRoutes,
+          ),
+      },
+      // Accounting Routes
+      {
+        path: 'accounting',
+        loadChildren: () =>
+          import('../../private/modules/store/accounting/accounting.routes').then(
+            (m) => m.accountingRoutes,
+          ),
+      },
+      // Payroll Routes
+      {
+        path: 'payroll',
+        loadChildren: () =>
+          import('../../private/modules/store/payroll/payroll.routes').then(
+            (m) => m.payrollRoutes,
           ),
       },
     ],

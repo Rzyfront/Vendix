@@ -7,15 +7,15 @@ metadata:
 ---
 # Vendix Frontend State Management
 
-> **Services, Toast & Notifications** - Estado reactivo, servicios HTTP y sistema de notificaciones.
+> **Services, Toast & Notifications** - Reactive state, HTTP services, and notification system.
 
 ## 🎯 State Management Principles
 
-**Vendix usa un enfoque híbrido:**
-- **Servicios con BehaviorSubject** para estado global
-- **Señales (Angular 20)** para estado local de componentes
-- **RxJS Observables** para operaciones asíncronas
-- **ToastService** para notificaciones al usuario
+**Vendix uses a hybrid approach:**
+- **Services with BehaviorSubject** for global state
+- **Signals (Angular 20)** for local component state
+- **RxJS Observables** for asynchronous operations
+- **ToastService** for user notifications
 
 ---
 

@@ -79,10 +79,10 @@ import { StoreSettingsService } from '../settings/general/services/store-setting
         class="flex-1 flex flex-col bg-surface rounded-card shadow-card border border-border min-h-0 overflow-hidden"
       >
         <!-- Header -->
-        <div class="flex-none px-4 lg:px-6 py-3 lg:py-4 border-b border-border pos-header">
-          <div
-            class="flex justify-between items-center gap-3"
-          >
+        <div
+          class="flex-none px-4 lg:px-6 py-3 lg:py-4 border-b border-border pos-header"
+        >
+          <div class="flex justify-between items-center gap-3">
             <!-- Left: Logo + Title -->
             <div class="flex items-center gap-2 lg:gap-3">
               <div
@@ -95,17 +95,29 @@ import { StoreSettingsService } from '../settings/general/services/store-setting
                 ></app-icon>
               </div>
               <div class="flex flex-col">
-                <h1 class="font-bold text-text-primary text-base lg:text-lg leading-none flex items-center gap-2">
+                <h1
+                  class="font-bold text-text-primary text-base lg:text-lg leading-none flex items-center gap-2"
+                >
                   @if (isEditMode()) {
                     <span>Editando Orden #{{ editingOrderNumber() }}</span>
-                    <app-badge variant="warning" class="hidden sm:inline-flex">Edición</app-badge>
+                    <app-badge variant="warning" class="hidden sm:inline-flex"
+                      >Edición</app-badge
+                    >
                   } @else {
                     <span class="hidden sm:inline">Vendix</span> POS
-                    <app-badge variant="success" class="hidden sm:inline-flex">Vende</app-badge>
+                    <app-badge variant="success" class="hidden sm:inline-flex"
+                      >Vende</app-badge
+                    >
                   }
                 </h1>
-                <span class="text-[10px] lg:text-xs text-text-secondary font-medium hidden sm:inline">
-                  {{ isEditMode() ? 'Modificar items de la orden' : 'Punto de venta' }}
+                <span
+                  class="text-[10px] lg:text-xs text-text-secondary font-medium hidden sm:inline"
+                >
+                  {{
+                    isEditMode()
+                      ? 'Modificar items de la orden'
+                      : 'Punto de venta'
+                  }}
                 </span>
               </div>
             </div>
@@ -184,35 +196,73 @@ import { StoreSettingsService } from '../settings/general/services/store-setting
         </div>
 
         <!-- Main Content Grid -->
-        <div class="flex-1 h-0 p-3 lg:p-6 min-h-0 overflow-hidden pos-main-content relative">
-          
+        <div
+          class="flex-1 h-0 p-3 lg:p-6 min-h-0 overflow-hidden pos-main-content relative"
+        >
           @if (isOutOfHours && !canBypassSchedule) {
             <!-- Out of hours overlay -->
-            <div class="absolute inset-0 z-40 bg-surface/90 backdrop-blur-sm flex items-center justify-center p-4">
-              <app-card class="max-w-md w-full shadow-xl border-border" [padding]="true">
-                <div class="flex flex-col items-center text-center py-6 px-4 gap-4">
-                  <div class="w-20 h-20 rounded-full bg-destructive/10 flex items-center justify-center text-destructive mb-2">
+            <div
+              class="absolute inset-0 z-40 bg-surface/90 backdrop-blur-sm flex items-center justify-center p-4"
+            >
+              <app-card
+                class="max-w-md w-full shadow-xl border-border"
+                [padding]="true"
+              >
+                <div
+                  class="flex flex-col items-center text-center py-6 px-4 gap-4"
+                >
+                  <div
+                    class="w-20 h-20 rounded-full bg-destructive/10 flex items-center justify-center text-destructive mb-2"
+                  >
                     <app-icon name="clock" [size]="40"></app-icon>
                   </div>
-                  <h2 class="text-2xl font-bold text-text-primary">POS Fuera de Horario</h2>
+                  <h2 class="text-2xl font-bold text-text-primary">
+                    POS Fuera de Horario
+                  </h2>
                   <p class="text-text-secondary text-sm leading-relaxed">
-                    {{ outOfHoursMessage || 'El punto de venta está fuera del horario de atención configurado. No se podrán realizar ventas hasta dentro del horario establecido.' }}
+                    {{
+                      outOfHoursMessage ||
+                        'El punto de venta está fuera del horario de atención configurado. No se podrán realizar ventas hasta dentro del horario establecido.'
+                    }}
                   </p>
-                  
+
                   @if (nextOpenTime) {
-                    <div class="bg-primary/5 border border-primary/20 rounded-xl p-4 w-full mt-2 flex flex-col items-center">
-                      <span class="text-xs text-text-secondary font-medium uppercase tracking-wider mb-1">Próxima apertura</span>
-                      <span class="text-lg font-bold text-primary">{{ nextOpenTime }}</span>
+                    <div
+                      class="bg-primary/5 border border-primary/20 rounded-xl p-4 w-full mt-2 flex flex-col items-center"
+                    >
+                      <span
+                        class="text-xs text-text-secondary font-medium uppercase tracking-wider mb-1"
+                        >Próxima apertura</span
+                      >
+                      <span class="text-lg font-bold text-primary">{{
+                        nextOpenTime
+                      }}</span>
                     </div>
                   }
-                  
-                  <div class="flex flex-col w-full gap-3 mt-6 pt-6 border-t border-border">
-                    <p class="text-xs text-text-secondary mb-1">¿Necesitas modificar los horarios?</p>
-                    <app-button variant="primary" class="w-full" (clicked)="goToSettings()">
-                      <app-icon name="settings" [size]="18" slot="icon"></app-icon>
+
+                  <div
+                    class="flex flex-col w-full gap-3 mt-6 pt-6 border-t border-border"
+                  >
+                    <p class="text-xs text-text-secondary mb-1">
+                      ¿Necesitas modificar los horarios?
+                    </p>
+                    <app-button
+                      variant="primary"
+                      class="w-full"
+                      (clicked)="goToSettings()"
+                    >
+                      <app-icon
+                        name="settings"
+                        [size]="18"
+                        slot="icon"
+                      ></app-icon>
                       Configuración de POS y Horarios
                     </app-button>
-                    <app-button variant="outline" class="w-full" (clicked)="goToDashboard()">
+                    <app-button
+                      variant="outline"
+                      class="w-full"
+                      (clicked)="goToDashboard()"
+                    >
                       Volver al Dashboard
                     </app-button>
                   </div>
@@ -255,11 +305,12 @@ import { StoreSettingsService } from '../settings/general/services/store-setting
         </div>
       </div>
 
-      <!-- Mobile Footer (only visible on mobile) -->
+      <!-- Mobile Footer (visible on mobile and tablet for sidebar sync) -->
       <app-pos-mobile-footer
-        *ngIf="isMobile()"
+        *ngIf="isMobile() || isTablet()"
         [cartSummary]="cartSummary"
         [itemCount]="cartItems.length"
+        [isTablet]="isTablet()"
         (viewCart)="onOpenCartModal()"
         (saveDraft)="onSaveDraft()"
         (shipping)="onShipping()"
@@ -403,16 +454,19 @@ export class PosComponent implements OnInit, OnDestroy {
   // Mobile detection signal
   isMobile = signal(false);
 
+  // Tablet detection (md breakpoint: 768px-1023px) - for sidebar synchronization
+  isTablet = signal(false);
+
   // Store settings for schedule validation
   storeSettingsSubscription: any;
   enableScheduleValidation = false;
   businessHours: Record<string, { open: string; close: string }> = {};
-  
+
   // Admin bypass for schedule validation
   isAdmin = false;
   canBypassSchedule = false;
   scheduleStatusChecked = false;
-  
+
   // Schedule UI State
   isOutOfHours = false;
   nextOpenTime?: string;
@@ -443,7 +497,10 @@ export class PosComponent implements OnInit, OnDestroy {
   }
 
   private checkMobile(): void {
-    this.isMobile.set(window.innerWidth < 1024);
+    const width = window.innerWidth;
+    this.isMobile.set(width < 768);
+    // Tablet range: 768px - 1023px (where sidebar can be collapsed/expanded)
+    this.isTablet.set(width >= 768 && width < 1024);
   }
 
   ngOnInit(): void {
@@ -459,35 +516,36 @@ export class PosComponent implements OnInit, OnDestroy {
    * Usa el endpoint del backend para obtener el estado con info de admin
    */
   private validateScheduleOnInit(): void {
-    this.settingsService.getScheduleStatus().pipe(
-      takeUntil(this.destroy$)
-    ).subscribe({
-      next: (response) => {
-        if (response?.success && response?.data) {
-          const status = response.data;
-          this.isAdmin = status.isAdmin || false;
-          this.canBypassSchedule = status.canBypass || false;
-          this.scheduleStatusChecked = true;
-          this.scheduleHandledByBackend = true;
+    this.settingsService
+      .getScheduleStatus()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response) => {
+          if (response?.success && response?.data) {
+            const status = response.data;
+            this.isAdmin = status.isAdmin || false;
+            this.canBypassSchedule = status.canBypass || false;
+            this.scheduleStatusChecked = true;
+            this.scheduleHandledByBackend = true;
 
-          // Si está fuera de horario y no es admin
-          if (!status.isWithinBusinessHours && !this.canBypassSchedule) {
-            this.isOutOfHours = true;
-            this.nextOpenTime = status.nextOpenTime;
-            this.outOfHoursMessage = status.message;
+            // Si está fuera de horario y no es admin
+            if (!status.isWithinBusinessHours && !this.canBypassSchedule) {
+              this.isOutOfHours = true;
+              this.nextOpenTime = status.nextOpenTime;
+              this.outOfHoursMessage = status.message;
+            }
+            // Si está fuera de horario pero es admin, mostrar warning info
+            else if (!status.isWithinBusinessHours && this.canBypassSchedule) {
+              this.showAdminScheduleWarning(status.message ?? '');
+            }
           }
-          // Si está fuera de horario pero es admin, mostrar warning info
-          else if (!status.isWithinBusinessHours && this.canBypassSchedule) {
-            this.showAdminScheduleWarning(status.message ?? '');
-          }
-        }
-      },
-      error: (err) => {
-        console.error('Error validating schedule:', err);
-        // En caso de error, permitir acceso pero usar validación local
-        this.scheduleStatusChecked = true;
-      }
-    });
+        },
+        error: (err) => {
+          console.error('Error validating schedule:', err);
+          // En caso de error, permitir acceso pero usar validación local
+          this.scheduleStatusChecked = true;
+        },
+      });
   }
 
   goToSettings(): void {
@@ -503,9 +561,10 @@ export class PosComponent implements OnInit, OnDestroy {
    */
   private showAdminScheduleWarning(message: string): void {
     this.toastService.info(
-      message || 'Fuera de horario de atención. Tienes acceso de administrador.',
+      message ||
+        'Fuera de horario de atención. Tienes acceso de administrador.',
       'Horario de Atención',
-      8000
+      8000,
     );
   }
 
@@ -611,10 +670,7 @@ export class PosComponent implements OnInit, OnDestroy {
       });
   }
 
-  onProductSelected(product: any): void {
-    // Product selected from POS product selection
-    // console.log('Product selected:', product);
-  }
+  onProductSelected(product: any): void {}
 
   onProductAddedToCart(event: { product: any; quantity: number }): void {
     // Toast is already handled in the child component
@@ -717,16 +773,20 @@ export class PosComponent implements OnInit, OnDestroy {
         // For regular sales, use customer data from backend or selected customer
         customer_name: paymentData.isAnonymousSale
           ? 'Consumidor Final'
-          : (paymentData.order?.customer_name || (this.selectedCustomer
+          : paymentData.order?.customer_name ||
+            (this.selectedCustomer
               ? `${this.selectedCustomer.first_name} ${this.selectedCustomer.last_name}`
-              : '')),
-        customer_email: (!paymentData.isAnonymousSale && this.selectedCustomer?.email)
-          ? this.selectedCustomer.email
-          : paymentData.order?.customer_email || '',
+              : ''),
+        customer_email:
+          !paymentData.isAnonymousSale && this.selectedCustomer?.email
+            ? this.selectedCustomer.email
+            : paymentData.order?.customer_email || '',
         // For anonymous sales, use "000" as tax ID
         customer_tax_id: paymentData.isAnonymousSale
           ? '000'
-          : (paymentData.order?.customer_tax_id || this.selectedCustomer?.document_number || ''),
+          : paymentData.order?.customer_tax_id ||
+            this.selectedCustomer?.document_number ||
+            '',
         customer: paymentData.order?.customer || this.selectedCustomer,
         payment: paymentData.order?.payment || paymentData.payment,
       };
@@ -767,7 +827,9 @@ export class PosComponent implements OnInit, OnDestroy {
   onViewOrderDetail(orderId: string): void {
     const targetOrderId = orderId || this.currentOrderId;
     if (!targetOrderId) {
-      this.toastService.error('No se pudo determinar la orden para mostrar el detalle');
+      this.toastService.error(
+        'No se pudo determinar la orden para mostrar el detalle',
+      );
       return;
     }
 
@@ -876,15 +938,24 @@ export class PosComponent implements OnInit, OnDestroy {
             weight_unit: item.weight_unit || undefined,
           })),
         subtotal: shippingData.order?.subtotal || this.cartSummary.subtotal,
-        tax_amount: shippingData.order?.tax_amount || this.cartSummary.taxAmount,
+        tax_amount:
+          shippingData.order?.tax_amount || this.cartSummary.taxAmount,
         discount_amount:
-          shippingData.order?.discount_amount || this.cartSummary.discountAmount,
-        total_amount: shippingData.order?.total_amount || this.cartSummary.total,
+          shippingData.order?.discount_amount ||
+          this.cartSummary.discountAmount,
+        total_amount:
+          shippingData.order?.total_amount || this.cartSummary.total,
         customer_name: this.selectedCustomer
           ? `${this.selectedCustomer.first_name} ${this.selectedCustomer.last_name}`
           : shippingData.order?.customer_name || '',
-        customer_email: this.selectedCustomer?.email || shippingData.order?.customer_email || '',
-        customer_tax_id: this.selectedCustomer?.document_number || shippingData.order?.customer_tax_id || '',
+        customer_email:
+          this.selectedCustomer?.email ||
+          shippingData.order?.customer_email ||
+          '',
+        customer_tax_id:
+          this.selectedCustomer?.document_number ||
+          shippingData.order?.customer_tax_id ||
+          '',
         customer: shippingData.order?.customer || this.selectedCustomer,
         payment: shippingData.order?.payment || shippingData.payment,
       };
@@ -896,93 +967,118 @@ export class PosComponent implements OnInit, OnDestroy {
   }
 
   private checkEditMode(): void {
-    this.route.queryParams.pipe(takeUntil(this.destroy$)).subscribe((params) => {
-      const editOrderId = params['editOrder'];
-      if (editOrderId) {
-        this.loadOrderForEditing(editOrderId.toString());
-      }
-    });
+    this.route.queryParams
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((params) => {
+        const editOrderId = params['editOrder'];
+        if (editOrderId) {
+          this.loadOrderForEditing(editOrderId.toString());
+        }
+      });
   }
 
   private loadOrderForEditing(orderId: string): void {
     this.loading = true;
-    this.ordersService.getOrderById(orderId).pipe(
-      takeUntil(this.destroy$),
-    ).subscribe({
-      next: (response: any) => {
-        const order = response.data || response;
+    this.ordersService
+      .getOrderById(orderId)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response: any) => {
+          const order = response.data || response;
 
-        if (order.state !== 'created') {
+          if (order.state !== 'created') {
+            this.loading = false;
+            this.toastService.error(
+              'Solo se pueden editar ordenes en estado "Creada"',
+            );
+            this.router.navigate(['/admin/orders', orderId]);
+            return;
+          }
+
+          // Load order items into cart
+          this.cartService
+            .loadFromOrder(order)
+            .pipe(takeUntil(this.destroy$))
+            .subscribe({
+              next: () => {
+                this.isEditMode.set(true);
+                this.editingOrderId.set(orderId);
+                this.editingOrderNumber.set(order.order_number);
+                this.loading = false;
+                this.toastService.info(`Editando Orden #${order.order_number}`);
+              },
+              error: (err) => {
+                this.loading = false;
+                this.toastService.error(
+                  'Error al cargar los productos de la orden',
+                );
+              },
+            });
+        },
+        error: (err) => {
           this.loading = false;
-          this.toastService.error('Solo se pueden editar ordenes en estado "Creada"');
-          this.router.navigate(['/admin/orders', orderId]);
-          return;
-        }
-
-        // Load order items into cart
-        this.cartService.loadFromOrder(order).pipe(
-          takeUntil(this.destroy$),
-        ).subscribe({
-          next: () => {
-            this.isEditMode.set(true);
-            this.editingOrderId.set(orderId);
-            this.editingOrderNumber.set(order.order_number);
-            this.loading = false;
-            this.toastService.info(`Editando Orden #${order.order_number}`);
-          },
-          error: (err) => {
-            this.loading = false;
-            this.toastService.error('Error al cargar los productos de la orden');
-          },
-        });
-      },
-      error: (err) => {
-        this.loading = false;
-        this.toastService.error('Error al cargar la orden para edición');
-        this.router.navigate(['/admin/orders']);
-      },
-    });
+          this.toastService.error('Error al cargar la orden para edición');
+          this.router.navigate(['/admin/orders']);
+        },
+      });
   }
 
   private updateExistingOrder(): void {
     if (!this.cartState || !this.editingOrderId()) return;
 
     this.loading = true;
-    this.posOrderService.updateOrderItems(this.editingOrderId()!, this.cartState).pipe(
-      takeUntil(this.destroy$),
-    ).subscribe({
-      next: () => {
-        this.loading = false;
-        this.toastService.success('Orden actualizada exitosamente');
-        this.cartService.clearCart().pipe(takeUntil(this.destroy$)).subscribe();
-        this.isEditMode.set(false);
-        this.router.navigate(['/admin/orders', this.editingOrderId()]);
-      },
-      error: (err) => {
-        this.loading = false;
-        this.toastService.error(err.message || 'Error al actualizar la orden');
-      },
-    });
+    this.posOrderService
+      .updateOrderItems(this.editingOrderId()!, this.cartState)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.loading = false;
+          this.toastService.success('Orden actualizada exitosamente');
+          this.cartService
+            .clearCart()
+            .pipe(takeUntil(this.destroy$))
+            .subscribe();
+          this.isEditMode.set(false);
+          this.router.navigate(['/admin/orders', this.editingOrderId()]);
+        },
+        error: (err) => {
+          this.loading = false;
+          this.toastService.error(
+            err.message || 'Error al actualizar la orden',
+          );
+        },
+      });
   }
 
   private loadStoreSettings(): void {
-    this.storeSettingsSubscription = this.store.select(selectStoreSettings).pipe(takeUntil(this.destroy$)).subscribe((storeSettings: any) => {
-      const settings = storeSettings;
-      if (settings?.general?.timezone) {
-        this.storeTimezone = settings.general.timezone;
-      }
-      if (settings?.pos) {
-        this.enableScheduleValidation = settings.pos.enable_schedule_validation || false;
-        this.businessHours = settings.pos.business_hours || {};
-
-        // Only apply local fallback if backend hasn't handled schedule validation
-        if (!this.scheduleHandledByBackend && this.scheduleStatusChecked && this.enableScheduleValidation && !this.isWithinBusinessHours() && !this.canBypassSchedule) {
-          this.isOutOfHours = true;
-          this.nextOpenTime = this.getLocalNextOpenDay();
-          this.outOfHoursMessage = 'El punto de venta está fuera del horario de atención configurado (Validación local).';
+    this.storeSettingsSubscription = this.store
+      .select(selectStoreSettings)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((storeSettings: any) => {
+        const settings = storeSettings;
+        if (settings?.general?.timezone) {
+          this.storeTimezone = settings.general.timezone;
         }
-      }
-    });
+        if (settings?.pos) {
+          this.enableScheduleValidation =
+            settings.pos.enable_schedule_validation || false;
+          this.businessHours = settings.pos.business_hours || {};
+
+          // Only apply local fallback if backend hasn't handled schedule validation
+          if (
+            !this.scheduleHandledByBackend &&
+            this.scheduleStatusChecked &&
+            this.enableScheduleValidation &&
+            !this.isWithinBusinessHours() &&
+            !this.canBypassSchedule
+          ) {
+            this.isOutOfHours = true;
+            this.nextOpenTime = this.getLocalNextOpenDay();
+            this.outOfHoursMessage =
+              'El punto de venta está fuera del horario de atención configurado (Validación local).';
+          }
+        }
+      });
   }
 
   /**
@@ -999,18 +1095,34 @@ export class PosComponent implements OnInit, OnDestroy {
         hour12: false,
       }).formatToParts(now);
 
-      const weekdayStr = parts.find(p => p.type === 'weekday')?.value || '';
-      const hoursVal = parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10);
-      const minutesVal = parseInt(parts.find(p => p.type === 'minute')?.value || '0', 10);
+      const weekdayStr = parts.find((p) => p.type === 'weekday')?.value || '';
+      const hoursVal = parseInt(
+        parts.find((p) => p.type === 'hour')?.value || '0',
+        10,
+      );
+      const minutesVal = parseInt(
+        parts.find((p) => p.type === 'minute')?.value || '0',
+        10,
+      );
 
       const weekdayMap: Record<string, number> = {
-        Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+        Sun: 0,
+        Mon: 1,
+        Tue: 2,
+        Wed: 3,
+        Thu: 4,
+        Fri: 5,
+        Sat: 6,
       };
       const dayVal = weekdayMap[weekdayStr] ?? now.getDay();
 
       return { day: dayVal, hours: hoursVal, minutes: minutesVal };
     } catch {
-      return { day: now.getDay(), hours: now.getHours(), minutes: now.getMinutes() };
+      return {
+        day: now.getDay(),
+        hours: now.getHours(),
+        minutes: now.getMinutes(),
+      };
     }
   }
 
@@ -1020,7 +1132,15 @@ export class PosComponent implements OnInit, OnDestroy {
     }
 
     const { day, hours, minutes } = this.getDateInTimezone();
-    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const dayNames = [
+      'sunday',
+      'monday',
+      'tuesday',
+      'wednesday',
+      'thursday',
+      'friday',
+      'saturday',
+    ];
     const currentDayName = dayNames[day];
 
     const todayHours = this.businessHours?.[currentDayName];
@@ -1048,10 +1168,23 @@ export class PosComponent implements OnInit, OnDestroy {
    * Iterates business hours to find the next open day for the local fallback
    */
   private getLocalNextOpenDay(): string {
-    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const dayNames = [
+      'sunday',
+      'monday',
+      'tuesday',
+      'wednesday',
+      'thursday',
+      'friday',
+      'saturday',
+    ];
     const spanishDays: Record<string, string> = {
-      sunday: 'Domingo', monday: 'Lunes', tuesday: 'Martes', wednesday: 'Miércoles',
-      thursday: 'Jueves', friday: 'Viernes', saturday: 'Sábado',
+      sunday: 'Domingo',
+      monday: 'Lunes',
+      tuesday: 'Martes',
+      wednesday: 'Miércoles',
+      thursday: 'Jueves',
+      friday: 'Viernes',
+      saturday: 'Sábado',
     };
 
     const { day, hours, minutes } = this.getDateInTimezone();
@@ -1060,7 +1193,11 @@ export class PosComponent implements OnInit, OnDestroy {
     // Check if today opens later
     const todayName = dayNames[day];
     const todayHours = this.businessHours?.[todayName];
-    if (todayHours && todayHours.open !== 'closed' && todayHours.close !== 'closed') {
+    if (
+      todayHours &&
+      todayHours.open !== 'closed' &&
+      todayHours.close !== 'closed'
+    ) {
       const [openH, openM] = todayHours.open.split(':').map(Number);
       if (curMinutes < openH * 60 + openM) {
         return `Hoy ${todayHours.open} - ${todayHours.close}`;

@@ -7,16 +7,13 @@ metadata:
 ---
 # Vendix Backend Authentication & Authorization
 
-> **Auth Pattern** - Estrategia global de JWT con decoradores para acceso público, roles y permisos granulares.
+> **Auth Pattern** - Global JWT strategy with decorators for public access, roles, and granular permissions.
 
 ## 🎯 Authentication Architecture
 
-Vendix implementa **autenticación JWT global** con autorización basada en roles y permisos usando decoradores.
+Vendix implements **global JWT authentication** with role-based and permission-based authorization using decorators.
 
 ---
-metadata:
-  scope: [root]
-  auto_invoke: "Implementing authentication"
 
 ## 🔐 Global JWT Strategy
 

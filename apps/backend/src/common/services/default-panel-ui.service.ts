@@ -55,6 +55,8 @@ export class DefaultPanelUIService {
         ecommerce: true,
         orders: true,
         expenses: true,
+        accounting: true,
+        payroll: true,
       },
       STORE_ADMIN: {
         dashboard: true,
@@ -82,11 +84,16 @@ export class DefaultPanelUIService {
         analytics_performance: true,
         analytics_overview: true,
         expenses: true,
-        expenses_overview: true,
-        expenses_all: true,
-        expenses_create: true,
-        expenses_categories: true,
-        expenses_reports: true,
+        invoicing: true,
+        accounting: true,
+        accounting_chart_of_accounts: false,
+        accounting_journal_entries: false,
+        accounting_fiscal_periods: false,
+        accounting_reports: false,
+        payroll: true,
+        payroll_employees: false,
+        payroll_runs: false,
+        payroll_settings: false,
         settings: true,
         settings_general: true,
         settings_payments: true,
@@ -154,10 +161,7 @@ export class DefaultPanelUIService {
         return result;
       }
     } catch (error: any) {
-      console.warn(
-        `Failed to load unified template from DB:`,
-        error.message,
-      );
+      // Silent fallback to hardcoded config
     }
 
     // Fallback to hardcoded configs

@@ -39,12 +39,10 @@ export class NotificationsApiService {
   getSseUrl(): string {
     const auth_state = localStorage.getItem('vendix_auth_state');
     if (!auth_state) {
-      console.warn('[NotificationsService] No auth state in localStorage for SSE');
       return '';
     }
     const token = JSON.parse(auth_state)?.tokens?.access_token;
     if (!token) {
-      console.warn('[NotificationsService] No access_token found in auth state for SSE');
       return '';
     }
     return `${this.baseUrl}/stream?token=${token}`;
