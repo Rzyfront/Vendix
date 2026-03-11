@@ -8,7 +8,7 @@ import {
   OnDestroy,
   inject,
 } from '@angular/core';
-import { Subject, takeUntil } from 'rxjs';
+import { Subject, takeUntil, take, filter } from 'rxjs';
 import { CommonModule } from '@angular/common';
 
 import {
@@ -21,6 +21,9 @@ import { PosPaymentService } from '../services/pos-payment.service';
 import { PosTicketService } from '../services/pos-ticket.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
+import { Store } from '@ngrx/store';
+import { Actions, ofType } from '@ngrx/effects';
+import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actions';
 
 @Component({
   selector: 'app-pos-order-confirmation',
@@ -165,6 +168,17 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             <app-icon name="mail" [size]="18" slot="icon"></app-icon>
             Email
           </app-button>
+
+          <app-button
+            variant="outline"
+            size="md"
+            (clicked)="createInvoice()"
+            [disabled]="!orderId"
+            [loading]="creatingInvoice"
+          >
+            <app-icon name="file-text" [size]="18" slot="icon"></app-icon>
+            Crear Factura
+          </app-button>
         </div>
 
         <div class="flex gap-3">
@@ -272,6 +286,7 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
 
   printing = false;
   emailing = false;
+  creatingInvoice = false;
 
   orderNumber = '';
   orderId: string | null = null;
@@ -292,6 +307,8 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
   private toastService = inject(ToastService);
   private ticketService = inject(PosTicketService);
   private currencyService = inject(CurrencyFormatService);
+  private store = inject(Store);
+  private actions$ = inject(Actions);
 
   ngOnInit(): void {
     const user = this.authFacade.getCurrentUser();
@@ -455,6 +472,28 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
   goToOrderDetail(): void {
     if (!this.orderId) return;
     this.viewDetail.emit(this.orderId);
+  }
+
+  createInvoice(): void {
+    if (!this.orderId) return;
+    this.creatingInvoice = true;
+
+    // Listen for the result before dispatching
+    this.actions$.pipe(
+      ofType(InvoicingActions.createFromOrderSuccess, InvoicingActions.createFromOrderFailure),
+      take(1),
+      takeUntil(this.destroy$),
+    ).subscribe((action) => {
+      this.creatingInvoice = false;
+      if (action.type === InvoicingActions.createFromOrderSuccess.type) {
+        this.toastService.success('Factura creada exitosamente');
+      } else {
+        const errorAction = action as ReturnType<typeof InvoicingActions.createFromOrderFailure>;
+        this.toastService.error(errorAction.error || 'Error al crear la factura');
+      }
+    });
+
+    this.store.dispatch(InvoicingActions.createFromOrder({ orderId: Number(this.orderId) }));
   }
 
   hasDiscount(): boolean {

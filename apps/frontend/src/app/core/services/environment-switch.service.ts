@@ -270,10 +270,6 @@ export class EnvironmentSwitchService {
       );
 
       // 3. ¡CRÍTICO! Actualizar las rutas en el Router inmediatamente
-      console.log(
-        '[EnvironmentSwitch] Reconfiguring routes for:',
-        newEnvironment,
-      );
       this.routeManager.configureDynamicRoutes(updatedConfig);
     } catch (error) {
       console.error('❌ Failed to update AppConfig and Routes:', error);
@@ -294,7 +290,6 @@ export class EnvironmentSwitchService {
       });
 
       if (!navigated) {
-        console.warn('[EnvironmentSwitch] Navigation failed, forcing reload');
         window.location.href = redirect_path;
         return;
       }

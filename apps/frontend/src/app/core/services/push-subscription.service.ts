@@ -27,12 +27,14 @@ export class PushSubscriptionService {
     if (!this.isSupported) return null;
 
     try {
-      this.sw_registration = await navigator.serviceWorker.register('/push-sw.js', {
-        scope: '/',
-      });
+      this.sw_registration = await navigator.serviceWorker.register(
+        '/push-sw.js',
+        {
+          scope: '/',
+        },
+      );
       return this.sw_registration;
     } catch (err) {
-      console.warn('[PushSubscription] SW registration failed:', err);
       return null;
     }
   }
@@ -60,7 +62,6 @@ export class PushSubscriptionService {
       }
 
       if (!this.vapid_public_key) {
-        console.warn('[PushSubscription] No VAPID key from backend');
         return false;
       }
 
@@ -88,7 +89,6 @@ export class PushSubscriptionService {
 
       return true;
     } catch (err) {
-      console.warn('[PushSubscription] Subscribe failed:', err);
       return false;
     }
   }
@@ -100,7 +100,9 @@ export class PushSubscriptionService {
     if (!this.isSupported) return;
 
     try {
-      const registration = this.sw_registration || await navigator.serviceWorker.getRegistration('/');
+      const registration =
+        this.sw_registration ||
+        (await navigator.serviceWorker.getRegistration('/'));
       if (!registration) return;
 
       const push_sub = await registration.pushManager.getSubscription();
@@ -114,7 +116,7 @@ export class PushSubscriptionService {
         this.http.patch(`${this.baseUrl}/unsubscribe`, { endpoint }),
       ).catch(() => {});
     } catch (err) {
-      console.warn('[PushSubscription] Unsubscribe failed:', err);
+      // Silently fail
     }
   }
 

@@ -45,14 +45,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
     private organizationDashboardService: OrganizationDashboardService,
     private route: ActivatedRoute,
     private globalFacade: GlobalFacade,
-  ) { }
+  ) {}
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
 
     // Try to get organizationId synchronously first
     const context = this.globalFacade.getUserContext();
-    
 
     // In ORG_ADMIN environment, the organization context is null
     // We need to get the organization_id from the authenticated user
@@ -60,14 +59,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
     const orgIdFromUser = context?.user?.organization_id;
 
     if (orgIdFromContext) {
-      
       this.organizationId = orgIdFromContext;
       this.loadDashboardData();
       return;
     }
 
     if (orgIdFromUser) {
-      
       this.organizationId = String(orgIdFromUser);
       this.loadDashboardData();
       return;
@@ -75,25 +72,21 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
     // First check route param
     const routeId = this.route.snapshot.paramMap.get('id');
-    
+
     if (routeId) {
       this.organizationId = routeId;
       this.loadDashboardData();
     } else {
       // Fallback to user context observable
-      
+
       this.globalFacade.userContext$
         .pipe(takeUntil(this.destroy$))
         .subscribe((context) => {
-          
-
-          const orgId = context?.organization?.id || context?.user?.organization_id;
+          const orgId =
+            context?.organization?.id || context?.user?.organization_id;
           if (orgId) {
-            
             this.organizationId = String(orgId);
             this.loadDashboardData();
-          } else {
-            console.warn('[Dashboard] Context emitted but no organization ID found');
           }
         });
     }
@@ -106,7 +99,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   private loadDashboardData(): void {
     if (!this.organizationId) {
-      console.warn('No organization ID available for dashboard stats');
       return;
     }
 
@@ -117,7 +109,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (data) => {
-          
           this.dashboardStats = data;
           this.updateRevenueChart(data);
           this.updateStoreDistributionChart(data);
@@ -162,7 +153,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   private updateRevenueChart(data: any): void {
-
     if (data.profit_trend) {
       const labels = data.profit_trend.map(
         (item: any) => `${item.month} ${item.year}`,
@@ -177,34 +167,35 @@ export class DashboardComponent implements OnInit, OnDestroy {
           axisPointer: {
             type: 'cross',
             label: {
-              backgroundColor: '#6a7985'
-            }
-          }
+              backgroundColor: '#6a7985',
+            },
+          },
         },
         legend: {
           data: ['Ganancia', 'Costos', 'Ganancia Neta'],
-          bottom: 0
+          bottom: 0,
         },
         grid: {
           left: '3%',
           right: '4%',
           bottom: '10%',
-          containLabel: true
+          containLabel: true,
         },
         xAxis: [
           {
             type: 'category',
             boundaryGap: false,
-            data: labels
-          }
+            data: labels,
+          },
         ],
         yAxis: [
           {
             type: 'value',
             axisLabel: {
-              formatter: (value: any) => this.currencyService.formatChartAxis(value)
-            }
-          }
+              formatter: (value: any) =>
+                this.currencyService.formatChartAxis(value),
+            },
+          },
         ],
         series: [
           {
@@ -214,7 +205,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
             areaStyle: { opacity: 0.1 },
             emphasis: { focus: 'series' },
             data: revenue,
-            itemStyle: { color: '#3b82f6' }
+            itemStyle: { color: '#3b82f6' },
           },
           {
             name: 'Costos',
@@ -223,7 +214,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
             areaStyle: { opacity: 0.1 },
             emphasis: { focus: 'series' },
             data: costs,
-            itemStyle: { color: '#ef4444' }
+            itemStyle: { color: '#ef4444' },
           },
           {
             name: 'Ganancia Neta',
@@ -233,9 +224,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
             emphasis: { focus: 'series' },
             data: profit,
             itemStyle: { color: '#22c55e' },
-            label: { show: true, position: 'top' }
-          }
-        ]
+            label: { show: true, position: 'top' },
+          },
+        ],
       };
     }
   }
@@ -254,10 +245,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this.storeDistributionData = {
         tooltip: {
           trigger: 'item',
-          formatter: '{b}: {c} ({d}%)' // Name: Value (Percent)
+          formatter: '{b}: {c} ({d}%)', // Name: Value (Percent)
         },
         legend: {
-          show: false
+          show: false,
         },
         series: [
           {
@@ -268,31 +259,34 @@ export class DashboardComponent implements OnInit, OnDestroy {
             itemStyle: {
               borderRadius: 10,
               borderColor: '#fff',
-              borderWidth: 2
+              borderWidth: 2,
             },
             label: {
               show: false,
-              position: 'center'
+              position: 'center',
             },
             emphasis: {
               label: {
                 show: true,
                 fontSize: 20,
-                fontWeight: 'bold'
-              }
+                fontWeight: 'bold',
+              },
             },
             labelLine: {
-              show: false
+              show: false,
             },
             data: data.store_distribution.map((item: any, index: number) => ({
               value: item.revenue || 0,
               name: item.type.charAt(0).toUpperCase() + item.type.slice(1),
               itemStyle: {
-                color: this.storeDistributionColors[index % this.storeDistributionColors.length]
-              }
-            }))
-          }
-        ]
+                color:
+                  this.storeDistributionColors[
+                    index % this.storeDistributionColors.length
+                  ],
+              },
+            })),
+          },
+        ],
       };
 
       // Update the display values in the legend

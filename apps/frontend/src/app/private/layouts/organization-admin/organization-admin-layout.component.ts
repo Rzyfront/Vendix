@@ -18,7 +18,10 @@ import { ConfigFacade } from '../../../core/store/config';
 
 // Store related imports
 import { OrganizationStoresService } from '../../../private/modules/organization/stores/services/organization-stores.service';
-import { StoreListItem, StoreType } from '../../../private/modules/organization/stores/interfaces/store.interface';
+import {
+  StoreListItem,
+  StoreType,
+} from '../../../private/modules/organization/stores/interfaces/store.interface';
 import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
 import { DialogService } from '../../../shared/components/dialog/dialog.service';
 import { ToastService } from '../../../shared/components/toast/toast.service';
@@ -147,6 +150,16 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
       route: '/admin/audit/logs',
     },
     {
+      label: 'Contabilidad',
+      icon: 'book-open',
+      route: '/admin/accounting',
+    },
+    {
+      label: 'Nómina',
+      icon: 'banknote',
+      route: '/admin/payroll',
+    },
+    {
       label: 'Configuración',
       icon: 'settings',
       children: [
@@ -182,22 +195,20 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
     this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
     this.organizationDomainHostname$ = this.authFacade.userDomainHostname$;
     this.logoUrl$ = this.authFacade.userOrganization$.pipe(
-      map(org => {
+      map((org) => {
         const domainConfig = this.configFacade.getCurrentConfig()?.domainConfig;
         if (domainConfig?.isMainVendixDomain) return 'vlogo.png';
         return org?.logo_url || null;
-      })
+      }),
     );
   }
 
   ngOnInit(): void {
     // Subscribe to filtered menu items based on panel_ui configuration
-    this.menuItems$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((items) => {
-        // Add dynamic stores AFTER filtering
-        this.filteredMenuItems = this.addDynamicStoresToMenu(items);
-      });
+    this.menuItems$.pipe(takeUntil(this.destroy$)).subscribe((items) => {
+      // Add dynamic stores AFTER filtering
+      this.filteredMenuItems = this.addDynamicStoresToMenu(items);
+    });
 
     // Check onboarding status considering both organization state and user role
     this.checkOnboardingWithRoleValidation();
@@ -265,7 +276,6 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
 
     this.storesService.getStores().subscribe({
       next: (response) => {
-        console.log('Stores response:', response);
         if (response.success && response.data) {
           this.stores = response.data.map((store: any) => ({
             id: store.id,
@@ -288,9 +298,7 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
             addresses: store.addresses || [],
             _count: store._count || { products: 0, orders: 0, store_users: 0 },
           }));
-
         } else {
-          console.warn('Invalid response structure:', response);
           this.stores = [];
         }
         this.isLoadingStores = false;
@@ -339,11 +347,9 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
    */
   private refreshMenuWithStores(): void {
     // Get current filtered items and add stores
-    this.menuItems$
-      .pipe(take(1))
-      .subscribe((items) => {
-        this.filteredMenuItems = this.addDynamicStoresToMenu(items);
-      });
+    this.menuItems$.pipe(take(1)).subscribe((items) => {
+      this.filteredMenuItems = this.addDynamicStoresToMenu(items);
+    });
   }
 
   async switchToStoreEnvironment(store: StoreListItem): Promise<void> {
@@ -405,7 +411,6 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
   }
 
   onOnboardingCompleted(event: any): void {
-    console.log('Onboarding completed:', event);
     // Update auth state to reflect onboarding completion
     this.authFacade.setOnboardingCompleted(true);
     // Reload user data to get updated organization/store info

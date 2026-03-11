@@ -215,14 +215,16 @@ export class PosProductService {
         } else if (responseData && Array.isArray(responseData.data)) {
           // Format { data: [...], pagination: {...} } or { data: [...], meta: {...} }
           productsResult = responseData.data;
-          const pagination = responseData.pagination || responseData.meta || response.meta || {};
+          const pagination =
+            responseData.pagination || responseData.meta || response.meta || {};
           total = pagination.total || productsResult.length;
           currentPage = pagination.page || page;
           limitNum = pagination.limit || pageSize;
         } else if (responseData) {
           // Fallback if data is directly in response.data but success check passed
           productsResult = Array.isArray(responseData) ? responseData : [];
-          total = response.meta?.total || response.total || productsResult.length;
+          total =
+            response.meta?.total || response.total || productsResult.length;
           currentPage = response.meta?.page || response.page || page;
           limitNum = response.meta?.limit || response.limit || pageSize;
         }
@@ -294,30 +296,41 @@ export class PosProductService {
 
       // Map product variants
       const rawVariants = product.product_variants || [];
-      const productVariants: PosProductVariant[] = rawVariants.map((v: any) => ({
-        id: v.id,
-        sku: v.sku || null,
-        price_override: v.price_override != null ? Number(v.price_override) : null,
-        cost_price: v.cost_price != null ? Number(v.cost_price) : null,
-        stock: v.stock ?? v.stock_levels?.[0]?.quantity_available ?? v.stock_quantity ?? 0,
-        is_active: v.is_active ?? true,
-        attributes: Array.isArray(v.attributes)
-          ? v.attributes
-          : (v.attributes && typeof v.attributes === 'object'
-            ? Object.entries(v.attributes).map(([key, value]: [string, any]) => ({
-                attribute_name: key,
-                attribute_value: String(value),
-              }))
-            : []),
-        image_url: v.image_url || v.product_images?.image_url || undefined,
-      }));
+      const productVariants: PosProductVariant[] = rawVariants.map(
+        (v: any) => ({
+          id: v.id,
+          sku: v.sku || null,
+          price_override:
+            v.price_override != null ? Number(v.price_override) : null,
+          cost_price: v.cost_price != null ? Number(v.cost_price) : null,
+          stock:
+            v.stock ??
+            v.stock_levels?.[0]?.quantity_available ??
+            v.stock_quantity ??
+            0,
+          is_active: v.is_active ?? true,
+          attributes: Array.isArray(v.attributes)
+            ? v.attributes
+            : v.attributes && typeof v.attributes === 'object'
+              ? Object.entries(v.attributes).map(
+                  ([key, value]: [string, any]) => ({
+                    attribute_name: key,
+                    attribute_value: String(value),
+                  }),
+                )
+              : [],
+          image_url: v.image_url || v.product_images?.image_url || undefined,
+        }),
+      );
 
       const transformed = {
         id: product.id?.toString() || '',
         name: product.name || '',
         sku: product.sku || '',
         price: parseFloat(product.base_price || product.price || 0),
-        final_price: parseFloat(product.final_price || product.base_price || product.price || 0),
+        final_price: parseFloat(
+          product.final_price || product.base_price || product.price || 0,
+        ),
         cost: product.cost_price ? parseFloat(product.cost_price) : undefined,
         category:
           product.product_categories && product.product_categories.length > 0
@@ -343,14 +356,6 @@ export class PosProductService {
         _rawStockQuantity: product.stock_quantity,
         _rawImageUrl: product.image_url,
       };
-
-      // Debug log for first product
-      if (products.indexOf(product) === 0) {
-        console.log('POS Product transform:', {
-          original: product,
-          transformed,
-        });
-      }
 
       return transformed;
     });
@@ -429,24 +434,22 @@ export class PosProductService {
   }
 
   getCategories(): Observable<Category[]> {
-    return this.http
-      .get<any>(`${environment.apiUrl}/store/categories`)
-      .pipe(
-        map((response) => {
-          const data = response.success ? response.data : response;
-          return Array.isArray(data) ? data : (data?.data || []);
-        }),
-        catchError((error: any) => {
-          return of([]);
-        }),
-      );
+    return this.http.get<any>(`${environment.apiUrl}/store/categories`).pipe(
+      map((response) => {
+        const data = response.success ? response.data : response;
+        return Array.isArray(data) ? data : data?.data || [];
+      }),
+      catchError((error: any) => {
+        return of([]);
+      }),
+    );
   }
 
   getBrands(): Observable<Brand[]> {
     return this.http.get<any>(`${environment.apiUrl}/store/brands`).pipe(
       map((response) => {
         const data = response.success ? response.data : response;
-        return Array.isArray(data) ? data : (data?.data || []);
+        return Array.isArray(data) ? data : data?.data || [];
       }),
       catchError((error: any) => {
         return of([]);
@@ -478,7 +481,8 @@ export class PosProductService {
           total = productsResult.length;
         } else if (dataRoot && Array.isArray(dataRoot.data)) {
           productsResult = dataRoot.data;
-          const pagination = dataRoot.pagination || dataRoot.meta || response.meta || {};
+          const pagination =
+            dataRoot.pagination || dataRoot.meta || response.meta || {};
           total = pagination.total || productsResult.length;
           page = pagination.page || page;
           limitNum = pagination.limit || limitNum;
@@ -544,4 +548,3 @@ export class PosProductService {
     return of(null).pipe(delay(100));
   }
 }
-

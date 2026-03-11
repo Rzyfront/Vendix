@@ -101,7 +101,7 @@ import {
       <!-- Tab: Methods -->
       @if (active_tab() === 'methods') {
         <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-                    md:border md:border-border md:overflow-hidden">
+                    md:border md:border-border">
 
           <!-- Sticky search header -->
           <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
@@ -176,7 +176,7 @@ import {
       <!-- Tab: Zones -->
       @if (active_tab() === 'zones') {
         <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-                    md:border md:border-border md:overflow-hidden">
+                    md:border md:border-border">
 
           <!-- Sticky search header -->
           <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]

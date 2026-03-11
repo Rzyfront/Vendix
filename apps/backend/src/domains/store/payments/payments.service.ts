@@ -440,7 +440,9 @@ export class PaymentsService {
         // 5. Emit payment event
         if (payment) {
           this.eventEmitter.emit('payment.received', {
+            payment_id: payment.id,
             store_id: createPosPaymentDto.store_id,
+            organization_id: order.stores?.organization_id,
             order_id: order.id,
             order_number: order.order_number,
             amount: payment.amount,
@@ -448,6 +450,7 @@ export class PaymentsService {
             payment_method:
               payment.store_payment_method?.system_payment_method
                 ?.display_name || 'Unknown',
+            user_id: user.id,
           });
         }
 

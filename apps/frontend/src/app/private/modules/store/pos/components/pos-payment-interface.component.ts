@@ -29,7 +29,10 @@ import {
   SelectorComponent,
 } from '../../../../../shared/components';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
-import { CurrencyFormatService, CurrencyPipe } from '../../../../../shared/pipes/currency';
+import {
+  CurrencyFormatService,
+  CurrencyPipe,
+} from '../../../../../shared/pipes/currency';
 import {
   PosPaymentService,
   PaymentMethod,
@@ -947,7 +950,9 @@ interface PaymentState {
     `,
   ],
 })
-export class PosPaymentInterfaceComponent implements OnInit, OnDestroy, OnChanges {
+export class PosPaymentInterfaceComponent
+  implements OnInit, OnDestroy, OnChanges
+{
   @Input() isOpen = false;
   @Input() cartState: CartState | null = null;
   @Output() closed = new EventEmitter<void>();
@@ -1052,7 +1057,7 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy, OnChange
     private router: Router,
     private store: Store,
     private cdr: ChangeDetectorRef,
-    private currencyService: CurrencyFormatService
+    private currencyService: CurrencyFormatService,
   ) {
     this.paymentForm = this.createPaymentForm();
     this.customerForm = this.createCustomerForm();
@@ -1146,7 +1151,15 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy, OnChange
 
     // Get current day and time in store timezone
     const now = new Date();
-    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const dayNames = [
+      'sunday',
+      'monday',
+      'tuesday',
+      'wednesday',
+      'thursday',
+      'friday',
+      'saturday',
+    ];
     const currentDayName = dayNames[now.getDay()];
 
     // Get business hours for current day
@@ -1177,46 +1190,42 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy, OnChange
   }
 
   private loadStoreSettings(): void {
-    this.storeSettingsSubscription = this.store.select(fromAuth.selectStoreSettings).pipe(takeUntil(this.destroy$)).subscribe((storeSettings: any) => {
-      // store_settings has structure: { settings: { pos: { ... }, general: { ... }, ... } }
-      const settings = storeSettings;
-      if (settings?.pos) {
-        const prevAllowAnonymous = this.allowAnonymousSales;
+    this.storeSettingsSubscription = this.store
+      .select(fromAuth.selectStoreSettings)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((storeSettings: any) => {
+        // store_settings has structure: { settings: { pos: { ... }, general: { ... }, ... } }
+        const settings = storeSettings;
+        if (settings?.pos) {
+          const prevAllowAnonymous = this.allowAnonymousSales;
 
-        this.allowAnonymousSales = settings.pos.allow_anonymous_sales || false;
-        this.anonymousSalesAsDefault = settings.pos.anonymous_sales_as_default || false;
-        this.requireCashDrawerOpen = settings.pos.require_cash_drawer_open || false;
-        this.enableScheduleValidation = settings.pos.enable_schedule_validation || false;
-        this.businessHours = settings.pos.business_hours || {};
-        this.settingsLoaded = true;
+          this.allowAnonymousSales =
+            settings.pos.allow_anonymous_sales || false;
+          this.anonymousSalesAsDefault =
+            settings.pos.anonymous_sales_as_default || false;
+          this.requireCashDrawerOpen =
+            settings.pos.require_cash_drawer_open || false;
+          this.enableScheduleValidation =
+            settings.pos.enable_schedule_validation || false;
+          this.businessHours = settings.pos.business_hours || {};
+          this.settingsLoaded = true;
 
-        console.log('[POS Payment] Store settings updated:', {
-          allowAnonymousSales: this.allowAnonymousSales,
-          anonymousSalesAsDefault: this.anonymousSalesAsDefault,
-          requireCashDrawerOpen: this.requireCashDrawerOpen,
-          enableScheduleValidation: this.enableScheduleValidation,
-          businessHours: this.businessHours,
-          prevAllowAnonymous,
-          isAnonymousSale: this.paymentState.isAnonymousSale,
-          rawSettings: settings,
-        });
-
-        // If anonymous sales are not allowed, always disable the toggle
-        if (!this.allowAnonymousSales) {
-          this.paymentState.isAnonymousSale = false;
-        } else {
-          // Only update if this is first load (prevAllowAnonymous is falsy)
-          // or if we want to respect the default setting
-          if (!prevAllowAnonymous || this.anonymousSalesAsDefault) {
-            this.paymentState.isAnonymousSale = this.anonymousSalesAsDefault;
+          // If anonymous sales are not allowed, always disable the toggle
+          if (!this.allowAnonymousSales) {
+            this.paymentState.isAnonymousSale = false;
+          } else {
+            // Only update if this is first load (prevAllowAnonymous is falsy)
+            // or if we want to respect the default setting
+            if (!prevAllowAnonymous || this.anonymousSalesAsDefault) {
+              this.paymentState.isAnonymousSale = this.anonymousSalesAsDefault;
+            }
+            // Otherwise, preserve current user selection
           }
-          // Otherwise, preserve current user selection
-        }
 
-        // Trigger change detection to update UI
-        this.cdr.markForCheck();
-      }
-    });
+          // Trigger change detection to update UI
+          this.cdr.markForCheck();
+        }
+      });
   }
 
   selectPaymentMethod(method: PaymentMethod): void {
@@ -1352,7 +1361,15 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy, OnChange
 
     // Check business hours if validation is enabled
     if (!this.isWithinBusinessHours()) {
-      const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+      const dayNames = [
+        'Domingo',
+        'Lunes',
+        'Martes',
+        'Miércoles',
+        'Jueves',
+        'Viernes',
+        'Sábado',
+      ];
       const today = dayNames[new Date().getDay()];
       this.toastService.show({
         variant: 'error',
@@ -1404,7 +1421,8 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy, OnChange
           this.toastService.show({
             variant: 'error',
             title: 'Error',
-            description: error.message || 'Error de conexión al procesar el pago',
+            description:
+              error.message || 'Error de conexión al procesar el pago',
           });
         },
       });
@@ -1438,7 +1456,15 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy, OnChange
 
     // Check business hours if validation is enabled
     if (!this.isWithinBusinessHours()) {
-      const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+      const dayNames = [
+        'Domingo',
+        'Lunes',
+        'Martes',
+        'Miércoles',
+        'Jueves',
+        'Viernes',
+        'Sábado',
+      ];
       const today = dayNames[new Date().getDay()];
       this.toastService.show({
         variant: 'error',
@@ -1469,7 +1495,8 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy, OnChange
             this.toastService.show({
               variant: 'error',
               title: 'Error',
-              description: response.message || 'Error al procesar la venta a crédito',
+              description:
+                response.message || 'Error al procesar la venta a crédito',
             });
           }
         },
@@ -1479,7 +1506,8 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy, OnChange
           this.toastService.show({
             variant: 'error',
             title: 'Error',
-            description: error.message || 'Error al procesar la venta a crédito',
+            description:
+              error.message || 'Error al procesar la venta a crédito',
           });
         },
       });
@@ -1649,7 +1677,10 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy, OnChange
             this.toastService.show({
               variant: 'error',
               title: 'Error',
-              description: error.error?.message || error.message || 'Error al crear cliente',
+              description:
+                error.error?.message ||
+                error.message ||
+                'Error al crear cliente',
             });
           },
         });

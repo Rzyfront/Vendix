@@ -37,9 +37,6 @@ export class OrganizationAdminGuard implements CanActivate {
       // Verificar que estamos en el entorno correcto
       const currentEnv = this.environmentContextService.getCurrentEnvironment();
       if (currentEnv !== AppEnvironment.ORG_ADMIN) {
-        console.warn('Access denied: Not in organization environment', {
-          currentEnv,
-        });
         this.toastService.warning('No tienes permisos para ver esa ruta');
         this.router.navigate(['/']);
         return false;
@@ -52,9 +49,6 @@ export class OrganizationAdminGuard implements CanActivate {
       );
 
       if (!hasOrgRole) {
-        console.warn('Access denied: Insufficient organization permissions', {
-          roles: user?.roles,
-        });
         this.toastService.warning('No tienes permisos para ver esa ruta');
         this.router.navigate(['/']);
         return false;
@@ -64,7 +58,6 @@ export class OrganizationAdminGuard implements CanActivate {
       const isConsistent =
         this.environmentContextService.validateEnvironmentConsistency();
       if (!isConsistent) {
-        console.warn('Environment inconsistency detected, redirecting to home');
         this.toastService.warning('Error de entorno');
         this.router.navigate(['/']);
         return false;

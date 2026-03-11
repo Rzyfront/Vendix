@@ -170,6 +170,8 @@ import {
   Scale,
   // AI Engine icon
   Cpu,
+  // Accounting icon
+  BookOpen,
 } from 'lucide-angular';
 
 /**
@@ -396,6 +398,9 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // AI Engine icon
   cpu: Cpu,
+
+  // Accounting icon
+  'book-open': BookOpen,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

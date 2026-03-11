@@ -30,11 +30,8 @@ export class AuthGuard implements CanActivate {
     // Si la sesión se está terminando, permitir navegación sin restricciones
     // para que el usuario pueda ser redirigido limpiamente
     if (this.sessionService.isTerminating()) {
-      console.log('[AUTH GUARD] Session terminating, allowing navigation');
       return of(true);
     }
-
-    console.log('[AUTH GUARD] canActivate() START', { path });
 
     // 1. Check if route is public (no auth required)
     if (this.isPublicRoute(path)) {
@@ -43,7 +40,6 @@ export class AuthGuard implements CanActivate {
 
     // 2. Check localStorage flag first for immediate logout detection
     if (this.wasRecentlyLoggedOut()) {
-      console.log('[AUTH GUARD] Recently logged out, redirecting');
       // Solo mostrar toast si NO estamos en proceso de logout
       if (!this.sessionService.shouldSuppressNotifications()) {
         this.toastService.warning(
@@ -58,7 +54,6 @@ export class AuthGuard implements CanActivate {
       take(1),
       switchMap((isAuthenticated) => {
         if (!isAuthenticated) {
-          console.log('[AUTH GUARD] Not authenticated, redirecting');
           // Solo mostrar toast si NO estamos en proceso de logout
           if (!this.sessionService.shouldSuppressNotifications()) {
             this.toastService.warning(
@@ -71,7 +66,6 @@ export class AuthGuard implements CanActivate {
         // 4. Check role-based permissions
         const hasPermission = this.hasRolePermission(path);
         if (!hasPermission) {
-          console.log('[AUTH GUARD] No role permission, redirecting');
           // Solo mostrar toast si NO estamos en proceso de logout
           if (!this.sessionService.shouldSuppressNotifications()) {
             this.toastService.error(
@@ -84,7 +78,6 @@ export class AuthGuard implements CanActivate {
         return of(true);
       }),
       catchError((error) => {
-        console.error('[AUTH GUARD] Error:', error);
         // Solo mostrar toast si NO estamos en proceso de logout
         if (!this.sessionService.shouldSuppressNotifications()) {
           this.toastService.error('Error verificando autenticación');
@@ -168,25 +161,18 @@ export class AuthGuard implements CanActivate {
   private getDashboardUrl(): UrlTree {
     const userRoles = this.authFacade.getRoles();
 
-    console.log('🎯 [AUTH GUARD] getDashboardUrl() - Roles:', userRoles);
-
     if (userRoles.includes('super_admin')) {
-      console.log('✅ [AUTH GUARD] Redirecting to /superadmin/dashboard');
       return this.router.createUrlTree(['/superadmin/dashboard']);
     }
 
     if (userRoles.some((r) => ['admin', 'owner', 'manager'].includes(r))) {
-      console.log('✅ [AUTH GUARD] Redirecting to /admin/dashboard');
       return this.router.createUrlTree(['/admin/dashboard']);
     }
 
     if (userRoles.some((r) => ['supervisor', 'employee'].includes(r))) {
-      console.log('✅ [AUTH GUARD] Redirecting to /admin/dashboard');
       return this.router.createUrlTree(['/admin/dashboard']);
     }
 
-    // Default fallback
-    console.log('⚠️ [AUTH GUARD] No valid roles, redirecting to / (landing)');
     return this.router.createUrlTree(['/']);
   }
 

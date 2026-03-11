@@ -75,7 +75,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
     { value: 'shipped', label: 'Enviado' },
     { value: 'delivered', label: 'Entregado' },
     { value: 'cancelled', label: 'Cancelado' },
-    { value: 'refunded', label: 'Reembolsado' }
+    { value: 'refunded', label: 'Reembolsado' },
   ];
 
   paymentStatusOptions = [
@@ -83,7 +83,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
     { value: 'paid', label: 'Pagado' },
     { value: 'failed', label: 'Fallido' },
     { value: 'refunded', label: 'Reembolsado' },
-    { value: 'partially_refunded', label: 'Reembolso parcial' }
+    { value: 'partially_refunded', label: 'Reembolso parcial' },
   ];
 
   private subscriptions: Subscription[] = [];
@@ -198,7 +198,6 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
 
     // TODO: Replace with actual API call
     setTimeout(() => {
-      console.log('Order updated successfully');
       this.loadOrderDetails(); // Reload details
       this.isUpdating = false;
     }, 1000);
@@ -212,7 +211,6 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
 
     // TODO: Replace with actual API call
     setTimeout(() => {
-      console.log('Order cancelled successfully');
       this.loadOrderDetails(); // Reload details
     }, 1000);
   }
@@ -227,7 +225,6 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
 
     // TODO: Replace with actual API call
     setTimeout(() => {
-      console.log('Order refunded successfully');
       this.loadOrderDetails(); // Reload details
     }, 1000);
   }
@@ -236,14 +233,12 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
     if (!this.orderDetails) return;
 
     // TODO: Replace with actual API call
-    console.log('Invoice downloaded successfully');
   }
 
   onPrintPackingSlip(): void {
     if (!this.orderDetails) return;
 
     // TODO: Replace with actual API call
-    console.log('Packing slip downloaded successfully');
   }
 
   // Helper methods
@@ -348,14 +343,14 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
     this.isDispatching = true;
 
     const dispatchData = {
-      tracking_number: this.dispatchForm.get('tracking_number')?.value || undefined,
+      tracking_number:
+        this.dispatchForm.get('tracking_number')?.value || undefined,
       carrier: this.dispatchForm.get('carrier')?.value || undefined,
       notes: this.dispatchForm.get('notes')?.value || undefined,
     };
 
     // TODO: Replace with actual API call to POST /store/orders/:id/flow/ship
     setTimeout(() => {
-      console.log('Order dispatched successfully', dispatchData);
       this.closeDispatchModal();
       this.loadOrderDetails();
       this.isDispatching = false;

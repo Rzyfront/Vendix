@@ -69,12 +69,6 @@ export class OrganizationOrdersService {
     if (query?.order) params = params.set('order', query.order);
 
     const url = `${this.apiUrl}/organization/orders`;
-    console.log(
-      'Fetching orders from:',
-      url,
-      'with params:',
-      params.toString(),
-    );
 
     return this.http.get<OrderListResponse>(url, { params });
   }

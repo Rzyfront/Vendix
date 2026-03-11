@@ -56,7 +56,9 @@ import { takeUntil, map } from 'rxjs/operators';
                     <app-icon name="store" [size]="9"></app-icon>
                     <span class="footer-info-label">Type</span>
                   </div>
-                  <span class="footer-info-value">{{ formatStoreType((storeType$ | async)) }}</span>
+                  <span class="footer-info-value">{{
+                    formatStoreType(storeType$ | async)
+                  }}</span>
                 </div>
               </div>
               <div class="footer-divider"></div>
@@ -81,6 +83,7 @@ import { takeUntil, map } from 'rxjs/operators';
         [style.margin-left]="
           !sidebarRef?.isMobile ? (sidebarCollapsed ? '4rem' : '15rem') : '0'
         "
+        [style.--sidebar-width-current]="sidebarCollapsed ? '4rem' : '15rem'"
       >
         <!-- Header -->
         <app-header
@@ -109,9 +112,7 @@ import { takeUntil, map } from 'rxjs/operators';
     ></app-onboarding-modal>
 
     <!-- Tour Modal -->
-    <app-tour-modal
-      [(isOpen)]="showTourModal"
-      [tourConfig]="posTourConfig">
+    <app-tour-modal [(isOpen)]="showTourModal" [tourConfig]="posTourConfig">
     </app-tour-modal>
   `,
   styleUrls: ['./store-admin-layout.component.scss'],
@@ -295,6 +296,58 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       route: '/admin/expenses',
     },
     {
+      label: 'Facturación',
+      icon: 'file-text',
+      route: '/admin/invoicing',
+    },
+    {
+      label: 'Contabilidad',
+      icon: 'book-open',
+      children: [
+        {
+          label: 'Plan de Cuentas',
+          icon: 'circle',
+          route: '/admin/accounting/chart-of-accounts',
+        },
+        {
+          label: 'Asientos Contables',
+          icon: 'circle',
+          route: '/admin/accounting/journal-entries',
+        },
+        {
+          label: 'Periodos Fiscales',
+          icon: 'circle',
+          route: '/admin/accounting/fiscal-periods',
+        },
+        {
+          label: 'Reportes',
+          icon: 'circle',
+          route: '/admin/accounting/reports',
+        },
+      ],
+    },
+    {
+      label: 'Nómina',
+      icon: 'banknote',
+      children: [
+        {
+          label: 'Empleados',
+          icon: 'circle',
+          route: '/admin/payroll/employees',
+        },
+        {
+          label: 'Liquidaciones',
+          icon: 'circle',
+          route: '/admin/payroll/runs',
+        },
+        {
+          label: 'Configuración Nómina',
+          icon: 'circle',
+          route: '/admin/payroll/settings',
+        },
+      ],
+    },
+    {
       label: 'Ayuda',
       icon: 'help-circle',
       children: [
@@ -369,11 +422,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     this.storeDomainHostname$ = this.authFacade.userDomainHostname$;
     this.storeType$ = this.authFacade.userStoreType$;
     this.storeLogo$ = this.authFacade.userStore$.pipe(
-      map(store => {
+      map((store) => {
         const domainConfig = this.configFacade.getCurrentConfig()?.domainConfig;
         if (domainConfig?.isMainVendixDomain) return 'vlogo.png';
         return store?.logo_url || null;
-      })
+      }),
     );
   }
 
@@ -404,11 +457,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       });
 
     // Resolve isVendixDomain for promotional tooltip
-    this.isVendixDomain = !!this.configFacade.getCurrentConfig()?.domainConfig?.isVendixDomain;
+    this.isVendixDomain =
+      !!this.configFacade.getCurrentConfig()?.domainConfig?.isVendixDomain;
 
     // Check if should show POS first sale tour
     this.checkAndStartPosTour();
-
   }
 
   /**
@@ -461,9 +514,9 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     if (!type) return 'N/A';
 
     const typeMap: Record<string, string> = {
-      'physical': 'Física',
-      'online': 'Online',
-      'hybrid': 'Híbrida',
+      physical: 'Física',
+      online: 'Online',
+      hybrid: 'Híbrida',
     };
 
     return typeMap[type] || type;
@@ -496,7 +549,6 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   }
 
   onOnboardingCompleted(event: any): void {
-    console.log('Onboarding completed:', event);
     // Update auth state to reflect onboarding completion
     this.authFacade.setOnboardingCompleted(true);
     // Reload user data to get updated organization/store info

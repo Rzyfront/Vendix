@@ -44,6 +44,7 @@ export { PaginationComponent } from './pagination/pagination.component';
 export { FileUploadDropzoneComponent } from './file-upload-dropzone/file-upload-dropzone.component';
 export { HelpSearchOverlayComponent } from './help-search-overlay/help-search-overlay.component';
 export { MarkdownEditorComponent } from './markdown-editor/markdown-editor.component';
+export { ScrollableTabsComponent } from './scrollable-tabs/scrollable-tabs.component';
 
 // Services
 export { TourService } from './tour/services/tour.service';
@@ -109,4 +110,8 @@ export type {
   TimelineVariant,
   TimelineSize,
 } from './timeline/timeline.interfaces';
+export type {
+  ScrollableTab,
+  ScrollableTabSize,
+} from './scrollable-tabs/scrollable-tabs.component';
 export { CHART_THEMES } from './chart';

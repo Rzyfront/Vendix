@@ -32,18 +32,11 @@ export class ScheduleValidationService {
       return false;
     }
 
-    // Verificar si el usuario tiene rol de admin en esta tienda
+    // Verificar si el usuario pertenece a esta tienda
     const storeUser = await this.prisma.store_users.findFirst({
       where: {
         user_id: userId,
         store_id: storeId,
-      },
-      include: {
-        user_roles: {
-          include: {
-            roles: true,
-          },
-        },
       },
     });
 
@@ -52,7 +45,12 @@ export class ScheduleValidationService {
     }
 
     // Verificar si tiene rol de admin (owner, admin, manager)
-    const hasAdminRole = storeUser.user_roles.some((ur) =>
+    const userRoles = await this.prisma.user_roles.findMany({
+      where: { user_id: userId },
+      include: { roles: true },
+    });
+
+    const hasAdminRole = userRoles.some((ur) =>
       ['owner', 'admin', 'manager'].includes(ur.roles?.name?.toLowerCase() || ''),
     );
 

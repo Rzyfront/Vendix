@@ -29,6 +29,7 @@ import { DefaultPanelUIModule } from './common/services/default-panel-ui.module'
 import { HelpersModule } from './common/helpers/helpers.module';
 import { DomainResolverMiddleware } from './common/middleware/domain-resolver.middleware';
 import { AIEngineModule } from './ai-engine/ai-engine.module';
+import { EncryptionModule } from './common/services/encryption.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { AIEngineModule } from './ai-engine/ai-engine.module';
     HelpersModule,
     JobsModule,
     AIEngineModule,
+    EncryptionModule,
   ],
   controllers: [AppController],
   providers: [

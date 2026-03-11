@@ -2,6 +2,8 @@
 // ORGANIZATION SETTINGS - Única fuente de verdad para configuración de organización
 // ============================================================================
 
+import { PayrollSettingsSection } from '../../../store/payroll/calculation/interfaces/payroll-rules.interface';
+
 // ============================================================================
 // BRANDING - Colores, logo y theming a nivel de organización
 // ============================================================================
@@ -42,4 +44,5 @@ export interface OrganizationSettings {
   branding: OrganizationBranding;
   fonts?: OrganizationFonts;
   panel_ui?: OrganizationPanelUISettings;
+  payroll?: PayrollSettingsSection;
 }

@@ -248,8 +248,8 @@ export class AuthEffects {
     this.actions$.pipe(
       ofType(AuthActions.logout),
       tap(({ redirect }) => this.authService.logout({ redirect })),
-      map(({ redirect }) => AuthActions.logoutSuccess({ redirect }))
-    )
+      map(({ redirect }) => AuthActions.logoutSuccess({ redirect })),
+    ),
   );
   logoutSuccess$ = createEffect(
     () =>
@@ -286,8 +286,6 @@ export class AuthEffects {
               'vendix_logged_out_recently',
               Date.now().toString(),
             );
-
-            console.log('[AuthEffects] Logout completed - localStorage cleared');
           }
 
           // NOTA: La navegación y toast son manejados por SessionService
@@ -352,7 +350,6 @@ export class AuthEffects {
             const parsedState = JSON.parse(authState);
             if (parsedState.user && parsedState.tokens?.access_token) {
               if (isTokenExpired(parsedState.tokens.access_token)) {
-                console.warn('[checkAuthStatus] Token expirado, limpiando sesión');
                 localStorage.removeItem('vendix_auth_state');
                 return AuthActions.clearAuthState();
               }
@@ -558,7 +555,9 @@ export class AuthEffects {
       this.actions$.pipe(
         ofType(AuthActions.updateStoreSettingsSuccess),
         tap(() => {
-          this.toast.success('Configuración de tienda actualizada correctamente');
+          this.toast.success(
+            'Configuración de tienda actualizada correctamente',
+          );
         }),
       ),
     { dispatch: false },
@@ -588,7 +587,6 @@ export class AuthEffects {
             }
           }
 
-          console.log('🎨 Applying user theme:', theme);
           this.themeService.applyUserTheme(theme);
         }),
       ),

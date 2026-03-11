@@ -31,6 +31,13 @@ export class OrganizationPrismaService extends BasePrismaService {
     'support_comments',
     'support_status_history',
     'support_notifications',
+    'invoices',
+    'invoice_resolutions',
+    'chart_of_accounts',
+    'fiscal_periods',
+    'accounting_entries',
+    'employees',
+    'payroll_runs',
   ];
 
   constructor() {
@@ -244,5 +251,36 @@ export class OrganizationPrismaService extends BasePrismaService {
 
   get support_notifications() {
     return this.baseClient.support_notifications;
+  }
+
+  // Invoicing models
+  get invoices() {
+    return this.scoped_client.invoices;
+  }
+
+  get invoice_resolutions() {
+    return this.scoped_client.invoice_resolutions;
+  }
+
+  // Accounting models
+  get chart_of_accounts() {
+    return this.scoped_client.chart_of_accounts;
+  }
+
+  get fiscal_periods() {
+    return this.scoped_client.fiscal_periods;
+  }
+
+  get accounting_entries() {
+    return this.scoped_client.accounting_entries;
+  }
+
+  // Payroll models
+  get employees() {
+    return this.scoped_client.employees;
+  }
+
+  get payroll_runs() {
+    return this.scoped_client.payroll_runs;
   }
 }

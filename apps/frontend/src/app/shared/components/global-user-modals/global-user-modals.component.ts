@@ -23,10 +23,7 @@ import { UserUiService } from '../../services/user-ui.service';
 export class GlobalUserModalsComponent {
   userUiService = inject(UserUiService);
 
-  constructor() {
-    this.userUiService.isProfileOpen$.subscribe(v => console.log('GlobalUserModals: isProfileOpen$', v));
-    this.userUiService.isSettingsOpen$.subscribe(v => console.log('GlobalUserModals: isSettingsOpen$', v));
-  }
+  constructor() {}
 
   onProfileClose(isOpen: boolean) {
     if (!isOpen) {

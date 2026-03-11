@@ -79,10 +79,7 @@ export class TableComponent implements AfterContentInit {
     // Validar que las columnas tengan las propiedades necesarias
     this.columns.forEach((col) => {
       if (!col.key || !col.label) {
-        console.warn(
-          'Columna inválida: cada columna debe tener key y label',
-          col,
-        );
+        // Columna inválida: cada columna debe tener key y label
       }
     });
   }
@@ -237,7 +234,12 @@ export class TableComponent implements AfterContentInit {
     const visibilityClasses = this.getResponsiveClasses(column);
     const typeClass = column.type ? [`cell-type-${column.type}`] : [];
 
-    return [...alignClasses[column.align || 'left'], ...widthClass, ...visibilityClasses, ...typeClass].join(' ');
+    return [
+      ...alignClasses[column.align || 'left'],
+      ...widthClass,
+      ...visibilityClasses,
+      ...typeClass,
+    ].join(' ');
   }
 
   /**
@@ -268,10 +270,12 @@ export class TableComponent implements AfterContentInit {
     // Keep first 2 columns always visible
     // Hide columns with high index on mobile
     if (totalColumns > 3) {
-      if (index >= 3) { // 4th column and beyond hidden on mobile
+      if (index >= 3) {
+        // 4th column and beyond hidden on mobile
         classes.push('hidden-mobile');
       }
-      if (index >= 5) { // 6th column and beyond hidden on tablet
+      if (index >= 5) {
+        // 6th column and beyond hidden on tablet
         classes.push('hidden-tablet');
       }
     }
@@ -374,7 +378,9 @@ export class TableComponent implements AfterContentInit {
     if (column.badgeConfig.type === 'status') {
       // For status type, use predefined color classes
       // Apply transform if exists to get display value, but use original for class
-      const displayValue = column.transform ? column.transform(value, undefined) : value;
+      const displayValue = column.transform
+        ? column.transform(value, undefined)
+        : value;
       const originalValue = value; // Use original value for CSS class
 
       // Handle UserState enum values and common status strings
@@ -460,7 +466,9 @@ export class TableComponent implements AfterContentInit {
   private getBadgeColorFromMap(column: TableColumn, value: any): string | null {
     if (column.badgeConfig?.colorMap) {
       // Apply transform function to get display value if exists
-      const displayValue = column.transform ? column.transform(value, undefined) : value;
+      const displayValue = column.transform
+        ? column.transform(value, undefined)
+        : value;
 
       // First try exact match with original value
       const exactValue = String(value);

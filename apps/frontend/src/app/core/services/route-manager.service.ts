@@ -53,7 +53,6 @@ export class RouteManagerService implements OnDestroy {
       .pipe(
         ofType(ConfigActions.initializeAppFailure),
         tap(({ error }) => {
-          console.warn('[RouteManager] App initialization failed, recovering with Vendix Landing fallback:', error);
           // Dispatch success with fallback config to clear the error state
           // and allow the router-outlet to render instead of the error screen
           this.store.dispatch(
@@ -84,16 +83,8 @@ export class RouteManagerService implements OnDestroy {
    * Public method to allow manual reconfiguration (e.g., during environment switch).
    */
   public configureDynamicRoutes(appConfig: AppConfig): void {
-    console.log('🔀 [RouteManager] configureDynamicRoutes() START', {
-      hasConfig: !!appConfig,
-      hasRoutes: !!appConfig?.routes,
-      environment: appConfig?.environment,
-      routesCount: appConfig?.routes?.length,
-    });
-
     // Si no tenemos config válida, fallback inmediato
     if (!appConfig || !appConfig.routes) {
-      console.error('🚨 [RouteManager] Invalid app config or routes, using fallback');
       this.router.resetConfig(this.getFallbackRoutes());
       this.routesConfigured.next(true);
       return;
@@ -101,31 +92,20 @@ export class RouteManagerService implements OnDestroy {
 
     const finalRoutes = this.buildFinalRoutes(appConfig);
 
-    console.log('🔀 [RouteManager] Final routes built:', {
-      totalRoutes: finalRoutes.length,
-      staticAuthRoutes: finalRoutes.filter(r => r.path === 'auth').length,
-      dynamicAppRoutes: appConfig.routes.length,
-      firstFewPaths: finalRoutes.slice(0, 5).map(r => ({ path: r.path, redirectTo: r.redirectTo })),
-    });
-
     // Si es la inicialización (la app no está lista), hacerlo síncrono
     // para no romper el APP_INITIALIZER
     if (!this.initialized_complete) {
-      console.log('🔀 [RouteManager] First initialization, setting routes synchronously');
       this.router.resetConfig(finalRoutes);
       this.initialized_complete = true;
       this.routesConfigured.next(true);
     } else {
       // Si es un cambio en caliente (switch de entorno), poner loading y usar delay para fluidez
-      console.log('🔀 [RouteManager] Hot reload, setting routes with delay');
       this.routesConfigured.next(false);
       setTimeout(() => {
         this.router.resetConfig(finalRoutes);
         this.routesConfigured.next(true);
       }, 100);
     }
-
-    console.log('✅ [RouteManager] Routes configured successfully');
   }
 
   private initialized_complete = false;
@@ -141,9 +121,9 @@ export class RouteManagerService implements OnDestroy {
       {
         path: '**',
         loadComponent: () =>
-          import(
-            '../../shared/components/not-found-redirect/not-found-redirect.component'
-          ).then((c) => c.NotFoundRedirectComponent),
+          import('../../shared/components/not-found-redirect/not-found-redirect.component').then(
+            (c) => c.NotFoundRedirectComponent,
+          ),
       },
     ];
   }
@@ -157,37 +137,37 @@ export class RouteManagerService implements OnDestroy {
           {
             path: 'login',
             loadComponent: () =>
-              import(
-                '../../public/auth/components/contextual-login/contextual-login.component'
-              ).then((c) => c.ContextualLoginComponent),
+              import('../../public/auth/components/contextual-login/contextual-login.component').then(
+                (c) => c.ContextualLoginComponent,
+              ),
           },
           {
             path: 'register',
             loadComponent: () =>
-              import(
-                '../../public/auth/components/register-owner/register-owner.component'
-              ).then((c) => c.RegisterOwnerComponent),
+              import('../../public/auth/components/register-owner/register-owner.component').then(
+                (c) => c.RegisterOwnerComponent,
+              ),
           },
           {
             path: 'forgot-owner-password',
             loadComponent: () =>
-              import(
-                '../../public/auth/components/forgot-owner-password/forgot-owner-password'
-              ).then((c) => c.ForgotOwnerPasswordComponent),
+              import('../../public/auth/components/forgot-owner-password/forgot-owner-password').then(
+                (c) => c.ForgotOwnerPasswordComponent,
+              ),
           },
           {
             path: 'reset-owner-password',
             loadComponent: () =>
-              import(
-                '../../public/auth/components/reset-owner-password/reset-owner-password'
-              ).then((c) => c.ResetOwnerPasswordComponent),
+              import('../../public/auth/components/reset-owner-password/reset-owner-password').then(
+                (c) => c.ResetOwnerPasswordComponent,
+              ),
           },
           {
             path: 'verify-email',
             loadComponent: () =>
-              import(
-                '../../public/auth/components/email-verification/email-verification.component'
-              ).then((c) => c.EmailVerificationComponent),
+              import('../../public/auth/components/email-verification/email-verification.component').then(
+                (c) => c.EmailVerificationComponent,
+              ),
           },
         ],
       },
@@ -200,9 +180,9 @@ export class RouteManagerService implements OnDestroy {
       {
         path: '',
         loadComponent: () =>
-          import(
-            '../../public/landing/vendix-landing/vendix-landing.component'
-          ).then((c) => c.VendixLandingComponent),
+          import('../../public/landing/vendix-landing/vendix-landing.component').then(
+            (c) => c.VendixLandingComponent,
+          ),
         pathMatch: 'full',
       },
       { path: '**', redirectTo: '' },
@@ -214,7 +194,6 @@ export class RouteManagerService implements OnDestroy {
    * This is called by APP_INITIALIZER when there's a timeout.
    */
   configureFallbackRoutes(): void {
-    console.warn('[RouteManager] Configuring fallback routes due to timeout');
     this.router.resetConfig(this.getFallbackRoutes());
     this.routesConfigured.next(true);
   }

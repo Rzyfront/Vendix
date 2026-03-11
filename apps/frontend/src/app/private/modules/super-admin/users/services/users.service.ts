@@ -200,20 +200,20 @@ export class UsersService {
       (dashboardQuery.role && dashboardQuery.role.trim() !== '') ||
       (dashboardQuery.page && dashboardQuery.page > 0) ||
       (dashboardQuery.limit && dashboardQuery.limit > 0) ||
-      (dashboardQuery.include_inactive !== undefined);
+      dashboardQuery.include_inactive !== undefined;
 
     // Si no hay parámetros, usar caché
     if (!hasParams) {
       const now = Date.now();
 
-      if (this.statsCache$ && (now - this.statsLastFetch) < this.CACHE_TTL) {
+      if (this.statsCache$ && now - this.statsLastFetch < this.CACHE_TTL) {
         return this.statsCache$;
       }
 
       this.statsCache$ = this.http
         .get<{ data: UserStats }>(`${this.apiUrl}/superadmin/users/dashboard`)
         .pipe(
-          tap(() => this.statsLastFetch = Date.now()),
+          tap(() => (this.statsLastFetch = Date.now())),
           shareReplay({ bufferSize: 1, refCount: true }),
           map((response) => response.data),
           catchError((error) => {
@@ -251,20 +251,14 @@ export class UsersService {
       );
     }
 
-    console.log('Making stats request with params:', params.toString());
-
     return this.http
-      .get<{ data: UserStats }>(`${this.apiUrl}/superadmin/users/dashboard`, { params })
+      .get<{
+        data: UserStats;
+      }>(`${this.apiUrl}/superadmin/users/dashboard`, { params })
       .pipe(
         map((response) => response.data),
         catchError((error) => {
           console.error('Error getting users stats:', error);
-          console.error('Error details:', {
-            status: error.status,
-            statusText: error.statusText,
-            url: error.url,
-            params: params.toString(),
-          });
           return throwError(() => error);
         }),
       );
@@ -273,19 +267,6 @@ export class UsersService {
   /**
    * Resetear contraseña de usuario
    */
-  // resetUserPassword(id: number, newPassword: string): Observable<void> {
-  //   return this.http
-  //     .post<void>(`${this.apiUrl}/superadmin/users/${id}/reset-password`, {
-  //       password: newPassword,
-  //     })
-  //     .pipe(
-  //       catchError((error) => {
-  //         console.error('Error resetting password:', error);
-  //         return throwError(() => error);
-  //       }),
-  //     );
-  // }
-
   /**
    * Toggle 2FA para usuario
    */

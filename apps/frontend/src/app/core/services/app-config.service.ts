@@ -47,66 +47,32 @@ export class AppConfigService {
   private router = inject(Router);
 
   async setupConfig(): Promise<AppConfig> {
-    console.log('🔍 [AppConfigService] ===== setupConfig() START =====');
-
     // 1. Detectar la configuración base del dominio.
     let domainConfig = await this.detectDomain();
-    const domainAppType = domainConfig.environment; // Guardar el app_type original del dominio
-
-    console.log('[AppConfigService] Domain detected:', {
-      hostname: domainConfig.hostname,
-      environment: domainConfig.environment,
-      domainType: domainConfig.domainType,
-    });
+    const domainAppType = domainConfig.environment;
 
     // 2. Revisar si hay un entorno de usuario guardado (de un login previo).
     const cachedUserEnv = this.getCachedUserEnvironment();
     const cachedDomainEnv = this.getCachedDomainAppType();
 
-    console.log('[AppConfigService] Cached environments:', {
-      cachedUserEnv,
-      cachedDomainEnv,
-      domainAppType,
-      fromLocalStorage: typeof localStorage !== 'undefined' ? localStorage.getItem('vendix_user_environment') : 'localStorage unavailable',
-      loggedOutFlag: typeof localStorage !== 'undefined' ? localStorage.getItem('vendix_logged_out_recently') : 'N/A',
-    });
-
     // 3. Lógica de Decisión de Entorno
     // Prioridad: 1) User environment (si está autenticado), 2) Domain app_type
     const isTargetAdmin =
       cachedUserEnv &&
-      [
-        AppType.ORG_ADMIN,
-        AppType.STORE_ADMIN,
-        AppType.VENDIX_ADMIN,
-      ].includes(cachedUserEnv);
-
-    console.log('[AppConfigService] Decision logic:', {
-      cachedUserEnv,
-      isTargetAdmin,
-      hasValidAuthState: this.hasValidAuthState(),
-    });
+      [AppType.ORG_ADMIN, AppType.STORE_ADMIN, AppType.VENDIX_ADMIN].includes(
+        cachedUserEnv,
+      );
 
     // Solo usar el user environment si hay una sesión válida
     if (cachedUserEnv && isTargetAdmin && this.hasValidAuthState()) {
-      console.log('[AppConfigService] ✅ ADMIN user authenticated: setting environment to', cachedUserEnv);
       domainConfig.environment = cachedUserEnv;
     } else {
-      // Sin sesión válida o sin user env: usar el domain app_type
-      console.log('[AppConfigService] ⚠️ Using domain app_type:', domainAppType);
       domainConfig.environment = domainAppType;
     }
 
     // 4. Construir la configuración final con el entorno definitivo.
     const appConfig = this.buildAppConfig(domainConfig);
-    console.log('[AppConfigService] Final App Config build:', {
-      environment: appConfig.environment,
-      domainConfigEnvironment: domainConfig.environment,
-      store: domainConfig.store_id,
-      org: domainConfig.organization_id,
-    });
     this.cacheAppConfig(appConfig);
-    console.log('🔍 [AppConfigService] ===== setupConfig() END =====');
     return appConfig;
   }
 
@@ -159,20 +125,8 @@ export class AppConfigService {
   }
 
   private resolveRoutes(domainConfig: DomainConfig): Routes {
-    console.log('🔀 [AppConfigService] resolveRoutes() START', {
-      environment: domainConfig.environment,
-    });
-
     const publicRoutes = this.resolvePublicRoutes(domainConfig);
     const privateRoutes = this.resolvePrivateRoutes(domainConfig);
-
-    console.log('🔀 [AppConfigService] resolveRoutes() result:', {
-      publicRoutesCount: publicRoutes.length,
-      privateRoutesCount: privateRoutes.length,
-      totalRoutes: publicRoutes.length + privateRoutes.length,
-      publicFirstPath: publicRoutes[0]?.path,
-      privateFirstPath: privateRoutes[0]?.path,
-    });
 
     // 🔥 FIX: Para entornos ADMIN, si el usuario está autenticado y visita /,
     // redirigir al dashboard correspondiente
@@ -186,18 +140,16 @@ export class AppConfigService {
 
     if (isAdminEnvironment) {
       // Verificar si ya existe una ruta para '/' en las rutas públicas
-      const hasRootRoute = publicRoutes.some(r => r.path === '' || r.path === '/');
+      const hasRootRoute = publicRoutes.some(
+        (r) => r.path === '' || r.path === '/',
+      );
       const hasAuthState = this.hasValidAuthState();
-
-      console.log('🔀 [AppConfigService] Admin environment detected:', {
-        hasRootRoute,
-        hasAuthState,
-      });
 
       // Si hay ruta raíz en públicas Y usuario está autenticado, agregar redirección prioritaria
       if (hasRootRoute && hasAuthState) {
-        const dashboardPath = this.getDashboardPathForEnvironment(domainConfig.environment);
-        console.log('🔀 [AppConfigService] Adding authenticated redirect to dashboard:', dashboardPath);
+        const dashboardPath = this.getDashboardPathForEnvironment(
+          domainConfig.environment,
+        );
 
         // Agregar redirección al inicio (para que tenga prioridad)
         finalRoutes.unshift({
@@ -244,10 +196,6 @@ export class AppConfigService {
   }
 
   private resolvePublicRoutes(domainConfig: DomainConfig): Routes {
-    console.log('🔀 [AppConfigService] resolvePublicRoutes()', {
-      environment: domainConfig.environment,
-    });
-
     let routes: Routes;
     switch (domainConfig.environment) {
       case AppType.VENDIX_LANDING:
@@ -266,19 +214,10 @@ export class AppConfigService {
         routes = defaultPublicRoutes;
     }
 
-    console.log('🔀 [AppConfigService] Public routes selected:', {
-      routesCount: routes.length,
-      firstRoute: routes[0],
-    });
-
     return routes;
   }
 
   private resolvePrivateRoutes(domainConfig: DomainConfig): Routes {
-    console.log('🔀 [AppConfigService] resolvePrivateRoutes()', {
-      environment: domainConfig.environment,
-    });
-
     let routes: Routes;
     switch (domainConfig.environment) {
       case AppType.VENDIX_ADMIN:
@@ -296,11 +235,6 @@ export class AppConfigService {
       default:
         routes = [];
     }
-
-    console.log('🔀 [AppConfigService] Private routes selected:', {
-      routesCount: routes.length,
-      firstRoute: routes[0],
-    });
 
     return routes;
   }
@@ -343,10 +277,6 @@ export class AppConfigService {
   private async resolveDomainFromAPI(
     hostname: string,
   ): Promise<DomainResolution | null> {
-    console.log('[AppConfigService] resolveDomainFromAPI() calling:', {
-      url: `${environment.apiUrl}/public/domains/resolve/${hostname}`,
-    });
-
     const response = await this.http
       .get<DomainResolutionResponse>(
         `${environment.apiUrl}/public/domains/resolve/${hostname}`,
@@ -355,39 +285,17 @@ export class AppConfigService {
         catchError((error) => {
           console.error('[AppConfigService] Domain API error:', error);
           return of(null);
-        })
+        }),
       )
       .toPromise();
 
-    const domainInfo = response?.data ?? null;
-
-    console.log('[AppConfigService] Domain API response:', {
-      success: response?.success,
-      hasData: !!domainInfo,
-      domainType: domainInfo?.domain_type,
-      app: domainInfo?.app,
-      fullResponse: response,
-    });
-
-    return domainInfo;
+    return response?.data ?? null;
   }
 
   private buildDomainConfig(
     hostname: string,
     domainInfo: DomainResolution,
   ): DomainConfig {
-    console.log('[AppConfigService] buildDomainConfig() input:', {
-      hostname,
-      domainType: domainInfo.domain_type,
-      app: domainInfo.app,
-      organizationSlug: domainInfo.organization_slug,
-      storeSlug: domainInfo.store_slug,
-      isVendixDomain: domainInfo.organization_slug === 'vendix-corp',
-      hasBranding: !!domainInfo.branding,
-      hasEcommerce: !!domainInfo.ecommerce,
-      hasPublication: !!domainInfo.publication,
-    });
-
     // NUEVO ESTÁNDAR: Usar domainInfo.app (única fuente de verdad)
     const appType = domainInfo.app;
     const normalizedEnv = this.normalizeEnvironment(appType);
@@ -407,7 +315,9 @@ export class AppConfigService {
         branding: {
           ...(domainInfo.branding || domainInfo.config?.branding),
           // Inyectar store_logo_url en branding.logo_url si no existe
-          logo_url: (domainInfo.branding || domainInfo.config?.branding)?.logo_url || domainInfo.store_logo_url,
+          logo_url:
+            (domainInfo.branding || domainInfo.config?.branding)?.logo_url ||
+            domainInfo.store_logo_url,
         },
         fonts: domainInfo.fonts,
         ecommerce: domainInfo.ecommerce,
@@ -416,14 +326,10 @@ export class AppConfigService {
         security: domainInfo.config?.security,
       },
       isVendixDomain: domainInfo.organization_slug === 'vendix-corp',
-      isMainVendixDomain: hostname === environment.vendixDomain || hostname === `www.${environment.vendixDomain}`,
+      isMainVendixDomain:
+        hostname === environment.vendixDomain ||
+        hostname === `www.${environment.vendixDomain}`,
     };
-
-    console.log('[AppConfigService] buildDomainConfig() output:', {
-      environment: result.environment,
-      domainType: result.domainType,
-      hasBranding: !!result.customConfig?.branding,
-    });
 
     // Cache domain's original app_type (immutable, survives logout)
     this.cacheDomainAppType(normalizedEnv);
@@ -432,29 +338,16 @@ export class AppConfigService {
   }
 
   private normalizeEnvironment(env: string): AppType {
-    console.log('[AppConfigService] normalizeEnvironment() input:', {
-      env,
-      envType: typeof env,
-      envLength: env?.length,
-      isEmpty: env === '',
-      isNull: env === null,
-      isUndefined: env === undefined,
-    });
-
     if (!env) {
-      console.warn('⚠️ [AppConfigService] normalizeEnvironment(): env is falsy, returning VENDIX_LANDING as fallback');
       return AppType.VENDIX_LANDING;
     }
     const normalized = env.toUpperCase() as AppType;
-    console.log('[AppConfigService] normalizeEnvironment() output:', normalized);
     return normalized;
   }
 
   private getCachedUserEnvironment(): AppType | null {
     try {
-      console.log('[AppConfigService] getCachedUserEnvironment() START');
       if (typeof localStorage === 'undefined') {
-        console.warn('[AppConfigService] localStorage is undefined');
         return null;
       }
 
@@ -463,34 +356,18 @@ export class AppConfigService {
         'vendix_logged_out_recently',
       );
 
-      console.log('[AppConfigService] Checking logout flag:', {
-        hasLoggedOutFlag: !!loggedOutRecently,
-        logoutFlagValue: loggedOutRecently,
-      });
-
       if (loggedOutRecently) {
         const logoutTime = parseInt(loggedOutRecently);
         const currentTime = Date.now();
         const timeDiff = currentTime - logoutTime;
 
-        console.log('[AppConfigService] Logout flag found:', {
-          logoutTime,
-          currentTime,
-          timeDiff,
-          timeDiffSeconds: Math.floor(timeDiff / 1000),
-          thresholdMs: 30000,
-          willIgnore: timeDiff < 30000,
-        });
-
         // Si el logout fue hace menos de 30 segundos, ignorar el environment cachado
         if (currentTime - logoutTime < 30000) {
-          console.warn('🔒 Recent logout detected (< 30s), ignoring cached environment');
           localStorage.removeItem('vendix_user_environment');
           localStorage.removeItem('vendix_logged_out_recently');
           return null;
         }
         // Limpiar bandera si pasó más tiempo
-        console.log('[AppConfigService] Logout flag expired (> 30s), clearing flag');
         localStorage.removeItem('vendix_logged_out_recently');
       }
 
@@ -498,14 +375,8 @@ export class AppConfigService {
         'vendix_user_environment',
       ) as AppType | null;
 
-      console.log('[AppConfigService] Returning cached environment:', {
-        cachedEnv,
-        cachedEnvType: typeof cachedEnv,
-      });
-
       return cachedEnv;
     } catch (e) {
-      console.error('[AppConfigService] Error in getCachedUserEnvironment():', e);
       return null;
     }
   }
@@ -514,7 +385,7 @@ export class AppConfigService {
     try {
       if (typeof localStorage !== 'undefined')
         localStorage.setItem('vendix_user_environment', env);
-    } catch (e) { }
+    } catch (e) {}
   }
 
   /**
@@ -524,7 +395,7 @@ export class AppConfigService {
     try {
       if (typeof localStorage !== 'undefined')
         localStorage.setItem('vendix_domain_app_type', env);
-    } catch (e) { }
+    } catch (e) {}
   }
 
   /**
@@ -543,6 +414,6 @@ export class AppConfigService {
     try {
       if (typeof localStorage !== 'undefined')
         localStorage.setItem('vendix_app_config', JSON.stringify(config));
-    } catch (e) { }
+    } catch (e) {}
   }
 }

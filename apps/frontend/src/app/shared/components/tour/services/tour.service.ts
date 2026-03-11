@@ -63,9 +63,7 @@ export class TourService {
   private stateSubject = new BehaviorSubject<TourState>(this.activeTourState);
   public state$ = this.stateSubject.asObservable();
 
-  constructor() {
-    console.log('[TourService] Service initialized');
-  }
+  constructor() {}
 
   /**
    * Get the tour state from user_settings
@@ -130,8 +128,6 @@ export class TourService {
    * Mark a tour as completed
    */
   completeTour(tourId: string): void {
-    console.log('[TourService] Completing tour:', tourId);
-
     const currentState = this.getUserToursState();
 
     // Create a new mutable object
@@ -139,7 +135,7 @@ export class TourService {
       completedTours: currentState.completedTours.includes(tourId)
         ? currentState.completedTours
         : [...currentState.completedTours, tourId],
-      skippedTours: currentState.skippedTours.filter(id => id !== tourId),
+      skippedTours: currentState.skippedTours.filter((id) => id !== tourId),
     };
 
     // Save to user_settings
@@ -161,8 +157,6 @@ export class TourService {
    * Mark a tour as skipped
    */
   skipTour(tourId: string): void {
-    console.log('[TourService] Skipping tour:', tourId);
-
     const currentState = this.getUserToursState();
 
     // Create a new mutable object
@@ -192,14 +186,12 @@ export class TourService {
    * Reset tour status (allow it to be shown again)
    */
   resetTour(tourId: string): void {
-    console.log('[TourService] Resetting tour:', tourId);
-
     const currentState = this.getUserToursState();
 
     // Create a new mutable object
     const toursState: UserToursState = {
-      completedTours: currentState.completedTours.filter(id => id !== tourId),
-      skippedTours: currentState.skippedTours.filter(id => id !== tourId),
+      completedTours: currentState.completedTours.filter((id) => id !== tourId),
+      skippedTours: currentState.skippedTours.filter((id) => id !== tourId),
     };
 
     // Save to user_settings
@@ -215,8 +207,6 @@ export class TourService {
    * Reset all tours (for testing purposes)
    */
   resetAllTours(): void {
-    console.log('[TourService] Resetting all tours');
-
     const toursState: UserToursState = {
       completedTours: [],
       skippedTours: [],
@@ -240,11 +230,8 @@ export class TourService {
    */
   startTour(tourId: string): void {
     if (!this.canShowTour(tourId)) {
-      console.warn('[TourService] Tour already completed or skipped:', tourId);
       return;
     }
-
-    console.log('[TourService] Starting tour:', tourId);
 
     this.activeTourState.isActive = true;
     this.activeTourState.currentTourId = tourId;
@@ -261,8 +248,6 @@ export class TourService {
    * End the current tour
    */
   endTour(): void {
-    console.log('[TourService] Ending current tour');
-
     this.activeTourState.isActive = false;
     this.activeTourState.currentTourId = null;
     this.activeTourState.currentStepIndex = 0;

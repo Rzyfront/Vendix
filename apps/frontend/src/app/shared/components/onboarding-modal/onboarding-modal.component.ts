@@ -204,11 +204,7 @@ interface WizardStep {
       </div>
 
       <!-- Unified Footer Navigation - Always visible except on step 1 without business type -->
-      <div
-        class="onboarding-footer"
-        slot="footer"
-        *ngIf="showFooter"
-      >
+      <div class="onboarding-footer" slot="footer" *ngIf="showFooter">
         <!-- Left side: Back button + Skip -->
         <div class="flex items-center gap-2">
           <app-button
@@ -266,7 +262,9 @@ interface WizardStep {
             variant="primary"
             size="xsm"
             (clicked)="nextStep()"
-            [disabled]="isSubmitting || isProcessing || !canProceedFromCurrentStep"
+            [disabled]="
+              isSubmitting || isProcessing || !canProceedFromCurrentStep
+            "
           >
             {{ nextButtonText }}
             <app-icon
@@ -476,7 +474,6 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     const newAppType = event.type === 'STORE' ? 'STORE_ADMIN' : 'ORG_ADMIN';
 
     if (currentAppType === newAppType) {
-      console.log('Skipping app type selection (already matches)');
       this.steps =
         event.type === 'STORE' ? this.storeSteps : this.organizationSteps;
       this.updateAppConfigForm();
@@ -495,7 +492,6 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       })
       .subscribe({
         next: (response) => {
-          console.log('App type selected successfully:', response);
           this.toastService.success(
             'Tipo de negocio seleccionado correctamente',
           );
@@ -543,7 +539,6 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     if (this.businessType === 'STORE') {
       // For single store, organization is auto-generated in backend when store is created
       // No need to populate organization form since it won't be shown
-      console.log('Store flow: Organization will be auto-generated in backend');
     } else if (this.businessType === 'ORGANIZATION') {
       // For organization first, preload store form with organization data
       this.organizationForm.valueChanges
@@ -864,7 +859,6 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         if (selectedType) {
           this.onBusinessTypeSelected({ type: selectedType });
         } else {
-          console.warn('No business type selected - cannot proceed');
           this.isProcessing = false;
         }
         break;
@@ -950,7 +944,6 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       this.wizardStatus?.has_user_address &&
       this.userForm.pristine
     ) {
-      console.log('Skipping user setup submission (already completed)');
       this.isSubmitting = false;
       this.isProcessing = false;
       this.wizardService.nextStep();
@@ -997,7 +990,6 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       this.wizardStatus?.has_store_address &&
       this.storeForm.pristine
     ) {
-      console.log('Skipping store setup submission (already completed)');
       this.isSubmitting = false;
       this.isProcessing = false;
       this.wizardService.nextStep();
@@ -1040,7 +1032,6 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
 
     // Smart Check
     if (this.wizardStatus?.has_organization && this.organizationForm.pristine) {
-      console.log('Skipping organization setup submission (already completed)');
       this.isSubmitting = false;
       this.isProcessing = false;
       this.wizardService.nextStep();
@@ -1089,7 +1080,6 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       this.wizardStatus?.step_app_config_completed &&
       this.appConfigForm.pristine
     ) {
-      console.log('Skipping app config submission (already completed)');
       this.isSubmitting = false;
       this.isProcessing = false;
       this.wizardService.nextStep();
@@ -1157,32 +1147,20 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
 
         if (app_type === 'STORE_ADMIN') {
           const store_slug = this.wizardService.getCreatedStoreSlug();
-          console.log(
-            'Complete wizard - App type:',
-            app_type,
-            'Store slug:',
-            store_slug,
-          );
 
           if (store_slug) {
             try {
-              console.log(
-                '✅ Switching to STORE_ADMIN environment with slug:',
-                store_slug,
-              );
               await this.envSwitchService.performEnvironmentSwitch(
                 'STORE_ADMIN',
                 store_slug,
               );
-              console.log('✅ Environment switch completed successfully');
             } catch (switchError) {
-              console.error('❌ Error switching environment:', switchError);
+              console.error('Error switching environment:', switchError);
               this.toastService.error('Error al cambiar al entorno de tienda');
               // Fallback reload to ensure clean state
               window.location.reload();
             }
           } else {
-            console.warn('⚠️ No se encontró slug de store');
             // Si no hay slug, redirigir al dashboard general sin switch de entorno
             this.toastService.warning(
               'No se pudo identificar la tienda específica, redirigiendo al panel general',
@@ -1193,21 +1171,16 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         } else if (app_type === 'ORG_ADMIN') {
           // Para ORG_ADMIN, hacer switch a entorno de organización
           try {
-            console.log('✅ Switching to ORG_ADMIN environment');
             await this.envSwitchService.performEnvironmentSwitch('ORG_ADMIN');
-            console.log(
-              '✅ Organization environment switch completed successfully',
-            );
           } catch (switchError) {
             console.error(
-              '❌ Error switching to organization environment:',
+              'Error switching to organization environment:',
               switchError,
             );
             // Fallback reload to ensure clean state
             window.location.reload();
           }
         } else {
-          console.warn('⚠️ Unknown app type:', app_type);
           this.toastService.warning(
             'Tipo de aplicación no reconocido, redirigiendo al panel general',
           );

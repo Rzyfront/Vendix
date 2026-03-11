@@ -177,10 +177,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
                       product.price | currency
                     }}</span>
                     <span *ngIf="product.originalPrice" class="original-price">
-                      {{
-                        product.originalPrice
-                          | currency
-                      }}
+                      {{ product.originalPrice | currency }}
                     </span>
                   </div>
                   <div class="product-actions">
@@ -239,9 +236,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
           </div>
         </div>
         <div class="cart-footer">
-          <div class="cart-total">
-            Total: {{ cartTotal | currency }}
-          </div>
+          <div class="cart-total">Total: {{ cartTotal | currency }}</div>
           <app-button variant="primary" size="lg" (click)="proceedToCheckout()">
             Proceder al Pago
           </app-button>
@@ -305,9 +300,6 @@ export class StorefrontComponent implements OnInit {
   async ngOnInit() {
     const appConfig = this.configFacade.getCurrentConfig();
     if (!appConfig) {
-      console.warn(
-        '[STOREFRONT] App config not available, using default values',
-      );
       this.loadDefaultData();
       return;
     }
@@ -452,9 +444,6 @@ export class StorefrontComponent implements OnInit {
         quantity: 1,
       });
     }
-
-    // Mostrar notificación (en producción usaría toast service)
-    console.log('Producto agregado al carrito:', product.name);
   }
 
   removeFromCart(item: any) {

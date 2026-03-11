@@ -26,6 +26,9 @@ export class StorePrismaService extends BasePrismaService {
     'notifications',
     'notification_subscriptions',
     'push_subscriptions',
+    'invoices',
+    'invoice_resolutions',
+    'dian_configurations',
   ];
 
   constructor() {
@@ -93,6 +96,16 @@ export class StorePrismaService extends BasePrismaService {
       'shipping_rates', // Relational
       'expense_categories', // Org scoped
       'product_tax_assignments', // Relational
+      'invoice_items', // Relational
+      'invoice_taxes', // Relational
+      'dian_audit_logs', // Relational
+      'accounting_entry_lines', // Relational
+      'payroll_items', // Relational
+      'chart_of_accounts', // Org scoped
+      'fiscal_periods', // Org scoped
+      'accounting_entries', // Org scoped
+      'employees', // Org scoped
+      'payroll_runs', // Org scoped
     ];
 
     for (const model of all_scoped_models) {
@@ -188,6 +201,15 @@ export class StorePrismaService extends BasePrismaService {
       inventory_transactions: { products: { store_id: context.store_id } },
       shipping_rates: { shipping_zone: { store_id: context.store_id } },
       product_tax_assignments: { products: { store_id: context.store_id } },
+      invoice_items: { invoice: { store_id: context.store_id } },
+      invoice_taxes: { invoice: { store_id: context.store_id } },
+      dian_audit_logs: { dian_configuration: { store_id: context.store_id } },
+      accounting_entry_lines: {
+        entry: { organization_id: context.organization_id },
+      },
+      payroll_items: {
+        payroll_run: { organization_id: context.organization_id },
+      },
     };
 
     const security_filter: Record<string, any> = {};
@@ -199,6 +221,11 @@ export class StorePrismaService extends BasePrismaService {
       'sales_orders',
       'return_orders',
       'expense_categories',
+      'chart_of_accounts',
+      'fiscal_periods',
+      'accounting_entries',
+      'employees',
+      'payroll_runs',
     ];
 
     if (this.store_scoped_models.includes(model)) {
@@ -467,6 +494,61 @@ export class StorePrismaService extends BasePrismaService {
 
   get push_subscriptions() {
     return this.scoped_client.push_subscriptions;
+  }
+
+  // Invoicing models
+  get invoices() {
+    return this.scoped_client.invoices;
+  }
+
+  get invoice_items() {
+    return this.scoped_client.invoice_items;
+  }
+
+  get invoice_taxes() {
+    return this.scoped_client.invoice_taxes;
+  }
+
+  get invoice_resolutions() {
+    return this.scoped_client.invoice_resolutions;
+  }
+
+  get dian_configurations() {
+    return this.scoped_client.dian_configurations;
+  }
+
+  get dian_audit_logs() {
+    return this.scoped_client.dian_audit_logs;
+  }
+
+  // Accounting models
+  get chart_of_accounts() {
+    return this.scoped_client.chart_of_accounts;
+  }
+
+  get fiscal_periods() {
+    return this.scoped_client.fiscal_periods;
+  }
+
+  get accounting_entries() {
+    return this.scoped_client.accounting_entries;
+  }
+
+  get accounting_entry_lines() {
+    return this.scoped_client.accounting_entry_lines;
+  }
+
+  // Payroll models
+  get employees() {
+    return this.scoped_client.employees;
+  }
+
+  get payroll_runs() {
+    return this.scoped_client.payroll_runs;
+  }
+
+  get payroll_items() {
+    return this.scoped_client.payroll_items;
   }
 
   // Global tables (no store scoping)

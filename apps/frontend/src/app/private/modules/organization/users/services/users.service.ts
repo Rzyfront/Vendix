@@ -198,13 +198,16 @@ export class UsersService {
       (dashboardQuery.role && dashboardQuery.role.trim() !== '') ||
       (dashboardQuery.page && dashboardQuery.page > 0) ||
       (dashboardQuery.limit && dashboardQuery.limit > 0) ||
-      (dashboardQuery.include_inactive !== undefined);
+      dashboardQuery.include_inactive !== undefined;
 
     // Si no hay parámetros, usar caché
     if (!hasParams) {
       const now = Date.now();
 
-      if (orgUsersStatsCache && (now - orgUsersStatsCache.lastFetch) < this.CACHE_TTL) {
+      if (
+        orgUsersStatsCache &&
+        now - orgUsersStatsCache.lastFetch < this.CACHE_TTL
+      ) {
         return orgUsersStatsCache.observable;
       }
 
@@ -234,28 +237,6 @@ export class UsersService {
 
     // Con parámetros, no usar caché
     let params = new HttpParams();
-
-    // Solo agregar parámetros si tienen valores válidos
-    if (dashboardQuery.search && dashboardQuery.search.trim() !== '') {
-      params = params.set('search', dashboardQuery.search.trim());
-    }
-    if (dashboardQuery.role && dashboardQuery.role.trim() !== '') {
-      params = params.set('role', dashboardQuery.role.trim());
-    }
-    if (dashboardQuery.page && dashboardQuery.page > 0) {
-      params = params.set('page', dashboardQuery.page.toString());
-    }
-    if (dashboardQuery.limit && dashboardQuery.limit > 0) {
-      params = params.set('limit', dashboardQuery.limit.toString());
-    }
-    if (dashboardQuery.include_inactive !== undefined) {
-      params = params.set(
-        'include_inactive',
-        dashboardQuery.include_inactive.toString(),
-      );
-    }
-
-    console.log('Making org stats request with params:', params.toString());
 
     return this.http
       .get<{
@@ -310,7 +291,10 @@ export class UsersService {
     this.isUpdatingUser$.next(true);
 
     return this.http
-      .patch<any>(`${this.apiUrl}/organization/users/${id}/configuration`, configData)
+      .patch<any>(
+        `${this.apiUrl}/organization/users/${id}/configuration`,
+        configData,
+      )
       .pipe(
         map((response) => response.data),
         finalize(() => this.isUpdatingUser$.next(false)),

@@ -1,0 +1,45 @@
+<div class="scrollable-tabs-wrapper" [class]="wrapper_class()">
+  <!-- Left scroll arrow -->
+  @if (show_left_arrow()) {
+    <button
+      type="button"
+      class="scroll-arrow scroll-arrow--left"
+      (click)="scrollLeft()"
+      aria-label="Scroll left">
+      <app-icon name="chevron-left" [size]="arrow_icon_size()"></app-icon>
+    </button>
+  }
+
+  <!-- Scrollable nav -->
+  <nav
+    #scroll_container
+    class="scrollable-tabs-nav"
+    [attr.aria-label]="ariaLabel()"
+    (scroll)="onScroll()">
+    @for (tab of tabs(); track tab.id) {
+      <button
+        type="button"
+        class="scrollable-tab"
+        [class.scrollable-tab--active]="activeTab() === tab.id"
+        [class.scrollable-tab--inactive]="activeTab() !== tab.id"
+        [attr.data-tab-id]="tab.id"
+        (click)="onTabClick(tab.id)">
+        @if (tab.icon) {
+          <app-icon [name]="tab.icon" [size]="tab_icon_size()"></app-icon>
+        }
+        <span>{{ tab.label }}</span>
+      </button>
+    }
+  </nav>
+
+  <!-- Right scroll arrow -->
+  @if (show_right_arrow()) {
+    <button
+      type="button"
+      class="scroll-arrow scroll-arrow--right"
+      (click)="scrollRight()"
+      aria-label="Scroll right">
+      <app-icon name="chevron-right" [size]="arrow_icon_size()"></app-icon>
+    </button>
+  }
+</div>

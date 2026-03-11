@@ -190,25 +190,13 @@ export class StoreEcommerceLayoutComponent implements OnInit {
         const tenantLogo =
           tenantConfig.branding?.logo_url || tenantConfig.branding?.logo?.url;
 
-        this.store_logo = storeLogo || inicioLogo || brandingLogo || tenantLogo || null;
+        this.store_logo =
+          storeLogo || inicioLogo || brandingLogo || tenantLogo || null;
 
         // Load footer settings from ecommerce config
         if (ecommerceConfig.footer) {
           this.footer_settings = ecommerceConfig.footer;
         }
-
-        console.log('Layout Resolved Config:', {
-          storeName: this.store_name,
-          storeLogo: this.store_logo,
-          footerSettings: this.footer_settings ? 'loaded' : 'not configured',
-          source: storeLogo
-            ? 'store_logo_url'
-            : inicioLogo
-              ? 'ecommerce.inicio.logo_url'
-              : brandingLogo
-                ? 'branding.logo_url'
-                : 'tenantConfig',
-        });
       });
 
     // Subscribe to auth modal requests
@@ -329,7 +317,6 @@ export class StoreEcommerceLayoutComponent implements OnInit {
     this.show_user_menu = false;
   }
 
-
   logout(): void {
     this.auth_facade.logout({ redirect: false });
     this.show_user_menu = false;
@@ -377,11 +364,15 @@ export class StoreEcommerceLayoutComponent implements OnInit {
     if (newQuantity <= 0) {
       this.removeCartItem(item);
     } else {
-      const sub = this.is_authenticated$.subscribe(isAuth => {
+      const sub = this.is_authenticated$.subscribe((isAuth) => {
         if (isAuth) {
           this.cart_service.updateItem(item.id, newQuantity).subscribe();
         } else {
-          this.cart_service.updateLocalCartItem(item.product_id, newQuantity, item.product_variant_id || undefined);
+          this.cart_service.updateLocalCartItem(
+            item.product_id,
+            newQuantity,
+            item.product_variant_id || undefined,
+          );
         }
       });
       sub.unsubscribe();
@@ -389,18 +380,21 @@ export class StoreEcommerceLayoutComponent implements OnInit {
   }
 
   removeCartItem(item: any): void {
-    const sub = this.is_authenticated$.subscribe(isAuth => {
+    const sub = this.is_authenticated$.subscribe((isAuth) => {
       if (isAuth) {
         this.cart_service.removeItem(item.id).subscribe();
       } else {
-        this.cart_service.removeFromLocalCart(item.product_id, item.product_variant_id || undefined);
+        this.cart_service.removeFromLocalCart(
+          item.product_id,
+          item.product_variant_id || undefined,
+        );
       }
     });
     sub.unsubscribe();
   }
 
   clearCart(): void {
-    const sub = this.is_authenticated$.subscribe(isAuth => {
+    const sub = this.is_authenticated$.subscribe((isAuth) => {
       if (isAuth) {
         this.cart_service.clearCart().subscribe();
       } else {
@@ -431,7 +425,8 @@ export class StoreEcommerceLayoutComponent implements OnInit {
 
   hasFaq(): boolean {
     return !!(
-      this.footer_settings?.help?.faq && this.footer_settings.help.faq.length > 0
+      this.footer_settings?.help?.faq &&
+      this.footer_settings.help.faq.length > 0
     );
   }
 

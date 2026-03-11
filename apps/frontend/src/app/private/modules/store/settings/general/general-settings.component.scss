@@ -9,35 +9,6 @@
   scroll-behavior: smooth;
 }
 
-// ─── Section Navigation (compact dashboard-tabs style) ──
-// Inline Tailwind handles layout/positioning in template.
-// Only custom styles needed here: scrollbar-hide + tab states.
-
-.scrollbar-hide {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-
-  &::-webkit-scrollbar {
-    display: none;
-  }
-}
-
-.active-tab {
-  background-color: var(--color-primary) !important;
-  color: white !important;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-}
-
-.inactive-tab {
-  background-color: var(--color-surface);
-  color: var(--color-text-secondary);
-
-  &:hover {
-    background-color: #f9fafb;
-    color: var(--color-text-primary);
-  }
-}
-
 // ─── Settings Content Area ──────────────────────────────
 
 .settings-content {

@@ -55,10 +55,11 @@ import {
     ButtonComponent,
   ],
   templateUrl: './payment-methods.component.html',
-
 })
 export class PaymentMethodsComponent implements OnInit, OnDestroy {
-  private readonly paymentMethodsService = inject(SuperAdminPaymentMethodsService);
+  private readonly paymentMethodsService = inject(
+    SuperAdminPaymentMethodsService,
+  );
   private readonly fb = inject(FormBuilder);
   private readonly dialogService = inject(DialogService);
   private readonly toastService = inject(ToastService);
@@ -205,8 +206,16 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
       this.paymentMethodsService.getPaymentMethodTypeLabel(value),
     detailKeys: [
       { key: 'provider', label: 'Proveedor', icon: 'credit-card' },
-      { key: '_count.store_payment_methods', label: 'Tiendas', icon: 'shopping-bag' },
-      { key: 'created_at', label: 'Fecha', transform: (v) => this.formatDate(v) },
+      {
+        key: '_count.store_payment_methods',
+        label: 'Tiendas',
+        icon: 'shopping-bag',
+      },
+      {
+        key: 'created_at',
+        label: 'Fecha',
+        transform: (v) => this.formatDate(v),
+      },
     ],
     footerKey: 'is_active',
     footerTransform: (val) => (val ? 'Activo' : 'Inactivo'),
@@ -306,7 +315,6 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
     direction: 'asc' | 'desc' | null;
   }): void {
     // TODO: Implement sorting logic
-    console.log('Sort changed:', event.column, event.direction);
     this.loadPaymentMethods();
   }
 

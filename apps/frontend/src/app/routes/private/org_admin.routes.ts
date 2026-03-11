@@ -90,6 +90,22 @@ export const orgAdminRoutes: Routes = [
             '../../private/modules/organization/domains/domains.component'
           ).then((c) => c.DomainsComponent),
       },
+      // Accounting Routes (adaptive module — visible at org level)
+      {
+        path: 'accounting',
+        loadChildren: () =>
+          import('../../private/modules/store/accounting/accounting.routes').then(
+            (m) => m.accountingRoutes,
+          ),
+      },
+      // Payroll Routes (adaptive module — visible at org level)
+      {
+        path: 'payroll',
+        loadChildren: () =>
+          import('../../private/modules/store/payroll/payroll.routes').then(
+            (m) => m.payrollRoutes,
+          ),
+      },
     ],
   },
 ];

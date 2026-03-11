@@ -1,4 +1,11 @@
-import { Component, Input, Output, EventEmitter, inject, OnInit } from '@angular/core';
+import {
+  Component,
+  Input,
+  Output,
+  EventEmitter,
+  inject,
+  OnInit,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   FormsModule,
@@ -715,7 +722,7 @@ export class OrderCreateModalComponent implements OnInit {
   private async loadCurrencyOptions(): Promise<void> {
     try {
       const currencies = await this.currencyService.getActiveCurrencies();
-      this.currencyOptions = currencies.map(c => ({
+      this.currencyOptions = currencies.map((c) => ({
         label: `${c.code} - ${c.name}`,
         value: c.code,
       }));
@@ -748,7 +755,10 @@ export class OrderCreateModalComponent implements OnInit {
       discount_amount: [0, [Validators.min(0)]],
       subtotal: [0, [Validators.min(0)]],
       total_amount: [0, [Validators.min(0)]],
-      currency: [this.currencyFormatService.currencyCode() || 'USD', Validators.required],
+      currency: [
+        this.currencyFormatService.currencyCode() || 'USD',
+        Validators.required,
+      ],
       notes: [''],
       internal_notes: [''],
       internal_reference: [''],
@@ -880,10 +890,6 @@ export class OrderCreateModalComponent implements OnInit {
   }
 
   onSubmit(): void {
-    console.log('Form valid:', this.orderForm.valid);
-    console.log('Form value:', this.orderForm.value);
-    console.log('Form errors:', this.orderForm.errors);
-
     if (this.orderForm.valid) {
       this.isSubmitting = true;
 
@@ -1042,7 +1048,6 @@ export class OrderCreateModalComponent implements OnInit {
   }
 
   onProductSelected(product: any, index: number): void {
-    console.log('Product selected:', product, 'index:', index);
     // Actualizar el item con el producto seleccionado
     const itemsArray = this.orderForm.get('items') as any;
     const itemGroup = itemsArray.at(index);
@@ -1057,7 +1062,6 @@ export class OrderCreateModalComponent implements OnInit {
   }
 
   onInventoryChecked(inventory: any, index: number): void {
-    console.log('Inventory checked:', inventory, 'index:', index);
     // Actualizar el item con la información de inventario
     const itemsArray = this.orderForm.get('items') as any;
     const itemGroup = itemsArray.at(index);
@@ -1070,8 +1074,6 @@ export class OrderCreateModalComponent implements OnInit {
   }
 
   private updateValidators(orderType: string): void {
-    console.log('Updating validators for order type:', orderType);
-
     // Reset all conditional validators first
     this.orderForm.get('store_id')?.clearValidators();
     this.orderForm.get('customer_id')?.clearValidators();
@@ -1107,8 +1109,6 @@ export class OrderCreateModalComponent implements OnInit {
     this.orderForm.get('supplier_id')?.updateValueAndValidity();
     this.orderForm.get('location_id')?.updateValueAndValidity();
     this.orderForm.get('partner_id')?.updateValueAndValidity();
-
-    console.log('Form valid after validator update:', this.orderForm.valid);
   }
 
   private resetForm(): void {

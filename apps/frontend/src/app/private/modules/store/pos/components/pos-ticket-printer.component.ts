@@ -377,25 +377,28 @@ import {
       }
 
       @media print {
-         .printer-header,
-         .printer-selection,
-         .print-options,
-         .printer-actions,
-         .ticket-preview h4 {
-           display: none !important;
-         }
+        .printer-header,
+        .printer-selection,
+        .print-options,
+        .printer-actions,
+        .ticket-preview h4 {
+          display: none !important;
+        }
 
-         .preview-container {
-           box-shadow: none;
-           border: none;
-           padding: 0;
-           margin: 0;
-         }
+        .preview-container {
+          box-shadow: none;
+          border: none;
+          padding: 0;
+          margin: 0;
+        }
 
-         button, input, select, textarea {
-           display: none !important;
-         }
-       }
+        button,
+        input,
+        select,
+        textarea {
+          display: none !important;
+        }
+      }
     `,
   ],
 })
@@ -461,9 +464,7 @@ export class PosTicketPrinterComponent implements OnInit {
       this.ticketService
         .testPrinter(this.selectedPrinter)
         .subscribe((success) => {
-          if (success) {
-            console.log('Prueba de impresión exitosa');
-          } else {
+          if (!success) {
             console.error('Error en la prueba de impresión');
           }
         });

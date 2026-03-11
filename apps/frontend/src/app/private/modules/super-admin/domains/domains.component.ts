@@ -200,7 +200,13 @@ export class DomainsComponent implements OnInit, OnDestroy {
 
   // Table configuration
   tableColumns: TableColumn[] = [
-    { key: 'hostname', label: 'Hostname', sortable: true, width: '250px', priority: 1 },
+    {
+      key: 'hostname',
+      label: 'Hostname',
+      sortable: true,
+      width: '250px',
+      priority: 1,
+    },
     {
       key: 'domain_type',
       label: 'Tipo',
@@ -291,8 +297,16 @@ export class DomainsComponent implements OnInit, OnDestroy {
     badgeConfig: { type: 'status', size: 'sm' },
     badgeTransform: (value: DomainStatus) => this.formatDomainStatus(value),
     detailKeys: [
-      { key: 'domain_type', label: 'Tipo', transform: (val: DomainType) => this.formatDomainType(val) },
-      { key: 'store.name', label: 'Tienda', transform: (val: any) => val || 'N/A' },
+      {
+        key: 'domain_type',
+        label: 'Tipo',
+        transform: (val: DomainType) => this.formatDomainType(val),
+      },
+      {
+        key: 'store.name',
+        label: 'Tienda',
+        transform: (val: any) => val || 'N/A',
+      },
     ],
   };
 
@@ -547,7 +561,6 @@ export class DomainsComponent implements OnInit, OnDestroy {
     column: string;
     direction: 'asc' | 'desc' | null;
   }): void {
-    console.log('Sort event:', sortEvent);
     this.loadDomains();
   }
 
@@ -614,9 +627,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
       });
   }
 
-  viewDomain(domain: DomainListItem): void {
-    console.log('View domain:', domain);
-  }
+  viewDomain(domain: DomainListItem): void {}
 
   editDomain(domain: DomainListItem): void {
     this.openEditDomainModal(domain);

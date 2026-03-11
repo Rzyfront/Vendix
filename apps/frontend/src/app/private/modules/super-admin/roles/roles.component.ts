@@ -164,7 +164,11 @@ export class RolesComponent implements OnInit, OnDestroy {
     badgeTransform: (value: boolean) => (value ? 'Sistema' : 'Personalizado'),
     detailKeys: [
       { key: '_count.user_roles', label: 'Usuarios', icon: 'users' },
-      { key: 'created_at', label: 'Fecha', transform: (v) => this.formatDate(v) },
+      {
+        key: 'created_at',
+        label: 'Fecha',
+        transform: (v) => this.formatDate(v),
+      },
     ],
   };
 
@@ -186,7 +190,8 @@ export class RolesComponent implements OnInit, OnDestroy {
       icon: 'trash-2',
       action: (role: Role) => this.confirmDelete(role),
       variant: 'danger',
-      disabled: (role: Role) => role.is_system_role || ((role._count?.user_roles ?? 0) > 0),
+      disabled: (role: Role) =>
+        role.is_system_role || (role._count?.user_roles ?? 0) > 0,
     },
   ];
 
@@ -214,8 +219,9 @@ export class RolesComponent implements OnInit, OnDestroy {
     this.loadRoleStats();
 
     // Subscribe to form changes
-    this.filterForm.get('is_system_role')?.valueChanges
-      .pipe(takeUntil(this.destroy$))
+    this.filterForm
+      .get('is_system_role')
+      ?.valueChanges.pipe(takeUntil(this.destroy$))
       .subscribe(() => {
         this.pagination.page = 1;
         this.loadRoles();
@@ -247,9 +253,10 @@ export class RolesComponent implements OnInit, OnDestroy {
       page: this.pagination.page,
       limit: this.pagination.limit,
       search: filters.search || undefined,
-      is_system_role: filters.is_system_role && filters.is_system_role !== ''
-        ? filters.is_system_role === 'true'
-        : undefined,
+      is_system_role:
+        filters.is_system_role && filters.is_system_role !== ''
+          ? filters.is_system_role === 'true'
+          : undefined,
     };
 
     this.rolesService
@@ -260,7 +267,9 @@ export class RolesComponent implements OnInit, OnDestroy {
           this.roles = response.data || [];
           if (response.pagination) {
             this.pagination.total = response.pagination.total || 0;
-            this.pagination.totalPages = response.pagination.total_pages || Math.ceil(this.pagination.total / this.pagination.limit);
+            this.pagination.totalPages =
+              response.pagination.total_pages ||
+              Math.ceil(this.pagination.total / this.pagination.limit);
           }
         },
         error: (error) => {
@@ -275,7 +284,8 @@ export class RolesComponent implements OnInit, OnDestroy {
   }
 
   loadRoleStats(): void {
-    this.rolesService.getRolesStats()
+    this.rolesService
+      .getRolesStats()
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (stats: RoleStats) => {
@@ -302,7 +312,6 @@ export class RolesComponent implements OnInit, OnDestroy {
   }): void {
     // Implement sort logic here if backend supports it
     // For now, re-load
-    console.log('Sort changed:', event);
   }
 
   refreshRoles(): void {
@@ -407,15 +416,19 @@ export class RolesComponent implements OnInit, OnDestroy {
     // The original code calculated diffs. Let's see if we can just assign the new set if the API supports it.
     // The Service has assignPermissionsToRole and removePermissionsFromRole. It seems we need to calc diffs.
 
-    // NOTE: Keep original logic logic or Refactor? 
+    // NOTE: Keep original logic logic or Refactor?
     // I'll keep the diff logic but cleaner.
 
     this.rolesService.getRolePermissions(this.currentRole.id).subscribe({
       next: (currentPermissionIds) => {
         const newPermissionIds = permissionData.permission_ids || [];
 
-        const toAdd = newPermissionIds.filter((id: number) => !currentPermissionIds.includes(id));
-        const toRemove = currentPermissionIds.filter((id: number) => !newPermissionIds.includes(id));
+        const toAdd = newPermissionIds.filter(
+          (id: number) => !currentPermissionIds.includes(id),
+        );
+        const toRemove = currentPermissionIds.filter(
+          (id: number) => !newPermissionIds.includes(id),
+        );
 
         if (toAdd.length === 0 && toRemove.length === 0) {
           this.isUpdatingPermissions = false;
@@ -426,10 +439,20 @@ export class RolesComponent implements OnInit, OnDestroy {
         }
 
         const requests = [];
-        if (toAdd.length) requests.push(this.rolesService.assignPermissionsToRole(this.currentRole!.id, { permission_ids: toAdd }));
-        if (toRemove.length) requests.push(this.rolesService.removePermissionsFromRole(this.currentRole!.id, { permission_ids: toRemove }));
+        if (toAdd.length)
+          requests.push(
+            this.rolesService.assignPermissionsToRole(this.currentRole!.id, {
+              permission_ids: toAdd,
+            }),
+          );
+        if (toRemove.length)
+          requests.push(
+            this.rolesService.removePermissionsFromRole(this.currentRole!.id, {
+              permission_ids: toRemove,
+            }),
+          );
 
-        // Execute sequentially or parallel. 
+        // Execute sequentially or parallel.
         // Using forkJoin or similar would be better but let's stick to simple promise/subscribe chain or just parallel.
         // I will use a simple counter for now as RxJS forkJoin needs import
 
@@ -447,27 +470,28 @@ export class RolesComponent implements OnInit, OnDestroy {
             if (errors === 0) {
               this.toastService.success('Permisos actualizados exitosamente');
             } else {
-              this.toastService.warning('Algunos permisos no se pudieron actualizar');
+              this.toastService.warning(
+                'Algunos permisos no se pudieron actualizar',
+              );
             }
           }
         };
 
-        requests.forEach(req => {
+        requests.forEach((req) => {
           req.subscribe({
             next: () => checkDone(),
             error: (e) => {
               console.error(e);
               errors++;
               checkDone();
-            }
+            },
           });
         });
-
       },
       error: (err) => {
         this.isUpdatingPermissions = false;
         this.toastService.error('Error al obtener permisos actuales');
-      }
+      },
     });
   }
 

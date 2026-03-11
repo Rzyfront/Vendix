@@ -68,7 +68,7 @@ export class PosPaymentService {
   constructor(
     private http: HttpClient,
     private storeContextService: StoreContextService,
-  ) { }
+  ) {}
 
   getPaymentMethods(): Observable<PaymentMethod[]> {
     // Use the context-aware endpoint that relies on the user's token scope
@@ -81,8 +81,12 @@ export class PosPaymentService {
           // Transform backend payment methods to frontend format
           return methodsData.map((method: any) => {
             // Handle both flattened or nested structure
-            const type = method.system_payment_method?.type || method.type || 'unknown';
-            const name = method.display_name || method.name || method.system_payment_method?.name;
+            const type =
+              method.system_payment_method?.type || method.type || 'unknown';
+            const name =
+              method.display_name ||
+              method.name ||
+              method.system_payment_method?.name;
 
             return {
               id: method.id.toString(),
@@ -93,7 +97,7 @@ export class PosPaymentService {
               requiresReference: type !== 'cash',
               referenceLabel: this.getReferenceLabel(type),
               // Preserve original metadata if needed
-              original: method
+              original: method,
             };
           });
         }
@@ -101,10 +105,6 @@ export class PosPaymentService {
         return this.PAYMENT_METHODS.filter((method) => method.enabled);
       }),
       catchError((error) => {
-        console.warn(
-          'Error fetching payment methods from backend, using defaults:',
-          error,
-        );
         return of(this.PAYMENT_METHODS.filter((method) => method.enabled)).pipe(
           delay(100),
         );
@@ -139,7 +139,9 @@ export class PosPaymentService {
   processPayment(request: PaymentRequest): Observable<PaymentResponse> {
     const user_id = this.storeContextService.getUserId();
     if (!user_id) {
-      return throwError(() => new Error('Usuario no identificado. Inicie sesión nuevamente.'));
+      return throwError(
+        () => new Error('Usuario no identificado. Inicie sesión nuevamente.'),
+      );
     }
 
     const register_id = localStorage.getItem('pos_register_id');
@@ -148,7 +150,9 @@ export class PosPaymentService {
       // BUT user said "nothing hardcoded". So we error if not configured.
       // However, to avoid breaking the app if no register config exists, we might need a prompt.
       // The prompt said "si algun dato falta... notificarse". So throwing error satisfies this.
-      return throwError(() => new Error('Caja no configurada (Register ID missing).'));
+      return throwError(
+        () => new Error('Caja no configurada (Register ID missing).'),
+      );
     }
 
     // For payment-only, we might not always have a customer if it's a direct charge (e.g. paying a debt).
@@ -169,7 +173,9 @@ export class PosPaymentService {
       requires_payment: true,
       store_payment_method_id: parseInt(request.paymentMethod.id),
       amount_received: Number(
-        parseFloat((request.cashReceived || request.amount).toString()).toFixed(2),
+        parseFloat((request.cashReceived || request.amount).toString()).toFixed(
+          2,
+        ),
       ),
       payment_reference: request.reference || '',
       register_id: register_id,
@@ -230,7 +236,9 @@ export class PosPaymentService {
 
     // For non-anonymous sales, customer is required
     if (!isAnonymousSale && !cartState.customer) {
-      return throwError(() => new Error('Debe seleccionar un cliente para procesar la venta.'));
+      return throwError(
+        () => new Error('Debe seleccionar un cliente para procesar la venta.'),
+      );
     }
 
     // Build sale data with conditional customer fields
@@ -296,10 +304,10 @@ export class PosPaymentService {
           // Ensure payment object has correct structure if needed by consumer
           const mappedPayment = data.payment
             ? {
-              ...data.payment,
-              paymentMethod: paymentRequest.paymentMethod,
-              transactionId: data.payment.transaction_id,
-            }
+                ...data.payment,
+                paymentMethod: paymentRequest.paymentMethod,
+                transactionId: data.payment.transaction_id,
+              }
             : undefined;
 
           return {
@@ -357,7 +365,8 @@ export class PosPaymentService {
 
     const sale_data: Record<string, any> = {
       customer_id: cartState.customer.id,
-      customer_name: `${cartState.customer.first_name} ${cartState.customer.last_name || ''}`.trim(),
+      customer_name:
+        `${cartState.customer.first_name} ${cartState.customer.last_name || ''}`.trim(),
       customer_email: cartState.customer.email,
       customer_phone: cartState.customer.phone,
       store_id: this.getStoreId(),
@@ -394,7 +403,9 @@ export class PosPaymentService {
         parseFloat(shippingData.shippingCost.toString()).toFixed(2),
       ),
       shipping_address_snapshot: shippingData.shippingAddress,
-      ...(shippingData.shippingAddressId ? { shipping_address_id: shippingData.shippingAddressId } : {}),
+      ...(shippingData.shippingAddressId
+        ? { shipping_address_id: shippingData.shippingAddressId }
+        : {}),
       // POS meta
       register_id: register_id,
       seller_user_id: user_id,
@@ -405,7 +416,9 @@ export class PosPaymentService {
     if (paymentRequest) {
       // "Pagar ahora" flow
       sale_data['requires_payment'] = true;
-      sale_data['store_payment_method_id'] = parseInt(paymentRequest.paymentMethod.id);
+      sale_data['store_payment_method_id'] = parseInt(
+        paymentRequest.paymentMethod.id,
+      );
       sale_data['amount_received'] = Number(
         parseFloat(
           (paymentRequest.cashReceived || totalWithShipping).toString(),
@@ -534,8 +547,8 @@ export class PosPaymentService {
     }
 
     const register_id = localStorage.getItem('pos_register_id');
-    // Draft might not need register strictly, but let's be consistent or lax. 
-    // User said "nada del pos puede ser hardcodeado". 
+    // Draft might not need register strictly, but let's be consistent or lax.
+    // User said "nada del pos puede ser hardcodeado".
     // If register missing, we can fail or skip it? Usually drafts are register-agnostic?
     // I'll fail if missing to be safe per instructions.
     if (!register_id) {
@@ -549,7 +562,10 @@ export class PosPaymentService {
     // I'll check if backend allows null customer. If I pass null, does it work?
     // If not, I'll error.
     if (!cartState.customer) {
-      return throwError(() => new Error('Debe seleccionar un cliente para guardar el borrador.'));
+      return throwError(
+        () =>
+          new Error('Debe seleccionar un cliente para guardar el borrador.'),
+      );
     }
 
     const draft_data = {

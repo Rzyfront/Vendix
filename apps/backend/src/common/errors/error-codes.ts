@@ -561,6 +561,213 @@ export const ErrorCodes = {
     httpStatus: 429,
     devMessage: 'AI application rate limit exceeded',
   },
+
+  // Invoicing
+  INVOICING_FIND_001: {
+    code: 'INVOICING_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Invoice not found',
+  },
+  INVOICING_FIND_002: {
+    code: 'INVOICING_FIND_002',
+    httpStatus: 404,
+    devMessage: 'Invoice resolution not found',
+  },
+  INVOICING_FIND_003: {
+    code: 'INVOICING_FIND_003',
+    httpStatus: 404,
+    devMessage: 'Order not found',
+  },
+  INVOICING_FIND_004: {
+    code: 'INVOICING_FIND_004',
+    httpStatus: 404,
+    devMessage: 'Sales order not found',
+  },
+  INVOICING_CREATE_001: {
+    code: 'INVOICING_CREATE_001',
+    httpStatus: 400,
+    devMessage: 'Error creating invoice',
+  },
+  INVOICING_VALIDATE_001: {
+    code: 'INVOICING_VALIDATE_001',
+    httpStatus: 400,
+    devMessage: 'Invoice validation failed',
+  },
+  INVOICING_STATUS_001: {
+    code: 'INVOICING_STATUS_001',
+    httpStatus: 400,
+    devMessage: 'Invalid invoice state transition',
+  },
+  INVOICING_STATUS_002: {
+    code: 'INVOICING_STATUS_002',
+    httpStatus: 400,
+    devMessage: 'Cannot modify invoice in current state',
+  },
+  INVOICING_RESOLUTION_001: {
+    code: 'INVOICING_RESOLUTION_001',
+    httpStatus: 400,
+    devMessage: 'No active resolution available for invoice numbering',
+  },
+  INVOICING_RESOLUTION_002: {
+    code: 'INVOICING_RESOLUTION_002',
+    httpStatus: 400,
+    devMessage: 'Resolution range exhausted',
+  },
+  INVOICING_DUP_001: {
+    code: 'INVOICING_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Duplicate invoice number',
+  },
+  INVOICING_PROVIDER_001: {
+    code: 'INVOICING_PROVIDER_001',
+    httpStatus: 502,
+    devMessage: 'Invoice provider communication error',
+  },
+
+  // Payroll
+  PAYROLL_FIND_001: {
+    code: 'PAYROLL_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Employee not found',
+  },
+  PAYROLL_FIND_002: {
+    code: 'PAYROLL_FIND_002',
+    httpStatus: 404,
+    devMessage: 'Payroll run not found',
+  },
+  PAYROLL_FIND_003: {
+    code: 'PAYROLL_FIND_003',
+    httpStatus: 404,
+    devMessage: 'Payroll item not found',
+  },
+  PAYROLL_CREATE_001: {
+    code: 'PAYROLL_CREATE_001',
+    httpStatus: 400,
+    devMessage: 'Error creating employee',
+  },
+  PAYROLL_CREATE_002: {
+    code: 'PAYROLL_CREATE_002',
+    httpStatus: 400,
+    devMessage: 'Error creating payroll run',
+  },
+  PAYROLL_DUP_001: {
+    code: 'PAYROLL_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Employee code already exists',
+  },
+  PAYROLL_DUP_002: {
+    code: 'PAYROLL_DUP_002',
+    httpStatus: 409,
+    devMessage: 'Employee document already exists',
+  },
+  PAYROLL_DUP_003: {
+    code: 'PAYROLL_DUP_003',
+    httpStatus: 409,
+    devMessage: 'Payroll number already exists',
+  },
+  PAYROLL_VALIDATE_001: {
+    code: 'PAYROLL_VALIDATE_001',
+    httpStatus: 400,
+    devMessage: 'Payroll validation failed',
+  },
+  PAYROLL_STATUS_001: {
+    code: 'PAYROLL_STATUS_001',
+    httpStatus: 409,
+    devMessage: 'Invalid payroll status transition',
+  },
+  PAYROLL_CALC_001: {
+    code: 'PAYROLL_CALC_001',
+    httpStatus: 400,
+    devMessage: 'Payroll calculation failed - no active employees found',
+  },
+  PAYROLL_PROVIDER_001: {
+    code: 'PAYROLL_PROVIDER_001',
+    httpStatus: 502,
+    devMessage: 'Payroll provider error',
+  },
+  PAYROLL_PERM_001: {
+    code: 'PAYROLL_PERM_001',
+    httpStatus: 403,
+    devMessage: 'Access denied to payroll resource',
+  },
+
+  // Accounting
+  ACC_FIND_001: {
+    code: 'ACC_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Account not found',
+  },
+  ACC_FIND_002: {
+    code: 'ACC_FIND_002',
+    httpStatus: 404,
+    devMessage: 'Journal entry not found',
+  },
+  ACC_FIND_003: {
+    code: 'ACC_FIND_003',
+    httpStatus: 404,
+    devMessage: 'Fiscal period not found',
+  },
+  ACC_VALIDATE_001: {
+    code: 'ACC_VALIDATE_001',
+    httpStatus: 400,
+    devMessage: 'Accounting validation failed',
+  },
+  ACC_VALIDATE_002: {
+    code: 'ACC_VALIDATE_002',
+    httpStatus: 400,
+    devMessage: 'Invalid date range',
+  },
+  ACC_CONFLICT_001: {
+    code: 'ACC_CONFLICT_001',
+    httpStatus: 409,
+    devMessage: 'Accounting resource conflict',
+  },
+  ACC_PERM_001: {
+    code: 'ACC_PERM_001',
+    httpStatus: 403,
+    devMessage: 'Access denied to accounting resource',
+  },
+  // DIAN Electronic Invoicing
+  DIAN_CONFIG_001: {
+    code: 'DIAN_CONFIG_001',
+    httpStatus: 404,
+    devMessage: 'DIAN configuration not found for this store',
+  },
+  DIAN_CONFIG_002: {
+    code: 'DIAN_CONFIG_002',
+    httpStatus: 409,
+    devMessage: 'DIAN configuration already exists for this store',
+  },
+  DIAN_CERT_001: {
+    code: 'DIAN_CERT_001',
+    httpStatus: 400,
+    devMessage: 'Invalid certificate file',
+  },
+  DIAN_CERT_002: {
+    code: 'DIAN_CERT_002',
+    httpStatus: 400,
+    devMessage: 'Invalid certificate password',
+  },
+  DIAN_CERT_003: {
+    code: 'DIAN_CERT_003',
+    httpStatus: 400,
+    devMessage: 'Certificate expired',
+  },
+  DIAN_CONN_001: {
+    code: 'DIAN_CONN_001',
+    httpStatus: 502,
+    devMessage: 'DIAN connection test failed',
+  },
+  DIAN_SEND_001: {
+    code: 'DIAN_SEND_001',
+    httpStatus: 422,
+    devMessage: 'DIAN rejected the document',
+  },
+  DIAN_SEND_002: {
+    code: 'DIAN_SEND_002',
+    httpStatus: 504,
+    devMessage: 'DIAN request timed out',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export type ErrorCodeKey = keyof typeof ErrorCodes;

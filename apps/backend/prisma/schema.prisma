@@ -70,6 +70,16 @@ model users {
   support_notifications      support_notifications[]    @relation("notification_user")
   help_articles_authored      help_articles[]            @relation("help_article_author")
 
+  // Invoicing, Accounting & Payroll relations
+  invoices_created         invoices[]            @relation("invoices_created_by")
+  invoices_as_customer     invoices[]            @relation("invoices_customer")
+  fiscal_periods_closed    fiscal_periods[]      @relation("fiscal_periods_closed_by")
+  accounting_entries_created accounting_entries[] @relation("accounting_entries_created_by")
+  accounting_entries_posted  accounting_entries[] @relation("accounting_entries_posted_by")
+  employees_link           employees[]           @relation("employees_user")
+  payroll_runs_approved    payroll_runs[]        @relation("payroll_runs_approved_by")
+  payroll_runs_created     payroll_runs[]        @relation("payroll_runs_created_by")
+
   // Campos de tracking de términos
   terms_accepted_version String?   @db.VarChar(20)
   terms_accepted_at      DateTime? @db.Timestamp(6)
@@ -285,6 +295,14 @@ model organizations {
   expenses                      expenses[]
   expense_categories            expense_categories[]
   support_tickets               support_tickets[]
+  invoices                      invoices[]
+  invoice_resolutions           invoice_resolutions[]
+  chart_of_accounts             chart_of_accounts[]
+  fiscal_periods                fiscal_periods[]
+  accounting_entries            accounting_entries[]
+  employees                     employees[]
+  payroll_runs                  payroll_runs[]
+  dian_configurations           dian_configurations[]
 
   @@index([onboarding])
   @@index([account_type])
@@ -365,6 +383,12 @@ model stores {
   notification_subscriptions notification_subscriptions[]
   push_subscriptions         push_subscriptions[]
   support_tickets            support_tickets[]
+  invoices                   invoices[]
+  invoice_resolutions        invoice_resolutions[]
+  accounting_entries         accounting_entries[]
+  employees                  employees[]
+  payroll_runs               payroll_runs[]
+  dian_configuration         dian_configurations?
 
   @@unique([organization_id, slug])
   @@index([onboarding])
@@ -563,6 +587,7 @@ model orders {
   refunds                                         refunds[]
   shipping_method                                 shipping_methods?        @relation(fields: [shipping_method_id], references: [id], onDelete: SetNull)
   shipping_rate                                   shipping_rates?          @relation(fields: [shipping_rate_id], references: [id], onDelete: SetNull)
+  invoices                                        invoices[]
 
   @@unique([store_id, order_number])
   @@index([store_id, order_number])
@@ -692,6 +717,7 @@ model product_variants {
   supplier_products        supplier_products[]        @relation("product_variantsTosupplier_products")
   cart_items               cart_items[]
   wishlist_items           wishlist_items[]
+  invoice_items            invoice_items[]
 
   @@unique([product_id, sku])
 }
@@ -746,6 +772,7 @@ model products {
   supplier_products        supplier_products[]
   cart_items               cart_items[]
   wishlist_items           wishlist_items[]
+  invoice_items            invoice_items[]
 
   @@unique([store_id, slug])
   @@unique([store_id, sku])
@@ -824,6 +851,7 @@ model tax_rates {
   order_item_taxes    order_item_taxes[]
   stores              stores?            @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   tax_categories      tax_categories     @relation(fields: [tax_category_id], references: [id], onUpdate: NoAction)
+  invoice_taxes       invoice_taxes[]
 }
 
 model api_keys {
@@ -987,6 +1015,7 @@ model suppliers {
   supplier_products supplier_products[]
   organizations     organizations       @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   addresses         addresses?          @relation("supplier_addresses", fields: [address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  invoices          invoices[]
 
   @@unique([organization_id, code])
   @@index([organization_id, name])
@@ -1183,6 +1212,7 @@ model sales_orders {
   users1              users?                  @relation("sales_orders_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   organizations       organizations           @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   addresses           addresses?              @relation("sales_orders_shipping_address", fields: [shipping_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  invoices            invoices[]
 
   @@unique([organization_id, order_number])
 }
@@ -1928,6 +1958,99 @@ enum expenses_state_enum {
   cancelled
 }
 
+// ===== INVOICING, ACCOUNTING & PAYROLL ENUMS =====
+
+enum invoice_status_enum {
+  draft
+  validated
+  sent
+  accepted
+  rejected
+  cancelled
+  voided
+}
+
+enum invoice_type_enum {
+  sales_invoice
+  purchase_invoice
+  credit_note
+  debit_note
+  export_invoice
+}
+
+enum document_send_status_enum {
+  pending
+  sending
+  sent_ok
+  sent_error
+  not_applicable
+}
+
+enum accounting_entry_status_enum {
+  draft
+  posted
+  voided
+}
+
+enum accounting_entry_type_enum {
+  manual
+  auto_invoice
+  auto_payment
+  auto_expense
+  auto_payroll
+  auto_inventory
+  adjustment
+}
+
+enum account_type_enum {
+  asset
+  liability
+  equity
+  revenue
+  expense
+}
+
+enum account_nature_enum {
+  debit
+  credit
+}
+
+enum fiscal_period_status_enum {
+  open
+  closing
+  closed
+}
+
+enum payroll_status_enum {
+  draft
+  calculated
+  approved
+  sent
+  accepted
+  rejected
+  paid
+  cancelled
+}
+
+enum payroll_frequency_enum {
+  monthly
+  biweekly
+  weekly
+}
+
+enum employee_status_enum {
+  active
+  inactive
+  terminated
+}
+
+enum contract_type_enum {
+  indefinite
+  fixed_term
+  service
+  apprentice
+}
+
 // ===== LEGAL DOCUMENTS DOMAIN =====
 
 model legal_documents {
@@ -2215,6 +2338,18 @@ enum help_article_status_enum {
   ARCHIVED
 }
 
+enum dian_environment_enum {
+  test
+  production
+}
+
+enum dian_enablement_status_enum {
+  not_started
+  testing
+  enabled
+  suspended
+}
+
 model help_article_categories {
   id          Int       @id @default(autoincrement())
   name        String    @db.VarChar(100)
@@ -2257,4 +2392,373 @@ model help_articles {
   @@index([module])
   @@index([is_featured])
   @@index([created_by_id])
+}
+
+// ===== ELECTRONIC INVOICING DOMAIN =====
+
+model invoices {
+  id                  Int                      @id @default(autoincrement())
+  organization_id     Int
+  store_id            Int
+  invoice_number      String                   @db.VarChar(50)
+  invoice_type        invoice_type_enum
+  status              invoice_status_enum      @default(draft)
+  customer_id         Int?
+  supplier_id         Int?
+  customer_name       String?                  @db.VarChar(255)
+  customer_tax_id     String?                  @db.VarChar(50)
+  customer_address    Json?
+  order_id            Int?
+  sales_order_id      Int?
+  related_invoice_id  Int?
+  subtotal_amount     Decimal                  @default(0) @db.Decimal(12, 2)
+  discount_amount     Decimal                  @default(0) @db.Decimal(12, 2)
+  tax_amount          Decimal                  @default(0) @db.Decimal(12, 2)
+  withholding_amount  Decimal                  @default(0) @db.Decimal(12, 2)
+  total_amount        Decimal                  @default(0) @db.Decimal(12, 2)
+  currency            String?                  @db.VarChar(10)
+  exchange_rate       Decimal?                 @db.Decimal(12, 6)
+  resolution_id       Int?
+  cufe                String?                  @db.VarChar(255)
+  qr_code             String?
+  xml_document        String?
+  pdf_url             String?
+  send_status         document_send_status_enum @default(not_applicable)
+  provider_response   Json?
+  sent_at             DateTime?                @db.Timestamp(6)
+  accepted_at         DateTime?                @db.Timestamp(6)
+  issue_date          DateTime                 @db.Timestamp(6)
+  due_date            DateTime?                @db.Timestamp(6)
+  payment_date        DateTime?                @db.Timestamp(6)
+  accounting_entry_id Int?
+  created_by_user_id  Int?
+  notes               String?
+  created_at          DateTime?                @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?                @default(now()) @db.Timestamp(6)
+
+  organization       organizations            @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store              stores                   @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  customer           users?                   @relation("invoices_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  supplier           suppliers?               @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  order              orders?                  @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  sales_order        sales_orders?            @relation(fields: [sales_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  related_invoice    invoices?                @relation("invoice_credit_debit_notes", fields: [related_invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  credit_debit_notes invoices[]               @relation("invoice_credit_debit_notes")
+  resolution         invoice_resolutions?     @relation(fields: [resolution_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  accounting_entry   accounting_entries?      @relation(fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by_user    users?                   @relation("invoices_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  invoice_items      invoice_items[]
+  invoice_taxes      invoice_taxes[]
+
+  @@unique([organization_id, invoice_type, invoice_number])
+  @@index([store_id, status])
+  @@index([organization_id, issue_date])
+  @@index([customer_id])
+}
+
+model invoice_items {
+  id                 Int               @id @default(autoincrement())
+  invoice_id         Int
+  product_id         Int?
+  product_variant_id Int?
+  description        String            @db.VarChar(500)
+  quantity           Decimal           @db.Decimal(12, 4)
+  unit_price         Decimal           @db.Decimal(12, 2)
+  discount_amount    Decimal           @default(0) @db.Decimal(12, 2)
+  tax_amount         Decimal           @default(0) @db.Decimal(12, 2)
+  total_amount       Decimal           @db.Decimal(12, 2)
+  created_at         DateTime?         @default(now()) @db.Timestamp(6)
+
+  invoice          invoices           @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+  product          products?          @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  product_variant  product_variants?  @relation(fields: [product_variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([invoice_id])
+}
+
+model invoice_taxes {
+  id             Int        @id @default(autoincrement())
+  invoice_id     Int
+  tax_rate_id    Int?
+  tax_name       String     @db.VarChar(100)
+  tax_rate       Decimal    @db.Decimal(5, 2)
+  taxable_amount Decimal    @db.Decimal(12, 2)
+  tax_amount     Decimal    @db.Decimal(12, 2)
+
+  invoice   invoices    @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+  tax_rates tax_rates?  @relation(fields: [tax_rate_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([invoice_id])
+}
+
+model invoice_resolutions {
+  id                Int       @id @default(autoincrement())
+  organization_id   Int
+  store_id          Int
+  resolution_number String    @db.VarChar(100)
+  resolution_date   DateTime  @db.Timestamp(6)
+  prefix            String    @db.VarChar(10)
+  range_from        Int
+  range_to          Int
+  current_number    Int       @default(0)
+  valid_from        DateTime  @db.Timestamp(6)
+  valid_to          DateTime  @db.Timestamp(6)
+  is_active         Boolean   @default(true)
+  technical_key     String?   @db.VarChar(255)
+  created_at        DateTime? @default(now()) @db.Timestamp(6)
+  updated_at        DateTime? @default(now()) @db.Timestamp(6)
+
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store        stores        @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  invoices     invoices[]
+
+  @@unique([organization_id, store_id, prefix])
+  @@index([store_id, is_active])
+}
+
+// ===== ACCOUNTING DOMAIN =====
+
+model chart_of_accounts {
+  id              Int                @id @default(autoincrement())
+  organization_id Int
+  code            String             @db.VarChar(20)
+  name            String             @db.VarChar(255)
+  account_type    account_type_enum
+  nature          account_nature_enum
+  parent_id       Int?
+  level           Int                @default(1)
+  is_active       Boolean            @default(true)
+  accepts_entries Boolean            @default(false)
+  created_at      DateTime?          @default(now()) @db.Timestamp(6)
+  updated_at      DateTime?          @default(now()) @db.Timestamp(6)
+
+  organization          organizations           @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  parent                chart_of_accounts?      @relation("chart_of_accounts_parent", fields: [parent_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  children              chart_of_accounts[]     @relation("chart_of_accounts_parent")
+  accounting_entry_lines accounting_entry_lines[]
+
+  @@unique([organization_id, code])
+  @@index([organization_id, parent_id])
+  @@index([organization_id, account_type])
+}
+
+model fiscal_periods {
+  id               Int                       @id @default(autoincrement())
+  organization_id  Int
+  name             String                    @db.VarChar(50)
+  start_date       DateTime                  @db.Timestamp(6)
+  end_date         DateTime                  @db.Timestamp(6)
+  status           fiscal_period_status_enum  @default(open)
+  closed_by_user_id Int?
+  closed_at        DateTime?                 @db.Timestamp(6)
+  created_at       DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at       DateTime?                 @default(now()) @db.Timestamp(6)
+
+  organization       organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  closed_by_user     users?               @relation("fiscal_periods_closed_by", fields: [closed_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  accounting_entries accounting_entries[]
+
+  @@unique([organization_id, name])
+}
+
+model accounting_entries {
+  id                 Int                           @id @default(autoincrement())
+  organization_id    Int
+  store_id           Int?
+  entry_number       String                        @db.VarChar(50)
+  entry_type         accounting_entry_type_enum     @default(manual)
+  status             accounting_entry_status_enum   @default(draft)
+  fiscal_period_id   Int
+  entry_date         DateTime                      @db.Timestamp(6)
+  description        String?                       @db.VarChar(500)
+  source_type        String?                       @db.VarChar(50)
+  source_id          Int?
+  total_debit        Decimal                       @default(0) @db.Decimal(12, 2)
+  total_credit       Decimal                       @default(0) @db.Decimal(12, 2)
+  created_by_user_id Int?
+  posted_by_user_id  Int?
+  posted_at          DateTime?                     @db.Timestamp(6)
+  created_at         DateTime?                     @default(now()) @db.Timestamp(6)
+  updated_at         DateTime?                     @default(now()) @db.Timestamp(6)
+
+  organization           organizations           @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store                  stores?                 @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  fiscal_period          fiscal_periods          @relation(fields: [fiscal_period_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by_user        users?                  @relation("accounting_entries_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  posted_by_user         users?                  @relation("accounting_entries_posted_by", fields: [posted_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  accounting_entry_lines accounting_entry_lines[]
+  invoices               invoices[]
+  payroll_runs           payroll_runs[]
+
+  @@unique([organization_id, entry_number])
+  @@index([organization_id, entry_date])
+  @@index([organization_id, fiscal_period_id])
+  @@index([source_type, source_id])
+}
+
+model accounting_entry_lines {
+  id            Int       @id @default(autoincrement())
+  entry_id      Int
+  account_id    Int
+  description   String?   @db.VarChar(500)
+  debit_amount  Decimal   @default(0) @db.Decimal(12, 2)
+  credit_amount Decimal   @default(0) @db.Decimal(12, 2)
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+
+  entry   accounting_entries @relation(fields: [entry_id], references: [id], onDelete: Cascade)
+  account chart_of_accounts  @relation(fields: [account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([entry_id])
+  @@index([account_id])
+}
+
+// ===== PAYROLL DOMAIN =====
+
+model employees {
+  id                  Int                    @id @default(autoincrement())
+  organization_id     Int
+  store_id            Int?
+  user_id             Int?
+  employee_code       String                 @db.VarChar(50)
+  first_name          String                 @db.VarChar(100)
+  last_name           String                 @db.VarChar(100)
+  document_type       String                 @db.VarChar(20)
+  document_number     String                 @db.VarChar(50)
+  hire_date           DateTime               @db.Timestamp(6)
+  termination_date    DateTime?              @db.Timestamp(6)
+  status              employee_status_enum   @default(active)
+  contract_type       contract_type_enum
+  position            String?                @db.VarChar(100)
+  department          String?                @db.VarChar(100)
+  base_salary         Decimal                @db.Decimal(12, 2)
+  payment_frequency   payroll_frequency_enum @default(monthly)
+  bank_name           String?                @db.VarChar(100)
+  bank_account_number String?                @db.VarChar(50)
+  bank_account_type   String?                @db.VarChar(20)
+  health_provider     String?                @db.VarChar(100)
+  pension_fund        String?                @db.VarChar(100)
+  arl_risk_level      Int?                   @default(1)
+  severance_fund      String?                @db.VarChar(100)
+  compensation_fund   String?                @db.VarChar(100)
+  created_at          DateTime?              @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?              @default(now()) @db.Timestamp(6)
+
+  organization  organizations  @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store         stores?        @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  user          users?         @relation("employees_user", fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  payroll_items payroll_items[]
+
+  @@unique([organization_id, employee_code])
+  @@unique([organization_id, document_type, document_number])
+  @@index([organization_id, status])
+  @@index([store_id])
+}
+
+model payroll_runs {
+  id                  Int                        @id @default(autoincrement())
+  organization_id     Int
+  store_id            Int?
+  payroll_number      String                     @db.VarChar(50)
+  status              payroll_status_enum         @default(draft)
+  frequency           payroll_frequency_enum
+  period_start        DateTime                   @db.Timestamp(6)
+  period_end          DateTime                   @db.Timestamp(6)
+  payment_date        DateTime?                  @db.Timestamp(6)
+  total_earnings      Decimal                    @default(0) @db.Decimal(12, 2)
+  total_deductions    Decimal                    @default(0) @db.Decimal(12, 2)
+  total_employer_costs Decimal                   @default(0) @db.Decimal(12, 2)
+  total_net_pay       Decimal                    @default(0) @db.Decimal(12, 2)
+  send_status         document_send_status_enum  @default(not_applicable)
+  applied_rules       Json?
+  provider_response   Json?
+  cune                String?                    @db.VarChar(255)
+  xml_document        String?
+  sent_at             DateTime?                  @db.Timestamp(6)
+  accounting_entry_id Int?
+  approved_by_user_id Int?
+  approved_at         DateTime?                  @db.Timestamp(6)
+  created_by_user_id  Int?
+  created_at          DateTime?                  @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?                  @default(now()) @db.Timestamp(6)
+
+  organization     organizations       @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store            stores?             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  accounting_entry accounting_entries? @relation(fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  approved_by_user users?              @relation("payroll_runs_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by_user  users?              @relation("payroll_runs_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  payroll_items    payroll_items[]
+
+  @@unique([organization_id, payroll_number])
+  @@index([organization_id, status])
+  @@index([store_id])
+}
+
+model payroll_items {
+  id                  Int       @id @default(autoincrement())
+  payroll_run_id      Int
+  employee_id         Int
+  base_salary         Decimal   @db.Decimal(12, 2)
+  worked_days         Int
+  earnings            Json?
+  deductions          Json?
+  employer_costs      Json?
+  total_earnings      Decimal   @default(0) @db.Decimal(12, 2)
+  total_deductions    Decimal   @default(0) @db.Decimal(12, 2)
+  total_employer_costs Decimal  @default(0) @db.Decimal(12, 2)
+  net_pay             Decimal   @default(0) @db.Decimal(12, 2)
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+
+  payroll_run payroll_runs @relation(fields: [payroll_run_id], references: [id], onDelete: Cascade)
+  employee    employees    @relation(fields: [employee_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([payroll_run_id])
+  @@index([employee_id])
+}
+
+// ===== DIAN ELECTRONIC INVOICING =====
+
+model dian_configurations {
+  id                             Int                          @id @default(autoincrement())
+  organization_id                Int
+  store_id                       Int                          @unique
+  nit                            String                       @db.VarChar(20)
+  nit_dv                         String?                      @db.VarChar(1)
+  software_id                    String                       @db.VarChar(100)
+  software_pin_encrypted         String                       @db.Text
+  certificate_s3_key             String?                      @db.Text
+  certificate_password_encrypted String?                      @db.Text
+  certificate_expiry             DateTime?                    @db.Timestamp(6)
+  environment                    dian_environment_enum        @default(test)
+  enablement_status              dian_enablement_status_enum  @default(not_started)
+  test_set_id                    String?                      @db.VarChar(100)
+  last_test_result               Json?
+  created_at                     DateTime?                    @default(now()) @db.Timestamp(6)
+  updated_at                     DateTime?                    @default(now()) @db.Timestamp(6)
+
+  organization    organizations    @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store           stores           @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  dian_audit_logs dian_audit_logs[]
+
+  @@index([organization_id])
+}
+
+model dian_audit_logs {
+  id                     Int       @id @default(autoincrement())
+  dian_configuration_id  Int
+  action                 String    @db.VarChar(100)
+  document_type          String?   @db.VarChar(50)
+  document_number        String?   @db.VarChar(50)
+  request_xml            String?   @db.Text
+  response_xml           String?   @db.Text
+  status                 String    @db.VarChar(20)
+  error_message          String?   @db.Text
+  cufe                   String?   @db.VarChar(255)
+  duration_ms            Int?
+  created_at             DateTime? @default(now()) @db.Timestamp(6)
+
+  dian_configuration dian_configurations @relation(fields: [dian_configuration_id], references: [id], onDelete: Cascade)
+
+  @@index([dian_configuration_id])
+  @@index([action])
+  @@index([created_at])
 }

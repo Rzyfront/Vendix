@@ -221,7 +221,9 @@ import { Subject, takeUntil, interval } from 'rxjs';
         line-height: 1.3;
         text-align: center;
         cursor: pointer;
-        transition: transform 0.1s ease, box-shadow 0.15s ease;
+        transition:
+          transform 0.1s ease,
+          box-shadow 0.15s ease;
         border: none;
         min-height: 5rem;
       }
@@ -248,11 +250,13 @@ import { Subject, takeUntil, interval } from 'rxjs';
       .action-btn-primary {
         background: var(--color-primary);
         color: white;
-        box-shadow: 0 4px 12px rgba(var(--color-primary-rgb, 99, 211, 166), 0.25);
+        box-shadow: 0 4px 12px
+          rgba(var(--color-primary-rgb, 99, 211, 166), 0.25);
       }
 
       .action-btn-primary:hover:not(:disabled) {
-        box-shadow: 0 6px 16px rgba(var(--color-primary-rgb, 99, 211, 166), 0.35);
+        box-shadow: 0 6px 16px
+          rgba(var(--color-primary-rgb, 99, 211, 166), 0.35);
       }
 
       .btn-icon {
@@ -351,7 +355,11 @@ import { Subject, takeUntil, interval } from 'rxjs';
           <div class="email-icon-wrapper">
             <div class="icon-outer-ring">
               <div class="icon-inner-circle">
-                <app-icon name="mail" size="28" class="email-main-icon"></app-icon>
+                <app-icon
+                  name="mail"
+                  size="28"
+                  class="email-main-icon"
+                ></app-icon>
               </div>
             </div>
           </div>
@@ -371,7 +379,8 @@ import { Subject, takeUntil, interval } from 'rxjs';
           <div class="status-content">
             <h3>Esperando verificación</h3>
             <p class="status-description">
-              Revisa tu bandeja de entrada y haz clic en el enlace que te enviamos
+              Revisa tu bandeja de entrada y haz clic en el enlace que te
+              enviamos
             </p>
           </div>
         </div>
@@ -379,7 +388,11 @@ import { Subject, takeUntil, interval } from 'rxjs';
         <!-- Instructions Card -->
         <div class="instructions-card">
           <div class="instructions-header">
-            <app-icon name="info" size="18" class="instructions-icon"></app-icon>
+            <app-icon
+              name="info"
+              size="18"
+              class="instructions-icon"
+            ></app-icon>
             <span class="instructions-title">Pasos rápidos</span>
           </div>
           <div class="steps-list">
@@ -422,7 +435,9 @@ import { Subject, takeUntil, interval } from 'rxjs';
             <span class="btn-text">
               <span class="btn-text-line">Reenviar</span>
               <span class="btn-text-line">
-                {{ resendCooldown > 0 ? '(' + resendCooldown + 's)' : 'correo' }}
+                {{
+                  resendCooldown > 0 ? '(' + resendCooldown + 's)' : 'correo'
+                }}
               </span>
             </span>
           </button>
@@ -449,7 +464,8 @@ import { Subject, takeUntil, interval } from 'rxjs';
         <div class="help-card">
           <app-icon name="help-circle" size="16" class="help-icon"></app-icon>
           <span class="help-text">
-            ¿No recibiste el email? Revisa tu carpeta de spam o correo no deseado
+            ¿No recibiste el email? Revisa tu carpeta de spam o correo no
+            deseado
           </span>
         </div>
       </div>
@@ -482,7 +498,7 @@ export class EmailVerificationStepComponent implements OnInit, OnDestroy {
   constructor(
     private wizardService: OnboardingWizardService,
     private authFacade: AuthFacade,
-  ) { }
+  ) {}
 
   ngOnInit(): void {
     this.loadUserEmail();
@@ -619,8 +635,7 @@ export class EmailVerificationStepComponent implements OnInit, OnDestroy {
       next: (response: any) => {
         this.isResendingEmail = false;
         if (response.success) {
-          console.log('Verification email resent successfully');
-          // Optionally show success message
+          // Email resent successfully
         }
       },
       error: (error: any) => {

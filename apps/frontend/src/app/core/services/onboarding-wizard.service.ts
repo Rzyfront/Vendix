@@ -113,7 +113,7 @@ export class OnboardingWizardService {
   private _created_store_slug: string | null = null;
   private _app_type: 'STORE_ADMIN' | 'ORG_ADMIN' | null = null;
 
-  constructor(private http: HttpClient) { }
+  constructor(private http: HttpClient) {}
 
   /**
    * Get created store slug
@@ -257,9 +257,6 @@ export class OnboardingWizardService {
           const storeSlug = response.data?.slug;
           if (storeSlug) {
             this._created_store_slug = storeSlug;
-            console.log('Store slug saved:', storeSlug);
-          } else {
-            console.warn('No store slug found in response:', response);
           }
           this.nextStep();
         }

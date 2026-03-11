@@ -146,6 +146,22 @@ export function getDefaultStoreSettings(): StoreSettings {
         // Gastos
         expenses: true,
 
+        // Facturación
+        invoicing: true,
+
+        // Contabilidad
+        accounting: true,
+        accounting_chart_of_accounts: false,
+        accounting_journal_entries: false,
+        accounting_fiscal_periods: false,
+        accounting_reports: false,
+
+        // Nómina
+        payroll: true,
+        payroll_employees: false,
+        payroll_runs: false,
+        payroll_settings: false,
+
         // Configuración
         settings: true,
         settings_general: true,

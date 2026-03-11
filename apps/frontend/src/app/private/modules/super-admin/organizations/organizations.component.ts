@@ -190,11 +190,41 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
 
   // Table configuration
   tableColumns: TableColumn[] = [
-    { key: 'name', label: 'Nombre', sortable: true, width: '200px', priority: 1 },
-    { key: 'slug', label: 'Vlink', sortable: true, width: '150px', priority: 3 },
-    { key: 'email', label: 'Email', sortable: true, width: '250px', priority: 2 },
-    { key: 'phone', label: 'Teléfono', sortable: true, width: '150px', priority: 3 },
-    { key: 'tax_id', label: 'NIT/CC', sortable: true, width: '120px', priority: 3 },
+    {
+      key: 'name',
+      label: 'Nombre',
+      sortable: true,
+      width: '200px',
+      priority: 1,
+    },
+    {
+      key: 'slug',
+      label: 'Vlink',
+      sortable: true,
+      width: '150px',
+      priority: 3,
+    },
+    {
+      key: 'email',
+      label: 'Email',
+      sortable: true,
+      width: '250px',
+      priority: 2,
+    },
+    {
+      key: 'phone',
+      label: 'Teléfono',
+      sortable: true,
+      width: '150px',
+      priority: 3,
+    },
+    {
+      key: 'tax_id',
+      label: 'NIT/CC',
+      sortable: true,
+      width: '120px',
+      priority: 3,
+    },
     {
       key: 'state',
       label: 'Estado',
@@ -359,7 +389,6 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
             this.loadOrganizations(); // Reload the list
             this.loadStats(); // Reload stats
             this.toastService.success('Organización creada exitosamente');
-            console.log('Organization created successfully:', response.data);
           }
           this.isCreatingOrganization = false;
         },
@@ -467,7 +496,6 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     direction: 'asc' | 'desc' | null;
   }): void {
     // TODO: Implement server-side sorting
-    console.log('Sort event:', sortEvent);
     // For now, just reload the organizations
     this.loadOrganizations();
   }
@@ -531,7 +559,6 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   viewOrganization(org: OrganizationListItem): void {
     // Navigate to organization details
     // TODO: Implement navigation when details page is created
-    console.log('View organization:', org);
   }
 
   editOrganization(org: OrganizationListItem): void {
@@ -579,7 +606,6 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
             this.loadOrganizations(); // Reload the list
             this.loadStats(); // Reload stats
             this.toastService.success('Organización actualizada exitosamente');
-            console.log('Organization updated successfully:', response.data);
           }
           this.isUpdatingOrganization = false;
         },
