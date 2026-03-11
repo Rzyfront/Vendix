@@ -16,7 +16,6 @@ import { JournalEntryDetailComponent } from './journal-entry-detail/journal-entr
 import {
   InputsearchComponent,
   StatsComponent,
-  IconComponent,
   ResponsiveDataViewComponent,
   OptionsDropdownComponent,
   PaginationComponent,
@@ -42,7 +41,6 @@ interface EntryStats {
     CommonModule,
     InputsearchComponent,
     StatsComponent,
-    IconComponent,
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
     PaginationComponent,

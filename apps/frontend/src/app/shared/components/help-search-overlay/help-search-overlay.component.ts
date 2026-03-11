@@ -188,6 +188,10 @@ import { HelpArticle } from '../../../private/modules/store/help/models/help-art
       border-radius: 4px;
       color: var(--color-text-tertiary, #9ca3af);
       background: var(--color-background, #f9fafb);
+
+      @media (max-width: 768px) {
+        display: none;
+      }
     }
 
     .spotlight-clear {

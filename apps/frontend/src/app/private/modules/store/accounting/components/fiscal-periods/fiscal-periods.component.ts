@@ -12,7 +12,6 @@ import { closeFiscalPeriod } from '../../state/actions/accounting.actions';
 import { FiscalPeriodCreateComponent } from './fiscal-period-create/fiscal-period-create.component';
 import {
   StatsComponent,
-  IconComponent,
   ResponsiveDataViewComponent,
   OptionsDropdownComponent,
   TableColumn,
@@ -34,7 +33,6 @@ interface PeriodStats {
   imports: [
     CommonModule,
     StatsComponent,
-    IconComponent,
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
     FiscalPeriodCreateComponent,
