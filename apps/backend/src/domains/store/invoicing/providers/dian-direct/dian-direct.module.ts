@@ -17,6 +17,11 @@ import { DianResponseParserService } from './dian-response-parser.service';
     DianXmlSignerService,
     DianResponseParserService,
   ],
-  exports: [DianDirectProvider],
+  exports: [
+    DianDirectProvider,
+    DianSoapClient,
+    DianXmlSignerService,
+    DianResponseParserService,
+  ],
 })
 export class DianDirectModule {}

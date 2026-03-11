@@ -58,7 +58,7 @@ export interface MenuItem {
         (click)="closeMobileSidebar()"
         aria-label="Close sidebar"
       >
-        <app-icon name="x" [size]="20"></app-icon>
+        <app-icon name="x" [size]="16"></app-icon>
       </button>
 
       <!-- Logo Section -->
@@ -117,7 +117,7 @@ export interface MenuItem {
               >
                 <app-icon
                   [name]="item.icon"
-                  [size]="item.iconSize || 20"
+                  [size]="item.iconSize || 18"
                   class="flex-shrink-0"
                 ></app-icon>
                 <span class="menu-text">{{ item.label }}</span>
@@ -129,13 +129,13 @@ export interface MenuItem {
               <button (click)="toggleSubmenu(item.label)" class="menu-item">
                 <app-icon
                   [name]="item.icon"
-                  [size]="item.iconSize || 20"
+                  [size]="item.iconSize || 18"
                   class="flex-shrink-0"
                 ></app-icon>
                 <span class="menu-text">{{ item.label }}</span>
                 <app-icon
                   name="chevron-right"
-                  [size]="16"
+                  [size]="14"
                   class="chevron"
                   [class.rotated]="isSubmenuOpen(item.label)"
                 ></app-icon>
