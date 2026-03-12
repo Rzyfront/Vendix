@@ -195,7 +195,7 @@
 
   // Ajustar padding cuando hay iconos
   &:has(+ .inputsearch-clear) {
-    padding-right: 2rem;
+    padding-right: 2.5rem;
   }
 }
 
@@ -245,7 +245,7 @@
 // Botón de limpiar
 .inputsearch-clear {
   position: absolute;
-  right: 0.5rem;
+  right: 0.75rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -277,7 +277,7 @@
 
   // Variaciones de tamaño
   &.inputsearch-clear-sm {
-    right: 0.375rem;
+    right: 0.5rem;
     padding: 0.25rem;
 
     .clear-icon {
@@ -287,7 +287,7 @@
   }
 
   &.inputsearch-clear-md {
-    right: 0.5rem;
+    right: 0.75rem;
     padding: 0.375rem;
 
     .clear-icon {
@@ -297,7 +297,7 @@
   }
 
   &.inputsearch-clear-lg {
-    right: 0.75rem;
+    right: 1rem;
     padding: 0.5rem;
 
     .clear-icon {
