@@ -167,6 +167,7 @@ export class TicketsService {
       const page = Number(query.page) || 1;
       const limit = Number(query.limit) || 10;
 
+      // Calculate sla_breached for each ticket
       const [total, data] = await Promise.all([
         this.prisma.support_tickets.count({ where }),
         this.prisma.support_tickets.findMany({
@@ -209,9 +210,19 @@ export class TicketsService {
         }),
       ]);
 
-      // Sign URLs for attachments
+      // Add sla_breached field based on sla_deadline
+      const ticketsWithSlaBreached = data.map((ticket) => ({
+        ...ticket,
+        sla_breached:
+          ticket.sla_deadline
+            ? new Date(ticket.sla_deadline) < new Date() &&
+              !['RESOLVED', 'CLOSED'].includes(ticket.status)
+            : false,
+      }));
+
+      // Sign URLs for attachments and add sla_breached
       const ticketsWithUrls = await Promise.all(
-        data.map(async (ticket) => {
+        ticketsWithSlaBreached.map(async (ticket) => {
           const attachmentsWithUrls = await Promise.all(
             ticket.attachments.map(async (att) => ({
               ...att,
@@ -301,7 +312,7 @@ export class TicketsService {
         throw new NotFoundException('Ticket not found');
       }
 
-      // Sign URLs for attachments
+      // Sign URLs for attachments and add sla_breached
       const attachmentsWithUrls = await Promise.all(
         ticket.attachments.map(async (att) => ({
           ...att,
@@ -312,10 +323,18 @@ export class TicketsService {
         })),
       );
 
+      // Calculate sla_breached
+      const slaBreached =
+        ticket.sla_deadline
+          ? new Date(ticket.sla_deadline) < new Date() &&
+            !['RESOLVED', 'CLOSED'].includes(ticket.status)
+          : false;
+
       return {
         success: true,
         data: {
           ...ticket,
+          sla_breached: slaBreached,
           attachments: attachmentsWithUrls,
         },
       };
