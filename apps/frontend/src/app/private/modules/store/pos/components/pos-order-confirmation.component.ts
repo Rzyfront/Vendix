@@ -34,7 +34,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   template: `
     <app-modal
       [isOpen]="isOpen"
-      [size]="'md'"
+      [size]="'lg'"
       (closed)="onModalClosed()"
       [showCloseButton]="false"
     >

@@ -882,6 +882,23 @@ export class ProductCreatePageComponent implements OnInit {
     this.activeImageIndex = index;
   }
 
+  setAsMainImage(index: number): void {
+    if (index === 0) return; // Already main
+
+    // Swap the selected image with the current main image
+    const tempUrl = this.imageUrls[index];
+    const tempId = this.imageIds[index];
+
+    this.imageUrls[index] = this.imageUrls[0];
+    this.imageIds[index] = this.imageIds[0];
+
+    this.imageUrls[0] = tempUrl;
+    this.imageIds[0] = tempId;
+
+    this.activeImageIndex = 0;
+    this.toastService.success('Imagen establecida como principal');
+  }
+
   nextImage(): void {
     if (this.imageUrls.length === 0) return;
     this.activeImageIndex = (this.activeImageIndex + 1) % this.imageUrls.length;

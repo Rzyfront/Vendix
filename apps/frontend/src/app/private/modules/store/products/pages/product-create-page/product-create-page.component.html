@@ -173,9 +173,14 @@
                             <!-- Thumbnails -->
                             <div *ngFor="let url of imageUrls; let i = index" (click)="setActiveImage(i)"
                                 [class.ring-2]="activeImageIndex === i" [class.ring-primary-500]="activeImageIndex === i"
-                                class="relative flex-shrink-0 w-16 h-16 bg-white rounded-xl overflow-hidden border border-gray-200 cursor-pointer shadow-sm">
+                                class="relative flex-shrink-0 w-16 h-16 bg-white rounded-xl overflow-hidden border border-gray-200 cursor-pointer shadow-sm group">
                                 <img [src]="url" class="w-full h-full object-cover" (error)="onImageError($event)">
                                 <div *ngIf="i === 0" class="absolute top-0 left-0 w-2.5 h-2.5 bg-primary-500 rounded-br"></div>
+                                <!-- Set as main button -->
+                                <button *ngIf="i !== 0" type="button" (click)="$event.stopPropagation(); setAsMainImage(i)"
+                                    class="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity rounded-xl">
+                                    <span class="text-[9px] text-white font-bold text-center px-1">Establecer<br>principal</span>
+                                </button>
                             </div>
                         </div>
 
@@ -446,10 +451,15 @@
                         <div class="flex gap-2.5 overflow-x-auto pb-2 scrollbar-none">
                             <div *ngFor="let url of imageUrls; let i = index" (click)="setActiveImage(i)"
                                 [class.ring-2]="activeImageIndex === i" [class.ring-primary]="activeImageIndex === i"
-                                class="relative flex-none w-16 h-16 bg-white rounded-lg overflow-hidden border border-gray-200 cursor-pointer shadow-sm transition-all hover:border-primary-300">
+                                class="relative flex-none w-16 h-16 bg-white rounded-lg overflow-hidden border border-gray-200 cursor-pointer shadow-sm transition-all hover:border-primary-300 group">
                                 <img [src]="url" class="w-full h-full object-cover" (error)="onImageError($event)">
                                 <div *ngIf="i === 0" class="absolute top-0 left-0 w-3 h-3 bg-primary-500 rounded-br-md">
                                 </div>
+                                <!-- Set as main button -->
+                                <button *ngIf="i !== 0" type="button" (click)="$event.stopPropagation(); setAsMainImage(i)"
+                                    class="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity rounded-lg">
+                                    <span class="text-[9px] text-white font-bold text-center px-1">Establecer<br>principal</span>
+                                </button>
                             </div>
 
                             <!-- Small Plus Button (only if < 5) -->
