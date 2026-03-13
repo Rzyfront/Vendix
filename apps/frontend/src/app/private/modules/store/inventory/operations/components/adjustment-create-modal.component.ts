@@ -587,27 +587,27 @@ interface LocationStockOption {
       <!-- Footer -->
       <div
         slot="footer"
-        class="flex justify-between gap-3 px-6 py-4 bg-gray-50 rounded-b-xl"
+        class="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 px-4 md:px-6 py-4 bg-gray-50 rounded-b-xl"
       >
-        <div>
+        <div class="order-2 sm:order-1">
           @if (currentStep === 2) {
             <app-button
               variant="outline"
               type="button"
               (clicked)="goToStep(1)"
-              customClasses="!rounded-xl"
+              customClasses="!rounded-xl w-full sm:w-auto"
             >
               <app-icon name="arrow-left" [size]="16" class="mr-1"></app-icon>
               Atras
             </app-button>
           }
         </div>
-        <div class="flex gap-3">
+        <div class="flex gap-3 order-1 sm:order-2">
           <app-button
             variant="outline"
             type="button"
             (clicked)="onCancel()"
-            customClasses="!rounded-xl font-bold"
+            customClasses="!rounded-xl font-bold flex-1 sm:flex-none"
           >
             Cancelar
           </app-button>
@@ -617,7 +617,7 @@ interface LocationStockOption {
               type="button"
               (clicked)="goToStep(2)"
               [disabled]="!selectedLocation"
-              customClasses="!rounded-xl font-bold shadow-md shadow-primary-200"
+              customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 flex-1 sm:flex-none"
             >
               Continuar
               <app-icon name="arrow-right" [size]="16" class="ml-1"></app-icon>
@@ -629,7 +629,7 @@ interface LocationStockOption {
               (clicked)="onSubmit()"
               [loading]="isSubmitting"
               [disabled]="form.invalid || isSubmitting || !selected_type"
-              customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all"
+              customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all flex-1 sm:flex-none"
             >
               Crear Ajuste
             </app-button>
