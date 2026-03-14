@@ -1,7 +1,7 @@
 export const environment = {
-  production: true,
-  apiUrl: 'https://api.vendix.online/api',
-  vendixDomain: 'vendix.online',
+  production: false,
+  apiUrl: 'http://localhost:3000/api',
+  vendixDomain: 'localhost',
 
   // Configuración para producción
   debugDomainDetection: false,

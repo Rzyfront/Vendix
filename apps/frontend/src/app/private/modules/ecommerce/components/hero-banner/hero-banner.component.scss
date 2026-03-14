@@ -13,7 +13,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background-size: cover;
+  background-size: 100% 100%;
   background-position: center;
   background-repeat: no-repeat;
   transition: background-image 0.5s ease-in-out;
@@ -92,9 +92,8 @@
     width: 3rem;
     height: 3rem;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.2);
-    backdrop-filter: blur(4px);
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    background: rgba(0, 0, 0, 0.5);
+    border: 2px solid rgba(255, 255, 255, 0.8);
     color: white;
     display: flex;
     align-items: center;
@@ -102,9 +101,11 @@
     cursor: pointer;
     pointer-events: auto;
     transition: all 0.3s ease;
+    font-size: 1.25rem;
 
     &:hover {
-      background: rgba(255, 255, 255, 0.4);
+      background: rgba(0, 0, 0, 0.7);
+      transform: scale(1.1);
     }
   }
 }
@@ -122,8 +123,8 @@
     width: 0.75rem;
     height: 0.75rem;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.4);
-    border: none;
+    background: rgba(255, 255, 255, 0.5);
+    border: 2px solid rgba(255, 255, 255, 0.8);
     padding: 0;
     cursor: pointer;
     transition: all 0.3s ease;
