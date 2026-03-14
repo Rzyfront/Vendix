@@ -28,6 +28,10 @@ export interface CartDiscount {
   value: number;
   description: string;
   amount: number;
+  promotion_id?: number;
+  coupon_id?: number;
+  coupon_code?: string;
+  is_auto_applied?: boolean;
 }
 
 export interface CartSummary {
@@ -44,6 +48,7 @@ export interface CartState {
   customer: PosCustomer | null;
   notes: string;
   appliedDiscounts: CartDiscount[];
+  appliedCoupon?: { id: number; code: string; discount_type: string; discount_value: number };
   summary: CartSummary;
   createdAt: Date;
   updatedAt: Date;
@@ -69,6 +74,7 @@ export interface ApplyDiscountRequest {
   type: 'percentage' | 'fixed';
   value: number;
   description: string;
+  promotion_id?: number;
 }
 
 export interface CartValidationError {

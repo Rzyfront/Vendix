@@ -71,13 +71,9 @@ export class RolesService {
     is_system_role?: boolean;
     organization_id?: number;
   }) {
-    const {
-      page = 1,
-      limit = 10,
-      search,
-      is_system_role,
-      organization_id,
-    } = query;
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 10;
+    const { search, is_system_role, organization_id } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.rolesWhereInput = {};

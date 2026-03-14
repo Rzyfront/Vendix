@@ -141,6 +141,11 @@ const APP_MODULES = {
           label: 'Órdenes de Compra',
           description: 'Órdenes de compra a proveedores',
         },
+        {
+          key: 'orders_quotations',
+          label: 'Cotizaciones',
+          description: 'Cotizaciones y presupuestos para clientes',
+        },
       ],
     },
 
@@ -359,6 +364,16 @@ const APP_MODULES = {
           key: 'settings_legal_documents',
           label: 'Documentos Legales',
           description: 'Gestionar términos, privacidad y documentos legales',
+        },
+        {
+          key: 'settings_users',
+          label: 'Usuarios',
+          description: 'Gestionar usuarios de la tienda',
+        },
+        {
+          key: 'settings_roles',
+          label: 'Roles',
+          description: 'Gestionar roles y permisos de la tienda',
         },
       ],
     },
@@ -853,6 +868,7 @@ export class SettingsModalComponent implements OnInit {
 
   /**
    * Compute which module keys are new (exist in defaults but not in user config)
+   * Keys are stored as "appType::key" to avoid cross-app-type contamination
    */
   private computeNewModuleKeys(config: any): void {
     this.newModuleKeys.clear();
@@ -865,14 +881,14 @@ export class SettingsModalComponent implements OnInit {
       const defaultKeys = this.defaultPanelUi[appType] || {};
       for (const key of Object.keys(defaultKeys)) {
         if (!userKeys.hasOwnProperty(key)) {
-          this.newModuleKeys.add(key);
+          this.newModuleKeys.add(appType + '::' + key);
         }
       }
     }
   }
 
   isNewModule(key: string): boolean {
-    return this.newModuleKeys.has(key);
+    return this.newModuleKeys.has(this.currentAppType + '::' + key);
   }
 
   loadSettings() {

@@ -45,6 +45,7 @@ export { FileUploadDropzoneComponent } from './file-upload-dropzone/file-upload-
 export { HelpSearchOverlayComponent } from './help-search-overlay/help-search-overlay.component';
 export { MarkdownEditorComponent } from './markdown-editor/markdown-editor.component';
 export { ScrollableTabsComponent } from './scrollable-tabs/scrollable-tabs.component';
+export { StepsLineComponent } from './steps-line/steps-line.component';
 
 // Services
 export { TourService } from './tour/services/tour.service';
@@ -83,11 +84,7 @@ export type {
 } from './multi-selector/multi-selector.component';
 export type { QuantityControlSize } from './quantity-control/quantity-control.component';
 export type { PaginationInfoStyle } from './pagination/pagination.component';
-export type {
-  ExtendedChartType,
-  ChartTheme,
-  EChartsOption,
-} from './chart';
+export type { ExtendedChartType, ChartTheme, EChartsOption } from './chart';
 export type {
   StickyHeaderActionButton,
   StickyHeaderVariant,
@@ -114,4 +111,8 @@ export type {
   ScrollableTab,
   ScrollableTabSize,
 } from './scrollable-tabs/scrollable-tabs.component';
+export type {
+  StepsLineItem,
+  StepsLineSize,
+} from './steps-line/steps-line.component';
 export { CHART_THEMES } from './chart';

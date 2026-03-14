@@ -4,6 +4,8 @@ import { provideEffects } from '@ngrx/effects';
 import { AuthGuard } from '../../core/guards/auth.guard';
 import { invoicingReducer } from '../../private/modules/store/invoicing/state/reducers/invoicing.reducer';
 import { InvoicingEffects } from '../../private/modules/store/invoicing/state/effects/invoicing.effects';
+import { couponReducer } from '../../private/modules/store/marketing/coupons/state/reducers/coupon.reducer';
+import { CouponEffects } from '../../private/modules/store/marketing/coupons/state/effects/coupon.effects';
 
 export const storeAdminRoutes: Routes = [
   {
@@ -172,6 +174,20 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
+            path: 'quotations',
+            loadComponent: () =>
+              import('../../private/modules/store/quotations/quotations.component').then(
+                (c) => c.QuotationsComponent,
+              ),
+          },
+          {
+            path: 'quotations/:id',
+            loadComponent: () =>
+              import('../../private/modules/store/quotations/pages/quotation-detail/quotation-detail.component').then(
+                (c) => c.QuotationDetailComponent,
+              ),
+          },
+          {
             path: ':id',
             loadComponent: () =>
               import('../../private/modules/store/orders/pages/order-details/order-details-page.component').then(
@@ -223,9 +239,9 @@ export const storeAdminRoutes: Routes = [
           },
           {
             path: 'promotions',
-            loadComponent: () =>
-              import('../../private/modules/store/marketing/promotions/promotions.component').then(
-                (c) => c.PromotionsComponent,
+            loadChildren: () =>
+              import('../../private/modules/store/marketing/promotions/promotions.routes').then(
+                (m) => m.promotionsRoutes,
               ),
           },
           {
@@ -234,6 +250,10 @@ export const storeAdminRoutes: Routes = [
               import('../../private/modules/store/marketing/coupons/coupons.component').then(
                 (c) => c.CouponsComponent,
               ),
+            providers: [
+              provideState('coupons', couponReducer),
+              provideEffects(CouponEffects),
+            ],
           },
         ],
       },
@@ -310,6 +330,20 @@ export const storeAdminRoutes: Routes = [
             loadComponent: () =>
               import('../../private/modules/store/settings/legal-documents/legal-documents.component').then(
                 (c) => c.LegalDocumentsComponent,
+              ),
+          },
+          {
+            path: 'users',
+            loadComponent: () =>
+              import('../../private/modules/store/settings/users/store-users-settings.component').then(
+                (c) => c.StoreUsersSettingsComponent,
+              ),
+          },
+          {
+            path: 'roles',
+            loadComponent: () =>
+              import('../../private/modules/store/settings/roles/store-roles-settings.component').then(
+                (c) => c.StoreRolesSettingsComponent,
               ),
           },
           {

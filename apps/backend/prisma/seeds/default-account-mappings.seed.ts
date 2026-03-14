@@ -1,0 +1,143 @@
+import { PrismaClient } from '@prisma/client';
+import { getPrismaClient } from './shared/client';
+
+export interface SeedDefaultAccountMappingsResult {
+  organizations_processed: number;
+  mappings_created: number;
+  mappings_skipped: number;
+}
+
+/**
+ * Default PUC account code for each mapping key.
+ * Defined locally to avoid cross-boundary imports from src/.
+ */
+const MAPPING_DEFAULTS: Record<string, string> = {
+  'invoice.validated.accounts_receivable': '1305',
+  'invoice.validated.revenue': '4135',
+  'invoice.validated.vat_payable': '2408',
+  'payment.received.cash': '1105',
+  'payment.received.accounts_receivable': '1305',
+  'payment.received.revenue': '4135',
+  'expense.approved.expense': '5195',
+  'expense.approved.accounts_payable': '2205',
+  'expense.paid.accounts_payable': '2205',
+  'expense.paid.cash': '1105',
+  'payroll.approved.payroll_expense': '5105',
+  'payroll.approved.social_security': '5110',
+  'payroll.approved.salaries_payable': '2505',
+  'payroll.approved.health_payable': '2370',
+  'payroll.approved.pension_payable': '2380',
+  'payroll.approved.withholdings': '2365',
+  'payroll.paid.salaries_payable': '2505',
+  'payroll.paid.bank': '1110',
+  'order.completed.cogs': '6135',
+  'order.completed.inventory': '1435',
+  'refund.completed.revenue': '4135',
+  'refund.completed.cash': '1105',
+  'purchase_order.received.inventory': '1435',
+  'purchase_order.received.accounts_payable': '2205',
+  'inventory.adjusted.inventory': '1435',
+  'inventory.adjusted.shrinkage': '5295',
+  // Phase 1: IVA on direct POS sales
+  'payment.received.bank': '1110',
+  'payment.received.vat_payable': '2408',
+  // Phase 1: Credit sales
+  'credit_sale.created.accounts_receivable': '1305',
+  'credit_sale.created.revenue': '4135',
+  'credit_sale.created.vat_payable': '2408',
+  // Phase 1: Refund VAT reversal
+  'refund.completed.vat_payable': '2408',
+};
+
+/**
+ * DEPENDENCIES: Requires organizations and chart_of_accounts to exist.
+ *
+ * Seeds default accounting account mappings for all organizations.
+ * For each organization, resolves PUC account codes from chart_of_accounts
+ * and creates org-level (store_id = null) mapping records.
+ *
+ * Uses findFirst + create/update instead of upsert because the composite
+ * unique constraint @@unique([organization_id, store_id, mapping_key])
+ * does not work reliably with NULL store_id in Prisma upsert.
+ *
+ * Idempotent: can run multiple times safely.
+ */
+export async function seedDefaultAccountMappings(
+  prisma?: PrismaClient,
+): Promise<SeedDefaultAccountMappingsResult> {
+  const client = prisma || getPrismaClient();
+
+  const organizations = await client.organizations.findMany({
+    select: { id: true, name: true },
+  });
+
+  let organizations_processed = 0;
+  let mappings_created = 0;
+  let mappings_skipped = 0;
+
+  for (const org of organizations) {
+    const accounts = await client.chart_of_accounts.findMany({
+      where: { organization_id: org.id },
+      select: { id: true, code: true },
+    });
+
+    const account_by_code = new Map(
+      accounts.map((a) => [a.code, a.id]),
+    );
+
+    for (const [mapping_key, account_code] of Object.entries(MAPPING_DEFAULTS)) {
+      const account_id = account_by_code.get(account_code);
+
+      if (!account_id) {
+        console.warn(
+          `  [Account Mappings] Skipping "${mapping_key}" for org "${org.name}" (id=${org.id}): ` +
+          `account code "${account_code}" not found in chart_of_accounts`,
+        );
+        mappings_skipped++;
+        continue;
+      }
+
+      // Check if mapping already exists (findFirst because store_id is NULL)
+      const existing = await client.accounting_account_mappings.findFirst({
+        where: {
+          organization_id: org.id,
+          store_id: null,
+          mapping_key,
+        },
+      });
+
+      if (existing) {
+        // Update existing mapping
+        await client.accounting_account_mappings.update({
+          where: { id: existing.id },
+          data: {
+            account_id,
+            is_active: true,
+          },
+        });
+      } else {
+        // Create new mapping
+        await client.accounting_account_mappings.create({
+          data: {
+            organization_id: org.id,
+            store_id: null,
+            mapping_key,
+            account_id,
+            is_active: true,
+          },
+        });
+      }
+
+      mappings_created++;
+    }
+
+    organizations_processed++;
+  }
+
+  console.log(
+    `[Account Mappings] Processed ${organizations_processed} organizations: ` +
+    `${mappings_created} mappings created/updated, ${mappings_skipped} skipped`,
+  );
+
+  return { organizations_processed, mappings_created, mappings_skipped };
+}

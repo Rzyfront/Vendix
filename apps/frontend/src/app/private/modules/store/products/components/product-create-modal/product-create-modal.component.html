@@ -91,6 +91,27 @@
         </div>
       </div>
 
+      <!-- IVA / Impuestos -->
+      <div>
+        <div class="flex gap-2 items-end">
+          <app-multi-selector class="flex-1" label="Impuestos (IVA)"
+            [options]="taxCategoryOptions" formControlName="tax_category_ids"
+            placeholder="Seleccionar impuestos...">
+          </app-multi-selector>
+          <button type="button" (click)="isTaxCategoryCreateOpen = true"
+            class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
+            style="border-radius: var(--radius-sm);">
+            <app-icon name="plus" size="20"></app-icon>
+          </button>
+        </div>
+        @if ((productForm.get('tax_category_ids')?.value || []).length > 0 && productForm.get('base_price')?.value > 0) {
+          <small class="text-xs text-gray-500 mt-1 block">
+            Precio con impuestos: <span class="font-semibold text-gray-700">{{ priceWithTax | number:'1.0-0' }}</span>
+          </small>
+        }
+        <small class="text-xs text-gray-400 mt-0.5 block">Opcional</small>
+      </div>
+
       <!-- Advanced Link -->
       <div class="pt-2">
         <button type="button" (click)="goToAdvancedCreation()"
@@ -129,3 +150,10 @@
   (created)="onBrandCreated($event)"
   (cancel)="isBrandCreateOpen = false"
 ></app-brand-quick-create>
+
+<app-tax-quick-create
+  [isOpen]="isTaxCategoryCreateOpen"
+  (isOpenChange)="isTaxCategoryCreateOpen = $event"
+  (created)="onTaxCategoryCreated($event)"
+  (cancel)="isTaxCategoryCreateOpen = false">
+</app-tax-quick-create>

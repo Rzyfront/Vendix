@@ -47,8 +47,8 @@ export class BrandsService {
       page = 1,
       limit = 10,
       search,
-      sort_by = 'name',
-      sort_order = 'asc',
+      sort_by = 'created_at',
+      sort_order = 'desc',
     } = query;
 
     const skip = (page - 1) * limit;
@@ -100,8 +100,8 @@ export class BrandsService {
       page = 1,
       limit = 10,
       search,
-      sort_by = 'name',
-      sort_order = 'asc',
+      sort_by = 'created_at',
+      sort_order = 'desc',
     } = query;
 
     const skip = (page - 1) * limit;

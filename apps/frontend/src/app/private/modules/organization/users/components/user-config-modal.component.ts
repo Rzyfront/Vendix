@@ -287,6 +287,7 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
         orders: true,
         orders_sales: true,
         orders_purchase_orders: false,
+        orders_quotations: true,
         inventory: true,
         inventory_pop: true,
         inventory_adjustments: false,
@@ -329,6 +330,8 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
         settings_appearance: false,
         settings_security: true,
         settings_domains: false,
+        settings_users: true,
+        settings_roles: true,
       },
       STORE_ECOMMERCE: {
         profile: true,

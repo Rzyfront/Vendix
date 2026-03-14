@@ -1,16 +1,21 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { CreateReturnOrderDto } from './dto/create-return-order.dto';
 import { UpdateReturnOrderDto } from './dto/update-return-order.dto';
 import { ReturnOrderQueryDto } from './dto/return-order-query.dto';
 import { return_order_status_enum } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { RequestContextService } from '@common/context/request-context.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 
 @Injectable()
 export class ReturnOrdersService {
+  private readonly logger = new Logger(ReturnOrdersService.name);
+
   constructor(
     private prisma: StorePrismaService,
     private stockLevelManager: StockLevelManager,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   async create(createReturnOrderDto: CreateReturnOrderDto) {
@@ -176,7 +181,7 @@ export class ReturnOrdersService {
     id: number,
     items: Array<{ id: number; action: string; location_id?: number }>,
   ) {
-    return this.prisma.$transaction(async (tx) => {
+    const processed_return = await this.prisma.$transaction(async (tx) => {
       const returnOrder = await tx.return_orders.findUnique({
         where: { id },
         include: { return_order_items: true },
@@ -238,6 +243,49 @@ export class ReturnOrdersService {
         },
       });
     });
+
+    // Emit refund.completed for accounting after successful transaction
+    try {
+      const refund_amount = Number(processed_return.total_refund_amount || 0);
+      if (refund_amount > 0) {
+        // Derive tax proportion from the original order if linked
+        let tax_amount = 0;
+        let store_id: number | undefined;
+        if (processed_return.related_order_id) {
+          const original_order = await this.prisma.orders.findUnique({
+            where: { id: processed_return.related_order_id },
+            select: {
+              tax_amount: true,
+              grand_total: true,
+              store_id: true,
+            },
+          });
+          if (original_order) {
+            store_id = original_order.store_id;
+            const order_total = Number(original_order.grand_total || 0);
+            const order_tax = Number(original_order.tax_amount || 0);
+            if (order_total > 0 && order_tax > 0) {
+              // Proportional tax: refund_amount / grand_total * tax_amount
+              tax_amount = Math.round((refund_amount / order_total) * order_tax * 100) / 100;
+            }
+          }
+        }
+
+        this.eventEmitter.emit('refund.completed', {
+          refund_id: processed_return.id,
+          organization_id: processed_return.organization_id,
+          store_id,
+          amount: refund_amount,
+          tax_amount,
+          return_type: processed_return.type,
+          user_id: RequestContextService.getUserId(),
+        });
+      }
+    } catch (error) {
+      this.logger.error(`Failed to emit refund.completed for return order #${id}: ${error.message}`);
+    }
+
+    return processed_return;
   }
 
   async cancel(id: number) {

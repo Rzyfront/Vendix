@@ -1018,3 +1018,4 @@ export class GenerateProductDescriptionDto {
 }
 
 export * from './bulk-image-upload.dto';
+export * from './update-product-promotions.dto';

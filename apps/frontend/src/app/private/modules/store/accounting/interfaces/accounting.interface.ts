@@ -171,6 +171,15 @@ export interface GeneralLedgerReport {
   accounts: GeneralLedgerAccount[];
 }
 
+// ── Account Mappings ──────────────────────────────────────────────
+export interface AccountMapping {
+  mapping_key: string;
+  account_code: string;
+  account_id?: number;
+  description: string;
+  source: 'store' | 'organization' | 'default';
+}
+
 // ── Query / List ───────────────────────────────────────────────────
 export interface QueryJournalEntryDto {
   search?: string;

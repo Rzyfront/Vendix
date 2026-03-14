@@ -3,7 +3,7 @@ name: vendix-customer-auth
 description: >
   Customer authentication patterns for STORE_ECOMMERCE app using modal-based login/register.
   Trigger: When implementing customer login, registration, or auth modal in e-commerce frontend.
-license: Apache-2.0
+license: MIT
 metadata:
   author: rzyfront
   version: "1.0"

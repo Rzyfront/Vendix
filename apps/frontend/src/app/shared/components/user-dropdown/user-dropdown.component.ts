@@ -110,7 +110,7 @@ export interface UserMenuOption {
             <span
               class="settings-sync-badge"
               *ngIf="
-                option.label === 'Configuración' &&
+                option.label === 'Configuración de usuario' &&
                 (newModuleCount$ | async) as count
               "
               >{{ count }}</span
@@ -219,7 +219,7 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
       action: () => this.goToProfile(),
     },
     {
-      label: 'Configuración',
+      label: 'Configuración de usuario',
       icon: 'user-cog',
       action: () => this.goToSettings(),
     },

@@ -174,6 +174,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           icon: 'circle',
           route: '/admin/orders/purchase-orders',
         },
+        {
+          label: 'Cotizaciones',
+          icon: 'circle',
+          route: '/admin/orders/quotations',
+        },
       ],
     },
     {
@@ -371,6 +376,16 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           label: 'General',
           icon: 'circle',
           route: '/admin/settings/general',
+        },
+        {
+          label: 'Usuarios',
+          icon: 'circle',
+          route: '/admin/settings/users',
+        },
+        {
+          label: 'Roles',
+          icon: 'circle',
+          route: '/admin/settings/roles',
         },
         {
           label: 'Métodos de Pago',

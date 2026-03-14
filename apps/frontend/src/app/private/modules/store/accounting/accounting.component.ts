@@ -38,6 +38,7 @@ export class AccountingComponent implements OnInit, OnDestroy {
     { id: 'chart-of-accounts', label: 'Plan de Cuentas', icon: 'book-open' },
     { id: 'journal-entries', label: 'Asientos', icon: 'file-text' },
     { id: 'fiscal-periods', label: 'Periodos Fiscales', icon: 'calendar' },
+    { id: 'account-mappings', label: 'Mapeo de Cuentas', icon: 'link' },
     { id: 'reports', label: 'Reportes', icon: 'bar-chart-2' },
   ];
   activeTab = 'chart-of-accounts';

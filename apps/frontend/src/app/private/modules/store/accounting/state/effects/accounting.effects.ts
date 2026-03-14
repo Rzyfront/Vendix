@@ -7,6 +7,21 @@ import { AccountingService } from '../../services/accounting.service';
 import * as AccountingActions from '../actions/accounting.actions';
 import { selectAccountingState } from '../selectors/accounting.selectors';
 
+/** Map API entry (accounting_entry_lines) → frontend interface (lines) */
+function mapEntry(raw: any): any {
+  if (!raw) return raw;
+  return {
+    ...raw,
+    lines: (raw.accounting_entry_lines || raw.lines || []).map((l: any) => ({
+      ...l,
+      debit_amount: Number(l.debit_amount),
+      credit_amount: Number(l.credit_amount),
+    })),
+    total_debit: Number(raw.total_debit),
+    total_credit: Number(raw.total_credit),
+  };
+}
+
 @Injectable()
 export class AccountingEffects {
   private actions$ = inject(Actions);
@@ -114,7 +129,10 @@ export class AccountingEffects {
           date_to: state.date_to || undefined,
         }).pipe(
           map((response) =>
-            AccountingActions.loadEntriesSuccess({ entries: response.data, meta: response.meta }),
+            AccountingActions.loadEntriesSuccess({
+              entries: response.data.map(mapEntry),
+              meta: response.meta,
+            }),
           ),
           catchError((error) =>
             of(AccountingActions.loadEntriesFailure({
@@ -132,7 +150,7 @@ export class AccountingEffects {
       switchMap(({ id }) =>
         this.accounting_service.getJournalEntry(id).pipe(
           map((response) =>
-            AccountingActions.loadEntrySuccess({ entry: response.data }),
+            AccountingActions.loadEntrySuccess({ entry: mapEntry(response.data) }),
           ),
           catchError((error) =>
             of(AccountingActions.loadEntryFailure({
@@ -150,7 +168,7 @@ export class AccountingEffects {
       switchMap(({ entry }) =>
         this.accounting_service.createJournalEntry(entry).pipe(
           map((response) =>
-            AccountingActions.createEntrySuccess({ entry: response.data }),
+            AccountingActions.createEntrySuccess({ entry: mapEntry(response.data) }),
           ),
           catchError((error) =>
             of(AccountingActions.createEntryFailure({
@@ -168,7 +186,7 @@ export class AccountingEffects {
       switchMap(({ id, entry }) =>
         this.accounting_service.updateJournalEntry(id, entry).pipe(
           map((response) =>
-            AccountingActions.updateEntrySuccess({ entry: response.data }),
+            AccountingActions.updateEntrySuccess({ entry: mapEntry(response.data) }),
           ),
           catchError((error) =>
             of(AccountingActions.updateEntryFailure({
@@ -202,7 +220,7 @@ export class AccountingEffects {
       switchMap(({ id }) =>
         this.accounting_service.postJournalEntry(id).pipe(
           map((response) =>
-            AccountingActions.postEntrySuccess({ entry: response.data }),
+            AccountingActions.postEntrySuccess({ entry: mapEntry(response.data) }),
           ),
           catchError((error) =>
             of(AccountingActions.postEntryFailure({
@@ -220,7 +238,7 @@ export class AccountingEffects {
       switchMap(({ id }) =>
         this.accounting_service.voidJournalEntry(id).pipe(
           map((response) =>
-            AccountingActions.voidEntrySuccess({ entry: response.data }),
+            AccountingActions.voidEntrySuccess({ entry: mapEntry(response.data) }),
           ),
           catchError((error) =>
             of(AccountingActions.voidEntryFailure({
@@ -383,6 +401,63 @@ export class AccountingEffects {
           catchError((error) =>
             of(AccountingActions.loadGeneralLedgerFailure({
               error: error.error?.message || error.message || 'Error loading general ledger',
+            })),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  // ── Account Mappings ──────────────────────────────────────────────
+  loadAccountMappings$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AccountingActions.loadAccountMappings),
+      switchMap(({ prefix, store_id }) =>
+        this.accounting_service.getAccountMappings({ prefix, store_id }).pipe(
+          map((response) =>
+            AccountingActions.loadAccountMappingsSuccess({ mappings: response.data }),
+          ),
+          catchError((error) =>
+            of(AccountingActions.loadAccountMappingsFailure({
+              error: error.error?.message || error.message || 'Error loading account mappings',
+            })),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  saveAccountMappings$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AccountingActions.saveAccountMappings),
+      switchMap(({ mappings, store_id }) =>
+        this.accounting_service.updateAccountMappings({ mappings, store_id }).pipe(
+          switchMap(() => [
+            AccountingActions.saveAccountMappingsSuccess(),
+            AccountingActions.loadAccountMappings({}),
+          ]),
+          catchError((error) =>
+            of(AccountingActions.saveAccountMappingsFailure({
+              error: error.error?.message || error.message || 'Error saving account mappings',
+            })),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  resetAccountMappings$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AccountingActions.resetAccountMappings),
+      switchMap(({ store_id }) =>
+        this.accounting_service.resetAccountMappings({ store_id }).pipe(
+          switchMap(() => [
+            AccountingActions.resetAccountMappingsSuccess(),
+            AccountingActions.loadAccountMappings({}),
+          ]),
+          catchError((error) =>
+            of(AccountingActions.resetAccountMappingsFailure({
+              error: error.error?.message || error.message || 'Error resetting account mappings',
             })),
           ),
         ),

@@ -1,10 +1,12 @@
 ---
 name: vendix-backend-auth
 description: Authentication and Authorization patterns.
+license: MIT
 metadata:
   scope: [root]
   auto_invoke: "Implementing authentication"
 ---
+
 # Vendix Backend Authentication & Authorization
 
 > **Auth Pattern** - Global JWT strategy with decorators for public access, roles, and granular permissions.
@@ -20,27 +22,27 @@ Vendix implements **global JWT authentication** with role-based and permission-b
 ### Configuration in app.module.ts
 
 ```typescript
-import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
-import { JwtModule } from '@nestjs/jwt';
-import { PassportModule } from '@nestjs/passport';
-import { JwtStrategy } from './auth/strategies/jwt.strategy';
-import { AuthGuard } from './common/guards/auth.guard';
+import { Module } from "@nestjs/common";
+import { APP_GUARD } from "@nestjs/core";
+import { JwtModule } from "@nestjs/jwt";
+import { PassportModule } from "@nestjs/passport";
+import { JwtStrategy } from "./auth/strategies/jwt.strategy";
+import { AuthGuard } from "./common/guards/auth.guard";
 
 @Module({
   imports: [
-    PassportModule.register({ defaultStrategy: 'jwt' }),
+    PassportModule.register({ defaultStrategy: "jwt" }),
     JwtModule.register({
       secret: process.env.JWT_SECRET,
       signOptions: {
-        expiresIn: process.env.JWT_EXPIRES_IN || '1d',
+        expiresIn: process.env.JWT_EXPIRES_IN || "1d",
       },
     }),
   ],
   providers: [
     JwtStrategy,
     {
-      provide: APP_GUARD,  // Global guard - ALL routes protected by default
+      provide: APP_GUARD, // Global guard - ALL routes protected by default
       useClass: AuthGuard,
     },
   ],
@@ -60,9 +62,9 @@ export class AuthModule {}
 **File:** `common/decorators/public.decorator.ts`
 
 ```typescript
-import { SetMetadata } from '@nestjs/common';
+import { SetMetadata } from "@nestjs/common";
 
-export const IS_PUBLIC_KEY = 'isPublic';
+export const IS_PUBLIC_KEY = "isPublic";
 
 export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
 ```
@@ -70,23 +72,23 @@ export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
 ### Usage
 
 ```typescript
-import { Public } from '@/common/decorators/public.decorator';
+import { Public } from "@/common/decorators/public.decorator";
 
-@Controller('auth')
+@Controller("auth")
 export class AuthController {
-  @Public()  // No authentication required
-  @Post('login')
+  @Public() // No authentication required
+  @Post("login")
   async login(@Body() login_dto: LoginDto) {
     return this.authService.login(login_dto);
   }
 
-  @Public()  // No authentication required
-  @Post('register')
+  @Public() // No authentication required
+  @Post("register")
   async register(@Body() register_dto: RegisterDto) {
     return this.authService.register(register_dto);
   }
 
-  @Post('logout')  // Requires authentication (default)
+  @Post("logout") // Requires authentication (default)
   async logout() {
     return this.authService.logout();
   }
@@ -94,6 +96,7 @@ export class AuthController {
 ```
 
 **When to use `@Public()`:**
+
 - Login/register endpoints
 - Password reset
 - Public catalog (when accessed by domain)
@@ -109,9 +112,9 @@ export class AuthController {
 **File:** `common/decorators/roles.decorator.ts`
 
 ```typescript
-import { SetMetadata } from '@nestjs/common';
+import { SetMetadata } from "@nestjs/common";
 
-export const ROLES_KEY = 'roles';
+export const ROLES_KEY = "roles";
 
 export const Roles = (...roles: string[]) => SetMetadata(ROLES_KEY, roles);
 ```
@@ -121,9 +124,9 @@ export const Roles = (...roles: string[]) => SetMetadata(ROLES_KEY, roles);
 **File:** `common/guards/roles.guard.ts`
 
 ```typescript
-import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
-import { ROLES_KEY } from '../decorators/roles.decorator';
+import { Injectable, CanActivate, ExecutionContext } from "@nestjs/common";
+import { Reflector } from "@nestjs/core";
+import { ROLES_KEY } from "../decorators/roles.decorator";
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -148,22 +151,22 @@ export class RolesGuard implements CanActivate {
 ### Usage
 
 ```typescript
-import { Roles } from '@/common/decorators/roles.decorator';
-import { RolesGuard } from '@/common/guards/roles.guard';
-import { UseGuards } from '@nestjs/common';
+import { Roles } from "@/common/decorators/roles.decorator";
+import { RolesGuard } from "@/common/guards/roles.guard";
+import { UseGuards } from "@nestjs/common";
 
-@Controller('superadmin')
-@UseGuards(AuthGuard, RolesGuard)  // Apply both guards
+@Controller("superadmin")
+@UseGuards(AuthGuard, RolesGuard) // Apply both guards
 export class SuperAdminController {
-  @Roles('super_admin')
-  @Get('system-stats')
+  @Roles("super_admin")
+  @Get("system-stats")
   async getSystemStats() {
     // Only accessible by users with 'super_admin' role
     return this.superadminService.getSystemStats();
   }
 
-  @Roles('super_admin', 'organization_admin')
-  @Get('organization-stats')
+  @Roles("super_admin", "organization_admin")
+  @Get("organization-stats")
   async getOrganizationStats() {
     // Accessible by super_admin OR organization_admin
   }
@@ -171,6 +174,7 @@ export class SuperAdminController {
 ```
 
 **Available Roles:**
+
 - `super_admin` - Full system access
 - `organization_admin` - Organization-wide access
 - `store_admin` - Store-wide access
@@ -185,9 +189,9 @@ export class SuperAdminController {
 **File:** `common/decorators/permissions.decorator.ts`
 
 ```typescript
-import { SetMetadata } from '@nestjs/common';
+import { SetMetadata } from "@nestjs/common";
 
-export const PERMISSIONS_KEY = 'permissions';
+export const PERMISSIONS_KEY = "permissions";
 
 export const Permissions = (...permissions: string[]) =>
   SetMetadata(PERMISSIONS_KEY, permissions);
@@ -198,9 +202,9 @@ export const Permissions = (...permissions: string[]) =>
 **File:** `common/guards/permissions.guard.ts`
 
 ```typescript
-import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
-import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
+import { Injectable, CanActivate, ExecutionContext } from "@nestjs/common";
+import { Reflector } from "@nestjs/core";
+import { PERMISSIONS_KEY } from "../decorators/permissions.decorator";
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
@@ -227,26 +231,26 @@ export class PermissionsGuard implements CanActivate {
 ### Usage
 
 ```typescript
-import { Permissions } from '@/common/decorators/permissions.decorator';
-import { PermissionsGuard } from '@/common/guards/permissions.guard';
+import { Permissions } from "@/common/decorators/permissions.decorator";
+import { PermissionsGuard } from "@/common/guards/permissions.guard";
 
-@Controller('catalog')
+@Controller("catalog")
 @UseGuards(AuthGuard, PermissionsGuard)
 export class CatalogController {
-  @Permissions('catalog:read')
-  @Get('products')
+  @Permissions("catalog:read")
+  @Get("products")
   async getProducts() {
     // Requires catalog:read permission
   }
 
-  @Permissions('catalog:write')
-  @Post('products')
+  @Permissions("catalog:write")
+  @Post("products")
   async createProduct() {
     // Requires catalog:write permission
   }
 
-  @Permissions('catalog:write', 'inventory:update')
-  @Patch('products/:id')
+  @Permissions("catalog:write", "inventory:update")
+  @Patch("products/:id")
   async updateProduct() {
     // Requires BOTH permissions
   }
@@ -256,6 +260,7 @@ export class CatalogController {
 **Permission Format:** `{resource}:{action}`
 
 **Available Permissions:**
+
 ```
 catalog:read, catalog:write
 inventory:read, inventory:write, inventory:update
@@ -273,12 +278,12 @@ payments:read, payments:process, payments:refund
 ### Multiple Guards
 
 ```typescript
-@Controller('admin')
+@Controller("admin")
 @UseGuards(AuthGuard, RolesGuard, PermissionsGuard)
 export class AdminController {
-  @Roles('organization_admin', 'store_admin')
-  @Permissions('users:write')
-  @Post('users')
+  @Roles("organization_admin", "store_admin")
+  @Permissions("users:write")
+  @Post("users")
   async createUser() {
     // Must have:
     // 1. Valid JWT (AuthGuard)
@@ -303,10 +308,10 @@ export class AdminController {
 **File:** `auth/strategies/jwt.strategy.ts`
 
 ```typescript
-import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { PassportStrategy } from '@nestjs/passport';
-import { ExtractJwt, Strategy } from 'passport-jwt';
-import { UserService } from '@/domains/organization/user/user.service';
+import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { PassportStrategy } from "@nestjs/passport";
+import { ExtractJwt, Strategy } from "passport-jwt";
+import { UserService } from "@/domains/organization/user/user.service";
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -322,7 +327,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const user = await this.user_service.findById(payload.sub);
 
     if (!user || !user.is_active) {
-      throw new UnauthorizedException('User not found or inactive');
+      throw new UnauthorizedException("User not found or inactive");
     }
 
     return {
@@ -396,14 +401,18 @@ async refresh(@Body() refresh_dto: RefreshTokenDto) {
 **File:** `common/guards/auth.guard.ts`
 
 ```typescript
-import { Injectable, ExecutionContext, UnauthorizedException } from '@nestjs/common';
-import { AuthGuard as PassportAuthGuard } from '@nestjs/passport';
-import { Observable } from 'rxjs';
-import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
-import { Reflector } from '@nestjs/core';
+import {
+  Injectable,
+  ExecutionContext,
+  UnauthorizedException,
+} from "@nestjs/common";
+import { AuthGuard as PassportAuthGuard } from "@nestjs/passport";
+import { Observable } from "rxjs";
+import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
+import { Reflector } from "@nestjs/core";
 
 @Injectable()
-export class AuthGuard extends PassportAuthGuard('jwt') {
+export class AuthGuard extends PassportAuthGuard("jwt") {
   constructor(private reflector: Reflector) {
     super();
   }
@@ -411,13 +420,13 @@ export class AuthGuard extends PassportAuthGuard('jwt') {
   canActivate(
     context: ExecutionContext,
   ): boolean | Promise<boolean> | Observable<boolean> {
-    const is_public = this.reflector.getAllAndOverride<boolean>(
-      IS_PUBLIC_KEY,
-      [context.getHandler(), context.getClass()],
-    );
+    const is_public = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
 
     if (is_public) {
-      return true;  // Skip auth for @Public() routes
+      return true; // Skip auth for @Public() routes
     }
 
     return super.canActivate(context);
@@ -425,7 +434,7 @@ export class AuthGuard extends PassportAuthGuard('jwt') {
 
   handleRequest(err: any, user: any, info: any) {
     if (err || !user) {
-      throw err || new UnauthorizedException('Invalid or missing token');
+      throw err || new UnauthorizedException("Invalid or missing token");
     }
     return user;
   }
@@ -433,6 +442,7 @@ export class AuthGuard extends PassportAuthGuard('jwt') {
 ```
 
 **Key Features:**
+
 - Checks for `@Public()` decorator first
 - Falls back to JWT validation
 - Throws `UnauthorizedException` for invalid tokens
@@ -444,13 +454,13 @@ export class AuthGuard extends PassportAuthGuard('jwt') {
 ### Controller-Level Guards
 
 ```typescript
-@Controller('api')
+@Controller("api")
 @UseGuards(AuthGuard)
 export class ApiController {
   // All routes require authentication
 
   @Public()
-  @Get('health')
+  @Get("health")
   health() {
     // Except this one
   }
@@ -460,7 +470,7 @@ export class ApiController {
 ### Method-Level Guards
 
 ```typescript
-@Controller('users')
+@Controller("users")
 @UseGuards(AuthGuard)
 export class UsersController {
   @Get()
@@ -468,7 +478,7 @@ export class UsersController {
     // Auth required
   }
 
-  @Get('profile')
+  @Get("profile")
   getProfile(@Request() req) {
     // Access user via req.user
     return req.user;
@@ -496,16 +506,16 @@ async createOrder(@Request() req, @Body() dto: CreateOrderDto) {
 
 ## 🔍 Key Files Reference
 
-| File | Purpose |
-|------|---------|
-| `app.module.ts` | Global guard configuration |
-| `auth/strategies/jwt.strategy.ts` | JWT validation strategy |
-| `common/guards/auth.guard.ts` | Authentication guard with @Public() support |
-| `common/guards/roles.guard.ts` | Role-based access control |
-| `common/guards/permissions.guard.ts` | Permission-based access control |
-| `common/decorators/public.decorator.ts` | Mark public routes |
-| `common/decorators/roles.decorator.ts` | Require specific roles |
-| `common/decorators/permissions.decorator.ts` | Require specific permissions |
+| File                                         | Purpose                                     |
+| -------------------------------------------- | ------------------------------------------- |
+| `app.module.ts`                              | Global guard configuration                  |
+| `auth/strategies/jwt.strategy.ts`            | JWT validation strategy                     |
+| `common/guards/auth.guard.ts`                | Authentication guard with @Public() support |
+| `common/guards/roles.guard.ts`               | Role-based access control                   |
+| `common/guards/permissions.guard.ts`         | Permission-based access control             |
+| `common/decorators/public.decorator.ts`      | Mark public routes                          |
+| `common/decorators/roles.decorator.ts`       | Require specific roles                      |
+| `common/decorators/permissions.decorator.ts` | Require specific permissions                |
 
 ---
 

@@ -25,6 +25,10 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { InvoicingModule } from './invoicing/invoicing.module';
 import { AccountingModule } from './accounting/accounting.module';
 import { PayrollModule } from './payroll/payroll.module';
+import { StoreRolesModule } from './roles/store-roles.module';
+import { PromotionsModule } from './promotions/promotions.module';
+import { CouponsModule } from './coupons/coupons.module';
+import { QuotationsModule } from './quotations/quotations.module';
 
 @Module({
   imports: [
@@ -52,6 +56,10 @@ import { PayrollModule } from './payroll/payroll.module';
     InvoicingModule,
     AccountingModule,
     PayrollModule,
+    StoreRolesModule,
+    PromotionsModule,
+    CouponsModule,
+    QuotationsModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],

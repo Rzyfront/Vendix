@@ -6,6 +6,7 @@ import {
   BalanceSheetReport,
   IncomeStatementReport,
   GeneralLedgerReport,
+  AccountMapping,
 } from '../interfaces/accounting.interface';
 
 export interface AccountingState {
@@ -28,6 +29,10 @@ export interface AccountingState {
   // Fiscal Periods
   fiscal_periods: FiscalPeriod[];
   fiscal_periods_loading: boolean;
+
+  // Account Mappings
+  account_mappings: AccountMapping[];
+  account_mappings_loading: boolean;
 
   // Reports
   trial_balance: TrialBalanceReport | null;
@@ -63,6 +68,9 @@ export const initialAccountingState: AccountingState = {
 
   fiscal_periods: [],
   fiscal_periods_loading: false,
+
+  account_mappings: [],
+  account_mappings_loading: false,
 
   trial_balance: null,
   balance_sheet: null,

@@ -24,6 +24,10 @@ export class QueryStoreUsersDto {
 
     @IsOptional()
     @IsString()
+    state?: string;
+
+    @IsOptional()
+    @IsString()
     sort_by?: string;
 
     @IsOptional()

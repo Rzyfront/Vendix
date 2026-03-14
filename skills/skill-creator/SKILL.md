@@ -3,9 +3,9 @@ name: skill-creator
 description: >
   Creates new AI agent skills following the Agent Skills spec.
   Trigger: When user asks to create a new skill, add agent instructions, or document patterns for AI.
-license: Apache-2.0
+license: MIT
 metadata:
-  author: gentleman-programming
+  author: rzyfront
   version: "1.0"
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash, WebFetch, WebSearch, Task
 ---
@@ -47,9 +47,9 @@ name: {skill-name}
 description: >
   {One-line description of what this skill does}.
   Trigger: {When the AI should load this skill}.
-license: Apache-2.0
+license: MIT
 metadata:
-  author: gentleman-programming
+  author: rzyfront
   version: "1.0"
 ---
 
@@ -110,8 +110,8 @@ Link to external guides?    → references/ (with local path)
 |-------|----------|-------------|
 | `name` | Yes | Skill identifier (lowercase, hyphens) |
 | `description` | Yes | What + Trigger in one block |
-| `license` | Yes | Always `Apache-2.0` for Prowler |
-| `metadata.author` | Yes | `gentleman-programming` |
+| `license` | Yes | `MIT` |
+| `metadata.author` | Yes | `rzyfront` |
 | `metadata.version` | Yes | Semantic version as string |
 
 ---

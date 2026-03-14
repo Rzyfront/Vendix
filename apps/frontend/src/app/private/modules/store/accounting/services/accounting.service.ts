@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
@@ -17,6 +17,7 @@ import {
   BalanceSheetReport,
   IncomeStatementReport,
   GeneralLedgerReport,
+  AccountMapping,
   AccountingListResponse,
   ApiResponse,
 } from '../interfaces/accounting.interface';
@@ -189,6 +190,31 @@ export class AccountingService {
     return this.http.get<ApiResponse<GeneralLedgerReport>>(
       this.getApiUrl('reports/general-ledger'),
       { params },
+    );
+  }
+
+  // ── Account Mappings ───────────────────────────────────────────────
+  getAccountMappings(params?: { prefix?: string; store_id?: number }): Observable<ApiResponse<AccountMapping[]>> {
+    let http_params = new HttpParams();
+    if (params?.prefix) http_params = http_params.set('prefix', params.prefix);
+    if (params?.store_id) http_params = http_params.set('store_id', params.store_id.toString());
+    return this.http.get<ApiResponse<AccountMapping[]>>(
+      this.getApiUrl('account-mappings'),
+      { params: http_params },
+    );
+  }
+
+  updateAccountMappings(body: { mappings: Array<{ mapping_key: string; account_id: number }>; store_id?: number }): Observable<ApiResponse<any>> {
+    return this.http.put<ApiResponse<any>>(
+      this.getApiUrl('account-mappings'),
+      body,
+    );
+  }
+
+  resetAccountMappings(body?: { store_id?: number }): Observable<ApiResponse<any>> {
+    return this.http.post<ApiResponse<any>>(
+      this.getApiUrl('account-mappings/reset'),
+      body || {},
     );
   }
 }

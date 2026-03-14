@@ -1,18 +1,22 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { purchase_order_status_enum } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { toTitleCase } from '@common/utils/format.util';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 
 @Injectable()
 export class PurchaseOrdersService {
+  private readonly logger = new Logger(PurchaseOrdersService.name);
+
   constructor(
     private prisma: StorePrismaService,
     private stockLevelManager: StockLevelManager,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   async create(createPurchaseOrderDto: CreatePurchaseOrderDto) {
@@ -506,7 +510,7 @@ export class PurchaseOrdersService {
     id: number,
     items: Array<{ id: number; quantity_received: number }>,
   ) {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // Update purchase order items with received quantities
       for (const item of items) {
         await tx.purchase_order_items.update({
@@ -554,21 +558,21 @@ export class PurchaseOrdersService {
       }
 
       // Check cumulative status based on actual DB state
-      const allItemsReceived = purchaseOrder.purchase_order_items.every(
+      const all_items_received = purchaseOrder.purchase_order_items.every(
         (item) => (item.quantity_received || 0) >= item.quantity_ordered
       );
 
       // Update purchase order status
       let newStatus = purchaseOrder.status;
-      if (allItemsReceived) {
+      if (all_items_received) {
         newStatus = purchase_order_status_enum.received;
       }
 
-      return tx.purchase_orders.update({
+      const updated_po = await tx.purchase_orders.update({
         where: { id },
         data: {
           status: newStatus,
-          received_date: allItemsReceived ? new Date() : null,
+          received_date: all_items_received ? new Date() : null,
         },
         include: {
           suppliers: true,
@@ -581,7 +585,28 @@ export class PurchaseOrdersService {
           },
         },
       });
+
+      return { updated_po, all_items_received };
     });
+
+    // Emit purchase_order.received for accounting after successful transaction
+    if (result.all_items_received) {
+      try {
+        const total_amount = Number(result.updated_po.total_amount || 0);
+        if (total_amount > 0) {
+          this.eventEmitter.emit('purchase_order.received', {
+            purchase_order_id: result.updated_po.id,
+            organization_id: result.updated_po.organization_id,
+            total_amount,
+            user_id: RequestContextService.getUserId(),
+          });
+        }
+      } catch (error) {
+        this.logger.error(`Failed to emit purchase_order.received for PO #${id}: ${error.message}`);
+      }
+    }
+
+    return result.updated_po;
   }
 
   remove(id: number) {

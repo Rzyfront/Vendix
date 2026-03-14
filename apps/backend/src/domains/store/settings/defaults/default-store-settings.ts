@@ -117,6 +117,7 @@ export function getDefaultStoreSettings(): StoreSettings {
         orders: true,
         orders_sales: true,
         orders_purchase_orders: true,
+        orders_quotations: true,
 
         // Inventario
         inventory: true,
@@ -171,6 +172,8 @@ export function getDefaultStoreSettings(): StoreSettings {
         settings_domains: true,
         settings_shipping: true,
         settings_legal_documents: true,
+        settings_users: true,
+        settings_roles: true,
 
         // Ayuda
         help: true,

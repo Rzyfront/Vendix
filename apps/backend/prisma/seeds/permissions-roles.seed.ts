@@ -429,6 +429,44 @@ export async function seedPermissionsAndRoles(
       method: 'DELETE',
     },
 
+    // Cotizaciones
+    {
+      name: 'store:quotations:create',
+      description: 'Crear cotización',
+      path: '/api/store/quotations',
+      method: 'POST',
+    },
+    {
+      name: 'store:quotations:read',
+      description: 'Leer cotizaciones',
+      path: '/api/store/quotations',
+      method: 'GET',
+    },
+    {
+      name: 'store:quotations:read:one',
+      description: 'Leer cotización específica',
+      path: '/api/store/quotations/:id',
+      method: 'GET',
+    },
+    {
+      name: 'store:quotations:update',
+      description: 'Actualizar cotización',
+      path: '/api/store/quotations/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:quotations:delete',
+      description: 'Eliminar cotización',
+      path: '/api/store/quotations/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:quotations:convert',
+      description: 'Convertir cotización a orden',
+      path: '/api/store/quotations/:id/convert',
+      method: 'POST',
+    },
+
     // Categorías
     {
       name: 'store:categories:create',
@@ -459,6 +497,44 @@ export async function seedPermissionsAndRoles(
       description: 'Eliminar categoría',
       path: '/api/store/categories/:id',
       method: 'DELETE',
+    },
+
+    // Cupones
+    {
+      name: 'store:coupons:create',
+      description: 'Crear cupón',
+      path: '/api/store/coupons',
+      method: 'POST',
+    },
+    {
+      name: 'store:coupons:read',
+      description: 'Leer cupones',
+      path: '/api/store/coupons',
+      method: 'GET',
+    },
+    {
+      name: 'store:coupons:read:one',
+      description: 'Leer cupón específico',
+      path: '/api/store/coupons/:id',
+      method: 'GET',
+    },
+    {
+      name: 'store:coupons:update',
+      description: 'Actualizar cupón',
+      path: '/api/store/coupons/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:coupons:delete',
+      description: 'Eliminar cupón',
+      path: '/api/store/coupons/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:coupons:validate',
+      description: 'Validar cupón',
+      path: '/api/store/coupons/validate',
+      method: 'POST',
     },
 
     // Marcas
@@ -1076,10 +1152,69 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/notifications',
       method: 'PATCH',
     },
+
+    // POS Access
+    {
+      name: 'store:pos:access',
+      description: 'Acceder al estado de validación de horario POS',
+      path: '/api/store/settings/schedule-status',
+      method: 'GET',
+    },
+
+    // Facturación (Invoicing)
+    {
+      name: 'invoicing:read',
+      description: 'Leer facturación',
+      path: '/api/store/invoicing',
+      method: 'GET',
+    },
+    {
+      name: 'invoicing:write',
+      description: 'Crear/Actualizar facturación',
+      path: '/api/store/invoicing',
+      method: 'POST',
+    },
+    {
+      name: 'invoicing:delete',
+      description: 'Eliminar facturación',
+      path: '/api/store/invoicing/:id',
+      method: 'DELETE',
+    },
+    // Promociones
+    {
+      name: 'store:promotions:read',
+      description: 'Leer promociones',
+      path: '/api/store/promotions',
+      method: 'GET',
+    },
+    {
+      name: 'store:promotions:create',
+      description: 'Crear promoción',
+      path: '/api/store/promotions',
+      method: 'POST',
+    },
+    {
+      name: 'store:promotions:update',
+      description: 'Actualizar promoción',
+      path: '/api/store/promotions/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:promotions:delete',
+      description: 'Eliminar promoción',
+      path: '/api/store/promotions/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:promotions:manage',
+      description: 'Gestionar estado de promociones (activar, pausar, cancelar)',
+      path: '/api/store/promotions/:id/activate',
+      method: 'POST',
+    },
   ];
 
   // Get valid permission names from our list
-  const validPermissionNames = new Set(permissions.map(p => p.name));
+  const validPermissionNames = new Set(permissions.map((p) => p.name));
 
   // Delete permissions that are not in our list (to avoid conflicts)
   const deletedCount = await client.permissions.deleteMany({
@@ -1322,6 +1457,8 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:orders:') ||
       p.name.includes('store:payments:read') ||
       (p.name.startsWith('store:inventory:') && p.name.includes(':read')) ||
+      p.name.includes('store:coupons:read') ||
+      p.name.includes('store:coupons:validate') ||
       p.name.includes('store:products:read') ||
       p.name.includes('store:categories:read') ||
       p.name.includes('store:brands:read') ||
@@ -1357,6 +1494,8 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:categories:read') ||
       p.name.includes('store:brands:read') ||
       p.name.includes('store:customers:read') ||
+      p.name.includes('store:coupons:read') ||
+      p.name.includes('store:coupons:validate') ||
       p.name.includes('organization:addresses:read') ||
       p.name.includes('store:addresses:read') ||
       p.name.includes('store:taxes:read'),

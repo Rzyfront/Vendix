@@ -12,7 +12,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   standalone: true,
   imports: [CommonModule, StatsComponent],
   template: `
-    <div class="stats-container">
+    <div class="stats-container !mb-0">
       <!-- Productos en Carrito -->
       <app-stats
         title="Productos"

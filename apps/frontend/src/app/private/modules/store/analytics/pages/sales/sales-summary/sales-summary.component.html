@@ -1,7 +1,7 @@
 <div class="md:space-y-4">
   <!-- Stats Cards -->
   @if (loading$ | async) {
-    <div class="stats-container">
+    <div class="stats-container !mb-0">
       @for (i of [1, 2, 3, 4]; track i) {
         <div class="bg-surface border border-border rounded-xl p-4 animate-pulse">
           <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>

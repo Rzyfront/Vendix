@@ -52,7 +52,7 @@ export class ProductsBulkService {
     private readonly accessValidationService: AccessValidationService,
     private readonly stockLevelManager: StockLevelManager,
     private readonly locationsService: LocationsService,
-  ) { }
+  ) {}
 
   /**
    * Genera la plantilla de carga masiva en formato Excel (.xlsx)
@@ -181,7 +181,7 @@ export class ProductsBulkService {
           // Since we can't easily pass 'tx' to this.productsService.create/update without refactoring them,
           // we will do a best-effort approach or basic operations here if possible?
           // ACTUALLY: deeply refactoring productsService to accept TX is out of scope for "fixing bulk upload" safely.
-          // However, to ensure integrity as requested "Adjust pass the full load that no data is lost", 
+          // However, to ensure integrity as requested "Adjust pass the full load that no data is lost",
           // we should AT LEAST ensure that if variants/stock fail, we don't leave a partial product.
           // Given the constraints, we will rely on the fact that if this block throws, the transaction rolls back.
           // BUT - inner service calls using `this.prisma` (the global one) WON'T be part of `tx`.
@@ -189,7 +189,7 @@ export class ProductsBulkService {
           // We will catch errors and if manual rollback is needed we might need to delete.
           // BETTER: For this specific task, we will try to do it sequentially and if creation fails, it fails.
           // If variants fail, we should delete the product?
-          // Since the user explicitly asked "Adjust for complete load that no data is lost", 
+          // Since the user explicitly asked "Adjust for complete load that no data is lost",
           // truly atomic acts require 'tx'.
 
           // Let's implement a localized transaction approach:
@@ -220,7 +220,7 @@ export class ProductsBulkService {
             results.push({
               product: resultProduct,
               status: 'success',
-              message: `Product with SKU ${productData.sku} updated successfully`,
+              message: `Producto con SKU ${productData.sku} actualizado exitosamente`,
             });
           } else {
             // Crear nuevo producto
@@ -231,7 +231,8 @@ export class ProductsBulkService {
             // We'll wrap creation + sub-steps in a try/catch to delete if subsequent steps fail
             let createdId = null;
             try {
-              resultProduct = await this.productsService.create(createProductDto);
+              resultProduct =
+                await this.productsService.create(createProductDto);
               createdId = (resultProduct as any).id;
 
               // Variantes
@@ -245,18 +246,19 @@ export class ProductsBulkService {
               results.push({
                 product: resultProduct,
                 status: 'success',
-                message: 'Product created successfully',
+                message: 'Producto creado exitosamente',
               });
             } catch (createErr) {
               // Compensation logic: if we created the product but failed later (e.g. variants), delete it
               if (createdId) {
-                await this.prisma.products.delete({ where: { id: createdId } }).catch(e => console.error("Cleanup failed", e));
+                await this.prisma.products
+                  .delete({ where: { id: createdId } })
+                  .catch((e) => console.error('Cleanup failed', e));
               }
               throw createErr; // Re-throw to be caught by outer loop
             }
           }
         }); // End fake transaction scope (just scoping variables mainly)
-
 
         successful++;
       } catch (error) {

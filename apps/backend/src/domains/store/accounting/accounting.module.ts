@@ -19,6 +19,10 @@ import { FiscalPeriodsService } from './fiscal-periods/fiscal-periods.service';
 import { AccountingReportsController } from './reports/accounting-reports.controller';
 import { AccountingReportsService } from './reports/accounting-reports.service';
 
+// Account Mappings
+import { AccountMappingController } from './account-mappings/account-mapping.controller';
+import { AccountMappingService } from './account-mappings/account-mapping.service';
+
 // Auto Entries
 import { AutoEntryService } from './auto-entries/auto-entry.service';
 import { AccountingEventsListener } from './auto-entries/accounting-events.listener';
@@ -30,6 +34,7 @@ import { AccountingEventsListener } from './auto-entries/accounting-events.liste
     JournalEntriesController,
     FiscalPeriodsController,
     AccountingReportsController,
+    AccountMappingController,
   ],
   providers: [
     ChartOfAccountsService,
@@ -37,6 +42,7 @@ import { AccountingEventsListener } from './auto-entries/accounting-events.liste
     JournalEntryFlowService,
     FiscalPeriodsService,
     AccountingReportsService,
+    AccountMappingService,
     AutoEntryService,
     AccountingEventsListener,
   ],
@@ -46,6 +52,7 @@ import { AccountingEventsListener } from './auto-entries/accounting-events.liste
     JournalEntryFlowService,
     FiscalPeriodsService,
     AccountingReportsService,
+    AccountMappingService,
     AutoEntryService,
   ],
 })

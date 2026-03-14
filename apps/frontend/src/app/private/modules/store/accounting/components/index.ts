@@ -5,6 +5,7 @@ export * from './journal-entries/journal-entry-create/journal-entry-create.compo
 export * from './journal-entries/journal-entry-detail/journal-entry-detail.component';
 export * from './fiscal-periods/fiscal-periods.component';
 export * from './fiscal-periods/fiscal-period-create/fiscal-period-create.component';
+export * from './account-mappings/account-mappings.component';
 export * from './reports/trial-balance/trial-balance.component';
 export * from './reports/balance-sheet/balance-sheet.component';
 export * from './reports/income-statement/income-statement.component';

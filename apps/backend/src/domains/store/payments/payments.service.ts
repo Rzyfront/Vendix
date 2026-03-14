@@ -23,6 +23,7 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { resolveCostPrice } from '../orders/utils/resolve-cost-price';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../settings/settings.service';
+import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 
 @Injectable()
 export class PaymentsService {
@@ -33,6 +34,7 @@ export class PaymentsService {
     private readonly taxes_service: TaxesService,
     private readonly eventEmitter: EventEmitter2,
     private readonly settingsService: SettingsService,
+    private readonly promotionEngine: PromotionEngineService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -399,6 +401,33 @@ export class PaymentsService {
           user,
         );
 
+        // 1.5. Apply promotions if provided
+        if (createPosPaymentDto.promotion_ids?.length) {
+          for (const promoId of createPosPaymentDto.promotion_ids) {
+            try {
+              const { discount } =
+                await this.promotionEngine.validatePromotion(
+                  promoId,
+                  createPosPaymentDto.items.map((i) => ({
+                    product_id: i.product_id,
+                    unit_price: i.unit_price,
+                    quantity: i.quantity,
+                  })),
+                  createPosPaymentDto.customer_id,
+                );
+              await this.promotionEngine.applyPromotion(
+                order.id,
+                promoId,
+                discount,
+                createPosPaymentDto.customer_id ?? null,
+                tx,
+              );
+            } catch (e) {
+              // Silent: promotion validation failed, continue without it
+            }
+          }
+        }
+
         // 2. Process payment if required
         let payment: any = null;
         if (createPosPaymentDto.requires_payment) {
@@ -437,7 +466,7 @@ export class PaymentsService {
           currency: order.currency || createPosPaymentDto.currency,
         });
 
-        // 5. Emit payment event
+        // 5. Emit payment event (with tax/subtotal for IVA accounting)
         if (payment) {
           this.eventEmitter.emit('payment.received', {
             payment_id: payment.id,
@@ -446,11 +475,61 @@ export class PaymentsService {
             order_id: order.id,
             order_number: order.order_number,
             amount: payment.amount,
+            subtotal_amount: Number(order.subtotal_amount || 0),
+            tax_amount: Number(order.tax_amount || 0),
             currency: payment.currency || createPosPaymentDto.currency,
             payment_method:
               payment.store_payment_method?.system_payment_method
                 ?.display_name || 'Unknown',
             user_id: user.id,
+          });
+
+          // 5b. Emit order.completed for COGS on direct POS sales
+          if (order.delivery_type === 'direct_delivery') {
+            const total_cost = order.order_items.reduce(
+              (sum: number, item: any) => sum + Number(item.cost_price || 0) * item.quantity,
+              0,
+            );
+            if (total_cost > 0) {
+              this.eventEmitter.emit('order.completed', {
+                order_id: order.id,
+                order_number: order.order_number,
+                organization_id: order.stores?.organization_id,
+                store_id: createPosPaymentDto.store_id,
+                total_cost,
+                user_id: user.id,
+              });
+            }
+          }
+        }
+
+        // 5c. Emit credit_sale.created for credit sales (no payment)
+        if (!createPosPaymentDto.requires_payment) {
+          this.eventEmitter.emit('credit_sale.created', {
+            order_id: order.id,
+            organization_id: order.stores?.organization_id,
+            store_id: createPosPaymentDto.store_id,
+            order_number: order.order_number,
+            subtotal_amount: Number(order.subtotal_amount || 0),
+            tax_amount: Number(order.tax_amount || 0),
+            total_amount: Number(order.grand_total || 0),
+            user_id: user.id,
+          });
+        }
+
+        // 5d. Register coupon use if applicable
+        if (createPosPaymentDto.coupon_id && (createPosPaymentDto.discount_amount ?? 0) > 0) {
+          await tx.coupon_uses.create({
+            data: {
+              coupon_id: createPosPaymentDto.coupon_id,
+              order_id: order.id,
+              customer_id: createPosPaymentDto.customer_id || null,
+              discount_applied: createPosPaymentDto.discount_amount,
+            },
+          });
+          await tx.coupons.update({
+            where: { id: createPosPaymentDto.coupon_id },
+            data: { current_uses: { increment: 1 } },
           });
         }
 
@@ -576,6 +655,8 @@ export class PaymentsService {
           discount_amount: dto.discount_amount || 0,
           grand_total: dto.total_amount,
           currency: dto.currency,
+          coupon_id: dto.coupon_id || undefined,
+          coupon_code: dto.coupon_code || undefined,
           billing_address_id: dto.billing_address_id,
           shipping_address_id: dto.shipping_address_id,
           internal_notes: dto.internal_notes,

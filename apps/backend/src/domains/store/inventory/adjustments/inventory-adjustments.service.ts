@@ -3,9 +3,11 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  Logger,
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   CreateAdjustmentDto,
   AdjustmentQueryDto,
@@ -84,10 +86,13 @@ const getTransactionType = (
 
 @Injectable()
 export class InventoryAdjustmentsService {
+  private readonly logger = new Logger(InventoryAdjustmentsService.name);
+
   constructor(
     private prisma: StorePrismaService,
     private transactionsService: InventoryTransactionsService,
     private stockLevelManager: StockLevelManager,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -111,7 +116,7 @@ export class InventoryAdjustmentsService {
       throw new BadRequestException('Invalid organization ID in context');
     }
 
-    return await this.prisma.$transaction(async (prisma) => {
+    const adjustment_result = await this.prisma.$transaction(async (prisma) => {
       // Ensure IDs are numbers (handling string payload from frontend)
       const productId = Number(data.product_id);
       const locationId = Number(data.location_id);
@@ -241,9 +246,39 @@ export class InventoryAdjustmentsService {
         userId: userId || undefined,
       });
 
-      // 6. Transformar respuesta para mapear nombres de relaciones
-      return this.mapAdjustmentResponse(adjustment);
+      // 6. Fetch product cost for accounting event
+      const product = await prisma.products.findUnique({
+        where: { id: productId },
+        select: { cost_price: true },
+      });
+
+      // 7. Transformar respuesta para mapear nombres de relaciones
+      return {
+        adjustment: this.mapAdjustmentResponse(adjustment),
+        quantity_change: quantityChange,
+        cost_per_unit: Number(product?.cost_price || 0),
+      };
     });
+
+    // Emit inventory.adjusted for accounting after successful transaction
+    try {
+      const cost_amount = Math.abs(
+        adjustment_result.quantity_change * adjustment_result.cost_per_unit,
+      );
+      if (cost_amount > 0) {
+        this.eventEmitter.emit('inventory.adjusted', {
+          adjustment_id: adjustment_result.adjustment.id,
+          organization_id: organizationId,
+          quantity_change: adjustment_result.quantity_change,
+          cost_amount,
+          user_id: userId,
+        });
+      }
+    } catch (error) {
+      this.logger.error(`Failed to emit inventory.adjusted for adjustment #${adjustment_result.adjustment.id}: ${error.message}`);
+    }
+
+    return adjustment_result.adjustment;
   }
 
   /**

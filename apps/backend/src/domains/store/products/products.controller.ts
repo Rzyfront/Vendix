@@ -22,6 +22,7 @@ import {
   ProductImageDto,
   ProductQueryDto,
   GenerateProductDescriptionDto,
+  UpdateProductPromotionsDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -102,6 +103,48 @@ export class ProductsController {
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al obtener los productos',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Get(':id/promotions')
+  @Permissions('store:products:read')
+  async getProductPromotions(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const result = await this.productsService.getProductPromotions(id);
+      return this.responseService.success(
+        result,
+        'Promociones del producto obtenidas exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener las promociones del producto',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Patch(':id/promotions')
+  @Permissions('store:products:update')
+  async updateProductPromotions(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateProductPromotionsDto,
+  ) {
+    try {
+      const result = await this.productsService.updateProductPromotions(
+        id,
+        dto.promotion_ids,
+      );
+      return this.responseService.success(
+        result,
+        'Promociones del producto actualizadas exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al actualizar las promociones del producto',
         error.response?.message || error.message,
         error.status || 400,
       );

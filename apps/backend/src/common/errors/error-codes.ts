@@ -313,37 +313,37 @@ export const ErrorCodes = {
   PROD_FIND_001: {
     code: 'PROD_FIND_001',
     httpStatus: 404,
-    devMessage: 'Product not found',
+    devMessage: 'Producto no encontrado',
   },
   PROD_CREATE_001: {
     code: 'PROD_CREATE_001',
     httpStatus: 400,
-    devMessage: 'Error creating product',
+    devMessage: 'Error al crear el producto',
   },
   PROD_VALIDATE_001: {
     code: 'PROD_VALIDATE_001',
     httpStatus: 400,
-    devMessage: 'Product validation failed',
+    devMessage: 'La validación del producto falló',
   },
   PROD_PERM_001: {
     code: 'PROD_PERM_001',
     httpStatus: 403,
-    devMessage: 'Access denied to product',
+    devMessage: 'Acceso denegado al producto',
   },
   PROD_DUP_001: {
     code: 'PROD_DUP_001',
     httpStatus: 409,
-    devMessage: 'Product already exists',
+    devMessage: 'El producto ya existe',
   },
   PROD_IMAGE_001: {
     code: 'PROD_IMAGE_001',
     httpStatus: 404,
-    devMessage: 'Image not found',
+    devMessage: 'Imagen no encontrada',
   },
   PROD_CAT_001: {
     code: 'PROD_CAT_001',
     httpStatus: 400,
-    devMessage: 'Invalid category or brand',
+    devMessage: 'Categoría o marca inválida',
   },
 
   // Orders
@@ -767,6 +767,47 @@ export const ErrorCodes = {
     code: 'DIAN_SEND_002',
     httpStatus: 504,
     devMessage: 'DIAN request timed out',
+  },
+  // Coupons
+  CPN_FIND_001: {
+    code: 'CPN_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Coupon not found',
+  },
+  CPN_DUP_001: {
+    code: 'CPN_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Coupon code already exists',
+  },
+  CPN_EXPIRED_001: {
+    code: 'CPN_EXPIRED_001',
+    httpStatus: 400,
+    devMessage: 'Coupon expired or not yet valid',
+  },
+  CPN_LIMIT_001: {
+    code: 'CPN_LIMIT_001',
+    httpStatus: 400,
+    devMessage: 'Coupon usage limit reached',
+  },
+  CPN_LIMIT_002: {
+    code: 'CPN_LIMIT_002',
+    httpStatus: 400,
+    devMessage: 'Customer already used this coupon',
+  },
+  CPN_MIN_001: {
+    code: 'CPN_MIN_001',
+    httpStatus: 400,
+    devMessage: 'Minimum purchase amount not met',
+  },
+  CPN_APPLY_001: {
+    code: 'CPN_APPLY_001',
+    httpStatus: 400,
+    devMessage: 'Coupon not applicable to cart products',
+  },
+  CPN_VALIDATE_001: {
+    code: 'CPN_VALIDATE_001',
+    httpStatus: 400,
+    devMessage: 'Coupon validation failed',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

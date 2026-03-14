@@ -29,6 +29,9 @@ export class StorePrismaService extends BasePrismaService {
     'invoices',
     'invoice_resolutions',
     'dian_configurations',
+    'promotions',
+    'coupons',
+    'quotations',
   ];
 
   constructor() {
@@ -101,6 +104,13 @@ export class StorePrismaService extends BasePrismaService {
       'dian_audit_logs', // Relational
       'accounting_entry_lines', // Relational
       'payroll_items', // Relational
+      'promotion_products', // Relational
+      'promotion_categories', // Relational
+      'order_promotions', // Relational
+      'coupon_products', // Relational
+      'coupon_categories', // Relational
+      'coupon_uses', // Relational
+      'quotation_items', // Relational
       'chart_of_accounts', // Org scoped
       'fiscal_periods', // Org scoped
       'accounting_entries', // Org scoped
@@ -210,6 +220,13 @@ export class StorePrismaService extends BasePrismaService {
       payroll_items: {
         payroll_run: { organization_id: context.organization_id },
       },
+      promotion_products: { promotions: { store_id: context.store_id } },
+      promotion_categories: { promotions: { store_id: context.store_id } },
+      order_promotions: { orders: { store_id: context.store_id } },
+      coupon_products: { coupon: { store_id: context.store_id } },
+      coupon_categories: { coupon: { store_id: context.store_id } },
+      coupon_uses: { coupon: { store_id: context.store_id } },
+      quotation_items: { quotation: { store_id: context.store_id } },
     };
 
     const security_filter: Record<string, any> = {};
@@ -521,6 +538,23 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.dian_audit_logs;
   }
 
+  // Promotions models
+  get promotions() {
+    return this.scoped_client.promotions;
+  }
+
+  get promotion_products() {
+    return this.scoped_client.promotion_products;
+  }
+
+  get promotion_categories() {
+    return this.scoped_client.promotion_categories;
+  }
+
+  get order_promotions() {
+    return this.scoped_client.order_promotions;
+  }
+
   // Accounting models
   get chart_of_accounts() {
     return this.scoped_client.chart_of_accounts;
@@ -549,6 +583,28 @@ export class StorePrismaService extends BasePrismaService {
 
   get payroll_items() {
     return this.scoped_client.payroll_items;
+  }
+
+  // Quotations models
+  get quotations() {
+    return this.scoped_client.quotations;
+  }
+
+  // Coupons models
+  get coupons() {
+    return this.scoped_client.coupons;
+  }
+
+  get coupon_products() {
+    return this.scoped_client.coupon_products;
+  }
+
+  get coupon_categories() {
+    return this.scoped_client.coupon_categories;
+  }
+
+  get coupon_uses() {
+    return this.scoped_client.coupon_uses;
   }
 
   // Global tables (no store scoping)

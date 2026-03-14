@@ -79,6 +79,43 @@ export class ProductsService {
     return { description: response.content };
   }
 
+  async getProductPromotions(productId: number) {
+    const records = await this.prisma.promotion_products.findMany({
+      where: { product_id: productId },
+      include: {
+        promotions: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            value: true,
+            state: true,
+            start_date: true,
+            end_date: true,
+          },
+        },
+      },
+    });
+    return records.map((r) => r.promotions);
+  }
+
+  async updateProductPromotions(productId: number, promotionIds: number[]) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.promotion_products.deleteMany({
+        where: { product_id: productId },
+      });
+      if (promotionIds.length) {
+        await tx.promotion_products.createMany({
+          data: promotionIds.map((pid) => ({
+            promotion_id: pid,
+            product_id: productId,
+          })),
+        });
+      }
+      return this.getProductPromotions(productId);
+    });
+  }
+
   async create(createProductDto: CreateProductDto) {
     try {
       // Obtener store_id del DTO o del contexto del token

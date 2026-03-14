@@ -8,32 +8,36 @@ import {
   EventEmitter,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { Observable, Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+import { takeUntil, map, distinctUntilChanged, skip } from 'rxjs/operators';
 import {
   PosCartService,
   CartState,
   CartItem,
 } from '../services/pos-cart.service';
+import { CartDiscount } from '../models/cart.model';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { PosScaleService } from '../services/pos-scale.service';
+import { PosApiService } from '../services/pos-api.service';
 
 @Component({
   selector: 'app-pos-cart',
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     IconComponent,
     QuantityControlComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
-      class="h-full flex flex-col bg-surface rounded-md shadow-card border border-border overflow-hidden"
+      class="h-full flex flex-col bg-surface rounded-card shadow-card border border-border overflow-hidden"
     >
       <!-- Cart Header & Summary Section (Fixed at top) -->
       <div class="flex-none bg-surface border-b border-border shadow-sm">
@@ -66,6 +70,80 @@ import { PosScaleService } from '../services/pos-scale.service';
                 formatCurrency((summary$ | async)?.taxAmount || 0)
               }}</span>
             </div>
+
+            <!-- Promotions & Coupons (hidden in quotation mode) -->
+            @if (!isQuotationMode) {
+              <!-- Promotions Applied -->
+              <ng-container *ngIf="getPromotionDiscounts().length > 0">
+                <div class="pt-1.5 border-t border-border/30">
+                  <div class="flex items-center gap-1.5 mb-1">
+                    <app-icon name="tag" [size]="12" class="text-green-600"></app-icon>
+                    <span class="text-[11px] font-semibold text-green-700">Promociones aplicadas</span>
+                    <span class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-green-100 text-green-700 text-[9px] font-bold">
+                      {{ getPromotionDiscounts().length }}
+                    </span>
+                  </div>
+                  <div *ngFor="let disc of getPromotionDiscounts()" class="flex items-center justify-between text-[11px] py-0.5">
+                    <div class="flex items-center gap-1 min-w-0">
+                      <span class="text-green-700 truncate">{{ disc.description }}</span>
+                      <span *ngIf="disc.is_auto_applied" class="inline-flex items-center px-1 rounded text-[8px] font-medium bg-green-100 text-green-600">auto</span>
+                    </div>
+                    <div class="flex items-center gap-1 shrink-0">
+                      <span class="font-medium text-green-700">-{{ formatCurrency(disc.amount) }}</span>
+                      <button
+                        *ngIf="!disc.is_auto_applied"
+                        (click)="removePromoDiscount(disc.id)"
+                        class="p-0.5 rounded text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
+                        title="Eliminar promoción"
+                      >
+                        <app-icon name="x" [size]="10"></app-icon>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </ng-container>
+
+              <!-- Coupon Code Input / Applied Coupon -->
+              <div class="pt-1.5 border-t border-border/30">
+                <ng-container *ngIf="getAppliedCoupon() as coupon; else couponInput">
+                  <div class="flex items-center justify-between py-0.5">
+                    <div class="flex items-center gap-1.5">
+                      <app-icon name="ticket" [size]="12" class="text-primary"></app-icon>
+                      <span class="text-[11px] font-semibold text-primary">{{ coupon.coupon_code }}</span>
+                    </div>
+                    <div class="flex items-center gap-1">
+                      <span class="text-[11px] font-medium text-green-700">-{{ formatCurrency(getCouponDiscountAmount()) }}</span>
+                      <button
+                        (click)="removeCoupon()"
+                        class="p-0.5 rounded text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
+                        title="Eliminar cupón"
+                      >
+                        <app-icon name="x" [size]="10"></app-icon>
+                      </button>
+                    </div>
+                  </div>
+                </ng-container>
+                <ng-template #couponInput>
+                  <div class="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      [(ngModel)]="couponCode"
+                      placeholder="Código de cupón"
+                      class="flex-1 px-2 py-1.5 text-xs rounded-md border border-border bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 uppercase"
+                      (keydown.enter)="applyCoupon()"
+                    />
+                    <button
+                      (click)="applyCoupon()"
+                      [disabled]="!couponCode.trim() || couponLoading"
+                      class="px-3 py-1.5 text-xs font-semibold rounded-md bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {{ couponLoading ? '...' : 'Aplicar' }}
+                    </button>
+                  </div>
+                </ng-template>
+              </div>
+            }
+
             <div
               class="pt-2 border-t border-border/50 flex justify-between items-center"
             >
@@ -78,35 +156,49 @@ import { PosScaleService } from '../services/pos-scale.service';
 
           <!-- Checkout Actions -->
           <div class="cart-actions">
-            <div class="cart-actions-row">
+            @if (isQuotationMode) {
+              <!-- Quotation mode: only quote button, styled as primary -->
               <button
                 type="button"
-                class="cart-btn save-btn"
-                (click)="saveCart()"
+                class="cart-btn checkout-btn"
+                (click)="quote.emit()"
                 [disabled]="(isEmpty$ | async) ?? false"
               >
-                <app-icon name="save" [size]="16"></app-icon>
-                <span>Guardar</span>
+                <app-icon name="file-text" [size]="18"></app-icon>
+                <span>Crear Cotización</span>
               </button>
+            } @else {
+              <!-- Normal POS buttons -->
+              <div class="cart-actions-row">
+                <button
+                  type="button"
+                  class="cart-btn save-btn"
+                  (click)="saveCart()"
+                  [disabled]="(isEmpty$ | async) ?? false"
+                >
+                  <app-icon name="save" [size]="16"></app-icon>
+                  <span>Guardar</span>
+                </button>
+                <button
+                  type="button"
+                  class="cart-btn shipping-btn"
+                  (click)="shipping.emit()"
+                  [disabled]="(isEmpty$ | async) ?? false"
+                >
+                  <app-icon name="truck" [size]="16"></app-icon>
+                  <span>Envío</span>
+                </button>
+              </div>
               <button
                 type="button"
-                class="cart-btn shipping-btn"
-                (click)="shipping.emit()"
+                class="cart-btn checkout-btn"
+                (click)="proceedToPayment()"
                 [disabled]="(isEmpty$ | async) ?? false"
               >
-                <app-icon name="truck" [size]="16"></app-icon>
-                <span>Envío</span>
+                <app-icon [name]="isEditMode ? 'check' : 'credit-card'" [size]="18"></app-icon>
+                <span>{{ isEditMode ? 'Actualizar Orden' : 'Cobrar' }}</span>
               </button>
-            </div>
-            <button
-              type="button"
-              class="cart-btn checkout-btn"
-              (click)="proceedToPayment()"
-              [disabled]="(isEmpty$ | async) ?? false"
-            >
-              <app-icon [name]="isEditMode ? 'check' : 'credit-card'" [size]="18"></app-icon>
-              <span>{{ isEditMode ? 'Actualizar Orden' : 'Cobrar' }}</span>
-            </button>
+            }
           </div>
         </div>
 
@@ -337,7 +429,8 @@ import { PosScaleService } from '../services/pos-scale.service';
       .shipping-btn:hover:not(:disabled) {
         opacity: 1;
       }
-    `,
+
+`,
   ],
 })
 export class PosCartComponent implements OnInit, OnDestroy {
@@ -347,10 +440,16 @@ export class PosCartComponent implements OnInit, OnDestroy {
   isEmpty$: Observable<boolean>;
   summary$: Observable<any>;
 
+  activePromotions: any[] = [];
+  couponCode = '';
+  couponLoading = false;
+
   @Input() isEditMode = false;
+  @Input() isQuotationMode = false;
   @Output() saveDraft = new EventEmitter<void>();
   @Output() shipping = new EventEmitter<void>();
   @Output() checkout = new EventEmitter<void>();
+  @Output() quote = new EventEmitter<void>();
 
   constructor(
     private cartService: PosCartService,
@@ -358,6 +457,7 @@ export class PosCartComponent implements OnInit, OnDestroy {
     private dialogService: DialogService,
     private currencyService: CurrencyFormatService,
     private scaleService: PosScaleService,
+    private posApiService: PosApiService,
   ) {
     this.cartState$ = this.cartService.cartState;
     this.isEmpty$ = this.cartService.isEmpty;
@@ -365,7 +465,34 @@ export class PosCartComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    // Component initialization logic if needed
+    // Load active promotions
+    this.posApiService.getActivePromotions()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response) => {
+          this.activePromotions = response?.data || response || [];
+        },
+        error: () => {
+          // Silently fail - promotions are not critical
+          this.activePromotions = [];
+        },
+      });
+
+    // Re-apply promotions when cart items change (use item count to avoid infinite loops)
+    this.cartState$
+      .pipe(
+        map(state => JSON.stringify(state.items.map(i => ({ id: i.product.id, qty: i.quantity, vid: i.variant_id })))),
+        distinctUntilChanged(),
+        skip(1), // Skip initial emission
+        takeUntil(this.destroy$),
+      )
+      .subscribe(() => {
+        if (this.activePromotions.length > 0) {
+          this.cartService.applyPromotions(this.activePromotions)
+            .pipe(takeUntil(this.destroy$))
+            .subscribe();
+        }
+      });
   }
 
   ngOnDestroy(): void {
@@ -501,6 +628,88 @@ export class PosCartComponent implements OnInit, OnDestroy {
           this.toastService.error(error.message || 'Error al actualizar peso');
         },
       });
+  }
+
+  getPromotionDiscounts(): CartDiscount[] {
+    return this.cartService.getCurrentState().appliedDiscounts.filter(d => d.promotion_id);
+  }
+
+  removePromoDiscount(discountId: string): void {
+    this.cartService
+      .removeDiscount(discountId)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Promoción eliminada');
+        },
+        error: (error) => {
+          this.toastService.error(error.message || 'Error al eliminar promoción');
+        },
+      });
+  }
+
+  applyCoupon(): void {
+    const code = this.couponCode?.trim().toUpperCase();
+    if (!code) return;
+
+    const currentState = this.cartService.getCurrentState();
+    const subtotal = currentState.summary.subtotal + currentState.summary.taxAmount;
+    const customerId = currentState.customer?.id;
+    const productIds = currentState.items.map(item => parseInt(item.product.id));
+
+    this.couponLoading = true;
+    this.posApiService.validateCoupon(code, subtotal, customerId, productIds)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response) => {
+          const validation = response?.data || response;
+          if (validation?.valid) {
+            this.cartService.applyCouponDiscount(validation)
+              .pipe(takeUntil(this.destroy$))
+              .subscribe({
+                next: () => {
+                  this.toastService.success(`Cupón "${code}" aplicado`);
+                  this.couponCode = '';
+                  this.couponLoading = false;
+                },
+                error: (error) => {
+                  this.toastService.error(error.message || 'Error al aplicar cupón');
+                  this.couponLoading = false;
+                },
+              });
+          } else {
+            this.toastService.error(validation?.message || 'Cupón no válido');
+            this.couponLoading = false;
+          }
+        },
+        error: (error) => {
+          this.toastService.error(error?.error?.message || 'Cupón no válido o expirado');
+          this.couponLoading = false;
+        },
+      });
+  }
+
+  removeCoupon(): void {
+    this.cartService.removeCoupon()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Cupón eliminado');
+        },
+        error: (error) => {
+          this.toastService.error(error.message || 'Error al eliminar cupón');
+        },
+      });
+  }
+
+  getAppliedCoupon(): { coupon_id: number; coupon_code: string } | null {
+    return this.cartService.getAppliedCoupon();
+  }
+
+  getCouponDiscountAmount(): number {
+    const state = this.cartService.getCurrentState();
+    const couponDiscount = state.appliedDiscounts.find(d => d.coupon_id);
+    return couponDiscount?.amount || 0;
   }
 
   formatCurrency(amount: number): string {

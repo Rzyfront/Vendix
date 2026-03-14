@@ -6,10 +6,14 @@ import { seedSystemPaymentMethods } from './seeds/system-payment-methods.seed';
 import { seedLegalDocuments } from './seeds/legal-documents.seed';
 import { seedUsers } from './seeds/users.seed';
 import { seedProductsAndCategories } from './seeds/products-categories.seed';
+import { seedDefaultPucForAllOrgs } from './seeds/default-puc.seed';
+import { seedDefaultAccountMappings } from './seeds/default-account-mappings.seed';
 import { seedDomains } from './seeds/domains.seed';
 import { seedAddresses } from './seeds/addresses.seed';
 import { seedInventoryLocations } from './seeds/inventory-locations.seed';
 import { seedTestOrders } from './seeds/test-orders.seed';
+import { seedHelpArticles } from './seeds/help-articles.seed';
+import { seedDefaultPayrollRules } from './seeds/default-payroll-rules.seed';
 
 /**
  * Seed modules registry
@@ -70,6 +74,16 @@ const seedModules = [
     description: 'Product catalog with categories and variants',
   },
   {
+    name: 'Default PUC Chart of Accounts',
+    fn: seedDefaultPucForAllOrgs,
+    description: 'Colombian PUC chart of accounts for all organizations',
+  },
+  {
+    name: 'Default Account Mappings',
+    fn: seedDefaultAccountMappings,
+    description: 'Default PUC account mappings for organizations',
+  },
+  {
     name: 'Domains',
     fn: seedDomains,
     description: 'Domain settings for organizations and stores',
@@ -88,6 +102,16 @@ const seedModules = [
     name: 'Test Orders',
     fn: seedTestOrders,
     description: 'Test orders and product reviews',
+  },
+  {
+    name: 'Help Articles',
+    fn: seedHelpArticles,
+    description: 'Help center articles and categories',
+  },
+  {
+    name: 'Default Payroll Rules',
+    fn: seedDefaultPayrollRules,
+    description: 'Colombian payroll rules defaults',
   },
 ];
 
@@ -113,10 +137,15 @@ async function main() {
     console.log(`▶️  [${module.name}] ${module.description}`);
     try {
       const result = await module.fn(prisma);
-      results.push({ name: module.name, description: module.description, result });
+      results.push({
+        name: module.name,
+        description: module.description,
+        result,
+      });
       console.log(`✅ Completed: ${module.name}\n`);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       results.push({
         name: module.name,
         description: module.description,
@@ -179,7 +208,11 @@ export * from './seeds/organizations-stores.seed';
 export * from './seeds/legal-documents.seed';
 export * from './seeds/users.seed';
 export * from './seeds/products-categories.seed';
+export * from './seeds/default-puc.seed';
+export * from './seeds/default-account-mappings.seed';
 export * from './seeds/domains.seed';
 export * from './seeds/addresses.seed';
 export * from './seeds/inventory-locations.seed';
 export * from './seeds/test-orders.seed';
+export * from './seeds/help-articles.seed';
+export * from './seeds/default-payroll-rules.seed';

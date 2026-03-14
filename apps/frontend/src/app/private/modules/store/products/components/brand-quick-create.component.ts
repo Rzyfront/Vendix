@@ -30,14 +30,14 @@ import { Brand } from '../interfaces';
   template: `
     <app-modal
       [size]="'md'"
-      [title]="'Create New Brand'"
+      [title]="'Crear Nueva Marca'"
       [isOpen]="isOpen"
       (closed)="onCancel()"
     >
       <form [formGroup]="brandForm" class="space-y-4">
         <app-input
-          label="Brand Name"
-          placeholder="Enter brand name"
+          label="Nombre de Marca"
+          placeholder="Ingresa el nombre de la marca"
           formControlName="name"
           [error]="getErrorMessage('name')"
           [required]="true"
@@ -45,8 +45,8 @@ import { Brand } from '../interfaces';
         </app-input>
 
         <app-textarea
-          label="Description"
-          placeholder="Enter brand description (optional)"
+          label="Descripción"
+          placeholder="Ingresa una descripción (opcional)"
           formControlName="description"
           [rows]="3"
           [control]="brandForm.get('description')"
@@ -62,7 +62,7 @@ import { Brand } from '../interfaces';
           (clicked)="onCancel()"
           [disabled]="isSubmitting"
         >
-          Cancel
+          Cancelar
         </app-button>
         <app-button
           variant="primary"
@@ -70,7 +70,7 @@ import { Brand } from '../interfaces';
           [loading]="isSubmitting"
           [disabled]="brandForm.invalid"
         >
-          Create Brand
+          Crear Marca
         </app-button>
       </div>
     </app-modal>
@@ -91,7 +91,14 @@ export class BrandQuickCreateComponent {
     private toastService: ToastService,
   ) {
     this.brandForm = this.fb.group({
-      name: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(100)]],
+      name: [
+        '',
+        [
+          Validators.required,
+          Validators.minLength(2),
+          Validators.maxLength(100),
+        ],
+      ],
       description: [''],
     });
   }
@@ -110,7 +117,7 @@ export class BrandQuickCreateComponent {
 
     this.brandsService.createBrand(brandData).subscribe({
       next: (brand) => {
-        this.toastService.success('Brand created successfully');
+        this.toastService.success('Marca creada exitosamente');
         this.created.emit(brand);
         this.isSubmitting = false;
         this.brandForm.reset();
@@ -118,7 +125,7 @@ export class BrandQuickCreateComponent {
       },
       error: (error) => {
         console.error('Error creating brand:', error);
-        this.toastService.error('Failed to create brand');
+        this.toastService.error('Error al crear la marca');
         this.isSubmitting = false;
       },
     });
@@ -129,9 +136,9 @@ export class BrandQuickCreateComponent {
     if (!field || !field.errors || !field.touched) {
       return '';
     }
-    if (field.errors['required']) return 'This field is required';
-    if (field.errors['minlength']) return 'Minimum 2 characters required';
-    if (field.errors['maxlength']) return 'Maximum 100 characters allowed';
-    return 'Invalid input';
+    if (field.errors['required']) return 'Este campo es obligatorio';
+    if (field.errors['minlength']) return 'Mínimo 2 caracteres requeridos';
+    if (field.errors['maxlength']) return 'Máximo 100 caracteres permitidos';
+    return 'Entrada inválida';
   }
 }

@@ -157,6 +157,22 @@ export class CreatePosPaymentDto {
   @Type(() => Number)
   discount_amount?: number = 0;
 
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Type(() => Number)
+  promotion_ids?: number[];
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  coupon_id?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  coupon_code?: string;
+
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   @Type(() => Number)
