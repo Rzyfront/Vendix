@@ -284,6 +284,8 @@ export class PosPaymentService {
       seller_user_id: user_id,
       internal_notes: cartState.notes || '',
       update_inventory: true,
+      coupon_id: cartState.appliedCoupon?.id,
+      coupon_code: cartState.appliedCoupon?.code,
     };
 
     // For anonymous sales, use "Consumidor Final" as customer name
@@ -411,6 +413,8 @@ export class PosPaymentService {
       seller_user_id: user_id,
       internal_notes: shippingData.deliveryNotes || cartState.notes || '',
       update_inventory: true,
+      coupon_id: cartState.appliedCoupon?.id,
+      coupon_code: cartState.appliedCoupon?.code,
     };
 
     if (paymentRequest) {
@@ -516,6 +520,8 @@ export class PosPaymentService {
       seller_user_id: user_id,
       internal_notes: cartState.notes || '',
       update_inventory: true,
+      coupon_id: cartState.appliedCoupon?.id,
+      coupon_code: cartState.appliedCoupon?.code,
     };
 
     return this.http.post<any>(this.apiUrl, credit_data).pipe(

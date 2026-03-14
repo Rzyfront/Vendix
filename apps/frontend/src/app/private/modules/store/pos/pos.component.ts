@@ -45,6 +45,7 @@ import { PosMobileFooterComponent } from './components/pos-mobile-footer.compone
 import { PosCartModalComponent } from './components/pos-cart-modal.component';
 import { PosShippingModalComponent } from './components/pos-shipping-modal/pos-shipping-modal.component';
 import { StoreSettingsService } from '../settings/general/services/store-settings.service';
+import { QuotationsService } from '../quotations/services/quotations.service';
 
 @Component({
   selector: 'app-pos',
@@ -68,11 +69,13 @@ import { StoreSettingsService } from '../settings/general/services/store-setting
     PosShippingModalComponent,
   ],
   template: `
-    <div class="h-full flex flex-col gap-3 lg:gap-4 p-3 lg:p-4 overflow-hidden pos-container">
-      <!-- POS Stats (hidden on mobile) -->
-      <div class="flex-none hidden lg:block">
-        <app-pos-stats [cartState]="cartState"></app-pos-stats>
-      </div>
+    <div class="h-full flex flex-col gap-4 lg:gap-6 overflow-hidden pos-container">
+      <!-- POS Stats (hidden on mobile and in quotation mode) -->
+      @if (!isQuotationMode()) {
+        <div class="flex-none hidden lg:block">
+          <app-pos-stats [cartState]="cartState"></app-pos-stats>
+        </div>
+      }
 
       <!-- Main POS Interface -->
       <div
@@ -98,7 +101,12 @@ import { StoreSettingsService } from '../settings/general/services/store-setting
                 <h1
                   class="font-bold text-text-primary text-base lg:text-lg leading-none flex items-center gap-2"
                 >
-                  @if (isEditMode()) {
+                  @if (isQuotationMode()) {
+                    <span>Modo Cotización</span>
+                    <app-badge variant="primary" class="hidden sm:inline-flex"
+                      >Cotización</app-badge
+                    >
+                  } @else if (isEditMode()) {
                     <span>Editando Orden #{{ editingOrderNumber() }}</span>
                     <app-badge variant="warning" class="hidden sm:inline-flex"
                       >Edición</app-badge
@@ -114,9 +122,11 @@ import { StoreSettingsService } from '../settings/general/services/store-setting
                   class="text-[10px] lg:text-xs text-text-secondary font-medium hidden sm:inline"
                 >
                   {{
-                    isEditMode()
-                      ? 'Modificar items de la orden'
-                      : 'Punto de venta'
+                    isQuotationMode()
+                      ? 'Crear cotización'
+                      : isEditMode()
+                        ? 'Modificar items de la orden'
+                        : 'Punto de venta'
                   }}
                 </span>
               </div>
@@ -287,9 +297,11 @@ import { StoreSettingsService } from '../settings/general/services/store-setting
               <app-pos-cart
                 class="h-full block"
                 [isEditMode]="isEditMode()"
+                [isQuotationMode]="isQuotationMode()"
                 (saveDraft)="onSaveDraft()"
                 (shipping)="onShipping()"
                 (checkout)="onCheckout()"
+                (quote)="onQuote()"
               ></app-pos-cart>
             </div>
           </div>
@@ -311,10 +323,12 @@ import { StoreSettingsService } from '../settings/general/services/store-setting
         [cartSummary]="cartSummary"
         [itemCount]="cartItems.length"
         [isTablet]="isTablet()"
+        [isQuotationMode]="isQuotationMode()"
         (viewCart)="onOpenCartModal()"
         (saveDraft)="onSaveDraft()"
         (shipping)="onShipping()"
         (checkout)="onCheckout()"
+        (quote)="onQuote()"
       ></app-pos-mobile-footer>
 
       <!-- Mobile Cart Modal -->
@@ -451,6 +465,10 @@ export class PosComponent implements OnInit, OnDestroy {
   editingOrderId = signal<string | null>(null);
   editingOrderNumber = signal<string | null>(null);
 
+  // Quotation mode
+  isQuotationMode = signal(false);
+  editingQuotationId = signal<string | null>(null);
+
   // Mobile detection signal
   isMobile = signal(false);
 
@@ -489,6 +507,7 @@ export class PosComponent implements OnInit, OnDestroy {
     private posOrderService: PosOrderService,
     private ordersService: StoreOrdersService,
     private settingsService: StoreSettingsService,
+    private quotationsService: QuotationsService,
   ) {}
 
   @HostListener('window:resize')
@@ -508,6 +527,7 @@ export class PosComponent implements OnInit, OnDestroy {
     this.setupSubscriptions();
     this.loadStoreSettings();
     this.checkEditMode();
+    this.checkQuotationMode();
     this.validateScheduleOnInit();
   }
 
@@ -712,6 +732,69 @@ export class PosComponent implements OnInit, OnDestroy {
         error: (error: any) => {
           this.loading = false;
           this.toastService.error(error.message || 'Error al guardar borrador');
+        },
+      });
+  }
+
+  onQuote(): void {
+    if (!this.selectedCustomer) {
+      this.toastService.warning('Debes asignar un cliente para crear una cotización');
+      this.onOpenCustomerModal();
+      return;
+    }
+
+    if (!this.cartState || this.isEmpty) {
+      this.toastService.warning('El carrito está vacío');
+      return;
+    }
+
+    this.loading = true;
+    const items = this.cartState.items.map((item) => ({
+      product_id: typeof item.product.id === 'string' ? parseInt(item.product.id, 10) : item.product.id,
+      product_name: item.product.name,
+      quantity: item.quantity,
+      unit_price: item.unitPrice,
+      discount_amount: 0,
+      tax_amount_item: item.taxAmount || 0,
+      total_price: item.totalPrice,
+    }));
+
+    const dto = {
+      customer_id: this.selectedCustomer
+        ? this.selectedCustomer.id
+        : undefined,
+      channel: 'pos' as const,
+      items,
+      notes: '',
+    };
+
+    const editId = this.editingQuotationId();
+    const obs$ = editId
+      ? this.quotationsService.updateQuotation(Number(editId), dto as any)
+      : this.quotationsService.createQuotation(dto as any);
+
+    obs$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (res: any) => {
+          this.loading = false;
+          const qNumber =
+            res?.data?.quotation_number || res?.quotation_number || '';
+          this.toastService.success(
+            editId
+              ? `Cotización ${qNumber} actualizada correctamente`
+              : `Cotización ${qNumber} creada correctamente`,
+          );
+          this.onClearCart();
+          if (this.isQuotationMode()) {
+            this.router.navigate(['/admin/orders/quotations']);
+          }
+        },
+        error: (err: any) => {
+          this.loading = false;
+          this.toastService.error(
+            err?.error?.message || 'Error al crear cotización',
+          );
         },
       });
   }
@@ -974,6 +1057,88 @@ export class PosComponent implements OnInit, OnDestroy {
         if (editOrderId) {
           this.loadOrderForEditing(editOrderId.toString());
         }
+      });
+  }
+
+  private checkQuotationMode(): void {
+    this.route.queryParams
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((params) => {
+        const mode = params['mode'];
+        const editQuotationId = params['editQuotation'];
+
+        if (mode === 'quotation') {
+          this.isQuotationMode.set(true);
+
+          if (editQuotationId) {
+            this.loadQuotationForEditing(editQuotationId);
+          }
+        } else {
+          this.isQuotationMode.set(false);
+          this.editingQuotationId.set(null);
+        }
+      });
+  }
+
+  private loadQuotationForEditing(quotationId: string): void {
+    this.loading = true;
+    this.quotationsService.getQuotationById(Number(quotationId))
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response: any) => {
+          const quotation = response?.data || response;
+          const items = (quotation.quotation_items || []).map((item: any) => ({
+            product: {
+              id: item.product_id?.toString() || item.product?.id?.toString(),
+              name: item.product_name || item.product?.name,
+              price: item.unit_price,
+              image_url: item.product?.image_url || '',
+              stock: 999,
+              track_inventory: false,
+              tax_assignments: item.product?.tax_assignments || [],
+            },
+            quantity: item.quantity,
+            unitPrice: item.unit_price,
+            totalPrice: item.total_price,
+            taxAmount: item.tax_amount_item || 0,
+          }));
+
+          // Load items into cart
+          this.cartService.clearCart().pipe(takeUntil(this.destroy$)).subscribe(() => {
+            items.forEach((item: any) => {
+              this.cartService.addToCart({
+                product: item.product,
+                quantity: item.quantity,
+              }).pipe(takeUntil(this.destroy$)).subscribe();
+            });
+          });
+
+          // Set customer if available
+          if (quotation.customer) {
+            const customer: PosCustomer = {
+              id: quotation.customer.id,
+              first_name: quotation.customer.first_name,
+              last_name: quotation.customer.last_name,
+              name: `${quotation.customer.first_name} ${quotation.customer.last_name}`,
+              email: quotation.customer.email || '',
+              phone: quotation.customer.phone || '',
+              document_number: quotation.customer.document_number || '',
+              created_at: quotation.customer.created_at || new Date(),
+              updated_at: quotation.customer.updated_at || new Date(),
+            };
+            this.customerService.selectCustomer(customer);
+            this.cartService.setCustomer(customer).pipe(takeUntil(this.destroy$)).subscribe();
+          }
+
+          this.editingQuotationId.set(quotationId);
+          this.loading = false;
+          this.toastService.info(`Editando Cotización #${quotation.quotation_number}`);
+        },
+        error: () => {
+          this.loading = false;
+          this.toastService.error('Error al cargar cotización');
+          this.router.navigate(['/admin/orders/quotations']);
+        },
       });
   }
 

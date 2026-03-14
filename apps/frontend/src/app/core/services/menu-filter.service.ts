@@ -29,7 +29,8 @@ export class MenuFilterService {
     // ORG_ADMIN mappings (módulos principales)
     'Panel Principal': 'dashboard',
     Tiendas: 'stores',
-    Usuarios: 'users',
+    Usuarios: ['users', 'settings_users'],
+    Roles: 'settings_roles',
     'Auditoría y Cumplimiento': 'audit',
 
     // STORE_ADMIN - Módulos principales (sin hijos)
@@ -41,6 +42,7 @@ export class MenuFilterService {
     Órdenes: 'orders',
     'Ordenes de Venta': 'orders_sales',
     'Ordenes de Compra': 'orders_purchase_orders',
+    Cotizaciones: 'orders_quotations',
 
     // STORE_ADMIN - Inventario (padre + submódulos)
     Inventario: 'inventory',

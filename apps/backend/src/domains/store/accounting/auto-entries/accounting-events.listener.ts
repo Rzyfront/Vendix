@@ -46,6 +46,8 @@ export class AccountingEventsListener {
     order_id: number;
     order_number: string;
     amount: number;
+    subtotal_amount?: number;
+    tax_amount?: number;
     currency: string;
     payment_method: string;
     user_id?: number;
@@ -55,7 +57,12 @@ export class AccountingEventsListener {
         payment_id: event.payment_id,
         organization_id: event.organization_id,
         store_id: event.store_id,
+        order_id: event.order_id,
+        order_number: event.order_number,
+        payment_method: event.payment_method,
         amount: Number(event.amount),
+        subtotal_amount: event.subtotal_amount != null ? Number(event.subtotal_amount) : undefined,
+        tax_amount: event.tax_amount != null ? Number(event.tax_amount) : undefined,
         user_id: event.user_id,
       });
       this.logger.log(`Auto-entry created for payment.received #${event.payment_id}`);
@@ -67,13 +74,43 @@ export class AccountingEventsListener {
     }
   }
 
+  @OnEvent('credit_sale.created')
+  async handleCreditSaleCreated(event: {
+    order_id: number;
+    organization_id: number;
+    store_id?: number;
+    order_number?: string;
+    subtotal_amount: number;
+    tax_amount: number;
+    total_amount: number;
+    user_id?: number;
+  }) {
+    try {
+      await this.auto_entry_service.onCreditSaleCreated({
+        order_id: event.order_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        order_number: event.order_number,
+        subtotal_amount: Number(event.subtotal_amount),
+        tax_amount: Number(event.tax_amount),
+        total_amount: Number(event.total_amount),
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for credit_sale.created order #${event.order_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for credit_sale.created order #${event.order_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   @OnEvent('expense.approved')
   async handleExpenseApproved(event: {
     expense_id: number;
     organization_id: number;
     store_id?: number;
     amount: number;
-    expense_account_code?: string;
     user_id?: number;
   }) {
     try {
@@ -82,7 +119,6 @@ export class AccountingEventsListener {
         organization_id: event.organization_id,
         store_id: event.store_id,
         amount: Number(event.amount),
-        expense_account_code: event.expense_account_code,
         user_id: event.user_id,
       });
       this.logger.log(`Auto-entry created for expense.approved #${event.expense_id}`);
@@ -175,6 +211,113 @@ export class AccountingEventsListener {
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for payroll.paid #${event.payroll_run_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  @OnEvent('order.completed')
+  async handleOrderCompleted(event: {
+    order_id: number;
+    order_number: string;
+    organization_id: number;
+    store_id?: number;
+    total_cost: number;
+    user_id?: number;
+  }) {
+    try {
+      await this.auto_entry_service.onOrderCompleted({
+        order_id: event.order_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        total_cost: Number(event.total_cost),
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for order.completed #${event.order_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for order.completed #${event.order_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  @OnEvent('refund.completed')
+  async handleRefundCompleted(event: {
+    refund_id: number;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    tax_amount?: number;
+    return_type?: string;
+    user_id?: number;
+  }) {
+    try {
+      await this.auto_entry_service.onRefundCompleted({
+        refund_id: event.refund_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        tax_amount: event.tax_amount != null ? Number(event.tax_amount) : undefined,
+        return_type: event.return_type,
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for refund.completed #${event.refund_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for refund.completed #${event.refund_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  @OnEvent('purchase_order.received')
+  async handlePurchaseOrderReceived(event: {
+    purchase_order_id: number;
+    organization_id: number;
+    store_id?: number;
+    total_amount: number;
+    user_id?: number;
+  }) {
+    try {
+      await this.auto_entry_service.onPurchaseOrderReceived({
+        purchase_order_id: event.purchase_order_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        total_amount: Number(event.total_amount),
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for purchase_order.received #${event.purchase_order_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for purchase_order.received #${event.purchase_order_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  @OnEvent('inventory.adjusted')
+  async handleInventoryAdjusted(event: {
+    adjustment_id: number;
+    organization_id: number;
+    store_id?: number;
+    cost_amount: number;
+    quantity_change: number;
+    user_id?: number;
+  }) {
+    try {
+      await this.auto_entry_service.onInventoryAdjusted({
+        adjustment_id: event.adjustment_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        cost_amount: Number(event.cost_amount),
+        quantity_change: Number(event.quantity_change),
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for inventory.adjusted #${event.adjustment_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for inventory.adjusted #${event.adjustment_id}: ${error.message}`,
         error.stack,
       );
     }

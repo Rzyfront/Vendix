@@ -25,6 +25,7 @@ import {
   SelectorOption,
   TextareaComponent,
   IconComponent,
+  StepsLineComponent,
 } from '../../../../../../shared/components/index';
 
 // Services
@@ -37,6 +38,8 @@ import {
   StockLevel,
   InventoryBatch,
 } from '../../interfaces';
+
+import { StepsLineItem } from '../../../../../../shared/components';
 
 interface LocationStockOption {
   location_id: number;
@@ -60,6 +63,7 @@ interface LocationStockOption {
     SelectorComponent,
     TextareaComponent,
     IconComponent,
+    StepsLineComponent,
   ],
   template: `
     <app-modal
@@ -74,60 +78,14 @@ interface LocationStockOption {
       subtitle="Registra un ajuste de inventario"
     >
       <!-- Step Indicator -->
-      <div class="flex items-center justify-center mb-6 px-2">
-        <!-- Step 1 -->
-        <div class="flex flex-col items-center gap-1.5 relative z-10">
-          <div
-            class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300"
-            [class]="
-              currentStep === 1
-                ? 'bg-primary text-white ring-2 ring-primary/20 shadow-lg'
-                : 'bg-success text-white ring-2 ring-success/20 shadow-md'
-            "
-          >
-            @if (currentStep > 1) {
-              <app-icon name="check" [size]="14" class="text-white"></app-icon>
-            } @else {
-              1
-            }
-          </div>
-          <span
-            class="text-[10px] font-bold uppercase tracking-wider transition-colors duration-300"
-            [class]="currentStep >= 1 ? 'text-primary' : 'text-text-muted'"
-          >
-            Seleccionar
-          </span>
-        </div>
-
-        <!-- Connection Line -->
-        <div class="w-16 h-0.5 mx-1 relative top-3">
-          <div class="absolute inset-0 bg-gray-200 rounded-full"></div>
-          <div
-            class="absolute inset-0 bg-success rounded-full transition-all duration-500 ease-out"
-            [style.width]="currentStep > 1 ? '100%' : '0%'"
-          ></div>
-        </div>
-
-        <!-- Step 2 -->
-        <div class="flex flex-col items-center gap-1.5 relative z-10">
-          <div
-            class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 border-2"
-            [class]="
-              currentStep === 2
-                ? 'bg-primary border-primary text-white ring-2 ring-primary/20 shadow-lg'
-                : 'bg-white border-gray-300 text-gray-400'
-            "
-          >
-            2
-          </div>
-          <span
-            class="text-[10px] font-bold uppercase tracking-wider transition-colors duration-300"
-            [class]="currentStep === 2 ? 'text-primary' : 'text-text-muted'"
-          >
-            Registrar
-          </span>
-        </div>
-      </div>
+      <app-steps-line
+        [steps]="steps"
+        [currentStep]="currentStep - 1"
+        size="md"
+        primaryColor="var(--color-primary)"
+        secondaryColor="var(--color-secondary)"
+        class="mb-6 block"
+      ></app-steps-line>
 
       <!-- STEP 1: Location & Batch Selection -->
       @if (currentStep === 1) {
@@ -595,16 +553,15 @@ interface LocationStockOption {
               variant="outline"
               type="button"
               (clicked)="goToStep(1)"
-              customClasses="!rounded-xl flex items-center"
+              customClasses="!rounded-xl"
             >
-              <span class="flex items-center">
-                <app-icon
-                  name="arrow-left"
-                  [size]="14"
-                  class="mr-1.5"
-                ></app-icon>
-                Atras
-              </span>
+              <app-icon
+                name="arrow-left"
+                [size]="14"
+                class="mr-1.5"
+                slot="icon"
+              ></app-icon>
+              Atras
             </app-button>
           }
         </div>
@@ -623,16 +580,15 @@ interface LocationStockOption {
               type="button"
               (clicked)="goToStep(2)"
               [disabled]="!selectedLocation"
-              customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 flex items-center"
+              customClasses="!rounded-xl font-bold shadow-md shadow-primary-200"
             >
-              <span class="flex items-center">
-                Continuar
-                <app-icon
-                  name="arrow-right"
-                  [size]="14"
-                  class="ml-1.5"
-                ></app-icon>
-              </span>
+              Continuar
+              <app-icon
+                name="arrow-right"
+                [size]="14"
+                class="ml-1.5"
+                slot="icon"
+              ></app-icon>
             </app-button>
           } @else {
             <app-button
@@ -641,16 +597,15 @@ interface LocationStockOption {
               (clicked)="onSubmit()"
               [loading]="isSubmitting"
               [disabled]="form.invalid || isSubmitting || !selected_type"
-              customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all flex items-center"
+              customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all"
             >
-              <span class="flex items-center">
-                Crear Ajuste
-                <app-icon
-                  name="check-circle"
-                  [size]="14"
-                  class="ml-1.5"
-                ></app-icon>
-              </span>
+              Crear Ajuste
+              <app-icon
+                name="check-circle"
+                [size]="14"
+                class="ml-1.5"
+                slot="icon"
+              ></app-icon>
             </app-button>
           }
         </div>
@@ -669,6 +624,10 @@ export class AdjustmentCreateModalComponent implements OnInit, OnChanges {
 
   // Step management
   currentStep = 1;
+  steps: StepsLineItem[] = [
+    { label: 'SELECCIONAR', completed: false },
+    { label: 'REGISTRAR', completed: false },
+  ];
 
   // Step 1: Location & Batch selection
   locationStockOptions: LocationStockOption[] = [];
@@ -759,6 +718,10 @@ export class AdjustmentCreateModalComponent implements OnInit, OnChanges {
 
   private resetModal(): void {
     this.currentStep = 1;
+    this.steps = [
+      { label: 'SELECCIONAR', completed: false },
+      { label: 'REGISTRAR', completed: false },
+    ];
     this.locationStockOptions = [];
     this.batchOptions = [];
     this.selectedLocation = null;
@@ -857,6 +820,12 @@ export class AdjustmentCreateModalComponent implements OnInit, OnChanges {
       return;
     }
     this.currentStep = step;
+
+    // Update steps completion state
+    this.steps = this.steps.map((s, i) => ({
+      ...s,
+      completed: i < step - 1,
+    }));
   }
 
   selectType(type: AdjustmentType): void {

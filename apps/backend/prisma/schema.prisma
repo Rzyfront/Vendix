@@ -70,6 +70,16 @@ model users {
   support_notifications      support_notifications[]    @relation("notification_user")
   help_articles_authored      help_articles[]            @relation("help_article_author")
 
+  // Quotation relations
+  quotations_as_customer    quotations[]          @relation("quotations_customer")
+  quotations_created        quotations[]          @relation("quotations_created_by")
+
+  // Coupons
+  coupon_uses               coupon_uses[]
+
+  // Promotions
+  order_promotions_customer order_promotions[] @relation("order_promotions_customer")
+
   // Invoicing, Accounting & Payroll relations
   invoices_created         invoices[]            @relation("invoices_created_by")
   invoices_as_customer     invoices[]            @relation("invoices_customer")
@@ -303,6 +313,7 @@ model organizations {
   employees                     employees[]
   payroll_runs                  payroll_runs[]
   dian_configurations           dian_configurations[]
+  accounting_account_mappings   accounting_account_mappings[]
 
   @@index([onboarding])
   @@index([account_type])
@@ -388,7 +399,11 @@ model stores {
   accounting_entries         accounting_entries[]
   employees                  employees[]
   payroll_runs               payroll_runs[]
-  dian_configuration         dian_configurations?
+  dian_configuration           dian_configurations?
+  accounting_account_mappings  accounting_account_mappings[]
+  quotations                   quotations[]
+  promotions                     promotions[]
+  coupons                        coupons[]
 
   @@unique([organization_id, slug])
   @@index([onboarding])
@@ -483,7 +498,9 @@ model categories {
   image_url          String?
   state              category_state_enum  @default(active)
   stores             stores?              @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  product_categories product_categories[]
+  product_categories   product_categories[]
+  promotion_categories promotion_categories[]
+  coupon_categories    coupon_categories[]
 
   @@unique([store_id, slug])
 }
@@ -576,6 +593,8 @@ model orders {
   internal_notes                                  String?
   created_at                                      DateTime?                @default(now()) @db.Timestamp(6)
   updated_at                                      DateTime?                @default(now()) @db.Timestamp(6)
+  coupon_id                                       Int?
+  coupon_code                                     String?                  @db.VarChar(50)
   placed_at                                       DateTime?                @db.Timestamp(6)
   completed_at                                    DateTime?                @db.Timestamp(6)
   order_items                                     order_items[]
@@ -588,6 +607,10 @@ model orders {
   shipping_method                                 shipping_methods?        @relation(fields: [shipping_method_id], references: [id], onDelete: SetNull)
   shipping_rate                                   shipping_rates?          @relation(fields: [shipping_rate_id], references: [id], onDelete: SetNull)
   invoices                                        invoices[]
+  quotations                                      quotations[]
+  order_promotions                                order_promotions[]
+  coupon                                          coupons?                 @relation(fields: [coupon_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  coupon_uses                                     coupon_uses[]
 
   @@unique([store_id, order_number])
   @@index([store_id, order_number])
@@ -718,6 +741,7 @@ model product_variants {
   cart_items               cart_items[]
   wishlist_items           wishlist_items[]
   invoice_items            invoice_items[]
+  quotation_items          quotation_items[]
 
   @@unique([product_id, sku])
 }
@@ -773,6 +797,9 @@ model products {
   cart_items               cart_items[]
   wishlist_items           wishlist_items[]
   invoice_items            invoice_items[]
+  quotation_items          quotation_items[]
+  promotion_products       promotion_products[]
+  coupon_products          coupon_products[]
 
   @@unique([store_id, slug])
   @@unique([store_id, sku])
@@ -1504,6 +1531,97 @@ model default_templates {
   @@index([is_system])
 }
 
+// ===== PROMOTIONS =====
+
+model promotions {
+  id                  Int                    @id @default(autoincrement())
+  store_id            Int
+  name                String                 @db.VarChar(255)
+  description         String?
+  code                String?                @db.VarChar(50)
+  type                promotion_type_enum
+  value               Decimal                @db.Decimal(12, 2)
+  scope               promotion_scope_enum   @default(order)
+  min_purchase_amount Decimal?               @db.Decimal(12, 2)
+  max_discount_amount Decimal?               @db.Decimal(12, 2)
+  usage_limit         Int?
+  usage_count         Int                    @default(0)
+  per_customer_limit  Int?
+  start_date          DateTime               @db.Timestamp(6)
+  end_date            DateTime?              @db.Timestamp(6)
+  state               promotion_state_enum   @default(draft)
+  is_auto_apply       Boolean                @default(false)
+  priority            Int                    @default(0)
+  created_at          DateTime?              @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?              @default(now()) @db.Timestamp(6)
+
+  stores              stores                 @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  promotion_products  promotion_products[]
+  promotion_categories promotion_categories[]
+  order_promotions    order_promotions[]
+
+  @@unique([store_id, code])
+  @@index([store_id, state])
+  @@index([store_id, start_date, end_date])
+}
+
+model promotion_products {
+  id           Int        @id @default(autoincrement())
+  promotion_id Int
+  product_id   Int
+  promotions   promotions @relation(fields: [promotion_id], references: [id], onDelete: Cascade)
+  products     products   @relation(fields: [product_id], references: [id], onDelete: Cascade)
+
+  @@unique([promotion_id, product_id])
+}
+
+model promotion_categories {
+  id           Int        @id @default(autoincrement())
+  promotion_id Int
+  category_id  Int
+  promotions   promotions  @relation(fields: [promotion_id], references: [id], onDelete: Cascade)
+  categories   categories  @relation(fields: [category_id], references: [id], onDelete: Cascade)
+
+  @@unique([promotion_id, category_id])
+}
+
+model order_promotions {
+  id              Int        @id @default(autoincrement())
+  order_id        Int
+  promotion_id    Int
+  customer_id     Int?
+  discount_amount Decimal    @db.Decimal(12, 2)
+  created_at      DateTime?  @default(now()) @db.Timestamp(6)
+  orders          orders     @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  promotions      promotions @relation(fields: [promotion_id], references: [id], onDelete: Cascade)
+  customers       users?     @relation("order_promotions_customer", fields: [customer_id], references: [id], onDelete: SetNull)
+
+  @@unique([order_id, promotion_id])
+  @@index([promotion_id, customer_id])
+}
+
+// ===== PROMOTIONS =====
+
+enum promotion_state_enum {
+  draft
+  scheduled
+  active
+  paused
+  expired
+  cancelled
+}
+
+enum promotion_type_enum {
+  percentage
+  fixed_amount
+}
+
+enum promotion_scope_enum {
+  order
+  product
+  category
+}
+
 // ===== NOTIFICATIONS =====
 
 enum notification_type_enum {
@@ -1999,6 +2117,8 @@ enum accounting_entry_type_enum {
   auto_expense
   auto_payroll
   auto_inventory
+  auto_purchase
+  auto_return
   adjustment
 }
 
@@ -2535,11 +2655,30 @@ model chart_of_accounts {
   organization          organizations           @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   parent                chart_of_accounts?      @relation("chart_of_accounts_parent", fields: [parent_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   children              chart_of_accounts[]     @relation("chart_of_accounts_parent")
-  accounting_entry_lines accounting_entry_lines[]
+  accounting_entry_lines      accounting_entry_lines[]
+  accounting_account_mappings accounting_account_mappings[]
 
   @@unique([organization_id, code])
   @@index([organization_id, parent_id])
   @@index([organization_id, account_type])
+}
+
+model accounting_account_mappings {
+  id              Int       @id @default(autoincrement())
+  organization_id Int
+  store_id        Int?
+  mapping_key     String    @db.VarChar(100)
+  account_id      Int
+  is_active       Boolean   @default(true)
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+
+  organization organizations     @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store        stores?            @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  account      chart_of_accounts  @relation(fields: [account_id], references: [id], onDelete: Restrict)
+
+  @@unique([organization_id, store_id, mapping_key])
+  @@index([organization_id, store_id])
 }
 
 model fiscal_periods {
@@ -2761,4 +2900,161 @@ model dian_audit_logs {
   @@index([dian_configuration_id])
   @@index([action])
   @@index([created_at])
+}
+
+// ===== QUOTATIONS =====
+
+enum quotation_status_enum {
+  draft
+  sent
+  accepted
+  rejected
+  expired
+  converted
+  cancelled
+}
+
+model quotations {
+  id                    Int                      @id @default(autoincrement())
+  store_id              Int
+  customer_id           Int?
+  quotation_number      String                   @db.VarChar(50)
+  status                quotation_status_enum    @default(draft)
+  channel               order_channel_enum       @default(pos)
+  subtotal_amount       Decimal                  @default(0.00) @db.Decimal(12, 2)
+  discount_amount       Decimal                  @default(0.00) @db.Decimal(12, 2)
+  tax_amount            Decimal                  @default(0.00) @db.Decimal(12, 2)
+  shipping_cost         Decimal                  @default(0.00) @db.Decimal(12, 2)
+  grand_total           Decimal                  @default(0.00) @db.Decimal(12, 2)
+  valid_until           DateTime?                @db.Timestamp(6)
+  notes                 String?                  @db.Text
+  internal_notes        String?                  @db.Text
+  terms_and_conditions  String?                  @db.Text
+  sent_at               DateTime?                @db.Timestamp(6)
+  accepted_at           DateTime?                @db.Timestamp(6)
+  rejected_at           DateTime?                @db.Timestamp(6)
+  converted_at          DateTime?                @db.Timestamp(6)
+  converted_order_id    Int?
+  created_by_user_id    Int?
+  created_at            DateTime?                @default(now()) @db.Timestamp(6)
+  updated_at            DateTime?                @default(now()) @db.Timestamp(6)
+
+  quotation_items       quotation_items[]
+  store                 stores                   @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  customer              users?                   @relation("quotations_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  converted_order       orders?                  @relation(fields: [converted_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by_user       users?                   @relation("quotations_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, quotation_number])
+  @@index([store_id, quotation_number])
+  @@index([store_id, status])
+  @@index([customer_id])
+}
+
+model quotation_items {
+  id                 Int               @id @default(autoincrement())
+  quotation_id       Int
+  product_id         Int?
+  product_variant_id Int?
+  product_name       String            @db.VarChar(255)
+  variant_sku        String?           @db.VarChar(100)
+  quantity           Int
+  unit_price         Decimal           @db.Decimal(12, 2)
+  discount_amount    Decimal           @default(0.00) @db.Decimal(12, 2)
+  tax_rate           Decimal?          @db.Decimal(6, 5)
+  tax_amount_item    Decimal?          @db.Decimal(12, 2)
+  total_price        Decimal           @db.Decimal(12, 2)
+  notes              String?           @db.Text
+  created_at         DateTime?         @default(now()) @db.Timestamp(6)
+  updated_at         DateTime?         @default(now()) @db.Timestamp(6)
+
+  quotation          quotations        @relation(fields: [quotation_id], references: [id], onDelete: Cascade)
+  product            products?         @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  product_variant    product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([quotation_id])
+  @@index([product_id, quotation_id])
+}
+
+// ===== COUPONS SYSTEM =====
+
+enum coupon_discount_type {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+enum coupon_applies_to {
+  ALL_PRODUCTS
+  SPECIFIC_PRODUCTS
+  SPECIFIC_CATEGORIES
+}
+
+model coupons {
+  id                   Int                  @id @default(autoincrement())
+  store_id             Int
+  code                 String               @db.VarChar(50)
+  name                 String               @db.VarChar(255)
+  description          String?
+  discount_type        coupon_discount_type
+  discount_value       Decimal              @db.Decimal(12, 2)
+  min_purchase_amount  Decimal?             @db.Decimal(12, 2)
+  max_discount_amount  Decimal?             @db.Decimal(12, 2)
+  max_uses             Int?
+  max_uses_per_customer Int?                @default(1)
+  current_uses         Int                  @default(0)
+  valid_from           DateTime             @db.Timestamp(6)
+  valid_until          DateTime             @db.Timestamp(6)
+  is_active            Boolean              @default(true)
+  applies_to           coupon_applies_to    @default(ALL_PRODUCTS)
+  created_at           DateTime?            @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?            @default(now()) @db.Timestamp(6)
+
+  store              stores               @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  coupon_products    coupon_products[]
+  coupon_categories  coupon_categories[]
+  coupon_uses        coupon_uses[]
+  orders             orders[]
+
+  @@unique([store_id, code])
+  @@index([store_id, is_active])
+}
+
+model coupon_products {
+  id         Int      @id @default(autoincrement())
+  coupon_id  Int
+  product_id Int
+
+  coupon   coupons  @relation(fields: [coupon_id], references: [id], onDelete: Cascade)
+  product  products @relation(fields: [product_id], references: [id], onDelete: Cascade)
+
+  @@unique([coupon_id, product_id])
+  @@index([coupon_id])
+}
+
+model coupon_categories {
+  id          Int @id @default(autoincrement())
+  coupon_id   Int
+  category_id Int
+
+  coupon   coupons    @relation(fields: [coupon_id], references: [id], onDelete: Cascade)
+  category categories @relation(fields: [category_id], references: [id], onDelete: Cascade)
+
+  @@unique([coupon_id, category_id])
+  @@index([coupon_id])
+}
+
+model coupon_uses {
+  id               Int      @id @default(autoincrement())
+  coupon_id        Int
+  order_id         Int
+  customer_id      Int?
+  discount_applied Decimal  @db.Decimal(12, 2)
+  used_at          DateTime @default(now()) @db.Timestamp(6)
+
+  coupon   coupons @relation(fields: [coupon_id], references: [id], onDelete: Cascade)
+  order    orders  @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  customer users?  @relation(fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([coupon_id, customer_id])
+  @@index([order_id])
 }

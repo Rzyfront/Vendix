@@ -22,7 +22,8 @@ export type InputType =
   | 'tel'
   | 'url'
   | 'search'
-  | 'date';
+  | 'date'
+  | 'datetime-local';
 export type InputSize = 'sm' | 'md' | 'lg';
 
 @Component({

@@ -14,7 +14,6 @@ import { InvoiceCreateComponent } from './components/invoice-create/invoice-crea
 import { InvoiceDetailComponent } from './components/invoice-detail/invoice-detail.component';
 import { CreditNoteCreateComponent } from './components/credit-note-create/credit-note-create.component';
 import { ResolutionsComponent } from './components/resolutions/resolutions.component';
-import { ButtonComponent } from '../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 
@@ -29,7 +28,6 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
     InvoiceDetailComponent,
     CreditNoteCreateComponent,
     ResolutionsComponent,
-    ButtonComponent,
     IconComponent,
   ],
   template: `

@@ -30,14 +30,14 @@ import { ProductCategory } from '../interfaces';
   template: `
     <app-modal
       [size]="'md'"
-      [title]="'Create New Category'"
+      [title]="'Crear Nueva Categoría'"
       [isOpen]="isOpen"
       (closed)="onCancel()"
     >
       <form [formGroup]="categoryForm" class="space-y-4">
         <app-input
-          label="Category Name"
-          placeholder="Enter category name"
+          label="Nombre de Categoría"
+          placeholder="Ingresa el nombre de la categoría"
           formControlName="name"
           [error]="getErrorMessage('name')"
           [required]="true"
@@ -45,8 +45,8 @@ import { ProductCategory } from '../interfaces';
         </app-input>
 
         <app-textarea
-          label="Description"
-          placeholder="Enter category description (optional)"
+          label="Descripción"
+          placeholder="Ingresa una descripción (opcional)"
           formControlName="description"
           [rows]="3"
           [control]="categoryForm.get('description')"
@@ -62,7 +62,7 @@ import { ProductCategory } from '../interfaces';
           (clicked)="onCancel()"
           [disabled]="isSubmitting"
         >
-          Cancel
+          Cancelar
         </app-button>
         <app-button
           variant="primary"
@@ -70,7 +70,7 @@ import { ProductCategory } from '../interfaces';
           [loading]="isSubmitting"
           [disabled]="categoryForm.invalid"
         >
-          Create Category
+          Crear Categoría
         </app-button>
       </div>
     </app-modal>
@@ -119,7 +119,7 @@ export class CategoryQuickCreateComponent {
     // For now, we send just name and description as per service signature
     this.categoriesService.createCategory(categoryData).subscribe({
       next: (category) => {
-        this.toastService.success('Category created successfully');
+        this.toastService.success('Categoría creada exitosamente');
         this.created.emit(category);
         this.isSubmitting = false;
         this.categoryForm.reset();
@@ -127,7 +127,7 @@ export class CategoryQuickCreateComponent {
       },
       error: (error) => {
         console.error('Error creating category:', error);
-        this.toastService.error('Failed to create category');
+        this.toastService.error('Error al crear la categoría');
         this.isSubmitting = false;
       },
     });
@@ -138,9 +138,9 @@ export class CategoryQuickCreateComponent {
     if (!field || !field.errors || !field.touched) {
       return '';
     }
-    if (field.errors['required']) return 'This field is required';
-    if (field.errors['minlength']) return 'Minimum 2 characters required';
-    if (field.errors['maxlength']) return 'Maximum 255 characters allowed';
-    return 'Invalid input';
+    if (field.errors['required']) return 'Este campo es obligatorio';
+    if (field.errors['minlength']) return 'Mínimo 2 caracteres requeridos';
+    if (field.errors['maxlength']) return 'Máximo 255 caracteres permitidos';
+    return 'Entrada inválida';
   }
 }

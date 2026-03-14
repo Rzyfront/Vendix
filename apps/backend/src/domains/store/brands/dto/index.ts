@@ -72,14 +72,14 @@ export class BrandQueryDto {
   search?: string;
 
   @ApiPropertyOptional({
-    example: 'name',
+    example: 'created_at',
     description: 'Campo para ordenar (opcional)',
   })
   @IsOptional()
   @IsString()
-  sort_by?: string = 'name';
+  sort_by?: string = 'created_at';
 
   @IsOptional()
   @IsString()
-  sort_order?: 'asc' | 'desc' = 'asc';
+  sort_order?: 'asc' | 'desc' = 'desc';
 }

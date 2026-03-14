@@ -12,14 +12,16 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 
 | Action | Skill |
 |--------|-------|
-| "revisar PR", "review PR", "analizar PR", "code review", "revisar pull request" | `pr-code-review` |
 | -- | `git-workflow` |
 | -- | `vendix-ai-engine` |
+| -- | `vendix-auto-entries` |
 | -- | `vendix-monorepo-workspaces` |
 | -- | `vendix-panel-ui` |
 | -- | `vendix-prisma-scopes` |
 | Adding modules or submodules to the sidebar | `vendix-panel-ui` |
 | Adding new AI applications | `vendix-ai-engine` |
+| Adding new automatic journal entries | `vendix-auto-entries` |
+| Adding new mapping keys to accounting | `vendix-auto-entries` |
 | Adding new menu items to admin layouts | `vendix-panel-ui` |
 | Adding new models to domain scopes | `vendix-prisma-scopes` |
 | Adding/removing workspaces | `vendix-monorepo-workspaces` |
@@ -39,6 +41,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Creating or modifying modals in frontend | `vendix-frontend-modal` |
 | Creating or refactoring standard admin modules (stats + table) | `vendix-frontend-standard-module` |
 | Debugging Forbidden errors in Prisma queries | `vendix-prisma-scopes` |
+| Debugging missing accounting entries | `vendix-auto-entries` |
 | Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns | `vendix-ui-ux` |
 | Editing Schema | `vendix-prisma-schema` |
 | Fixing Forbidden/403 errors in scoped services | `vendix-multi-tenant-context` |
@@ -52,6 +55,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Integrating AI Engine into a domain | `vendix-ai-engine` |
 | Managing Routes | `vendix-frontend-routing` |
 | Managing State | `vendix-frontend-state` |
+| Modifying auto-entry event handlers | `vendix-auto-entries` |
 | Modifying package.json | `vendix-monorepo-workspaces` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
 | Styling AI interaction buttons or loading states | `vendix-ai-engine` |
@@ -62,20 +66,16 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Verifying Build | `buildcheck-dev` |
 | Working on backend domains | `vendix-backend-domain` |
 | Working on frontend domains | `vendix-frontend-domain` |
+| Working with AccountingEventsListener or AutoEntryService | `vendix-auto-entries` |
 | Working with MenuFilterService or menu filtering | `vendix-panel-ui` |
 | Working with Prisma scoped services | `vendix-prisma-scopes` |
 | Working with ai_engine service or AIEngineService | `vendix-ai-engine` |
 | Working with notifications, SSE, or adding new event-driven alerts | `vendix-notifications-system` |
 | Writing Code (Naming) | `vendix-naming-conventions` |
 | Writing Validation Logic | `vendix-validation` |
-| Changes involving database migrations | `git-workflow` |
+| changes with database migrations | `git-workflow` |
 | git commit, git push, create PR, create branch | `git-workflow` |
-| Resolve merge conflicts | `git-workflow` |
-| Complex tasks spanning multiple domains or layers (backend + frontend + DB) | `agent-teams` |
-| Full end-to-end feature development | `agent-teams` |
-| Broad refactors touching multiple modules | `agent-teams` |
-| User requests agent teams, team of agents, or parallel work | `agent-teams` |
-| agent team, team of agents, parallel agents, split task, divide task | `agent-teams` |
+| resolve merge conflicts | `git-workflow` |
 
 ---
 

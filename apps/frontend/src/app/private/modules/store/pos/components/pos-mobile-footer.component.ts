@@ -45,34 +45,46 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         </button>
       </div>
 
-      <!-- Row 2: Secondary Action Buttons -->
-      <div class="actions-row">
+      @if (isQuotationMode) {
+        <!-- Quotation mode: single button -->
         <button
-          class="action-btn save-btn"
-          (click)="saveDraft.emit()"
+          class="action-btn checkout-btn checkout-btn-full"
+          (click)="quote.emit()"
           [disabled]="itemCount === 0"
         >
-          <app-icon name="save" [size]="16"></app-icon>
-          <span>Guardar</span>
+          <app-icon name="file-text" [size]="18"></app-icon>
+          <span>Crear Cotización</span>
         </button>
+      } @else {
+        <!-- Row 2: Secondary Action Buttons -->
+        <div class="actions-row">
+          <button
+            class="action-btn save-btn"
+            (click)="saveDraft.emit()"
+            [disabled]="itemCount === 0"
+          >
+            <app-icon name="save" [size]="16"></app-icon>
+            <span>Guardar</span>
+          </button>
+          <button
+            class="action-btn shipping-btn"
+            (click)="shipping.emit()"
+            [disabled]="itemCount === 0"
+          >
+            <app-icon name="truck" [size]="16"></app-icon>
+            <span>Envío</span>
+          </button>
+        </div>
+        <!-- Row 3: Primary CTA -->
         <button
-          class="action-btn shipping-btn"
-          (click)="shipping.emit()"
+          class="action-btn checkout-btn checkout-btn-full"
+          (click)="checkout.emit()"
           [disabled]="itemCount === 0"
         >
-          <app-icon name="truck" [size]="16"></app-icon>
-          <span>Envío</span>
+          <app-icon name="credit-card" [size]="18"></app-icon>
+          <span>Cobrar</span>
         </button>
-      </div>
-      <!-- Row 3: Primary CTA -->
-      <button
-        class="action-btn checkout-btn checkout-btn-full"
-        (click)="checkout.emit()"
-        [disabled]="itemCount === 0"
-      >
-        <app-icon name="credit-card" [size]="18"></app-icon>
-        <span>Cobrar</span>
-      </button>
+      }
     </div>
   `,
   styles: [
@@ -311,11 +323,13 @@ export class PosMobileFooterComponent {
   @Input() cartSummary: CartSummary | null = null;
   @Input() itemCount: number = 0;
   @Input() isTablet: boolean = false;
+  @Input() isQuotationMode: boolean = false;
 
   @Output() viewCart = new EventEmitter<void>();
   @Output() saveDraft = new EventEmitter<void>();
   @Output() shipping = new EventEmitter<void>();
   @Output() checkout = new EventEmitter<void>();
+  @Output() quote = new EventEmitter<void>();
 
   formatCurrency(amount: number): string {
     return this.currencyService.format(amount);

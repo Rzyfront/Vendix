@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
-import { RequestContextService } from '../../../../common/context/request-context.service';
+import { AccountMappingService } from '../account-mappings/account-mapping.service';
 
 export interface AutoEntryEventData {
   source_type: string;
@@ -25,16 +25,40 @@ export interface AutoEntryLine {
  * AutoEntryService - Hub for automatic journal entry creation.
  *
  * This service listens to events from other modules (invoicing, payments,
- * expenses, payroll) and creates corresponding journal entries automatically.
+ * expenses, payroll, orders, refunds, purchases, inventory) and creates
+ * corresponding journal entries automatically.
  *
- * Event handlers can be wired via @OnEvent() decorators if @nestjs/event-emitter
- * is available, or invoked directly by other services.
+ * Account codes are resolved via AccountMappingService which supports
+ * store-level overrides, organization-level mappings, and PUC defaults.
  */
 @Injectable()
 export class AutoEntryService {
   private readonly logger = new Logger(AutoEntryService.name);
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly account_mapping_service: AccountMappingService,
+  ) {}
+
+  /**
+   * Resolve a single account line using AccountMappingService.
+   */
+  private async resolveAccountLine(
+    org_id: number,
+    mapping_key: string,
+    description: string,
+    debit_amount: number,
+    credit_amount: number,
+    store_id?: number,
+  ): Promise<AutoEntryLine> {
+    const mapping = await this.account_mapping_service.getMapping(org_id, mapping_key, store_id);
+    return {
+      account_code: mapping.account_code,
+      description,
+      debit_amount,
+      credit_amount,
+    };
+  }
 
   /**
    * Create an automatic journal entry from event data.
@@ -116,6 +140,11 @@ export class AutoEntryService {
       'expense.paid': 'auto_expense',
       'payroll.approved': 'auto_payroll',
       'payroll.paid': 'auto_payroll',
+      'order.completed': 'auto_inventory',
+      'refund.completed': 'auto_return',
+      'purchase_order.received': 'auto_purchase',
+      'inventory.adjusted': 'auto_inventory',
+      'credit_sale.created': 'auto_invoice', // Uses auto_invoice type (revenue recognition without payment)
     };
     const entry_type = entry_type_map[source_type] || 'manual';
 
@@ -200,28 +229,24 @@ export class AutoEntryService {
     total: number;
     user_id?: number;
   }) {
-    const lines: AutoEntryLine[] = [
-      {
-        account_code: '1305',
-        description: 'Accounts Receivable',
-        debit_amount: data.total,
-        credit_amount: 0,
-      },
-      {
-        account_code: '4135',
-        description: 'Revenue',
-        debit_amount: 0,
-        credit_amount: data.subtotal,
-      },
-    ];
+    const lines: AutoEntryLine[] = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'invoice.validated.accounts_receivable',
+        'Accounts Receivable', data.total, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'invoice.validated.revenue',
+        'Revenue', 0, data.subtotal, data.store_id,
+      ),
+    ]);
 
     if (data.tax_amount > 0) {
-      lines.push({
-        account_code: '2408',
-        description: 'VAT Payable',
-        debit_amount: 0,
-        credit_amount: data.tax_amount,
-      });
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id, 'invoice.validated.vat_payable',
+          'VAT Payable', 0, data.tax_amount, data.store_id,
+        ),
+      );
     }
 
     return this.createAutoEntry({
@@ -237,36 +262,158 @@ export class AutoEntryService {
   }
 
   /**
-   * payment.received: Debit Cash/Bank, Credit Accounts Receivable
+   * Resolve the cash/bank mapping key based on payment method.
+   * cash/efectivo → payment.received.cash (1105)
+   * transfer/card/other → payment.received.bank (1110)
+   */
+  private resolveCashBankKey(payment_method?: string): string {
+    if (!payment_method) return 'payment.received.cash';
+    const method = payment_method.toLowerCase();
+    const is_cash = method.includes('cash') || method.includes('efectivo');
+    return is_cash ? 'payment.received.cash' : 'payment.received.bank';
+  }
+
+  /**
+   * payment.received:
+   * - WITH invoice: Debit Cash/Bank, Credit Accounts Receivable (invoice already recognized revenue)
+   * - WITHOUT invoice (POS direct sale): Debit Cash/Bank, Credit Revenue + VAT if applicable
    */
   async onPaymentReceived(data: {
     payment_id: number;
     organization_id: number;
     store_id?: number;
+    order_id?: number;
+    order_number?: string;
+    payment_method?: string;
     amount: number;
+    subtotal_amount?: number;
+    tax_amount?: number;
     user_id?: number;
   }) {
+    // Check if this payment's order has an associated invoice
+    let has_invoice = false;
+    if (data.order_id) {
+      const invoice = await this.prisma.invoices.findFirst({
+        where: {
+          order_id: data.order_id,
+          status: { notIn: ['cancelled', 'voided'] },
+        },
+        select: { id: true },
+      });
+      has_invoice = !!invoice;
+    }
+
+    const payment_desc = data.payment_method
+      ? `Pago ${data.payment_method}`
+      : 'Pago recibido';
+    const order_ref = data.order_number
+      ? ` - Orden ${data.order_number}`
+      : '';
+
+    const cash_bank_key = this.resolveCashBankKey(data.payment_method);
+    let lines: AutoEntryLine[];
+
+    if (has_invoice) {
+      // Invoice exists: Debit Cash/Bank, Credit AR (invoice.validated already recognized revenue+IVA)
+      lines = await Promise.all([
+        this.resolveAccountLine(
+          data.organization_id, cash_bank_key,
+          `${payment_desc}${order_ref}`, data.amount, 0, data.store_id,
+        ),
+        this.resolveAccountLine(
+          data.organization_id, 'payment.received.accounts_receivable',
+          `Recaudo CxC${order_ref}`, 0, data.amount, data.store_id,
+        ),
+      ]);
+    } else {
+      // No invoice (POS direct sale): Debit Cash/Bank, Credit Revenue + VAT
+      const tax = Number(data.tax_amount || 0);
+      const subtotal = data.subtotal_amount != null
+        ? Number(data.subtotal_amount)
+        : data.amount - tax; // fallback: derive subtotal from amount - tax
+
+      lines = [
+        await this.resolveAccountLine(
+          data.organization_id, cash_bank_key,
+          `${payment_desc}${order_ref}`, data.amount, 0, data.store_id,
+        ),
+        await this.resolveAccountLine(
+          data.organization_id, 'payment.received.revenue',
+          `Venta directa${order_ref}`, 0, subtotal, data.store_id,
+        ),
+      ];
+
+      // Separate VAT line if tax > 0
+      if (tax > 0) {
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payment.received.vat_payable',
+            `IVA venta directa${order_ref}`, 0, tax, data.store_id,
+          ),
+        );
+      }
+    }
+
+    const description = has_invoice
+      ? `Recaudo factura - Pago #${data.payment_id}${order_ref}`
+      : `Venta POS #${data.payment_id}${order_ref}`;
+
     return this.createAutoEntry({
       source_type: 'payment.received',
       source_id: data.payment_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
       entry_date: new Date(),
-      description: `Payment received #${data.payment_id}`,
-      lines: [
-        {
-          account_code: '1105',
-          description: 'Cash/Bank',
-          debit_amount: data.amount,
-          credit_amount: 0,
-        },
-        {
-          account_code: '1305',
-          description: 'Accounts Receivable',
-          debit_amount: 0,
-          credit_amount: data.amount,
-        },
-      ],
+      description,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * credit_sale.created: Debit Accounts Receivable, Credit Revenue + VAT Payable
+   * For POS credit sales (requires_payment = false)
+   */
+  async onCreditSaleCreated(data: {
+    order_id: number;
+    organization_id: number;
+    store_id?: number;
+    order_number?: string;
+    subtotal_amount: number;
+    tax_amount: number;
+    total_amount: number;
+    user_id?: number;
+  }) {
+    const order_ref = data.order_number ? ` - Orden ${data.order_number}` : '';
+
+    const lines: AutoEntryLine[] = [
+      await this.resolveAccountLine(
+        data.organization_id, 'credit_sale.created.accounts_receivable',
+        `CxC venta a crédito${order_ref}`, data.total_amount, 0, data.store_id,
+      ),
+      await this.resolveAccountLine(
+        data.organization_id, 'credit_sale.created.revenue',
+        `Ingreso venta a crédito${order_ref}`, 0, data.subtotal_amount, data.store_id,
+      ),
+    ];
+
+    if (data.tax_amount > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id, 'credit_sale.created.vat_payable',
+          `IVA venta a crédito${order_ref}`, 0, data.tax_amount, data.store_id,
+        ),
+      );
+    }
+
+    return this.createAutoEntry({
+      source_type: 'credit_sale.created',
+      source_id: data.order_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Venta a crédito #${data.order_id}${order_ref}`,
+      lines,
       user_id: data.user_id,
     });
   }
@@ -279,10 +426,18 @@ export class AutoEntryService {
     organization_id: number;
     store_id?: number;
     amount: number;
-    expense_account_code?: string;
     user_id?: number;
   }) {
-    const expense_code = data.expense_account_code || '5195';
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'expense.approved.expense',
+        'Expense', data.amount, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'expense.approved.accounts_payable',
+        'Accounts Payable', 0, data.amount, data.store_id,
+      ),
+    ]);
 
     return this.createAutoEntry({
       source_type: 'expense.approved',
@@ -291,20 +446,7 @@ export class AutoEntryService {
       store_id: data.store_id,
       entry_date: new Date(),
       description: `Expense approved #${data.expense_id}`,
-      lines: [
-        {
-          account_code: expense_code,
-          description: 'Expense',
-          debit_amount: data.amount,
-          credit_amount: 0,
-        },
-        {
-          account_code: '2205',
-          description: 'Accounts Payable',
-          debit_amount: 0,
-          credit_amount: data.amount,
-        },
-      ],
+      lines,
       user_id: data.user_id,
     });
   }
@@ -319,6 +461,17 @@ export class AutoEntryService {
     amount: number;
     user_id?: number;
   }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'expense.paid.accounts_payable',
+        'Accounts Payable', data.amount, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'expense.paid.cash',
+        'Cash/Bank', 0, data.amount, data.store_id,
+      ),
+    ]);
+
     return this.createAutoEntry({
       source_type: 'expense.paid',
       source_id: data.expense_id,
@@ -326,20 +479,7 @@ export class AutoEntryService {
       store_id: data.store_id,
       entry_date: new Date(),
       description: `Expense paid #${data.expense_id}`,
-      lines: [
-        {
-          account_code: '2205',
-          description: 'Accounts Payable',
-          debit_amount: data.amount,
-          credit_amount: 0,
-        },
-        {
-          account_code: '1105',
-          description: 'Cash/Bank',
-          debit_amount: 0,
-          credit_amount: data.amount,
-        },
-      ],
+      lines,
       user_id: data.user_id,
     });
   }
@@ -359,38 +499,28 @@ export class AutoEntryService {
     pension_deduction: number;
     user_id?: number;
   }) {
-    const lines: AutoEntryLine[] = [
-      {
-        account_code: '5105',
-        description: 'Payroll Expense',
-        debit_amount: data.total_earnings,
-        credit_amount: 0,
-      },
-      {
-        account_code: '5110',
-        description: 'Social Security Expense',
-        debit_amount: data.total_employer_costs,
-        credit_amount: 0,
-      },
-      {
-        account_code: '2505',
-        description: 'Salaries Payable',
-        debit_amount: 0,
-        credit_amount: data.total_net_pay,
-      },
-      {
-        account_code: '2370',
-        description: 'Health Payable',
-        debit_amount: 0,
-        credit_amount: data.health_deduction,
-      },
-      {
-        account_code: '2380',
-        description: 'Pension Payable',
-        debit_amount: 0,
-        credit_amount: data.pension_deduction,
-      },
-    ];
+    const lines: AutoEntryLine[] = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'payroll.approved.payroll_expense',
+        'Payroll Expense', data.total_earnings, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'payroll.approved.social_security',
+        'Social Security Expense', data.total_employer_costs, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'payroll.approved.salaries_payable',
+        'Salaries Payable', 0, data.total_net_pay, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'payroll.approved.health_payable',
+        'Health Payable', 0, data.health_deduction, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'payroll.approved.pension_payable',
+        'Pension Payable', 0, data.pension_deduction, data.store_id,
+      ),
+    ]);
 
     // Balance check: the remaining deductions go to a generic withholdings account
     const total_debit = data.total_earnings + data.total_employer_costs;
@@ -398,12 +528,12 @@ export class AutoEntryService {
     const remaining = total_debit - total_credit;
 
     if (Math.abs(remaining) > 0.001) {
-      lines.push({
-        account_code: '2365',
-        description: 'Other Withholdings Payable',
-        debit_amount: 0,
-        credit_amount: remaining,
-      });
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id, 'payroll.approved.withholdings',
+          'Other Withholdings Payable', 0, remaining, data.store_id,
+        ),
+      );
     }
 
     return this.createAutoEntry({
@@ -428,6 +558,17 @@ export class AutoEntryService {
     total_net_pay: number;
     user_id?: number;
   }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'payroll.paid.salaries_payable',
+        'Salaries Payable', data.total_net_pay, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'payroll.paid.bank',
+        'Bank', 0, data.total_net_pay, data.store_id,
+      ),
+    ]);
+
     return this.createAutoEntry({
       source_type: 'payroll.paid',
       source_id: data.payroll_run_id,
@@ -435,20 +576,185 @@ export class AutoEntryService {
       store_id: data.store_id,
       entry_date: new Date(),
       description: `Payroll paid #${data.payroll_run_id}`,
-      lines: [
-        {
-          account_code: '2505',
-          description: 'Salaries Payable',
-          debit_amount: data.total_net_pay,
-          credit_amount: 0,
-        },
-        {
-          account_code: '1110',
-          description: 'Bank',
-          debit_amount: 0,
-          credit_amount: data.total_net_pay,
-        },
-      ],
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * order.completed: Debit COGS, Credit Inventory
+   */
+  async onOrderCompleted(data: {
+    order_id: number;
+    organization_id: number;
+    store_id?: number;
+    total_cost: number;
+    user_id?: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'order.completed.cogs',
+        'Cost of Goods Sold', data.total_cost, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'order.completed.inventory',
+        'Inventory', 0, data.total_cost, data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'order.completed',
+      source_id: data.order_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Order completed #${data.order_id} - COGS`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * refund.completed: Debit Revenue + VAT (reversal), Credit Cash/Bank
+   * For 'refund' type: reverse revenue + IVA, credit cash
+   * For 'replacement' type: no accounting entry (only inventory movement)
+   * For 'credit' type: reverse revenue + IVA, credit customer credit (future Phase 2)
+   */
+  async onRefundCompleted(data: {
+    refund_id: number;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    tax_amount?: number;
+    return_type?: string;
+    user_id?: number;
+  }) {
+    // Replacements only move inventory — no financial entry needed
+    if (data.return_type === 'replacement') {
+      this.logger.log(`Skipping accounting entry for replacement return #${data.refund_id}`);
+      return null;
+    }
+
+    const tax = Number(data.tax_amount || 0);
+    const revenue_amount = tax > 0 ? data.amount - tax : data.amount;
+
+    const lines: AutoEntryLine[] = [
+      await this.resolveAccountLine(
+        data.organization_id, 'refund.completed.revenue',
+        'Ingresos (reversa)', revenue_amount, 0, data.store_id,
+      ),
+    ];
+
+    // Reverse VAT if tax was charged
+    if (tax > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id, 'refund.completed.vat_payable',
+          'IVA (reversa devolución)', tax, 0, data.store_id,
+        ),
+      );
+    }
+
+    // Credit: Cash/Bank for the total refund amount
+    lines.push(
+      await this.resolveAccountLine(
+        data.organization_id, 'refund.completed.cash',
+        'Reembolso al cliente', 0, data.amount, data.store_id,
+      ),
+    );
+
+    return this.createAutoEntry({
+      source_type: 'refund.completed',
+      source_id: data.refund_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Devolución #${data.refund_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * purchase_order.received: Debit Inventory, Credit Accounts Payable
+   */
+  async onPurchaseOrderReceived(data: {
+    purchase_order_id: number;
+    organization_id: number;
+    store_id?: number;
+    total_amount: number;
+    user_id?: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'purchase_order.received.inventory',
+        'Inventory', data.total_amount, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'purchase_order.received.accounts_payable',
+        'Accounts Payable', 0, data.total_amount, data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'purchase_order.received',
+      source_id: data.purchase_order_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Purchase order received #${data.purchase_order_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * inventory.adjusted: Debit/Credit Inventory vs Shrinkage based on quantity_change direction
+   */
+  async onInventoryAdjusted(data: {
+    adjustment_id: number;
+    organization_id: number;
+    store_id?: number;
+    cost_amount: number;
+    quantity_change: number;
+    user_id?: number;
+  }) {
+    let lines: AutoEntryLine[];
+
+    if (data.quantity_change < 0) {
+      // Shrinkage: DR Shrinkage, CR Inventory
+      lines = await Promise.all([
+        this.resolveAccountLine(
+          data.organization_id, 'inventory.adjusted.shrinkage',
+          'Inventory Shrinkage', data.cost_amount, 0, data.store_id,
+        ),
+        this.resolveAccountLine(
+          data.organization_id, 'inventory.adjusted.inventory',
+          'Inventory', 0, data.cost_amount, data.store_id,
+        ),
+      ]);
+    } else {
+      // Surplus: DR Inventory, CR Shrinkage
+      lines = await Promise.all([
+        this.resolveAccountLine(
+          data.organization_id, 'inventory.adjusted.inventory',
+          'Inventory', data.cost_amount, 0, data.store_id,
+        ),
+        this.resolveAccountLine(
+          data.organization_id, 'inventory.adjusted.shrinkage',
+          'Inventory Surplus', 0, data.cost_amount, data.store_id,
+        ),
+      ]);
+    }
+
+    return this.createAutoEntry({
+      source_type: 'inventory.adjusted',
+      source_id: data.adjustment_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Inventory adjustment #${data.adjustment_id}`,
+      lines,
       user_id: data.user_id,
     });
   }

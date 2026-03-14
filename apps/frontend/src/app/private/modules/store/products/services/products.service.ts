@@ -29,7 +29,10 @@ interface CacheEntry<T> {
   lastFetch: number;
 }
 
-const storeProductsStatsCache = new Map<number, CacheEntry<Observable<ProductStats>>>();
+const storeProductsStatsCache = new Map<
+  number,
+  CacheEntry<Observable<ProductStats>>
+>();
 
 @Injectable({
   providedIn: 'root',
@@ -231,10 +234,9 @@ export class ProductsService {
   // Generación de descripción con IA
   generateDescription(data: Record<string, any>): Observable<any> {
     return this.http
-      .post<ApiResponse<any>>(
-        `${this.apiUrl}/store/products/generate-description`,
-        data,
-      )
+      .post<
+        ApiResponse<any>
+      >(`${this.apiUrl}/store/products/generate-description`, data)
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),
@@ -246,7 +248,7 @@ export class ProductsService {
     const now = Date.now();
     const cached = storeProductsStatsCache.get(storeId);
 
-    if (cached && (now - cached.lastFetch) < this.CACHE_TTL) {
+    if (cached && now - cached.lastFetch < this.CACHE_TTL) {
       return cached.observable;
     }
 
@@ -419,6 +421,33 @@ export class ProductsService {
       );
   }
 
+  // Promociones del producto
+  getProductPromotions(productId: number): Observable<any[]> {
+    return this.http
+      .get<ApiResponse<any[]>>(
+        `${this.apiUrl}/store/products/${productId}/promotions`,
+      )
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
+  updateProductPromotions(
+    productId: number,
+    promotionIds: number[],
+  ): Observable<any[]> {
+    return this.http
+      .patch<ApiResponse<any[]>>(
+        `${this.apiUrl}/store/products/${productId}/promotions`,
+        { promotion_ids: promotionIds },
+      )
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
   // Utilidades
   private buildParams(query: ProductQueryDto): HttpParams {
     let params = new HttpParams();
@@ -437,22 +466,22 @@ export class ProductsService {
     console.error('ProductsService Error:', error);
 
     // Mensajes de error más descriptivos
-    let errorMessage = 'An error occurred';
+    let errorMessage = 'Ocurrió un error';
 
     if (error.error?.message) {
       errorMessage = error.error.message;
     } else if (error.status === 400) {
-      errorMessage = 'Invalid data provided';
+      errorMessage = 'Datos inválidos proporcionados';
     } else if (error.status === 401) {
-      errorMessage = 'Unauthorized access';
+      errorMessage = 'Acceso no autorizado';
     } else if (error.status === 403) {
-      errorMessage = 'Insufficient permissions';
+      errorMessage = 'Permisos insuficientes';
     } else if (error.status === 404) {
-      errorMessage = 'Product not found';
+      errorMessage = 'Producto no encontrado';
     } else if (error.status === 409) {
-      errorMessage = 'Product with this SKU or slug already exists';
+      errorMessage = 'Ya existe un producto con este SKU o slug';
     } else if (error.status >= 500) {
-      errorMessage = 'Server error. Please try again later';
+      errorMessage = 'Error del servidor. Por favor intenta más tarde';
     }
 
     return throwError(() => errorMessage);

@@ -13,6 +13,10 @@ import {
   ItemListSize,
 } from '../item-list/item-list.interfaces';
 
+// Re-export types for consumer convenience
+export type { TableColumn, TableAction, TableSize, SortDirection };
+export type { ItemListCardConfig, ItemListSize };
+
 /**
  * ResponsiveDataViewComponent
  *

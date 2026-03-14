@@ -21,6 +21,7 @@ import {
 import { SystemPaymentMethodsService } from './services/system-payment-methods.service';
 import { StorePaymentMethodsService } from './services/store-payment-methods.service';
 import { OrganizationPaymentPoliciesService } from './services/organization-payment-policies.service';
+import { PromotionsModule } from '../promotions/promotions.module';
 import {
   CashPaymentModule,
   StripeModule,
@@ -44,6 +45,7 @@ import { BankTransferProcessor } from './processors/bank-transfer/bank-transfer.
     forwardRef(() => OrderFlowModule),
     TaxesModule,
     SettingsModule,
+    PromotionsModule,
   ],
   controllers: [
     PaymentsController,

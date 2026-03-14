@@ -45,6 +45,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     } else {
       errorCode = 'SYS_INTERNAL_001';
       message = 'Internal server error';
+      console.error(`[AllExceptionsFilter] Unhandled exception on ${request.method} ${request.url}:`, exception);
     }
 
     const responseBody: Record<string, any> = {

@@ -57,6 +57,7 @@ import { AdjustmentCreateModalComponent } from '../../../inventory/operations/co
 import { InventoryService } from '../../../inventory/services/inventory.service';
 import { CreateAdjustmentDto } from '../../../inventory/interfaces';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
 
 interface VariantAttribute {
   name: string;
@@ -157,78 +158,88 @@ interface GeneratedVariant {
         animation: ai-shimmer 1.5s ease-in-out infinite;
       }
 
-    /* ── Hover propagation: button hover → label + textarea ── */
-    .ai-description-wrapper .ai-label {
-      transition: all 0.4s ease;
-    }
+      /* ── Hover propagation: button hover → label + textarea ── */
+      .ai-description-wrapper .ai-label {
+        transition: all 0.4s ease;
+      }
 
-    .ai-description-wrapper .ai-textarea-wrapper {
-      transition: all 0.4s ease;
-      border-radius: 12px;
-      padding: 2px;
-      background: transparent;
-    }
+      .ai-description-wrapper .ai-textarea-wrapper {
+        transition: all 0.4s ease;
+        border-radius: 12px;
+        padding: 2px;
+        background: transparent;
+      }
 
-    .ai-description-wrapper:has(.ai-generate-btn:hover:not(:disabled)) .ai-label {
-      background: linear-gradient(90deg,
-        rgba(var(--color-primary-rgb), 1) 0%,
-        rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 1) 50%,
-        rgba(var(--color-primary-rgb), 1) 100%
-      );
-      background-size: 200% 100%;
-      animation: ai-shimmer 2s ease-in-out infinite;
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-      font-weight: 600;
-    }
+      .ai-description-wrapper:has(.ai-generate-btn:hover:not(:disabled))
+        .ai-label {
+        background: linear-gradient(
+          90deg,
+          rgba(var(--color-primary-rgb), 1) 0%,
+          rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 1) 50%,
+          rgba(var(--color-primary-rgb), 1) 100%
+        );
+        background-size: 200% 100%;
+        animation: ai-shimmer 2s ease-in-out infinite;
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 600;
+      }
 
-    .ai-description-wrapper:has(.ai-generate-btn:hover:not(:disabled)) .ai-textarea-wrapper {
-      position: relative;
-      border-radius: 12px;
-      padding: 2px;
-      background: linear-gradient(135deg,
-        rgba(var(--color-primary-rgb), 0.4) 0%,
-        rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.6) 25%,
-        rgba(var(--color-primary-rgb), 0.3) 50%,
-        rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.6) 75%,
-        rgba(var(--color-primary-rgb), 0.4) 100%
-      );
-      background-size: 300% 300%;
-      animation: ai-outline-flow 2s ease-in-out infinite;
-    }
+      .ai-description-wrapper:has(.ai-generate-btn:hover:not(:disabled))
+        .ai-textarea-wrapper {
+        position: relative;
+        border-radius: 12px;
+        padding: 2px;
+        background: linear-gradient(
+          135deg,
+          rgba(var(--color-primary-rgb), 0.4) 0%,
+          rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.6) 25%,
+          rgba(var(--color-primary-rgb), 0.3) 50%,
+          rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.6) 75%,
+          rgba(var(--color-primary-rgb), 0.4) 100%
+        );
+        background-size: 300% 300%;
+        animation: ai-outline-flow 2s ease-in-out infinite;
+      }
 
-    .ai-description-wrapper:has(.ai-generate-btn:hover:not(:disabled)) .ai-textarea-wrapper ::ng-deep textarea {
-      border: none !important;
-      border-radius: 10px;
-    }
+      .ai-description-wrapper:has(.ai-generate-btn:hover:not(:disabled))
+        .ai-textarea-wrapper
+        ::ng-deep
+        textarea {
+        border: none !important;
+        border-radius: 10px;
+      }
 
-    /* ── Tooltip ── */
-    .ai-tooltip {
-      position: absolute;
-      bottom: calc(100% + 8px);
-      right: 0;
-      padding: 6px 12px;
-      border-radius: 8px;
-      background: linear-gradient(135deg,
-        rgba(var(--color-primary-rgb), 0.85) 0%,
-        rgba(var(--color-primary-rgb), 0.95) 50%,
-        rgba(var(--color-primary-rgb), 0.85) 100%
-      );
-      background-size: 200% 200%;
-      animation: ai-shimmer 3s ease-in-out infinite;
-      color: white;
-      font-size: 11px;
-      white-space: nowrap;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 0.2s ease, transform 0.2s ease;
-      transform: translateY(4px);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.25),
-        inset 0 1px 1px rgba(255, 255, 255, 0.15);
-    }
+      /* ── Tooltip ── */
+      .ai-tooltip {
+        position: absolute;
+        bottom: calc(100% + 8px);
+        right: 0;
+        padding: 6px 12px;
+        border-radius: 8px;
+        background: linear-gradient(
+          135deg,
+          rgba(var(--color-primary-rgb), 0.85) 0%,
+          rgba(var(--color-primary-rgb), 0.95) 50%,
+          rgba(var(--color-primary-rgb), 0.85) 100%
+        );
+        background-size: 200% 200%;
+        animation: ai-shimmer 3s ease-in-out infinite;
+        color: white;
+        font-size: 11px;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition:
+          opacity 0.2s ease,
+          transform 0.2s ease;
+        transform: translateY(4px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow:
+          0 4px 12px rgba(0, 0, 0, 0.25),
+          inset 0 1px 1px rgba(255, 255, 255, 0.15);
+      }
 
       .ai-generate-btn:hover .ai-tooltip {
         opacity: 1;
@@ -314,6 +325,11 @@ export class ProductCreatePageComponent implements OnInit {
   private dialogService = inject(DialogService);
   private currencyService = inject(CurrencyFormatService);
   private cdr = inject(ChangeDetectorRef);
+  private promotionsService = inject(PromotionsService);
+
+  // Promotions
+  promotionOptions: MultiSelectorOption[] = [];
+  productPromotionIds: number[] = [];
 
   // Image loading state for feedback visual
   isLoadingImages = false;
@@ -400,14 +416,71 @@ export class ProductCreatePageComponent implements OnInit {
     this.currencyService.loadCurrency();
     this.loadCategoriesAndBrands();
 
+    // Verificar draft del modal de creación rápida
+    const navState = history.state;
+    if (navState?.draft) {
+      this.applyDraftData(navState.draft);
+    }
+
     // Check for ID in route to determine edit mode
     this.route.params.subscribe((params: Params) => {
       if (params['id']) {
         this.productId = +params['id'];
         this.isEditMode.set(true);
         this.loadProduct(this.productId);
+        this.loadPromotionOptions();
+        this.loadProductPromotions(this.productId);
       }
     });
+  }
+
+  private applyDraftData(draft: any): void {
+    this.productForm.patchValue({
+      name: draft.name || '',
+      description: draft.description || '',
+      base_price: draft.base_price || 0,
+      stock_quantity: draft.stock_quantity || 0,
+      track_inventory: draft.track_inventory ?? true,
+      sku: draft.sku || '',
+      category_ids: draft.category_ids || [],
+      brand_id: draft.brand_id || null,
+      tax_category_ids: draft.tax_category_ids || [],
+      state: draft.state || ProductState.ACTIVE,
+    });
+  }
+
+  loadPromotionOptions(): void {
+    this.promotionsService
+      .getPromotions({ limit: 200 })
+      .subscribe((res) => {
+        this.promotionOptions = res.data.map((p: any) => ({
+          value: p.id,
+          label: p.name,
+          description: `${p.type === 'percentage' ? p.value + '%' : '$' + p.value} — ${p.state}`,
+        }));
+      });
+  }
+
+  loadProductPromotions(productId: number): void {
+    this.productsService.getProductPromotions(productId).subscribe((promos) => {
+      this.productPromotionIds = promos.map((p: any) => p.id);
+    });
+  }
+
+  onPromotionsChange(ids: (string | number)[]): void {
+    if (!this.productId) return;
+    const numericIds = ids.map((id) => Number(id));
+    this.productsService
+      .updateProductPromotions(this.productId, numericIds)
+      .subscribe({
+        next: (promos) => {
+          this.productPromotionIds = promos.map((p: any) => p.id);
+          this.toastService.success('Promociones actualizadas');
+        },
+        error: () => {
+          this.toastService.error('Error al actualizar promociones');
+        },
+      });
   }
 
   private createForm(): FormGroup {
@@ -1265,8 +1338,8 @@ export class ProductCreatePageComponent implements OnInit {
           : undefined,
     };
 
-    // Add Variants if enabled — always send the array (even empty) so the
-    // backend can delete variants that were removed by the user.
+    // Add Variants - ALWAYS send the array so the backend can handle the toggle
+    // When hasVariants is false, send empty array to delete all existing variants
     if (this.hasVariants) {
       productData.variants = this.generatedVariants.map((v) => ({
         id: v.id,
@@ -1289,6 +1362,9 @@ export class ProductCreatePageComponent implements OnInit {
       if (formValue.track_inventory) {
         productData.stock_quantity = this.totalVariantStock;
       }
+    } else {
+      // Send empty array to tell backend to delete all existing variants
+      productData.variants = [];
     }
 
     const request$ =
@@ -1391,9 +1467,9 @@ export class ProductCreatePageComponent implements OnInit {
   getErrorMessage(fieldName: string): string {
     const field = this.productForm.get(fieldName);
     if (!field || !field.errors || !field.touched) return '';
-    if (field.errors['required']) return 'Required field';
-    if (field.errors['min']) return `Min value: ${field.errors['min'].min}`;
-    return 'Invalid value';
+    if (field.errors['required']) return 'Campo obligatorio';
+    if (field.errors['min']) return `Valor mínimo: ${field.errors['min'].min}`;
+    return 'Valor inválido';
   }
 
   // Adjustment Modal

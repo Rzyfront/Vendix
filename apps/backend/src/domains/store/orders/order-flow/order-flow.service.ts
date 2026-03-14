@@ -8,6 +8,7 @@ import {
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { order_state_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { RequestContextService } from '@common/context/request-context.service';
 import {
   PayOrderDto,
   PaymentType,
@@ -146,6 +147,44 @@ export class OrderFlowService {
       old_state: previous_order?.state || '',
       new_state: newState,
     });
+
+    // Emit order.completed for accounting (COGS journal entry)
+    if (newState === 'finished') {
+      try {
+        const order_with_items = await this.prisma.orders.findUnique({
+          where: { id: orderId },
+          include: {
+            stores: { select: { id: true, organization_id: true } },
+            order_items: {
+              select: {
+                quantity: true,
+                cost_price: true,
+              },
+            },
+          },
+        });
+
+        if (order_with_items?.order_items) {
+          const total_cost = order_with_items.order_items.reduce(
+            (sum, item) => sum + (Number(item.cost_price || 0) * Number(item.quantity)),
+            0,
+          );
+
+          if (total_cost > 0) {
+            this.eventEmitter.emit('order.completed', {
+              order_id: orderId,
+              order_number: previous_order?.order_number || '',
+              organization_id: order_with_items.stores?.organization_id,
+              store_id: updated_order.store_id,
+              total_cost,
+              user_id: RequestContextService.getUserId(),
+            });
+          }
+        }
+      } catch (error) {
+        this.logger.error(`Failed to emit order.completed for order #${orderId}: ${error.message}`);
+      }
+    }
 
     return updated_order;
   }

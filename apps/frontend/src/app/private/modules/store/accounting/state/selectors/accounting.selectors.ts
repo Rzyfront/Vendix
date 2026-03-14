@@ -89,6 +89,17 @@ export const selectReportLoading = createSelector(
   (state) => state.report_loading,
 );
 
+// ── Account Mappings ──────────────────────────────────────────────
+export const selectAccountMappings = createSelector(
+  selectAccountingState,
+  (state) => state.account_mappings,
+);
+
+export const selectAccountMappingsLoading = createSelector(
+  selectAccountingState,
+  (state) => state.account_mappings_loading,
+);
+
 // ── Filters ────────────────────────────────────────────────────────
 export const selectSearch = createSelector(
   selectAccountingState,

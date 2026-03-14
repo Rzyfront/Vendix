@@ -20,7 +20,7 @@ import {
 
 // Re-export types for component usage
 export type { ProcessPaymentRequest, PosOrder } from '../models/order.model';
-import { CartState } from '../models/cart.model';
+import { CartState, CartDiscount } from '../models/cart.model';
 import { PosCustomer } from '../models/customer.model';
 
 @Injectable({
@@ -103,6 +103,8 @@ export class PosOrderService {
       seller_user_id: createdBy,
       internal_notes: cartState.notes,
       update_inventory: true,
+      coupon_id: this.extractCouponId(cartState),
+      coupon_code: this.extractCouponCode(cartState),
     };
 
     // Call unified POS endpoint
@@ -250,6 +252,8 @@ export class PosOrderService {
       seller_user_id: request.sellerUserId || 'current_user',
       internal_notes: request.notes || '',
       update_inventory: true,
+      coupon_id: (request as any).coupon_id,
+      coupon_code: (request as any).coupon_code,
     };
 
     // Call unified POS endpoint
@@ -1005,5 +1009,13 @@ export class PosOrderService {
 
   private getStoreId(): number {
     return this.storeContextService.getStoreIdOrThrow();
+  }
+
+  private extractCouponId(cartState: CartState): number | undefined {
+    return cartState.appliedCoupon?.id;
+  }
+
+  private extractCouponCode(cartState: CartState): string | undefined {
+    return cartState.appliedCoupon?.code;
   }
 }

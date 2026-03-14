@@ -315,6 +315,56 @@ export const accountingReducer = createReducer(
     date_to: '',
   })),
 
+  // ── Account Mappings ────────────────────────────────────────────
+  on(AccountingActions.loadAccountMappings, (state) => ({
+    ...state,
+    account_mappings_loading: true,
+    error: null,
+  })),
+  on(AccountingActions.loadAccountMappingsSuccess, (state, { mappings }) => ({
+    ...state,
+    account_mappings: mappings,
+    account_mappings_loading: false,
+    error: null,
+  })),
+  on(AccountingActions.loadAccountMappingsFailure, (state, { error }) => ({
+    ...state,
+    account_mappings_loading: false,
+    error,
+  })),
+
+  on(AccountingActions.saveAccountMappings, (state) => ({
+    ...state,
+    account_mappings_loading: true,
+    error: null,
+  })),
+  on(AccountingActions.saveAccountMappingsSuccess, (state) => ({
+    ...state,
+    account_mappings_loading: false,
+    error: null,
+  })),
+  on(AccountingActions.saveAccountMappingsFailure, (state, { error }) => ({
+    ...state,
+    account_mappings_loading: false,
+    error,
+  })),
+
+  on(AccountingActions.resetAccountMappings, (state) => ({
+    ...state,
+    account_mappings_loading: true,
+    error: null,
+  })),
+  on(AccountingActions.resetAccountMappingsSuccess, (state) => ({
+    ...state,
+    account_mappings_loading: false,
+    error: null,
+  })),
+  on(AccountingActions.resetAccountMappingsFailure, (state, { error }) => ({
+    ...state,
+    account_mappings_loading: false,
+    error,
+  })),
+
   // ── Clear State ──────────────────────────────────────────────────
   on(AccountingActions.clearAccountingState, () => initialAccountingState),
 );

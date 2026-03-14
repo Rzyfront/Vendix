@@ -286,6 +286,146 @@ export class PosCartService {
   }
 
   /**
+   * Apply eligible promotions to the cart
+   */
+  applyPromotions(activePromotions: any[]): Observable<CartState> {
+    return of(activePromotions).pipe(
+      map((promotions) => {
+        const currentState = this.cartState$.value;
+
+        // Remove previously auto-applied promotion discounts
+        const manualDiscounts = currentState.appliedDiscounts.filter(d => !d.is_auto_applied);
+
+        // Calculate cart total for eligibility
+        const subtotal = this.calculateSubtotal(currentState.items);
+
+        // Apply eligible auto-apply promotions
+        const promoDiscounts: CartDiscount[] = [];
+        for (const promo of promotions) {
+          if (!promo.is_auto_apply) continue;
+
+          // Check min purchase
+          if (promo.min_purchase_amount && subtotal < Number(promo.min_purchase_amount)) continue;
+
+          // Check scope eligibility
+          if (promo.scope === 'product') {
+            const promoProductIds = (promo.promotion_products || []).map((pp: any) => pp.product_id);
+            const hasProduct = currentState.items.some(item => promoProductIds.includes(Number(item.product.id)));
+            if (!hasProduct) continue;
+          }
+
+          // Calculate discount
+          let discountAmount = 0;
+          if (promo.type === 'percentage') {
+            discountAmount = subtotal * (Number(promo.value) / 100);
+          } else {
+            discountAmount = Math.min(Number(promo.value), subtotal);
+          }
+
+          if (promo.max_discount_amount) {
+            discountAmount = Math.min(discountAmount, Number(promo.max_discount_amount));
+          }
+
+          promoDiscounts.push({
+            id: 'PROMO_' + promo.id,
+            type: promo.type === 'percentage' ? 'percentage' : 'fixed',
+            value: Number(promo.value),
+            description: promo.name,
+            amount: Math.round(discountAmount * 100) / 100,
+            promotion_id: promo.id,
+            is_auto_applied: true,
+          });
+        }
+
+        const updatedDiscounts = [...manualDiscounts, ...promoDiscounts];
+
+        return {
+          ...currentState,
+          appliedDiscounts: updatedDiscounts,
+          summary: this.calculateSummary(currentState.items, updatedDiscounts),
+          updatedAt: new Date(),
+        } as CartState;
+      }),
+      tap((newState) => this.cartState$.next(newState)),
+    );
+  }
+
+  /**
+   * Apply a coupon code as a discount (new coupon system)
+   */
+  applyCouponDiscount(couponValidation: any): Observable<CartState> {
+    const currentState = this.cartState$.value;
+
+    // Remove any previously applied coupon
+    const withoutCoupon = currentState.appliedDiscounts.filter(d => !d.coupon_id);
+
+    const newDiscount: CartDiscount = {
+      id: 'COUPON_' + couponValidation.coupon_id,
+      type: couponValidation.discount_type === 'PERCENTAGE' ? 'percentage' : 'fixed',
+      value: Number(couponValidation.discount_value),
+      description: `Cupón ${couponValidation.coupon_code}`,
+      amount: Number(couponValidation.discount_amount),
+      coupon_id: couponValidation.coupon_id,
+      coupon_code: couponValidation.coupon_code,
+    };
+
+    const updatedDiscounts = [...withoutCoupon, newDiscount];
+
+    const newState: CartState = {
+      ...currentState,
+      appliedDiscounts: updatedDiscounts,
+      appliedCoupon: {
+        id: couponValidation.coupon_id,
+        code: couponValidation.coupon_code,
+        discount_type: couponValidation.discount_type,
+        discount_value: Number(couponValidation.discount_value),
+      },
+      summary: this.calculateSummary(currentState.items, updatedDiscounts),
+      updatedAt: new Date(),
+    };
+
+    this.cartState$.next(newState);
+    return of(newState);
+  }
+
+  /**
+   * Remove the applied coupon
+   */
+  removeCoupon(): Observable<CartState> {
+    const currentState = this.cartState$.value;
+    const withoutCoupon = currentState.appliedDiscounts.filter(d => !d.coupon_id);
+
+    const newState: CartState = {
+      ...currentState,
+      appliedDiscounts: withoutCoupon,
+      appliedCoupon: undefined,
+      summary: this.calculateSummary(currentState.items, withoutCoupon),
+      updatedAt: new Date(),
+    };
+
+    this.cartState$.next(newState);
+    return of(newState);
+  }
+
+  /**
+   * Get promotion IDs from applied discounts (for sending to backend)
+   */
+  getAppliedPromotionIds(): number[] {
+    return this.cartState$.value.appliedDiscounts
+      .filter(d => d.promotion_id && !d.coupon_id)
+      .map(d => d.promotion_id!);
+  }
+
+  /**
+   * Get the applied coupon data (for sending to backend)
+   */
+  getAppliedCoupon(): { coupon_id: number; coupon_code: string } | null {
+    return this.cartState$.value.appliedCoupon
+      ? { coupon_id: this.cartState$.value.appliedCoupon.id, coupon_code: this.cartState$.value.appliedCoupon.code }
+      : null;
+  }
+
+  /**
    * Get current cart state value
    */
   getCurrentState(): CartState {
@@ -500,6 +640,7 @@ export class PosCartService {
       value: request.value,
       description: request.description,
       amount: discountAmount,
+      promotion_id: request.promotion_id,
     };
 
     const updatedDiscounts = [...currentState.appliedDiscounts, newDiscount];

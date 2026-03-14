@@ -41,6 +41,13 @@ export const accountingRoutes: Routes = [
           ),
       },
       {
+        path: 'account-mappings',
+        loadComponent: () =>
+          import('./components/account-mappings/account-mappings.component').then(
+            (c) => c.AccountMappingsComponent,
+          ),
+      },
+      {
         path: 'reports',
         loadComponent: () =>
           import('./components/reports/reports.component').then(

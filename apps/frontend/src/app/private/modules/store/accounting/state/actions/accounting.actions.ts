@@ -13,6 +13,7 @@ import {
   IncomeStatementReport,
   GeneralLedgerReport,
   ReportQueryDto,
+  AccountMapping,
 } from '../../interfaces/accounting.interface';
 
 // ── Chart of Accounts ──────────────────────────────────────────────
@@ -270,6 +271,44 @@ export const setDateRange = createAction(
   props<{ date_from: string; date_to: string }>(),
 );
 export const clearFilters = createAction('[Accounting] Clear Filters');
+
+// ── Account Mappings ──────────────────────────────────────────────
+export const loadAccountMappings = createAction(
+  '[Accounting] Load Account Mappings',
+  props<{ prefix?: string; store_id?: number }>(),
+);
+export const loadAccountMappingsSuccess = createAction(
+  '[Accounting] Load Account Mappings Success',
+  props<{ mappings: AccountMapping[] }>(),
+);
+export const loadAccountMappingsFailure = createAction(
+  '[Accounting] Load Account Mappings Failure',
+  props<{ error: string }>(),
+);
+
+export const saveAccountMappings = createAction(
+  '[Accounting] Save Account Mappings',
+  props<{ mappings: Array<{ mapping_key: string; account_id: number }>; store_id?: number }>(),
+);
+export const saveAccountMappingsSuccess = createAction(
+  '[Accounting] Save Account Mappings Success',
+);
+export const saveAccountMappingsFailure = createAction(
+  '[Accounting] Save Account Mappings Failure',
+  props<{ error: string }>(),
+);
+
+export const resetAccountMappings = createAction(
+  '[Accounting] Reset Account Mappings',
+  props<{ store_id?: number }>(),
+);
+export const resetAccountMappingsSuccess = createAction(
+  '[Accounting] Reset Account Mappings Success',
+);
+export const resetAccountMappingsFailure = createAction(
+  '[Accounting] Reset Account Mappings Failure',
+  props<{ error: string }>(),
+);
 
 // ── Clear State ────────────────────────────────────────────────────
 export const clearAccountingState = createAction('[Accounting] Clear State');
