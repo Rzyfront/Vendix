@@ -1,3 +1,6 @@
+import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
+import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { UseGuards } from '@nestjs/common';
 import {
   Controller,
   Get,
@@ -19,6 +22,7 @@ import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto';
 import { QueryJournalEntryDto } from './dto/query-journal-entry.dto';
 
 @Controller('store/accounting/journal-entries')
+@UseGuards(PermissionsGuard)
 export class JournalEntriesController {
   constructor(
     private readonly journal_entries_service: JournalEntriesService,
@@ -27,6 +31,7 @@ export class JournalEntriesController {
   ) {}
 
   @Get()
+  @Permissions('store:accounting:journal_entries:read')
   async findAll(@Query() query_dto: QueryJournalEntryDto) {
     const result = await this.journal_entries_service.findAll(query_dto);
     return this.response_service.paginated(
@@ -38,12 +43,14 @@ export class JournalEntriesController {
   }
 
   @Get(':id')
+  @Permissions('store:accounting:journal_entries:read')
   async findOne(@Param('id') id: string) {
     const result = await this.journal_entries_service.findOne(+id);
     return this.response_service.success(result);
   }
 
   @Post()
+  @Permissions('store:accounting:journal_entries:create')
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() create_dto: CreateJournalEntryDto) {
     const result = await this.journal_entries_service.create(create_dto);
@@ -51,6 +58,7 @@ export class JournalEntriesController {
   }
 
   @Put(':id')
+  @Permissions('store:accounting:journal_entries:update')
   async update(
     @Param('id') id: string,
     @Body() update_dto: UpdateJournalEntryDto,
@@ -60,6 +68,7 @@ export class JournalEntriesController {
   }
 
   @Patch(':id/post')
+  @Permissions('store:accounting:journal_entries:post')
   @HttpCode(HttpStatus.OK)
   async postEntry(@Param('id') id: string) {
     const result = await this.journal_entry_flow_service.post(+id);
@@ -67,6 +76,7 @@ export class JournalEntriesController {
   }
 
   @Patch(':id/void')
+  @Permissions('store:accounting:journal_entries:void')
   @HttpCode(HttpStatus.OK)
   async voidEntry(@Param('id') id: string) {
     const result = await this.journal_entry_flow_service.void(+id);
@@ -74,6 +84,7 @@ export class JournalEntriesController {
   }
 
   @Delete(':id')
+  @Permissions('store:accounting:journal_entries:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id') id: string) {
     await this.journal_entries_service.remove(+id);

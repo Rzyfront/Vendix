@@ -2,6 +2,7 @@ import {
   IsArray,
   IsEmail,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   ValidateNested,
@@ -10,10 +11,10 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
 export class BulkCustomerItemDto {
-  @ApiProperty({ example: 'maria.garcia@email.com' })
+  @ApiPropertyOptional({ example: 'maria.garcia@email.com' })
+  @IsOptional()
   @IsEmail()
-  @IsNotEmpty()
-  email: string;
+  email?: string;
 
   @ApiProperty({ example: 'Maria' })
   @IsString()
@@ -25,10 +26,10 @@ export class BulkCustomerItemDto {
   @IsNotEmpty()
   last_name: string;
 
-  @ApiProperty({ example: '12345678' })
+  @ApiPropertyOptional({ example: '12345678' })
   @IsString()
-  @IsNotEmpty()
-  document_number: string;
+  @IsOptional()
+  document_number?: string;
 
   @ApiPropertyOptional({ example: 'CC' })
   @IsString()
@@ -39,6 +40,11 @@ export class BulkCustomerItemDto {
   @IsString()
   @IsOptional()
   phone?: string;
+
+  @ApiPropertyOptional({ example: 3 })
+  @IsNumber()
+  @IsOptional()
+  row_number?: number;
 }
 
 export class BulkCustomerUploadDto {
@@ -61,6 +67,9 @@ export class BulkCustomerUploadItemResultDto {
 
   @ApiPropertyOptional({ example: 'ConflictException' })
   error?: string;
+
+  @ApiPropertyOptional({ example: 3 })
+  row_number?: number;
 }
 
 export class BulkCustomerUploadResultDto {

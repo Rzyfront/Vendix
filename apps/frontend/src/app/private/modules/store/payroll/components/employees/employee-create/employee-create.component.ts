@@ -115,6 +115,12 @@ import { SelectorComponent, SelectorOption } from '../../../../../../../shared/c
                 [control]="employeeForm.get('department')"
                 placeholder="Ej: Ventas"
               ></app-input>
+
+              <app-selector
+                label="Centro de Costo"
+                formControlName="cost_center"
+                [options]="costCenterOptions"
+              ></app-selector>
             </div>
           </div>
 
@@ -262,6 +268,12 @@ export class EmployeeCreateComponent {
     { label: 'Nivel V (6.960%)', value: 5 },
   ];
 
+  costCenterOptions: SelectorOption[] = [
+    { label: 'Administrativo', value: 'administrative' },
+    { label: 'Operativo / Producción', value: 'operational' },
+    { label: 'Ventas', value: 'sales' },
+  ];
+
   constructor(
     private fb: FormBuilder,
     private store: Store
@@ -283,6 +295,7 @@ export class EmployeeCreateComponent {
       contract_type: ['indefinite', [Validators.required]],
       position: [''],
       department: [''],
+      cost_center: ['administrative'],
       // Compensation
       base_salary: [null, [Validators.required, Validators.min(1)]],
       payment_frequency: ['monthly', [Validators.required]],
@@ -348,6 +361,7 @@ export class EmployeeCreateComponent {
         contract_type: formValue.contract_type,
         position: formValue.position || undefined,
         department: formValue.department || undefined,
+        cost_center: formValue.cost_center || undefined,
         base_salary: Number(formValue.base_salary),
         payment_frequency: formValue.payment_frequency,
         bank_name: formValue.bank_name || undefined,
@@ -371,6 +385,7 @@ export class EmployeeCreateComponent {
       document_type: 'CC',
       contract_type: 'indefinite',
       payment_frequency: 'monthly',
+      cost_center: 'administrative',
       hire_date: new Date().toISOString().split('T')[0],
       arl_risk_level: 1,
     });

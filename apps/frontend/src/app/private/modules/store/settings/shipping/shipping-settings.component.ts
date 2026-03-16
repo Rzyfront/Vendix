@@ -33,9 +33,9 @@ import {
 } from './components/index';
 import { ModalComponent } from '../../../../../../app/shared/components/index';
 import {
-  DashboardTabsComponent,
-  DashboardTab,
-} from '../../dashboard/components/dashboard-tabs.component';
+  ScrollableTabsComponent,
+  ScrollableTab,
+} from '../../../../../../app/shared/components/index';
 
 @Component({
   selector: 'app-shipping-settings',
@@ -48,7 +48,7 @@ import {
     IconComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
-    DashboardTabsComponent,
+    ScrollableTabsComponent,
     ShippingMethodsModalComponent,
     ModalComponent,
     ZoneModalComponent,
@@ -92,7 +92,7 @@ import {
       </div>
 
       <!-- Tabs -->
-      <app-dashboard-tabs
+      <app-scrollable-tabs
         [tabs]="tabs"
         [activeTab]="active_tab()"
         (tabChange)="onTabChange($event)"
@@ -356,9 +356,9 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
 
   // Tabs configuration
-  readonly tabs: DashboardTab[] = [
-    { id: 'methods', label: 'Métodos de Envío', shortLabel: 'Métodos', icon: 'truck' },
-    { id: 'zones', label: 'Zonas y Tarifas', shortLabel: 'Zonas', icon: 'map-pin' },
+  readonly tabs: ScrollableTab[] = [
+    { id: 'methods', label: 'Métodos de Envío', icon: 'truck' },
+    { id: 'zones', label: 'Zonas y Tarifas', icon: 'map-pin' },
   ];
 
   readonly active_tab = signal<'methods' | 'zones'>('methods');

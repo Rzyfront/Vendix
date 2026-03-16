@@ -94,7 +94,7 @@ import { DomainFormModalComponent } from './components/domain-form-modal.compone
 
       <!-- List Component Container — mobile-first: surface styles only on desktop -->
       <div
-        class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border md:min-h-[600px]"
+        class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border"
       >
         <!-- Search Section — sticky on mobile -->
         <div

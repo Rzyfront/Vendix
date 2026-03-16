@@ -1,3 +1,6 @@
+import { PermissionsGuard } from '../../auth/guards/permissions.guard';
+import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { UseGuards } from '@nestjs/common';
 import {
   Controller,
   Get,
@@ -20,6 +23,7 @@ import { CreateExpenseCategoryDto } from './dto/create-category.dto';
 import { UpdateExpenseCategoryDto } from './dto/update-category.dto';
 
 @Controller('store/expenses')
+@UseGuards(PermissionsGuard)
 export class ExpensesController {
   constructor(
     private readonly expenses_service: ExpensesService,
@@ -28,6 +32,7 @@ export class ExpensesController {
   ) { }
 
   @Get()
+  @Permissions('store:expenses:read')
   async findAll(@Query() query_dto: QueryExpenseDto) {
     const result = await this.expenses_service.findAll(query_dto);
     return this.response_service.paginated(
@@ -41,12 +46,14 @@ export class ExpensesController {
   // --- Static Routes (MUST be before :id) ---
 
   @Get('categories')
+  @Permissions('store:expenses:read')
   async findAllCategories() {
     const result = await this.expenses_service.findAllCategories();
     return this.response_service.success(result);
   }
 
   @Post('categories')
+  @Permissions('store:expenses:create')
   @HttpCode(HttpStatus.CREATED)
   async createCategory(@Body() create_dto: CreateExpenseCategoryDto) {
     const result = await this.expenses_service.createCategory(create_dto);
@@ -54,6 +61,7 @@ export class ExpensesController {
   }
 
   @Put('categories/:id')
+  @Permissions('store:expenses:update')
   async updateCategory(
     @Param('id') id: string,
     @Body() update_dto: UpdateExpenseCategoryDto,
@@ -63,6 +71,7 @@ export class ExpensesController {
   }
 
   @Delete('categories/:id')
+  @Permissions('store:expenses:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
   async removeCategory(@Param('id') id: string) {
     await this.expenses_service.removeCategory(+id);
@@ -70,6 +79,7 @@ export class ExpensesController {
   }
 
   @Get('summary')
+  @Permissions('store:expenses:read')
   async getSummary(
     @Query('date_from') date_from?: string,
     @Query('date_to') date_to?: string,
@@ -87,12 +97,14 @@ export class ExpensesController {
   // --- Parameter Routes (MUST be last) ---
 
   @Get(':id')
+  @Permissions('store:expenses:read')
   async findOne(@Param('id') id: string) {
     const result = await this.expenses_service.findOne(+id);
     return this.response_service.success(result);
   }
 
   @Post()
+  @Permissions('store:expenses:create')
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() create_dto: CreateExpenseDto) {
     const result = await this.expenses_service.create(create_dto);
@@ -103,6 +115,7 @@ export class ExpensesController {
   }
 
   @Put(':id')
+  @Permissions('store:expenses:update')
   async update(@Param('id') id: string, @Body() update_dto: UpdateExpenseDto) {
     const result = await this.expenses_service.update(+id, update_dto);
     return this.response_service.success(
@@ -112,6 +125,7 @@ export class ExpensesController {
   }
 
   @Post(':id/approve')
+  @Permissions('store:expenses:approve')
   @HttpCode(HttpStatus.OK)
   async approve(@Param('id') id: string) {
     const result = await this.expense_flow_service.approve(+id);
@@ -122,6 +136,7 @@ export class ExpensesController {
   }
 
   @Post(':id/reject')
+  @Permissions('store:expenses:reject')
   @HttpCode(HttpStatus.OK)
   async reject(@Param('id') id: string) {
     const result = await this.expense_flow_service.reject(+id);
@@ -132,6 +147,7 @@ export class ExpensesController {
   }
 
   @Post(':id/pay')
+  @Permissions('store:expenses:pay')
   @HttpCode(HttpStatus.OK)
   async pay(@Param('id') id: string) {
     const result = await this.expense_flow_service.pay(+id);
@@ -142,6 +158,7 @@ export class ExpensesController {
   }
 
   @Post(':id/cancel')
+  @Permissions('store:expenses:cancel')
   @HttpCode(HttpStatus.OK)
   async cancel(@Param('id') id: string) {
     const result = await this.expense_flow_service.cancel(+id);
@@ -152,6 +169,7 @@ export class ExpensesController {
   }
 
   @Delete(':id')
+  @Permissions('store:expenses:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id') id: string) {
     await this.expenses_service.remove(+id);

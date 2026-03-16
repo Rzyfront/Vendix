@@ -21,28 +21,22 @@
                         <h2 class="text-base font-bold text-gray-900">Información General</h2>
                     </div>
 
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-                        <!-- Name -->
-                        <div class="md:col-span-2">
+                    <div class="space-y-3 md:space-y-4">
+                        <!-- Row 1: Nombre | SKU | Slug (3 cols) -->
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
                             <app-input label="Nombre del Producto" formControlName="name"
                                 placeholder="Ej. Camiseta Algodón Premium" [error]="getErrorMessage('name')"
-                                [required]="true"></app-input>
-                        </div>
+                                [required]="true" customWrapperClass="!mt-0"></app-input>
 
-                        <!-- SKU -->
-                        <div>
                             <app-input label="SKU" formControlName="sku" placeholder="Ej. CAM-001"
-                                [error]="getErrorMessage('sku')"></app-input>
-                        </div>
+                                [error]="getErrorMessage('sku')" customWrapperClass="!mt-0"></app-input>
 
-                        <!-- Slug -->
-                        <div>
                             <app-input label="Slug (URL)" formControlName="slug" placeholder="camiseta-algodon-premium"
-                                [error]="getErrorMessage('slug')"></app-input>
+                                [error]="getErrorMessage('slug')" customWrapperClass="!mt-0"></app-input>
                         </div>
 
-                        <!-- Description + AI Generator -->
-                        <div class="md:col-span-2 ai-description-wrapper"
+                        <!-- Row 2: Descripción (full width) -->
+                        <div class="ai-description-wrapper"
                             [class.ai-generating]="isGeneratingDescription()">
                             <div class="flex items-center justify-between mb-1">
                                 <label class="block text-sm font-medium text-text-secondary ai-label">Descripción</label>
@@ -81,67 +75,48 @@
                         <h2 class="text-base font-bold text-gray-900">Precios y Rentabilidad</h2>
                     </div>
 
-                    <!-- Pricing Type Selector -->
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div class="md:col-span-2">
-                            <app-selector label="Tipo de Venta" [options]="pricingTypeOptions"
-                                formControlName="pricing_type"
-                                placeholder="Seleccionar tipo de venta"
-                                helpText="Define si el producto se vende por unidad o por peso (kg)">
-                            </app-selector>
-                        </div>
-                    </div>
-
-                    <!-- Weight pricing info banner -->
-                    <div *ngIf="productForm.get('pricing_type')?.value === 'weight'"
-                        class="flex items-center gap-2 p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 text-sm">
-                        <app-icon name="info" size="16" class="text-blue-600 shrink-0"></app-icon>
-                        <span>Los precios se interpretan <strong>por unidad de peso (kg)</strong>. El precio base es el precio por kilogramo.</span>
-                    </div>
-
-                    <!-- First Row: Core pricing -->
-                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-                        <!-- Cost Price -->
+                    <!-- Grid 3x2: Pricing compacto -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                        <!-- Row 1: Costo | Margen | Precio Base -->
                         <app-input
                             [label]="productForm.get('pricing_type')?.value === 'weight' ? 'Costo por kg' : 'Precio de Costo'"
                             type="number" formControlName="cost_price"
                             [error]="getErrorMessage('cost_price')" prefix="$" placeholder="0.00"
-                            [helperText]="productForm.get('pricing_type')?.value === 'weight' ? 'Costo por kilogramo' : 'Inversión por unidad'"
+                            tooltipText="Precio al que adquieres el producto. Se usa para calcular la rentabilidad."
                             customWrapperClass="!mt-0"></app-input>
 
-                        <!-- Margin -->
                         <app-input label="Margen (%)" type="number" formControlName="profit_margin"
                             [error]="getErrorMessage('profit_margin')" suffix="%" placeholder="0.00"
-                            helperText="Rentabilidad deseada" customWrapperClass="!mt-0"></app-input>
+                            tooltipText="Porcentaje de ganancia deseado sobre el costo. Ajusta automáticamente el precio base."
+                            customWrapperClass="!mt-0"></app-input>
 
-                        <!-- Base Price (Sale Price before tax) -->
                         <app-input
                             [label]="productForm.get('pricing_type')?.value === 'weight' ? 'Precio por kg (PVP)' : 'Precio Base (PVP)'"
                             type="number" formControlName="base_price"
                             [error]="getErrorMessage('base_price')" prefix="$" placeholder="0.00"
-                            [helperText]="productForm.get('pricing_type')?.value === 'weight' ? 'Precio por kilogramo antes de impuestos' : 'Precio antes de impuestos'"
+                            tooltipText="Precio de venta antes de impuestos. Se calcula automáticamente si defines costo + margen."
                             [required]="true"
                             customWrapperClass="!mt-0"></app-input>
-                    </div>
 
-                    <!-- Second Row: Taxes and Final Result -->
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 pt-4 md:pt-6 border-t border-gray-100">
-                        <!-- Tax Categories (Multi-select) -->
-                        <div class="md:col-span-2">
-                            <div class="flex gap-2 items-end h-full">
-                                <app-multi-selector class="flex-1" label="Impuestos Aplicables"
-                                    [options]="taxCategoryOptions" formControlName="tax_category_ids"
-                                    placeholder="Seleccionar impuestos..."
-                                    helpText="Afectan al precio final"></app-multi-selector>
+                        <!-- Row 2: Tipo de Venta | Impuestos | Precio Final -->
+                        <app-selector label="Tipo de Venta" [options]="pricingTypeOptions"
+                            formControlName="pricing_type"
+                            placeholder="Seleccionar tipo"
+                            tooltipText="Define si el producto se vende por unidad o por peso (kg). Afecta cómo se interpretan los precios.">
+                        </app-selector>
 
-                                <app-button variant="outline" (clicked)="isTaxCategoryCreateOpen = true"
-                                    customClasses="!w-[42px] !h-[42px] !p-0 flex items-center justify-center mb-[26px]">
-                                    <app-icon name="plus" size="20"></app-icon>
-                                </app-button>
-                            </div>
+                        <div class="flex gap-2 items-end h-full">
+                            <app-multi-selector class="flex-1" label="Impuestos Aplicables"
+                                [options]="taxCategoryOptions" formControlName="tax_category_ids"
+                                placeholder="Seleccionar impuestos..."
+                                helpText="Afectan al precio final"></app-multi-selector>
+
+                            <app-button variant="outline" (clicked)="isTaxCategoryCreateOpen = true"
+                                customClasses="!w-[42px] !h-[42px] !p-0 flex items-center justify-center mb-[26px]">
+                                <app-icon name="plus" size="20"></app-icon>
+                            </app-button>
                         </div>
 
-                        <!-- Calculated Price with Tax (Visual Result) -->
                         <div class="flex flex-col justify-end h-full">
                             <div class="space-y-1.5">
                                 <label class="block text-sm font-bold text-text-primary">Precio Final (PVP + Imp)</label>
@@ -244,124 +219,102 @@
                         <h2 class="text-base font-bold text-gray-900">Disponibilidad y Estado</h2>
                     </div>
 
-                    <div class="space-y-4 md:space-y-6">
-                        <!-- First Row: Status & Stock -->
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <!-- Product State -->
-                            <div class="bg-surface rounded-xl p-4 border border-border shadow-sm">
-                                <h3 class="text-xs font-bold text-text-secondary uppercase tracking-wider mb-3">
-                                    Estado del Producto</h3>
-                                <div class="flex flex-wrap gap-2">
-                                    <button *ngFor="let status of productStateOptions" type="button"
-                                        (click)="updateProductState(status)"
-                                        [disabled]="productForm.get('state')?.value === status"
-                                        [class.bg-primary-600]="productForm.get('state')?.value === status"
-                                        [class.text-white]="productForm.get('state')?.value === status"
-                                        [class.bg-bg]="productForm.get('state')?.value !== status"
-                                        [class.text-text-secondary]="productForm.get('state')?.value !== status"
-                                        class="px-3 py-1.5 md:px-4 md:py-2 text-xs border border-border rounded-lg font-bold disabled:opacity-100 transition-all hover:bg-surface-hover">
-                                        {{ formatStatus(status) }}
-                                    </button>
-                                </div>
-                            </div>
+                    <!-- Grid 2x2: Estado, Stock, Variantes, Inventario -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Row 1, Col 1: Estado -->
+                        <app-input-buttons
+                            label="Estado"
+                            [options]="productStateButtonOptions"
+                            formControlName="state"
+                            (valueChange)="onStateChange($event)"
+                            customWrapperClass="!mt-0">
+                        </app-input-buttons>
 
-                            <!-- Track Inventory Toggle + Stock -->
-                            <div class="space-y-3">
-                                <app-setting-toggle formControlName="track_inventory"
-                                    label="Controlar inventario"
-                                    [description]="productForm.get('track_inventory')?.value
-                                        ? 'Se controla el stock de este producto'
-                                        : 'Producto bajo pedido — siempre disponible para venta'">
-                                </app-setting-toggle>
-
-                                @if (productForm.get('track_inventory')?.value) {
-                                    <!-- Stock: info panel when variants, editable input when no variants -->
-                                    @if (hasVariants) {
-                                        <div class="p-3 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800 animate-fadeIn">
-                                            <div class="flex items-center gap-2 font-medium mb-1">
-                                                <app-icon name="info" size="16"></app-icon>
-                                                Stock basado en variantes
-                                            </div>
-                                            <p class="text-blue-600 text-xs">
-                                                El stock se calcula como la suma de todas las variantes.
-                                                Asigna stock individualmente a cada variante.
-                                            </p>
-                                            @if (isEditMode()) {
-                                                <div class="mt-2 font-semibold text-blue-900">
-                                                    Stock total: {{ totalVariantStock }} unidades
-                                                </div>
-                                            }
-                                        </div>
+                        <!-- Row 1, Col 2: Stock (condicional) -->
+                        <div class="animate-fadeIn">
+                            @if (productForm.get('track_inventory')?.value) {
+                                @if (hasVariants) {
+                                    <!-- Stock basado en variantes -->
+                                    <div class="flex items-center gap-2 px-3 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800 min-h-[42px]">
+                                        <app-icon name="layers" size="16" class="text-blue-600 shrink-0"></app-icon>
+                                        <span class="font-medium text-xs">Stock basado en variantes</span>
+                                        @if (isEditMode()) {
+                                            <span class="ml-auto font-bold text-blue-900 text-sm">{{ totalVariantStock }} uds</span>
+                                        }
+                                    </div>
+                                } @else {
+                                    @if (!isEditMode()) {
+                                        <app-input label="Stock Inicial" type="number"
+                                            formControlName="stock_quantity"
+                                            [error]="getErrorMessage('stock_quantity')" placeholder="0"
+                                            tooltipText="Cantidad inicial de unidades disponibles para venta."
+                                            customWrapperClass="!mt-0"></app-input>
                                     } @else {
-                                        <div class="animate-fadeIn">
-                                            <!-- Create mode: editable initial stock -->
-                                            <div *ngIf="!isEditMode()">
-                                                <app-input label="Stock Inicial" type="number"
-                                                    formControlName="stock_quantity"
-                                                    [error]="getErrorMessage('stock_quantity')" placeholder="0"
-                                                    helperText="Cantidad inicial disponible" customWrapperClass="!mt-0"
-                                                    [tooltipText]="'Define la cantidad inicial de unidades disponibles.'"></app-input>
-                                            </div>
-
-                                            <!-- Edit mode: read-only, click to adjust -->
-                                            <div *ngIf="isEditMode()" class="relative">
-                                                <div (click)="openStockAdjustment()" class="cursor-pointer group"
-                                                    title="Click para ajustar stock">
-                                                    <app-input label="Stock Actual" type="number"
-                                                        formControlName="stock_quantity" [disabled]="true"
-                                                        placeholder="Click para ajustar stock"
-                                                        class="opacity-75 cursor-pointer" [suffixIcon]="true"
-                                                        customWrapperClass="!mt-0"
-                                                        [tooltipText]="'El stock no se puede editar directamente. Haz clic para ajustar.'">
-                                                        <ng-container slot="suffix-icon">
-                                                            <app-icon name="plus" size="16"
-                                                                class="text-text-muted group-hover:text-primary-600"></app-icon>
-                                                        </ng-container>
-                                                    </app-input>
-                                                </div>
-                                            </div>
+                                        <div (click)="openStockAdjustment()" class="cursor-pointer group">
+                                            <app-input label="Stock Actual" type="number"
+                                                formControlName="stock_quantity" [disabled]="true"
+                                                placeholder="Click para ajustar"
+                                                class="opacity-75 cursor-pointer" [suffixIcon]="true"
+                                                customWrapperClass="!mt-0"
+                                                tooltipText="El stock no se edita directamente. Haz clic para crear un ajuste.">
+                                                <ng-container slot="suffix-icon">
+                                                    <app-icon name="plus" size="16"
+                                                        class="text-text-muted group-hover:text-primary-600"></app-icon>
+                                                </ng-container>
+                                            </app-input>
                                         </div>
                                     }
-                                } @else {
-                                    <div class="p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 animate-fadeIn">
-                                        <div class="flex items-center gap-2 font-medium mb-1">
-                                            <app-icon name="info" size="16"></app-icon>
-                                            Producto bajo pedido
-                                        </div>
-                                        <p class="text-amber-600 text-xs">
-                                            Este producto siempre estará disponible para venta sin control de stock.
-                                        </p>
-                                    </div>
                                 }
-                            </div>
+                            } @else {
+                                <!-- Producto bajo pedido -->
+                                <div class="flex items-center gap-2 px-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 min-h-[42px]">
+                                    <app-icon name="info" size="16" class="text-amber-600 shrink-0"></app-icon>
+                                    <span class="font-medium text-xs">Producto bajo pedido — siempre disponible</span>
+                                </div>
+                            }
                         </div>
 
-                        <!-- Variants Toggle -->
-                        <div class="pt-2 border-t border-border mt-2">
-                            <app-setting-toggle [ngModel]="hasVariants" (ngModelChange)="toggleVariants($event)"
-                                [ngModelOptions]="{standalone: true}" label="Este producto tiene variantes"
-                                description="Agrega opciones como tamaño, color o material">
+                        <!-- Row 2, Col 1: Variantes -->
+                        <app-setting-toggle [ngModel]="hasVariants" (ngModelChange)="toggleVariants($event)"
+                            [ngModelOptions]="{standalone: true}" label="Este producto tiene variantes"
+                            description="Agrega opciones como tamaño, color o material">
+                        </app-setting-toggle>
+
+                        <!-- Row 2, Col 2: Control de inventario -->
+                        <app-setting-toggle formControlName="track_inventory"
+                            label="Controlar inventario"
+                            [description]="productForm.get('track_inventory')?.value
+                                ? 'Se controla el stock de este producto'
+                                : 'Producto bajo pedido — siempre disponible para venta'">
+                        </app-setting-toggle>
+                    </div>
+
+                    <!-- E-commerce y Ofertas -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-gray-100">
+                        <app-setting-toggle formControlName="available_for_ecommerce"
+                            label="Disponible en E-commerce" description="Visible en tu tienda online">
+                        </app-setting-toggle>
+
+                        <div class="space-y-3">
+                            <app-setting-toggle formControlName="is_on_sale" label="Producto en Oferta"
+                                description="Activa un precio promocional">
                             </app-setting-toggle>
-                        </div>
 
-                        <!-- Second Row: Toggles -->
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <!-- Ecommerce Visibility -->
-                            <app-setting-toggle formControlName="available_for_ecommerce"
-                                label="Disponible en E-commerce" description="Visible en tu tienda online">
-                            </app-setting-toggle>
-
-                            <!-- Offers Section -->
-                            <div class="space-y-3">
-                                <app-setting-toggle formControlName="is_on_sale" label="Producto en Oferta"
-                                    description="Activa un precio promocional">
-                                </app-setting-toggle>
-
-                                <div *ngIf="productForm.get('is_on_sale')?.value" class="animate-fadeIn pl-3">
-                                    <app-input label="Precio de Oferta" type="number"
+                            <div *ngIf="productForm.get('is_on_sale')?.value"
+                                class="animate-fadeIn mt-2 relative overflow-hidden rounded-xl p-[1px] bg-gradient-to-r from-rose-500 via-orange-400 to-amber-400 shadow-lg shadow-rose-500/20">
+                                <div class="bg-white rounded-[11px] p-3 space-y-2">
+                                    <div class="flex items-center gap-1.5">
+                                        <app-icon name="flame" size="14" class="text-rose-500"></app-icon>
+                                        <span class="text-[11px] font-bold uppercase tracking-wide bg-gradient-to-r from-rose-600 to-orange-500 bg-clip-text text-transparent">
+                                            Precio de Oferta
+                                        </span>
+                                    </div>
+                                    <app-input type="number"
                                         formControlName="sale_price" [error]="getErrorMessage('sale_price')"
                                         prefix="$" placeholder="0.00"
-                                        helperText="Se mostrará junto al precio base"></app-input>
+                                        customWrapperClass="!mt-0"
+                                        customInputClass="!border-rose-200 !bg-rose-50/50 focus:!border-rose-400 !text-lg !font-bold !text-rose-600"></app-input>
+                                    <p class="text-[10px] text-rose-400 font-medium italic">Se mostrará como precio promocional</p>
                                 </div>
                             </div>
                         </div>
@@ -554,6 +507,50 @@
                         <h2 class="text-base font-bold text-gray-900">Inventario / Stock</h2>
                     </div>
 
+                    <!-- Estado del Producto -->
+                    <div class="space-y-2 mb-4 p-3 bg-bg rounded-xl border border-border">
+                        <p class="text-[10px] text-text-muted uppercase font-bold tracking-wider">Estado del Producto</p>
+                        <!-- Estado -->
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs text-text-secondary">Estado</span>
+                            <span class="text-[11px] font-bold px-2 py-0.5 rounded-full"
+                                [class]="productForm.get('state')?.value === 'active' ? 'bg-green-100 text-green-800' :
+                                         productForm.get('state')?.value === 'inactive' ? 'bg-gray-100 text-gray-600' :
+                                         'bg-red-100 text-red-800'">
+                                {{ formatStatus(productForm.get('state')?.value) }}
+                            </span>
+                        </div>
+                        <!-- Tipo de venta -->
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs text-text-secondary">Tipo de venta</span>
+                            <div class="flex items-center gap-1.5 text-xs font-medium text-text-primary">
+                                <app-icon [name]="productForm.get('pricing_type')?.value === 'weight' ? 'weight' : 'hash'" size="13" class="text-primary-600"></app-icon>
+                                {{ productForm.get('pricing_type')?.value === 'weight' ? 'Por peso (kg)' : 'Por unidad' }}
+                            </div>
+                        </div>
+                        <!-- Variantes -->
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs text-text-secondary">Variantes</span>
+                            @if (hasVariants) {
+                                <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
+                                    {{ generatedVariants.length }} variante{{ generatedVariants.length !== 1 ? 's' : '' }}
+                                </span>
+                            } @else {
+                                <span class="text-xs text-text-muted">Sin variantes</span>
+                            }
+                        </div>
+                        <!-- Control inventario -->
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs text-text-secondary">Control inventario</span>
+                            <div class="flex items-center gap-1.5">
+                                <div class="w-2 h-2 rounded-full" [class]="productForm.get('track_inventory')?.value ? 'bg-green-500' : 'bg-gray-300'"></div>
+                                <span class="text-xs font-medium" [class]="productForm.get('track_inventory')?.value ? 'text-green-700' : 'text-text-muted'">
+                                    {{ productForm.get('track_inventory')?.value ? 'Activo' : 'Inactivo' }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
                     @if (!productForm.get('track_inventory')?.value) {
                         <div class="p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
                             <div class="flex items-center gap-2 font-medium mb-1">
@@ -720,6 +717,26 @@
 
             <!-- Variants UI -->
             <div class="space-y-4 md:space-y-5">
+                <!-- Quick Attribute Buttons -->
+                <div class="flex flex-wrap gap-2">
+                    <button type="button" (click)="addQuickAttribute('Color')"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-dashed border-primary/30 text-primary-600 bg-primary/5 hover:bg-primary/10 hover:border-primary/50 transition-colors">
+                        <app-icon name="plus" size="12"></app-icon> Color
+                    </button>
+                    <button type="button" (click)="addQuickAttribute('Talla')"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-dashed border-primary/30 text-primary-600 bg-primary/5 hover:bg-primary/10 hover:border-primary/50 transition-colors">
+                        <app-icon name="plus" size="12"></app-icon> Talla
+                    </button>
+                    <button type="button" (click)="addQuickAttribute('Material')"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-dashed border-primary/30 text-primary-600 bg-primary/5 hover:bg-primary/10 hover:border-primary/50 transition-colors">
+                        <app-icon name="plus" size="12"></app-icon> Material
+                    </button>
+                    <button type="button" (click)="addAttribute()"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-dashed border-gray-300 text-gray-600 bg-gray-50 hover:bg-gray-100 hover:border-gray-400 transition-colors">
+                        <app-icon name="plus" size="12"></app-icon> Personalizado
+                    </button>
+                </div>
+
                 <!-- Attribute Manager -->
                 <div class="space-y-3 md:space-y-4">
                     <div *ngFor="let attr of variantAttributes; let i = index; trackBy: trackByIndex"
@@ -738,14 +755,20 @@
                                         class="inline-flex items-center px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 text-xs font-medium">
                                         {{ val }}
                                         <button type="button" (click)="removeAttributeValue(i, j)"
-                                            class="ml-1 text-primary/70 hover:text-primary">×</button>
+                                            class="ml-1 text-primary/70 hover:text-primary">&times;</button>
                                     </span>
                                     <input type="text"
                                         class="flex-1 border-none p-0 text-sm focus:ring-0 focus:outline-none min-w-[100px] bg-transparent text-text-primary placeholder:text-text-muted"
-                                        placeholder="Agregar valor..."
+                                        [placeholder]="attr.values.length === 0 ? 'Escribe un valor y presiona Enter (ej: Rojo, Azul)' : 'Agregar valor...'"
                                         (keydown.enter)="$event.preventDefault(); addAttributeValue(i, $event)"
                                         (blur)="addAttributeValue(i, $event)">
                                 </div>
+                                @if (attr.values.length === 0) {
+                                    <p class="text-[10px] text-text-muted mt-1 flex items-center gap-1">
+                                        <app-icon name="info" size="10"></app-icon>
+                                        Presiona Enter para agregar cada valor
+                                    </p>
+                                }
                             </div>
 
                             <button (click)="removeAttribute(i)"
@@ -762,89 +785,116 @@
                     </button>
                 </div>
 
-                <!-- Generated Variants - Mobile Cards View -->
-                <div *ngIf="generatedVariants.length > 0" class="lg:hidden space-y-3">
-                    <p class="text-xs font-bold text-text-muted uppercase tracking-wider">{{ generatedVariants.length }} Variantes</p>
+                <!-- Preview + Generate Button -->
+                @if (variantAttributes.length > 0 && previewVariantCount > 0) {
+                    <div class="flex items-center justify-between p-3 bg-primary/5 border border-primary/15 rounded-xl">
+                        <div class="flex items-center gap-2">
+                            <app-icon name="layers" size="16" class="text-primary-600"></app-icon>
+                            <span class="text-sm font-medium text-primary-700">
+                                Se generarán <strong>{{ previewVariantCount }}</strong> variantes
+                            </span>
+                        </div>
+                        <app-button variant="primary" size="sm" (clicked)="generateVariants(true)">
+                            <app-icon slot="icon" name="zap" [size]="14"></app-icon>
+                            Generar Variantes
+                        </app-button>
+                    </div>
+                }
+
+                <!-- Bulk Actions Bar -->
+                @if (generatedVariants.length > 0) {
+                    <div class="flex flex-wrap gap-2 p-3 bg-gray-50 border border-gray-200 rounded-xl">
+                        <span class="text-xs font-bold text-text-muted uppercase tracking-wider self-center mr-2">
+                            {{ generatedVariants.length }} variantes
+                        </span>
+                        <app-button variant="outline" size="sm" (clicked)="applyBasePriceToAll()">
+                            <app-icon slot="icon" name="dollar-sign" [size]="14"></app-icon>
+                            Aplicar precio base a todas
+                        </app-button>
+                        <app-button variant="outline" size="sm" (clicked)="applyBaseCostToAll()">
+                            <app-icon slot="icon" name="calculator" [size]="14"></app-icon>
+                            Aplicar costo base a todas
+                        </app-button>
+                    </div>
+                }
+
+                <!-- Generated Variants - Mobile Cards View (Collapsible) -->
+                <div *ngIf="generatedVariants.length > 0" class="lg:hidden space-y-2">
                     <div *ngFor="let variant of generatedVariants; let idx = index"
-                        class="p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-3">
-                        <!-- Header: Image + Name -->
-                        <div class="flex items-center gap-3">
-                            <div (click)="triggerVariantImageUpload(idx)"
-                                class="relative flex-shrink-0 w-12 h-12 rounded-lg border border-gray-200 bg-white cursor-pointer group">
+                        class="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
+                        <!-- Collapsed Header (always visible) -->
+                        <button type="button" (click)="toggleVariantExpand(idx)"
+                            class="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-100 transition-colors">
+                            <div (click)="$event.stopPropagation(); triggerVariantImageUpload(idx)"
+                                class="relative flex-shrink-0 w-10 h-10 rounded-lg border border-gray-200 bg-white cursor-pointer group">
                                 <img *ngIf="variant.image_url" [src]="variant.image_url"
                                     class="w-full h-full object-cover rounded-lg" (error)="onImageError($event)">
                                 <div *ngIf="!variant.image_url"
-                                    class="w-full h-full flex flex-col items-center justify-center rounded-lg
-                                      border-2 border-dashed border-gray-300 bg-gray-50/80
-                                      group-hover:border-primary/40 group-hover:bg-primary/5 transition-colors">
-                                    <app-icon name="image-plus" size="16" class="text-gray-400 group-hover:text-primary/60 transition-colors"></app-icon>
+                                    class="w-full h-full flex items-center justify-center rounded-lg">
+                                    <app-icon name="package" size="14" class="text-gray-400"></app-icon>
                                 </div>
-                                <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity
-                                    flex items-center justify-center rounded-lg overflow-hidden">
-                                    <app-icon name="camera" size="14" class="text-white"></app-icon>
-                                </div>
-                                <button *ngIf="variant.image_url" type="button"
-                                    (click)="$event.stopPropagation(); removeVariantImage(idx)"
-                                    aria-label="Eliminar imagen"
-                                    class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full
-                                      flex items-center justify-center text-[10px] font-bold shadow-md z-10">
-                                    &times;
-                                </button>
                             </div>
                             <div class="flex-1 min-w-0">
-                                <p class="font-bold text-sm text-gray-900 truncate">{{ variant.name }}</p>
-                                <div class="flex gap-1 mt-0.5">
+                                <div class="flex flex-wrap gap-1">
                                     <span *ngFor="let item of variant.attributes | keyvalue"
-                                        class="text-[10px] text-gray-500 bg-white px-1.5 py-0.5 rounded border border-gray-200">
-                                        {{ item.value }}
+                                        class="text-xs text-gray-700 font-medium">
+                                        {{ item.key }}: {{ item.value }}
                                     </span>
                                 </div>
                             </div>
-                        </div>
-                        <!-- Fields Grid -->
-                        <div class="grid grid-cols-2 gap-3">
-                            <app-input label="Costo" type="number" size="sm" [(ngModel)]="variant.cost_price"
-                                [ngModelOptions]="{standalone: true}" placeholder="0.00"
-                                (ngModelChange)="onVariantCostOrMarginChange(variant)"
-                                customWrapperClass="!mt-0" prefix="$"></app-input>
-                            <app-input label="Margen (%)" type="number" size="sm" [(ngModel)]="variant.profit_margin"
-                                [ngModelOptions]="{standalone: true}" placeholder="0.00"
-                                (ngModelChange)="onVariantCostOrMarginChange(variant)"
-                                customWrapperClass="!mt-0" suffix="%"></app-input>
-                            <app-input label="Precio Venta" type="number" size="sm" [(ngModel)]="variant.price"
-                                [ngModelOptions]="{standalone: true}" placeholder="0.00"
-                                (ngModelChange)="onVariantPriceChange(variant)"
-                                customWrapperClass="!mt-0" prefix="$"></app-input>
-                            <div class="flex flex-col justify-end">
-                                <label class="block text-xs font-medium text-text-secondary mb-1">Precio Final</label>
-                                <div class="h-[34px] px-2 flex items-center bg-surface border border-primary-500/20 rounded-lg text-sm font-bold text-primary-600">
-                                    {{ getVariantPriceWithTax(variant) | currency }}
+                            <span class="text-sm font-bold text-primary-600 whitespace-nowrap">
+                                {{ getVariantPriceWithTax(variant) | currency }}
+                            </span>
+                            <app-icon [name]="expandedVariantIndex() === idx ? 'chevron-up' : 'chevron-down'"
+                                size="16" class="text-gray-400 flex-shrink-0"></app-icon>
+                        </button>
+                        <!-- Expanded Fields -->
+                        @if (expandedVariantIndex() === idx) {
+                            <div class="px-3 pb-3 space-y-3 border-t border-gray-200 pt-3">
+                                <div class="grid grid-cols-2 gap-3">
+                                    <app-input label="Costo" type="number" size="sm" [(ngModel)]="variant.cost_price"
+                                        [ngModelOptions]="{standalone: true}" placeholder="0.00"
+                                        (ngModelChange)="onVariantCostOrMarginChange(variant)"
+                                        customWrapperClass="!mt-0" prefix="$"></app-input>
+                                    <app-input label="Margen (%)" type="number" size="sm" [(ngModel)]="variant.profit_margin"
+                                        [ngModelOptions]="{standalone: true}" placeholder="0.00"
+                                        (ngModelChange)="onVariantCostOrMarginChange(variant)"
+                                        customWrapperClass="!mt-0" suffix="%"></app-input>
+                                    <app-input label="Precio Venta" type="number" size="sm" [(ngModel)]="variant.price"
+                                        [ngModelOptions]="{standalone: true}" placeholder="0.00"
+                                        (ngModelChange)="onVariantPriceChange(variant)"
+                                        customWrapperClass="!mt-0" prefix="$"></app-input>
+                                    <div class="flex flex-col justify-end">
+                                        <label class="block text-xs font-medium text-text-secondary mb-1">Precio Final</label>
+                                        <div class="h-[34px] px-2 flex items-center bg-surface border border-primary-500/20 rounded-lg text-sm font-bold text-primary-600">
+                                            {{ getVariantPriceWithTax(variant) | currency }}
+                                        </div>
+                                    </div>
+                                    @if (productForm.get('track_inventory')?.value) {
+                                      <app-input label="Stock" type="number" size="sm" [(ngModel)]="variant.stock"
+                                          [ngModelOptions]="{standalone: true}" placeholder="0"
+                                          customWrapperClass="!mt-0"></app-input>
+                                    } @else {
+                                      <div class="flex flex-col justify-end">
+                                        <label class="block text-xs font-medium text-text-secondary mb-1">Stock</label>
+                                        <div class="h-[34px] px-2 flex items-center bg-blue-50 border border-blue-200 rounded-lg text-xs font-medium text-blue-600">
+                                          Disponible
+                                        </div>
+                                      </div>
+                                    }
+                                    <app-input label="SKU" type="text" size="sm" [(ngModel)]="variant.sku"
+                                        [ngModelOptions]="{standalone: true}" placeholder="SKU"
+                                        customWrapperClass="!mt-0"></app-input>
+                                </div>
+                                <div class="flex justify-end pt-2 border-t border-gray-100">
+                                    <button type="button" (click)="removeVariant(idx)"
+                                        class="flex items-center gap-1 text-xs text-destructive hover:text-destructive/80 font-medium py-1">
+                                        <app-icon name="trash-2" size="14"></app-icon>
+                                        Eliminar variante
+                                    </button>
                                 </div>
                             </div>
-                            @if (productForm.get('track_inventory')?.value) {
-                              <app-input label="Stock" type="number" size="sm" [(ngModel)]="variant.stock"
-                                  [ngModelOptions]="{standalone: true}" placeholder="0"
-                                  customWrapperClass="!mt-0"></app-input>
-                            } @else {
-                              <div class="flex flex-col justify-end">
-                                <label class="block text-xs font-medium text-text-secondary mb-1">Stock</label>
-                                <div class="h-[34px] px-2 flex items-center bg-blue-50 border border-blue-200 rounded-lg text-xs font-medium text-blue-600">
-                                  Disponible
-                                </div>
-                              </div>
-                            }
-                            <app-input label="SKU" type="text" size="sm" [(ngModel)]="variant.sku"
-                                [ngModelOptions]="{standalone: true}" placeholder="SKU"
-                                customWrapperClass="!mt-0"></app-input>
-                        </div>
-                        <!-- Delete variant action -->
-                        <div class="flex justify-end pt-2 border-t border-gray-100">
-                            <button type="button" (click)="removeVariant(idx)"
-                                class="flex items-center gap-1 text-xs text-destructive hover:text-destructive/80 font-medium py-1">
-                                <app-icon name="trash-2" size="14"></app-icon>
-                                Eliminar variante
-                            </button>
-                        </div>
+                        }
                     </div>
                 </div>
 
@@ -863,6 +913,8 @@
                                     Margen (%)</th>
                                 <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Precio Venta</th>
+                                <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    P. Oferta</th>
                                 <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Precio Final</th>
                                 <th *ngIf="productForm.get('track_inventory')?.value" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -899,13 +951,14 @@
                                         </button>
                                     </div>
                                 </td>
-                                <!-- Variant Name -->
+                                <!-- Variant Name with structured attributes -->
                                 <td class="px-3 py-3 text-sm text-gray-900 font-medium">
-                                    {{ variant.name }}
-                                    <div class="flex gap-1 mt-1">
-                                        <span *ngFor="let item of variant.attributes | keyvalue"
-                                            class="text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">
-                                            {{ item.key }}: {{ item.value }}
+                                    <div class="flex flex-wrap gap-1">
+                                        <span *ngFor="let item of variant.attributes | keyvalue; let last = last"
+                                            class="text-xs">
+                                            <span class="text-gray-500">{{ item.key }}:</span>
+                                            <span class="font-semibold text-gray-800">{{ item.value }}</span>
+                                            <span *ngIf="!last" class="text-gray-300 mx-0.5">|</span>
                                         </span>
                                     </div>
                                 </td>
@@ -929,6 +982,21 @@
                                         [ngModelOptions]="{standalone: true}" placeholder="0.00"
                                         (ngModelChange)="onVariantPriceChange(variant)"
                                         customWrapperClass="!mt-0" prefix="$"></app-input>
+                                </td>
+                                <!-- Offer Price with toggle -->
+                                <td class="px-3 py-2">
+                                    <div class="flex items-center gap-1">
+                                        <input type="checkbox" [(ngModel)]="variant.is_on_sale"
+                                            [ngModelOptions]="{standalone: true}"
+                                            class="w-3.5 h-3.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer">
+                                        @if (variant.is_on_sale) {
+                                            <app-input type="number" size="sm" [(ngModel)]="variant.sale_price"
+                                                [ngModelOptions]="{standalone: true}" placeholder="0.00"
+                                                customWrapperClass="!mt-0" prefix="$"></app-input>
+                                        } @else {
+                                            <span class="text-xs text-gray-400 px-1">—</span>
+                                        }
+                                    </div>
                                 </td>
                                 <!-- Final Price (readonly) -->
                                 <td class="px-3 py-2">
@@ -1137,5 +1205,11 @@
 </app-modal>
 
 <!-- Adjustment Modal -->
-<app-adjustment-create-modal [(isOpen)]="isAdjustmentModalOpen" [product]="product" [isSubmitting]="isAdjusting"
-    (cancel)="closeAdjustmentModal()" (save)="onAdjustmentSave($event)"></app-adjustment-create-modal>
+<app-adjustment-create-modal
+    [(isOpen)]="isAdjustmentModalOpen"
+    [isSubmitting]="isAdjusting"
+    [locations]="adjustmentLocationOptions"
+    (cancel)="closeAdjustmentModal()"
+    (save)="onAdjustmentSave($event)"
+    (saveAndComplete)="onAdjustmentSaveAndComplete($event)"
+></app-adjustment-create-modal>

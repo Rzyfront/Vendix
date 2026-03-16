@@ -7,7 +7,7 @@ import {
   EventEmitter,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { CommonModule, DecimalPipe } from '@angular/common';
 import { Observable, Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 import {
@@ -30,7 +30,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 @Component({
   selector: 'app-pop-cart',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, IconComponent, TooltipComponent, InputComponent, FormsModule, QuantityControlComponent],
+  imports: [CommonModule, DecimalPipe, ButtonComponent, IconComponent, TooltipComponent, InputComponent, FormsModule, QuantityControlComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -208,13 +208,20 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                     </app-tooltip>
                   </div>
                 </div>
-                <!-- SKU -->
-                <div class="text-[10px] text-text-secondary mb-2">SKU: {{ item.product.code }}</div>
+                <!-- Variant & SKU -->
+                @if (item.variant) {
+                  <div class="text-[10px] text-primary font-medium mb-0.5">
+                    Variante: {{ item.variant.name || item.variant.sku }}
+                  </div>
+                }
+                <div class="text-[10px] text-text-secondary mb-2">SKU: {{ item.variant?.sku || item.product.code }}</div>
 
                 <div class="flex justify-between items-end">
                    <!-- Unit Cost Input (Editable for POP) -->
                   <div class="flex flex-col">
-                    <span class="text-[10px] text-text-secondary uppercase mb-1">Costo Unit.</span>
+                    <span class="text-[10px] text-text-secondary uppercase mb-1">
+                      {{ item.product.pricing_type === 'weight' ? 'Costo / kg' : 'Costo Unit.' }}
+                    </span>
                      <app-input
                         type="number"
                         size="sm"
@@ -233,6 +240,29 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                      </span>
                   </div>
                 </div>
+
+                <!-- Cost comparison -->
+                @if (getCostDelta(item); as delta) {
+                  <div class="flex items-center gap-1.5 mt-1 text-[10px]">
+                    <span class="text-text-secondary">
+                      Costo actual: {{ formatCurrency(delta.currentCost) }}
+                    </span>
+                    <app-icon name="arrow-right" [size]="10" class="text-text-muted"></app-icon>
+                    <span class="text-text-secondary">
+                      Nuevo: {{ formatCurrency(item.unit_cost) }}
+                    </span>
+                    <span
+                      class="font-bold px-1 py-0.5 rounded"
+                      [class]="delta.percentage < 0
+                        ? 'text-success bg-success/10'
+                        : delta.percentage > 0
+                          ? 'text-destructive bg-destructive/10'
+                          : 'text-text-muted'"
+                    >
+                      {{ delta.percentage > 0 ? '+' : '' }}{{ delta.percentage | number:'1.1-1' }}%
+                    </span>
+                  </div>
+                }
               </div>
             </div>
 
@@ -241,25 +271,38 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
               class="flex items-center justify-between pt-2 border-t border-border/50"
             >
               <span class="text-[10px] uppercase tracking-wider font-bold text-text-secondary/60">
-                Cantidad
+                {{ item.product.pricing_type === 'weight' ? 'Peso (kg)' : 'Cantidad' }}
               </span>
-              <app-quantity-control
-                [value]="item.quantity"
-                [min]="1"
-                [editable]="true"
-                [disabled]="(loading$ | async) ?? false"
-                [size]="'sm'"
-                (valueChange)="updateQuantity(item.id, $event)"
-              ></app-quantity-control>
+              @if (item.product.pricing_type === 'weight') {
+                <app-input
+                  type="number"
+                  size="sm"
+                  [ngModel]="item.quantity"
+                  (ngModelChange)="updateQuantity(item.id, $event)"
+                  customInputClass="text-right !h-7 !py-0 !w-24"
+                  customWrapperClass="!mt-0"
+                  min="0.001"
+                  step="0.001"
+                ></app-input>
+              } @else {
+                <app-quantity-control
+                  [value]="item.quantity"
+                  [min]="1"
+                  [editable]="true"
+                  [disabled]="(loading$ | async) ?? false"
+                  [size]="'sm'"
+                  (valueChange)="updateQuantity(item.id, $event)"
+                ></app-quantity-control>
+              }
             </div>
             
-            <!-- Lot Info Trigger -->
-             <div 
-                class="flex items-center gap-1 text-[10px] text-text-secondary hover:text-primary cursor-pointer mt-1"
-                (click)="openLotModal(item)"
+            <!-- Config Trigger (Variants / Lot / Unit) -->
+             <div
+                class="flex items-center gap-1.5 text-[10px] mt-1 px-2 py-1 rounded-md border border-dashed border-border hover:border-primary hover:bg-primary/5 cursor-pointer transition-colors"
+                (click)="openConfigModal(item)"
              >
-                 <app-icon name="package" [size]="10"></app-icon>
-                 <span>{{ item.lot_info ? 'Lote Configurado' : 'Configurar Lote / Vencimiento' }}</span>
+                 <app-icon name="settings" [size]="11" class="text-primary"></app-icon>
+                 <span class="text-text-secondary">{{ getConfigDisplayText(item) }}</span>
              </div>
           </div>
         </div>
@@ -302,6 +345,7 @@ export class PopCartComponent implements OnInit, OnDestroy {
   @Output() saveDraft = new EventEmitter<void>();
   @Output() submitOrder = new EventEmitter<void>();
   @Output() requestLotConfig = new EventEmitter<any>();
+  @Output() requestItemConfig = new EventEmitter<PopCartItem>();
 
   constructor(
     private cartService: PopCartService,
@@ -439,8 +483,52 @@ export class PopCartComponent implements OnInit, OnDestroy {
     return '';
   }
 
-  openLotModal(item: PopCartItem): void {
-    this.requestLotConfig.emit(item);
+  openConfigModal(item: PopCartItem): void {
+    this.requestItemConfig.emit(item);
+  }
+
+  getConfigDisplayText(item: PopCartItem): string {
+    const parts: string[] = [];
+
+    // Variant info
+    if (item.variant) {
+      parts.push(`Variante: ${item.variant.name || item.variant.sku}`);
+    }
+
+    // Lot info
+    if (item.lot_info?.batch_number) {
+      let lotText = `Lote: ${item.lot_info.batch_number}`;
+      if (item.lot_info.expiration_date) {
+        const date = new Date(item.lot_info.expiration_date);
+        lotText += ` (${date.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: '2-digit' })})`;
+      }
+      parts.push(lotText);
+    } else if (item.lot_info) {
+      parts.push('Lote configurado');
+    }
+
+    if (parts.length > 0) {
+      return parts.join(' · ');
+    }
+
+    // Nothing configured yet
+    const hasVariants = (item.product.product_variants?.length ?? 0) > 0;
+    const needsLot = item.product.requires_batch_tracking;
+
+    if (hasVariants && needsLot) return 'Configurar variante y lote';
+    if (hasVariants) return 'Configurar variante';
+    if (needsLot) return 'Configurar lote / vencimiento';
+    return 'Configurar';
+  }
+
+  getCostDelta(item: PopCartItem): { currentCost: number; percentage: number } | null {
+    const currentCost = Number(
+      item.variant?.cost_price || item.product.cost_price || item.product.cost || 0,
+    );
+    if (!currentCost || currentCost <= 0) return null;
+    if (item.unit_cost === currentCost) return null;
+    const percentage = ((item.unit_cost - currentCost) / currentCost) * 100;
+    return { currentCost, percentage };
   }
 
   formatCurrency(amount: number): string {

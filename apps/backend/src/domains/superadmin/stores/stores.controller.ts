@@ -9,6 +9,8 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { StoresService } from './stores.service';
 import {
@@ -31,6 +33,7 @@ export class StoresController {
     private readonly responseService: ResponseService,
   ) { }
 
+  @Permissions('superadmin:stores:create')
   @Post()
   @ApiOperation({ summary: 'Create a new store' })
   @ApiResponse({ status: 201, description: 'Store created successfully' })
@@ -39,6 +42,7 @@ export class StoresController {
     return this.responseService.created(result, 'Store created successfully');
   }
 
+  @Permissions('superadmin:stores:read')
   @Get()
   @ApiOperation({ summary: 'Get all stores with pagination and filtering' })
   @ApiResponse({ status: 200, description: 'Stores retrieved successfully' })
@@ -53,6 +57,7 @@ export class StoresController {
     );
   }
 
+  @Permissions('superadmin:stores:read')
   @Get('dashboard')
   @ApiOperation({ summary: 'Get dashboard statistics for stores' })
   @ApiResponse({
@@ -67,6 +72,7 @@ export class StoresController {
     );
   }
 
+  @Permissions('superadmin:stores:read')
   @Get(':id')
   @ApiOperation({ summary: 'Get a store by ID' })
   @ApiResponse({ status: 200, description: 'Store retrieved successfully' })
@@ -76,6 +82,7 @@ export class StoresController {
     return this.responseService.success(store, 'Store retrieved successfully');
   }
 
+  @Permissions('superadmin:stores:update')
   @Patch(':id')
   @ApiOperation({ summary: 'Update a store' })
   @ApiResponse({ status: 200, description: 'Store updated successfully' })
@@ -88,6 +95,7 @@ export class StoresController {
     return this.responseService.updated(store, 'Store updated successfully');
   }
 
+  @Permissions('superadmin:stores:delete')
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a store' })
   @ApiResponse({ status: 200, description: 'Store deleted successfully' })

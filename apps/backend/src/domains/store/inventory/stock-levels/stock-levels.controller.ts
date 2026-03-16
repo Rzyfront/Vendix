@@ -1,3 +1,6 @@
+import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
+import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { UseGuards } from '@nestjs/common';
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { StockLevelsService } from './stock-levels.service';
 import { StockLevelQueryDto } from './dto/stock-level-query.dto';
@@ -5,6 +8,7 @@ import { ResponseService } from '@common/responses/response.service';
 import { InventoryBatchesService } from '../batches/inventory-batches.service';
 
 @Controller('store/inventory/stock-levels')
+@UseGuards(PermissionsGuard)
 export class StockLevelsController {
   constructor(
     private readonly stockLevelsService: StockLevelsService,
@@ -13,6 +17,7 @@ export class StockLevelsController {
   ) {}
 
   @Get()
+  @Permissions('store:inventory:stock_levels:read')
   async findAll(@Query() query: StockLevelQueryDto) {
     try {
       const result = await this.stockLevelsService.findAll(query);
@@ -39,6 +44,7 @@ export class StockLevelsController {
   }
 
   @Get('product/:productId')
+  @Permissions('store:inventory:stock_levels:read')
   async findByProduct(
     @Param('productId') productId: string,
     @Query() query: StockLevelQueryDto,
@@ -62,6 +68,7 @@ export class StockLevelsController {
   }
 
   @Get('product/:productId/batches')
+  @Permissions('store:inventory:stock_levels:read')
   async findBatchesByProduct(
     @Param('productId') productId: string,
     @Query('location_id') locationId?: string,
@@ -85,6 +92,7 @@ export class StockLevelsController {
   }
 
   @Get('location/:locationId')
+  @Permissions('store:inventory:stock_levels:read')
   async findByLocation(
     @Param('locationId') locationId: string,
     @Query() query: StockLevelQueryDto,
@@ -109,6 +117,7 @@ export class StockLevelsController {
   }
 
   @Get('alerts')
+  @Permissions('store:inventory:stock_levels:read')
   async getStockAlerts(@Query() query: StockLevelQueryDto) {
     try {
       const result = await this.stockLevelsService.getStockAlerts(query);
@@ -126,6 +135,7 @@ export class StockLevelsController {
   }
 
   @Get(':id')
+  @Permissions('store:inventory:stock_levels:read')
   async findOne(@Param('id') id: string) {
     try {
       const result = await this.stockLevelsService.findOne(+id);

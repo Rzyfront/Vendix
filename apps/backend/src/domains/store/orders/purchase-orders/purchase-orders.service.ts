@@ -1,13 +1,19 @@
-import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
+import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
+import { RegisterPaymentDto } from './dto/register-payment.dto';
+import { AddAttachmentDto } from './dto/add-attachment.dto';
 import { purchase_order_status_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { toTitleCase } from '@common/utils/format.util';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
+import { CostingService } from '../../inventory/shared/services/costing.service';
+import { AuditService } from '@common/audit/audit.service';
+import { S3Service } from '@common/services/s3.service';
 
 @Injectable()
 export class PurchaseOrdersService {
@@ -16,11 +22,14 @@ export class PurchaseOrdersService {
   constructor(
     private prisma: StorePrismaService,
     private stockLevelManager: StockLevelManager,
+    private costingService: CostingService,
+    private auditService: AuditService,
+    private s3Service: S3Service,
     private eventEmitter: EventEmitter2,
   ) {}
 
   async create(createPurchaseOrderDto: CreatePurchaseOrderDto) {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // 1. Process items to handle new product creation
       const processedItems: any[] = [];
       const organization_id = RequestContextService.getOrganizationId();
@@ -34,7 +43,7 @@ export class PurchaseOrdersService {
 
         // If product_id is 0 or missing, and we have name/sku, create the product
         if ((!finalProductId || finalProductId === 0) && item.product_name) {
-          // Check if product with SKU exists to avoid duplicates? 
+          // Check if product with SKU exists to avoid duplicates?
           // Start simple: Create new product
           // Resolve store_id for the new product
           let storeId: number | undefined;
@@ -156,7 +165,6 @@ export class PurchaseOrdersService {
           if (existingProduct) {
             finalProductId = existingProduct.id;
             // Update existing product with new metadata if provided
-            // Only update fields that are meaningful from the bulk load
             await tx.products.update({
               where: { id: existingProduct.id },
               data: {
@@ -166,16 +174,10 @@ export class PurchaseOrdersService {
                 is_on_sale: isOnSale,
                 sale_price: item.sale_price !== undefined ? item.sale_price : existingProduct.sale_price,
                 brand_id: brandId !== undefined ? brandId : existingProduct.brand_id,
-                // Re-link categories? simpler to just add new ones or replace?
-                // For bulk update, usually we want to ensure these categories exist.
-                // We'll simplisticly add new relations if not exist, or replace.
-                // Replace: delete many then create. Safe for bulk update logic.
                 product_categories: {
                   deleteMany: {},
                   create: categoryIds.map(id => ({ category_id: id }))
                 },
-                // Update prices if they were provided/calculated and differ?
-                // User wants "full information uploaded", implies overwriting.
                 base_price: basePrice > 0 ? basePrice : existingProduct.base_price,
                 profit_margin: margin > 0 ? margin : existingProduct.profit_margin,
                 cost_price: cost > 0 ? cost : existingProduct.cost_price,
@@ -208,18 +210,11 @@ export class PurchaseOrdersService {
             });
             finalProductId = newProduct.id;
           }
-
-          // Optionally create a supplier_product entry?
-          // For now, minimal valid product creation.
         }
-
-        // If we still don't have a valid ID and it was supposed to be new, throw error? 
-        // For now, assume if ID is 0 and no name, it's invalid, but let Prisma fail on FK.
 
         processedItems.push({
           ...item,
           product_id: finalProductId,
-          // Remove temp fields to avoid prisma error if it tries to map them to order item (though strict typing might strip them, manual mapping is safer)
           product_name: undefined,
           sku: undefined,
           product_description: undefined
@@ -249,11 +244,6 @@ export class PurchaseOrdersService {
           .toString()
           .padStart(3, '0')}`;
 
-      // Create purchase order
-      // We must construct the creation data carefully. 
-      // The original code passed `...createPurchaseOrderDto`. We need to replace `items` with `processedItems`.
-
-      // Clean up DTO to avoid spreading the old items array
       const { items, created_by_user_id, ...orderData } = createPurchaseOrderDto;
       const user_id = RequestContextService.getUserId();
 
@@ -291,7 +281,6 @@ export class PurchaseOrdersService {
               product_variant_id: item.product_variant_id,
               quantity_ordered: item.quantity,
               unit_cost: item.unit_price,
-              // total_cost: item.quantity * item.unit_price, // Optional if we want to save it calculated
               notes: item.notes,
               batch_number: item.batch_number,
               manufacturing_date: item.manufacturing_date,
@@ -313,6 +302,22 @@ export class PurchaseOrdersService {
 
       return purchaseOrder;
     });
+
+    // Audit log after transaction
+    try {
+      const user_id = RequestContextService.getUserId();
+      await this.auditService.logCustom(
+        user_id ?? 0,
+        'PO_CREATED',
+        'purchase_orders',
+        { purchase_order_id: result.id, order_number: result.order_number },
+        result.id,
+      );
+    } catch (error) {
+      this.logger.error(`Failed to log audit for PO create #${result.id}: ${error.message}`);
+    }
+
+    return result;
   }
 
   async findAll(query: PurchaseOrderQueryDto) {
@@ -467,7 +472,7 @@ export class PurchaseOrdersService {
   }
 
   async approve(id: number) {
-    return this.prisma.purchase_orders.update({
+    const result = await this.prisma.purchase_orders.update({
       where: { id },
       data: {
         status: purchase_order_status_enum.approved,
@@ -484,10 +489,26 @@ export class PurchaseOrdersService {
         },
       },
     });
+
+    // Audit log
+    try {
+      const user_id = RequestContextService.getUserId();
+      await this.auditService.logCustom(
+        user_id ?? 0,
+        'PO_APPROVED',
+        'purchase_orders',
+        { purchase_order_id: id },
+        id,
+      );
+    } catch (error) {
+      this.logger.error(`Failed to log audit for PO approve #${id}: ${error.message}`);
+    }
+
+    return result;
   }
 
   async cancel(id: number) {
-    return this.prisma.purchase_orders.update({
+    const result = await this.prisma.purchase_orders.update({
       where: { id },
       data: {
         status: purchase_order_status_enum.cancelled,
@@ -504,15 +525,50 @@ export class PurchaseOrdersService {
         },
       },
     });
+
+    // Audit log
+    try {
+      const user_id = RequestContextService.getUserId();
+      await this.auditService.logCustom(
+        user_id ?? 0,
+        'PO_CANCELLED',
+        'purchase_orders',
+        { purchase_order_id: id },
+        id,
+      );
+    } catch (error) {
+      this.logger.error(`Failed to log audit for PO cancel #${id}: ${error.message}`);
+    }
+
+    return result;
   }
 
-  async receive(
-    id: number,
-    items: Array<{ id: number; quantity_received: number }>,
-  ) {
+  async receive(id: number, dto: ReceivePurchaseOrderDto) {
     const result = await this.prisma.$transaction(async (tx) => {
-      // Update purchase order items with received quantities
-      for (const item of items) {
+      // Create reception record
+      const user_id = RequestContextService.getUserId();
+      const reception = await tx.purchase_order_receptions.create({
+        data: {
+          purchase_order_id: id,
+          received_by_user_id: user_id,
+          notes: dto.notes,
+        },
+      });
+
+      // Process each item
+      for (const item of dto.items) {
+        if (item.quantity_received <= 0) continue;
+
+        // Create reception item record
+        await tx.purchase_order_reception_items.create({
+          data: {
+            reception_id: reception.id,
+            purchase_order_item_id: item.id,
+            quantity_received: item.quantity_received,
+          },
+        });
+
+        // Increment quantity_received on purchase_order_items
         await tx.purchase_order_items.update({
           where: { id: item.id },
           data: {
@@ -531,17 +587,19 @@ export class PurchaseOrdersService {
       });
 
       if (!purchaseOrder) {
-        throw new Error('Purchase order not found');
+        throw new NotFoundException('Purchase order not found');
       }
 
-      // Create inventory movements and update stock for received items
-      for (const item of items) {
+      // Create inventory movements, update stock, and calculate cost for received items
+      for (const item of dto.items) {
+        if (item.quantity_received <= 0) continue;
+
         const orderItem = purchaseOrder.purchase_order_items.find(i => i.id === item.id);
         const productId = orderItem?.product_id;
         const productVariantId = orderItem?.product_variant_id;
 
-        if (productId && item.quantity_received > 0) {
-          // Update stock levels using StockLevelManager (handles sync + movement + transaction)
+        if (productId) {
+          // Update stock levels using StockLevelManager
           await this.stockLevelManager.updateStock(
             {
               product_id: productId,
@@ -554,20 +612,49 @@ export class PurchaseOrdersService {
             },
             tx,
           );
+
+          // Calculate cost on receipt using CostingService
+          try {
+            await this.costingService.calculateCostOnReceipt(
+              {
+                product_id: productId,
+                variant_id: productVariantId || undefined,
+                location_id: purchaseOrder.location_id!,
+                quantity_received: item.quantity_received,
+                unit_cost: Number(orderItem.unit_cost || 0),
+                costing_method: 'weighted_average',
+                purchase_order_id: id,
+                batch_number: orderItem.batch_number || undefined,
+                manufacturing_date: orderItem.manufacturing_date || undefined,
+                expiration_date: orderItem.expiration_date || undefined,
+              },
+              tx,
+            );
+          } catch (error) {
+            this.logger.error(
+              `Failed to calculate cost for PO item #${item.id}: ${error.message}`,
+            );
+          }
         }
       }
 
-      // Check cumulative status based on actual DB state
+      // Determine new status based on cumulative quantities
       const all_items_received = purchaseOrder.purchase_order_items.every(
-        (item) => (item.quantity_received || 0) >= item.quantity_ordered
+        (item) => (item.quantity_received || 0) >= item.quantity_ordered,
       );
 
-      // Update purchase order status
+      const some_items_received = purchaseOrder.purchase_order_items.some(
+        (item) => (item.quantity_received || 0) > 0,
+      );
+
       let newStatus = purchaseOrder.status;
       if (all_items_received) {
         newStatus = purchase_order_status_enum.received;
+      } else if (some_items_received && newStatus !== purchase_order_status_enum.received) {
+        newStatus = 'partial' as purchase_order_status_enum;
       }
 
+      // Update purchase order status
       const updated_po = await tx.purchase_orders.update({
         where: { id },
         data: {
@@ -589,7 +676,22 @@ export class PurchaseOrdersService {
       return { updated_po, all_items_received };
     });
 
-    // Emit purchase_order.received for accounting after successful transaction
+    // Audit log after transaction
+    try {
+      const user_id = RequestContextService.getUserId();
+      const audit_action = result.all_items_received ? 'PO_RECEIVED' : 'PO_PARTIALLY_RECEIVED';
+      await this.auditService.logCustom(
+        user_id ?? 0,
+        audit_action,
+        'purchase_orders',
+        { purchase_order_id: id, items_count: dto.items.length },
+        id,
+      );
+    } catch (error) {
+      this.logger.error(`Failed to log audit for PO receive #${id}: ${error.message}`);
+    }
+
+    // Emit purchase_order.received for accounting ONLY when fully received
     if (result.all_items_received) {
       try {
         const total_amount = Number(result.updated_po.total_amount || 0);
@@ -607,6 +709,230 @@ export class PurchaseOrdersService {
     }
 
     return result.updated_po;
+  }
+
+  // ===== Receptions =====
+
+  async getReceptions(purchaseOrderId: number) {
+    return this.prisma.purchase_order_receptions.findMany({
+      where: { purchase_order_id: purchaseOrderId },
+      include: {
+        received_by: { select: { id: true, username: true, first_name: true, last_name: true } },
+        items: {
+          include: {
+            purchase_order_item: {
+              include: {
+                products: { select: { id: true, name: true } },
+                product_variants: { select: { id: true, sku: true, name: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { received_at: 'desc' },
+    });
+  }
+
+  // ===== Cost Summary =====
+
+  async getCostSummary(purchaseOrderId: number) {
+    return this.prisma.inventory_cost_layers.findMany({
+      where: { purchase_order_id: purchaseOrderId },
+      orderBy: { received_at: 'desc' },
+    });
+  }
+
+  // ===== Timeline =====
+
+  async getTimeline(purchaseOrderId: number) {
+    const [auditLogs, receptions, payments] = await Promise.all([
+      this.prisma.audit_logs.findMany({
+        where: { resource: 'purchase_orders', resource_id: purchaseOrderId },
+        orderBy: { created_at: 'desc' },
+      }),
+      this.prisma.purchase_order_receptions.findMany({
+        where: { purchase_order_id: purchaseOrderId },
+        include: { received_by: { select: { id: true, username: true, first_name: true, last_name: true } } },
+        orderBy: { received_at: 'desc' },
+      }),
+      this.prisma.purchase_order_payments.findMany({
+        where: { purchase_order_id: purchaseOrderId },
+        include: { created_by: { select: { id: true, username: true, first_name: true, last_name: true } } },
+        orderBy: { created_at: 'desc' },
+      }),
+    ]);
+
+    const timeline = [
+      ...auditLogs.map(l => ({ type: 'audit' as const, date: l.created_at || new Date(0), data: l })),
+      ...receptions.map(r => ({ type: 'reception' as const, date: r.received_at, data: r })),
+      ...payments.map(p => ({ type: 'payment' as const, date: p.created_at, data: p })),
+    ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    return timeline;
+  }
+
+  // ===== Attachments =====
+
+  async addAttachment(purchaseOrderId: number, file: Express.Multer.File, dto: AddAttachmentDto) {
+    // 1. Upload to S3 using S3Service (store the KEY, not the presigned URL)
+    const s3Key = await this.s3Service.uploadFile(
+      file.buffer,
+      `purchase-orders/attachments/${purchaseOrderId}/${Date.now()}-${file.originalname}`,
+      file.mimetype,
+    );
+
+    // 2. Create DB record with S3 key
+    const userId = RequestContextService.getUserId();
+    const attachment = await this.prisma.purchase_order_attachments.create({
+      data: {
+        purchase_order_id: purchaseOrderId,
+        file_url: s3Key,
+        file_name: file.originalname,
+        file_type: file.mimetype,
+        file_size: file.size,
+        supplier_invoice_number: dto.supplier_invoice_number,
+        supplier_invoice_date: dto.supplier_invoice_date ? new Date(dto.supplier_invoice_date) : null,
+        supplier_invoice_amount: dto.supplier_invoice_amount,
+        notes: dto.notes,
+        uploaded_by_user_id: userId,
+      },
+    });
+
+    // 3. Audit log
+    try {
+      await this.auditService.logCustom(
+        userId ?? 0,
+        'PO_ATTACHMENT_ADDED',
+        'purchase_orders',
+        { file_name: file.originalname, attachment_id: attachment.id },
+        purchaseOrderId,
+      );
+    } catch (error) {
+      this.logger.error(`Failed to log audit for PO attachment #${purchaseOrderId}: ${error.message}`);
+    }
+
+    return attachment;
+  }
+
+  async getAttachments(purchaseOrderId: number) {
+    const attachments = await this.prisma.purchase_order_attachments.findMany({
+      where: { purchase_order_id: purchaseOrderId },
+      include: { uploaded_by: { select: { id: true, username: true, first_name: true, last_name: true } } },
+      orderBy: { created_at: 'desc' },
+    });
+
+    // Generate presigned URLs for each attachment
+    return Promise.all(
+      attachments.map(async (att) => ({
+        ...att,
+        download_url: await this.s3Service.signUrl(att.file_url),
+      })),
+    );
+  }
+
+  async removeAttachment(attachmentId: number) {
+    const attachment = await this.prisma.purchase_order_attachments.findUnique({
+      where: { id: attachmentId },
+    });
+
+    if (!attachment) {
+      throw new NotFoundException('Attachment not found');
+    }
+
+    // Delete from S3
+    try {
+      await this.s3Service.deleteFile(attachment.file_url);
+    } catch (error) {
+      this.logger.error(`Failed to delete S3 file ${attachment.file_url}: ${error.message}`);
+    }
+
+    // Delete from DB
+    await this.prisma.purchase_order_attachments.delete({ where: { id: attachmentId } });
+
+    return { deleted: true };
+  }
+
+  // ===== Payments =====
+
+  async registerPayment(purchaseOrderId: number, dto: RegisterPaymentDto) {
+    const po = await this.prisma.purchase_orders.findUnique({ where: { id: purchaseOrderId } });
+    if (!po) {
+      throw new NotFoundException('Purchase order not found');
+    }
+
+    // Get existing payments total
+    const existingPayments = await this.prisma.purchase_order_payments.aggregate({
+      where: { purchase_order_id: purchaseOrderId },
+      _sum: { amount: true },
+    });
+
+    const totalPaid = Number(existingPayments._sum.amount || 0) + Number(dto.amount);
+    const totalAmount = Number(po.total_amount);
+
+    if (totalPaid > totalAmount) {
+      throw new BadRequestException('El pago excedería el monto total de la orden');
+    }
+
+    const userId = RequestContextService.getUserId();
+
+    // Create payment record
+    const payment = await this.prisma.purchase_order_payments.create({
+      data: {
+        purchase_order_id: purchaseOrderId,
+        amount: dto.amount,
+        payment_date: new Date(dto.payment_date),
+        payment_method: dto.payment_method,
+        reference: dto.reference,
+        notes: dto.notes,
+        created_by_user_id: userId,
+      },
+    });
+
+    // Update payment_status on PO
+    let paymentStatus: 'unpaid' | 'partial' | 'paid' = 'unpaid';
+    if (totalPaid >= totalAmount) paymentStatus = 'paid';
+    else if (totalPaid > 0) paymentStatus = 'partial';
+
+    await this.prisma.purchase_orders.update({
+      where: { id: purchaseOrderId },
+      data: { payment_status: paymentStatus as any },
+    });
+
+    // Audit log
+    try {
+      await this.auditService.logCustom(
+        userId ?? 0,
+        'PO_PAYMENT_REGISTERED',
+        'purchase_orders',
+        { amount: dto.amount, method: dto.payment_method, payment_id: payment.id },
+        purchaseOrderId,
+      );
+    } catch (error) {
+      this.logger.error(`Failed to log audit for PO payment #${purchaseOrderId}: ${error.message}`);
+    }
+
+    // Emit event for accounting
+    try {
+      this.eventEmitter.emit('purchase_order.payment', {
+        purchase_order_id: purchaseOrderId,
+        organization_id: po.organization_id,
+        amount: Number(dto.amount),
+        payment_method: dto.payment_method,
+        user_id: userId,
+      });
+    } catch (error) {
+      this.logger.error(`Failed to emit purchase_order.payment for PO #${purchaseOrderId}: ${error.message}`);
+    }
+
+    return payment;
+  }
+
+  async getPayments(purchaseOrderId: number) {
+    return this.prisma.purchase_order_payments.findMany({
+      where: { purchase_order_id: purchaseOrderId },
+      include: { created_by: { select: { id: true, username: true, first_name: true, last_name: true } } },
+      orderBy: { created_at: 'desc' },
+    });
   }
 
   remove(id: number) {

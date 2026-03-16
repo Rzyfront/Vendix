@@ -27,10 +27,11 @@ import { ToggleComponent } from '../toggle/toggle.component';
     ],
     template: `
     <div
-      class="flex items-center justify-between p-3 bg-gray-50 border border-gray-100 rounded-xl transition-all hover:bg-gray-100/50"
+      class="flex items-center justify-between p-2 mt-3 bg-gray-50 border border-gray-100 rounded-xl transition-all hover:bg-gray-100/50 cursor-pointer select-none"
       [class.opacity-50]="disabled"
       [class.cursor-not-allowed]="disabled"
       [class.new-highlight]="isNew"
+      (click)="onToggle(!value)"
     >
       <div class="flex-1 mr-4">
         <label class="text-xs font-semibold text-gray-700 block">
@@ -42,13 +43,19 @@ import { ToggleComponent } from '../toggle/toggle.component';
         </p>
       </div>
       <app-toggle
+        class="shrink-0"
         [checked]="value"
         [disabled]="disabled"
         (changed)="onToggle($event)"
+        (click)="$event.stopPropagation()"
       ></app-toggle>
     </div>
   `,
     styles: [`
+      :host {
+        cursor: pointer;
+      }
+
       .new-highlight {
         border-color: #f97316 !important;
         background: rgba(249, 115, 22, 0.05) !important;

@@ -31,6 +31,9 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<string, { code: string; descriptio
   'refund.completed.cash': { code: '1105', description: 'Caja/Banco' },
   'purchase_order.received.inventory': { code: '1435', description: 'Inventario' },
   'purchase_order.received.accounts_payable': { code: '2205', description: 'Proveedores' },
+  // Purchase order payments
+  'purchase_order.payment.accounts_payable': { code: '2205', description: 'Proveedores (pago OC)' },
+  'purchase_order.payment.cash_bank': { code: '1110', description: 'Banco (pago OC)' },
   'inventory.adjusted.inventory': { code: '1435', description: 'Inventario' },
   'inventory.adjusted.shrinkage': { code: '5295', description: 'Faltantes de Inventario' },
   // Phase 1: IVA on direct POS sales
@@ -42,6 +45,9 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<string, { code: string; descriptio
   'credit_sale.created.vat_payable': { code: '2408', description: 'IVA por Pagar (venta a crédito)' },
   // Phase 1: Refund VAT reversal
   'refund.completed.vat_payable': { code: '2408', description: 'IVA por Pagar (reversa devolución)' },
+  // Phase 2: Sales discounts (POS coupons, manual discounts)
+  'payment.received.sales_discount': { code: '4175', description: 'Descuentos en Ventas (POS)' },
+  'credit_sale.created.sales_discount': { code: '4175', description: 'Descuentos en Ventas (Crédito)' },
 };
 
 interface CacheEntry {

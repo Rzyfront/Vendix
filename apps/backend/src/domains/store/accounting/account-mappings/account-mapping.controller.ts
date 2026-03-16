@@ -1,3 +1,6 @@
+import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
+import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { UseGuards } from '@nestjs/common';
 import {
   Controller,
   Get,
@@ -14,6 +17,7 @@ import { UpsertAccountMappingDto, ResetAccountMappingDto } from './dto/upsert-ac
 import { RequestContextService } from '../../../../common/context/request-context.service';
 
 @Controller('store/accounting/account-mappings')
+@UseGuards(PermissionsGuard)
 export class AccountMappingController {
   constructor(
     private readonly account_mapping_service: AccountMappingService,
@@ -29,6 +33,7 @@ export class AccountMappingController {
   }
 
   @Get()
+  @Permissions('store:accounting:account_mappings:read')
   async getMappings(
     @Query('prefix') prefix?: string,
     @Query('store_id') store_id?: string,
@@ -45,6 +50,7 @@ export class AccountMappingController {
   }
 
   @Put()
+  @Permissions('store:accounting:account_mappings:update')
   async bulkUpsertMappings(@Body() dto: UpsertAccountMappingDto) {
     const context = this.getContext();
 
@@ -57,6 +63,7 @@ export class AccountMappingController {
   }
 
   @Post('reset')
+  @Permissions('store:accounting:account_mappings:create')
   @HttpCode(HttpStatus.OK)
   async resetToDefaults(@Body() dto: ResetAccountMappingDto) {
     const context = this.getContext();

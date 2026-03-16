@@ -2,6 +2,7 @@ import {
   Injectable,
   BadRequestException,
   ConflictException,
+  Logger,
 } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { Prisma } from '@prisma/client';
@@ -24,9 +25,13 @@ import { resolveCostPrice } from '../orders/utils/resolve-cost-price';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../settings/settings.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
+import { SessionsService } from '../cash-registers/sessions/sessions.service';
+import { MovementsService } from '../cash-registers/movements/movements.service';
 
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name);
+
   constructor(
     private prisma: StorePrismaService,
     private paymentGateway: PaymentGatewayService,
@@ -35,6 +40,8 @@ export class PaymentsService {
     private readonly eventEmitter: EventEmitter2,
     private readonly settingsService: SettingsService,
     private readonly promotionEngine: PromotionEngineService,
+    private readonly sessionsService: SessionsService,
+    private readonly movementsService: MovementsService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -393,7 +400,19 @@ export class PaymentsService {
           await this.settingsService.getStoreCurrency();
       }
 
-      return await this.prisma.$transaction(async (tx) => {
+      // Enforce require_session_for_sales setting
+      const settings = await this.settingsService.getSettings();
+      const cr_settings = (settings as any)?.pos?.cash_register;
+      if (cr_settings?.enabled && cr_settings?.require_session_for_sales) {
+        const session = await this.sessionsService.getActiveSession(user.id);
+        if (!session) {
+          throw new BadRequestException(
+            'Se requiere una caja registradora abierta para procesar ventas.',
+          );
+        }
+      }
+
+      const result = await this.prisma.$transaction(async (tx) => {
         // 1. Create or update order
         const order = await this.createOrUpdateOrderFromPos(
           tx,
@@ -477,6 +496,7 @@ export class PaymentsService {
             amount: payment.amount,
             subtotal_amount: Number(order.subtotal_amount || 0),
             tax_amount: Number(order.tax_amount || 0),
+            discount_amount: Number(order.discount_amount || 0),
             currency: payment.currency || createPosPaymentDto.currency,
             payment_method:
               payment.store_payment_method?.system_payment_method
@@ -512,6 +532,7 @@ export class PaymentsService {
             order_number: order.order_number,
             subtotal_amount: Number(order.subtotal_amount || 0),
             tax_amount: Number(order.tax_amount || 0),
+            discount_amount: Number(order.discount_amount || 0),
             total_amount: Number(order.grand_total || 0),
             user_id: user.id,
           });
@@ -566,6 +587,20 @@ export class PaymentsService {
             : undefined,
         };
       });
+
+      // Record cash register movement AFTER transaction commit (non-critical)
+      if (result.success) {
+        this.recordCashRegisterMovement(
+          createPosPaymentDto,
+          result.order,
+          result.payment,
+          user,
+        ).catch((err) => {
+          this.logger.error(`Failed to record cash register movement: ${err.message}`, err.stack);
+        });
+      }
+
+      return result;
     } catch (error) {
       return {
         success: false,
@@ -954,5 +989,65 @@ export class PaymentsService {
     throw new BadRequestException(
       'Creating payment methods directly is deprecated. Use POST /stores/:storeId/payment-methods/enable/:systemMethodId instead',
     );
+  }
+
+  /**
+   * Record a cash register movement when the feature is enabled.
+   * Silently skips if feature is disabled or no active session exists.
+   */
+  private async recordCashRegisterMovement(
+    dto: CreatePosPaymentDto,
+    order: any,
+    payment: any,
+    user: any,
+  ) {
+    try {
+      const settings = await this.settingsService.getSettings();
+      const cr_settings = (settings as any)?.pos?.cash_register;
+      this.logger.debug(`[CashRegister] cr_settings.enabled=${cr_settings?.enabled}`);
+      if (!cr_settings?.enabled) return;
+
+      // Find active session for this user
+      const session = await this.sessionsService.getActiveSession(user.id);
+      this.logger.debug(`[CashRegister] Active session for user ${user.id}: ${session ? `id=${session.id}` : 'NONE'}`);
+      if (!session) return;
+
+      const order_id = order?.id;
+      const payment_id = payment?.id;
+      const amount = Number(payment?.amount || order?.total_amount || 0);
+      this.logger.debug(`[CashRegister] order_id=${order_id}, payment_id=${payment_id}, amount=${amount}`);
+      if (!order_id || amount <= 0) return;
+
+      // Resolve the actual system payment method type (cash, card, etc.)
+      // payment.payment_method contains the display_name, not the system type
+      let payment_method = 'cash';
+      if (dto.store_payment_method_id) {
+        const method = await this.prisma.store_payment_methods.findFirst({
+          where: { id: dto.store_payment_method_id },
+          include: { system_payment_method: { select: { type: true } } },
+        });
+        payment_method = method?.system_payment_method?.type || 'cash';
+      }
+
+      this.logger.debug(`[CashRegister] payment_method=${payment_method}, track_non_cash=${cr_settings.track_non_cash_payments}`);
+
+      // Only track non-cash if setting enabled
+      if (payment_method !== 'cash' && !cr_settings.track_non_cash_payments) {
+        this.logger.debug(`[CashRegister] Skipping non-cash movement (tracking disabled)`);
+        return;
+      }
+
+      await this.movementsService.recordSaleMovement(session.id, {
+        store_id: dto.store_id,
+        user_id: user.id,
+        amount,
+        payment_method,
+        order_id,
+        payment_id,
+      });
+      this.logger.log(`[CashRegister] Sale movement recorded for session ${session.id}, order ${order_id}`);
+    } catch (error) {
+      this.logger.error(`[CashRegister] Error recording movement: ${error.message}`, error.stack);
+    }
   }
 }

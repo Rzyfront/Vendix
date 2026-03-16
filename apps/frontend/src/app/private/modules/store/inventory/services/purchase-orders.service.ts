@@ -8,6 +8,10 @@ import {
     UpdatePurchaseOrderDto,
     PurchaseOrderQueryDto,
     ReceivePurchaseOrderItemDto,
+    PurchaseOrderReception,
+    PurchaseOrderAttachment,
+    PurchaseOrderPayment,
+    PurchaseOrderTimelineEntry,
     ApiResponse,
 } from '../interfaces';
 
@@ -82,10 +86,86 @@ export class PurchaseOrdersService {
 
     receivePurchaseOrder(
         id: number,
-        items: ReceivePurchaseOrderItemDto[]
+        items: ReceivePurchaseOrderItemDto[],
+        notes?: string
     ): Observable<ApiResponse<PurchaseOrder>> {
+        const body: { items: ReceivePurchaseOrderItemDto[]; notes?: string } = { items };
+        if (notes) body.notes = notes;
         return this.http
-            .patch<ApiResponse<PurchaseOrder>>(`${this.api_url}/${id}/receive`, { items })
+            .patch<ApiResponse<PurchaseOrder>>(`${this.api_url}/${id}/receive`, body)
+            .pipe(catchError(this.handleError));
+    }
+
+    // ============================================================
+    // Receptions
+    // ============================================================
+
+    getPurchaseOrderReceptions(id: number): Observable<ApiResponse<PurchaseOrderReception[]>> {
+        return this.http
+            .get<ApiResponse<PurchaseOrderReception[]>>(`${this.api_url}/${id}/receptions`)
+            .pipe(catchError(this.handleError));
+    }
+
+    // ============================================================
+    // Cost Summary
+    // ============================================================
+
+    getPurchaseOrderCostSummary(id: number): Observable<ApiResponse<unknown[]>> {
+        return this.http
+            .get<ApiResponse<unknown[]>>(`${this.api_url}/${id}/cost-summary`)
+            .pipe(catchError(this.handleError));
+    }
+
+    // ============================================================
+    // Timeline
+    // ============================================================
+
+    getPurchaseOrderTimeline(id: number): Observable<ApiResponse<PurchaseOrderTimelineEntry[]>> {
+        return this.http
+            .get<ApiResponse<PurchaseOrderTimelineEntry[]>>(`${this.api_url}/${id}/timeline`)
+            .pipe(catchError(this.handleError));
+    }
+
+    // ============================================================
+    // Attachments
+    // ============================================================
+
+    getPurchaseOrderAttachments(id: number): Observable<ApiResponse<PurchaseOrderAttachment[]>> {
+        return this.http
+            .get<ApiResponse<PurchaseOrderAttachment[]>>(`${this.api_url}/${id}/attachments`)
+            .pipe(catchError(this.handleError));
+    }
+
+    uploadPurchaseOrderAttachment(id: number, file: File, metadata: Record<string, unknown> = {}): Observable<ApiResponse<PurchaseOrderAttachment>> {
+        const formData = new FormData();
+        formData.append('file', file);
+        Object.keys(metadata).forEach(key => {
+            if (metadata[key] != null) formData.append(key, String(metadata[key]));
+        });
+        return this.http
+            .post<ApiResponse<PurchaseOrderAttachment>>(`${this.api_url}/${id}/attachments`, formData)
+            .pipe(catchError(this.handleError));
+    }
+
+    removePurchaseOrderAttachment(id: number, attachmentId: number): Observable<ApiResponse<void>> {
+        return this.http
+            .delete<ApiResponse<void>>(`${this.api_url}/${id}/attachments/${attachmentId}`)
+            .pipe(catchError(this.handleError));
+    }
+
+    // ============================================================
+    // Payments
+    // ============================================================
+
+    getPurchaseOrderPayments(id: number): Observable<ApiResponse<PurchaseOrderPayment[]>> {
+        return this.http
+            .get<ApiResponse<PurchaseOrderPayment[]>>(`${this.api_url}/${id}/payments`)
+            .pipe(catchError(this.handleError));
+    }
+
+    registerPurchaseOrderPayment(id: number, payment: Record<string, unknown>): Observable<ApiResponse<PurchaseOrderPayment>> {
+        return this.http
+            .post<ApiResponse<PurchaseOrderPayment>>(`${this.api_url}/${id}/payments`, payment)
             .pipe(catchError(this.handleError));
     }
 

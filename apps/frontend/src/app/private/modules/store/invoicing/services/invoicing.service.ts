@@ -166,8 +166,12 @@ export class InvoicingService {
 
   // ── DIAN Config ─────────────────────────────────────────
 
-  getDianConfig(): Observable<any> {
+  getDianConfigs(): Observable<any> {
     return this.http.get(this.getApiUrl('dian-config'));
+  }
+
+  getDianConfigById(id: number): Observable<any> {
+    return this.http.get(this.getApiUrl(`dian-config/${id}`));
   }
 
   createDianConfig(data: any): Observable<any> {
@@ -178,6 +182,14 @@ export class InvoicingService {
     return this.http.patch(this.getApiUrl(`dian-config/${id}`), data);
   }
 
+  deleteDianConfig(id: number): Observable<any> {
+    return this.http.delete(this.getApiUrl(`dian-config/${id}`));
+  }
+
+  setDefaultDianConfig(id: number): Observable<any> {
+    return this.http.patch(this.getApiUrl(`dian-config/${id}/set-default`), {});
+  }
+
   uploadDianCertificate(config_id: number, file: File, password: string): Observable<any> {
     const form_data = new FormData();
     form_data.append('certificate', file);
@@ -186,21 +198,21 @@ export class InvoicingService {
     return this.http.post(this.getApiUrl('dian-config/upload-certificate'), form_data);
   }
 
-  testDianConnection(): Observable<any> {
-    return this.http.post(this.getApiUrl('dian-config/test-connection'), {});
+  testDianConnection(config_id: number): Observable<any> {
+    return this.http.post(this.getApiUrl(`dian-config/${config_id}/test-connection`), {});
   }
 
-  runDianTestSet(): Observable<any> {
-    return this.http.post(this.getApiUrl('dian-config/run-test-set'), {});
+  runDianTestSet(config_id: number): Observable<any> {
+    return this.http.post(this.getApiUrl(`dian-config/${config_id}/run-test-set`), {});
   }
 
-  getDianTestResults(): Observable<any> {
-    return this.http.get(this.getApiUrl('dian-config/test-results'));
+  getDianTestResults(config_id: number): Observable<any> {
+    return this.http.get(this.getApiUrl(`dian-config/${config_id}/test-results`));
   }
 
-  getDianAuditLogs(page = 1, limit = 20): Observable<any> {
-    return this.http.get(this.getApiUrl('dian-config/audit-logs'), {
-      params: { page: String(page), limit: String(limit) },
-    });
+  getDianAuditLogs(page = 1, limit = 20, config_id?: number): Observable<any> {
+    const params: Record<string, string> = { page: String(page), limit: String(limit) };
+    if (config_id) params['config_id'] = String(config_id);
+    return this.http.get(this.getApiUrl('dian-config/audit-logs'), { params });
   }
 }

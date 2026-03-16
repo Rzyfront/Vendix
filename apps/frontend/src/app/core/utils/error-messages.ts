@@ -108,6 +108,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   CUST_CREATE_001: 'Error al crear el cliente.',
   CUST_VALIDATE_001: 'La validacion del cliente fallo.',
   CUST_PERM_001: 'No tiene permisos para acceder a este cliente.',
+  CUST_BULK_001: 'El archivo excede el limite de 1000 clientes.',
+  CUST_BULK_002: 'Error de validacion en los datos del cliente.',
+  CUST_BULK_003: 'Email duplicado en el archivo.',
+  CUST_BULK_004: 'No se pudo determinar la tienda actual.',
 
   // Shipping
   SHIP_FIND_001: 'Metodo de envio no encontrado.',
@@ -129,6 +133,26 @@ export const ERROR_MESSAGES: Record<string, string> = {
   SUP_ADMIN_ORG_001: 'Organizacion no encontrada.',
   SUP_ADMIN_ROLE_001: 'Rol de superadministrador no encontrado.',
   SUP_ADMIN_PERM_001: 'Permiso de superadministrador denegado.',
+
+  // Payroll
+  PAYROLL_FIND_001: 'Empleado no encontrado.',
+  PAYROLL_FIND_002: 'Liquidacion de nomina no encontrada.',
+  PAYROLL_FIND_003: 'Item de nomina no encontrado.',
+  PAYROLL_CREATE_001: 'Error al crear el empleado.',
+  PAYROLL_CREATE_002: 'Error al crear la liquidacion de nomina.',
+  PAYROLL_DUP_001: 'Ya existe un empleado con ese codigo.',
+  PAYROLL_DUP_002: 'Ya existe un empleado con ese documento.',
+  PAYROLL_DUP_003: 'Ya existe una liquidacion con ese numero.',
+  PAYROLL_VALIDATE_001: 'La validacion de nomina fallo.',
+  PAYROLL_STATUS_001: 'No se puede cambiar el estado de la liquidacion.',
+  PAYROLL_CALC_001: 'No se encontraron empleados activos para calcular.',
+  PAYROLL_PROVIDER_001: 'Error en el proveedor de nomina.',
+  PAYROLL_PERM_001: 'No tiene permisos para acceder a nomina.',
+  PAYROLL_BULK_001: 'El archivo excede el limite de 1000 empleados.',
+  PAYROLL_BULK_002: 'Error de validacion en los datos del empleado.',
+  PAYROLL_BULK_003: 'Documento duplicado en el archivo.',
+  PAYROLL_BULK_004: 'El email es obligatorio cuando se marca como usuario.',
+  PAYROLL_BULK_005: 'El usuario ya esta vinculado a otro empleado.',
 
   // AI Engine
   AI_CONFIG_001: 'Configuracion de IA no encontrada.',

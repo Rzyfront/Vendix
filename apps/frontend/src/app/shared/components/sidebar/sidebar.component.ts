@@ -180,12 +180,13 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
   @Input() menuItems: MenuItem[] = [];
   @Input() title: string = 'Vendix Corp';
   @Input() vlink: string = 'vlink-slug';
-  @Input() domainHostname: string | null = null; // Nuevo input para el hostname del dominio
-  @Input() logoUrl: string | null = null; // Logo URL for store branding
+  @Input() domainHostname: string | null = null;
+  @Input() logoUrl: string | null = null;
   @Input() collapsed: boolean = false;
   @Input() isOpen: boolean = false;
   @Input() showFooter: boolean = false;
   @Input() isVendixDomain: boolean = false;
+  @Input() shimmer: boolean = false;
   @Output() expandSidebar = new EventEmitter<void>();
 
   isMobile = false;
@@ -310,6 +311,10 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
 
     if (this.collapsed) {
       classes.push('collapsed');
+    }
+
+    if (this.shimmer) {
+      classes.push('shimmer-active');
     }
 
     if (this.isMobile) {

@@ -385,6 +385,40 @@
             </div>
           }
 
+          <!-- Refund History (for partial refunds or detailed view) -->
+          @if (orderRefunds() && orderRefunds().length > 0) {
+            <app-card shadow="sm" [responsivePadding]="true">
+              <h2 class="text-xs font-bold text-gray-900 uppercase tracking-wider mb-3 flex items-center gap-2">
+                <app-icon name="rotate-ccw" size="14" class="text-orange-600"></app-icon>
+                Historial de Reembolsos
+              </h2>
+              <div class="space-y-2">
+                @for (refund of orderRefunds(); track refund.id) {
+                  <div class="p-3 bg-[var(--color-surface)] rounded-lg border border-border">
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-sm font-bold text-gray-900">{{ refund.amount | currency }}</span>
+                      <span class="px-2 py-0.5 text-[10px] font-black uppercase rounded-md"
+                        [ngClass]="{
+                          'bg-green-500/20 text-green-600': refund.state === 'completed',
+                          'bg-yellow-500/20 text-yellow-600': refund.state === 'processing',
+                          'bg-gray-500/20 text-gray-400': refund.state !== 'completed' && refund.state !== 'processing'
+                        }">
+                        {{ refund.state === 'completed' ? 'Completado' : refund.state === 'processing' ? 'Procesando' : refund.state }}
+                      </span>
+                    </div>
+                    @if (refund.reason) {
+                      <p class="text-xs text-gray-500 mb-1">{{ refund.reason }}</p>
+                    }
+                    <div class="flex items-center justify-between text-[10px] text-gray-400">
+                      <span>{{ refund.refund_items.length || 0 }} item(s)</span>
+                      <span>{{ formatDate(refund.created_at) }}</span>
+                    </div>
+                  </div>
+                }
+              </div>
+            </app-card>
+          }
+
           <!-- 6. SEGUIMIENTO DE ENVIO -->
           @if (showShipmentTracking()) {
             <app-card shadow="sm" [responsivePadding]="true">
@@ -725,54 +759,13 @@
       </div>
     </app-modal>
 
-    <!-- REFUND MODAL -->
-    <app-modal
+    <!-- REFUND MODAL (professional multi-step) -->
+    <app-order-refund-modal
       [isOpen]="showRefundModal()"
+      [order]="orderData"
+      (isOpenChange)="showRefundModal.set($event)"
       (closed)="showRefundModal.set(false)"
-      title="Procesar Reembolso"
-      size="md"
-    >
-      <div class="p-4 space-y-4" [formGroup]="refundForm">
-        <div class="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-start gap-3">
-          <app-icon name="alert-triangle" size="18" class="text-orange-600 mt-0.5"></app-icon>
-          <div>
-            <p class="text-sm font-bold text-orange-800">Reembolso de orden</p>
-            <p class="text-xs text-orange-600 mt-0.5">Se procesara el reembolso y la orden pasara a estado reembolsado.</p>
-          </div>
-        </div>
-
-        <div>
-          <label class="block text-sm font-bold text-gray-700 mb-1.5">Monto a Reembolsar</label>
-          <input
-            type="number"
-            formControlName="amount"
-            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-          />
-          <p class="text-xs text-gray-500 mt-1">Total de la orden: {{ orderData.grand_total || 0 | currency }}. Dejar vacio para reembolso completo.</p>
-        </div>
-
-        <div>
-          <label class="block text-sm font-bold text-gray-700 mb-1.5">Razon del reembolso *</label>
-          <textarea
-            formControlName="reason"
-            rows="3"
-            placeholder="Describe la razon del reembolso (minimo 3 caracteres)..."
-            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none"
-          ></textarea>
-        </div>
-      </div>
-
-      <div slot="footer" class="flex items-center justify-end gap-2 p-4 border-t border-border">
-        <app-button variant="outline" (clicked)="showRefundModal.set(false)">Cancelar</app-button>
-        <app-button
-          variant="primary"
-          (clicked)="submitRefund()"
-          [disabled]="refundForm.invalid || isProcessingAction()"
-          customClasses="!bg-orange-600 hover:!bg-orange-700"
-        >
-          {{ isProcessingAction() ? 'Procesando...' : 'Procesar Reembolso' }}
-        </app-button>
-      </div>
-    </app-modal>
+      (refundSubmitted)="onRefundSubmitted()"
+    />
   }
 </div>

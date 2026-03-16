@@ -113,6 +113,10 @@ export class AdjustmentListComponent {
       align: 'right',
       priority: 1,
       transform: (value: number) => (value > 0 ? `+${value}` : `${value}`),
+      cellStyle: (value: number) => ({
+        color: value > 0 ? 'var(--color-success)' : value < 0 ? 'var(--color-error, #ef4444)' : '',
+        'font-weight': value !== 0 ? '700' : '',
+      }),
     },
     {
       key: 'quantity_before',
@@ -231,6 +235,6 @@ export class AdjustmentListComponent {
   getEmptyStateDescription(): string {
     return this.hasFilters()
       ? 'Intente ajustar sus términos de búsqueda o filtros'
-      : 'Los ajustes de inventario se registran desde el detalle del producto.';
+      : 'Crea un nuevo ajuste usando el botón +';
   }
 }

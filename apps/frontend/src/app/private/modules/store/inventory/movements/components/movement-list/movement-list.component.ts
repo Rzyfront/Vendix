@@ -104,6 +104,14 @@ export class MovementListComponent {
       label: 'Cantidad',
       align: 'right',
       priority: 1,
+      transform: (value: number, item?: any) => this.formatQuantity(value, item?.movement_type),
+      cellStyle: (_value: number, item?: any) => {
+        const isInbound = item?.movement_type === 'stock_in' || item?.movement_type === 'return';
+        return {
+          color: isInbound ? 'var(--color-success)' : 'var(--color-error, #ef4444)',
+          'font-weight': '700',
+        };
+      },
     },
     {
       key: 'to_location.name',

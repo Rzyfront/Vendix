@@ -38,19 +38,14 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
     <app-modal
       [isOpen]="isOpen"
       [size]="'md'"
+      [showCloseButton]="true"
+      title="¡Venta Completada!"
+      [subtitle]="'Orden #' + orderNumber + ' procesada exitosamente'"
       (closed)="onModalClosed()"
-      [showCloseButton]="false"
     >
-      <div slot="header" class="text-center py-2">
-        <div
-          class="w-16 h-16 rounded-full bg-success/10 flex items-center justify-center text-success mx-auto mb-4"
-        >
-          <app-icon name="check-circle" [size]="40"></app-icon>
-        </div>
-        <h2 class="text-2xl font-bold text-text-primary">¡Venta Completada!</h2>
-        <p class="text-text-secondary">
-          Orden #{{ orderNumber }} procesada exitosamente
-        </p>
+      <div slot="header"
+        class="w-10 h-10 rounded-full bg-success/10 flex items-center justify-center text-success flex-shrink-0">
+        <app-icon name="check-circle" [size]="24"></app-icon>
       </div>
 
       <!-- Ticket Visual Representation -->
@@ -146,55 +141,41 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
         </div>
       </div>
 
-      <div slot="footer" class="flex flex-wrap items-center justify-between gap-3 w-full">
-        <div class="flex gap-3">
-          <app-button
-            variant="outline"
-            size="md"
-            (clicked)="printReceipt()"
-            [loading]="printing"
-          >
-            <app-icon name="printer" [size]="18" slot="icon"></app-icon>
-            Imprimir Ticket
+      <div slot="footer" class="flex flex-col gap-3 w-full">
+        <!-- CTA Primario: full-width, prominente -->
+        <app-button
+          variant="primary"
+          size="lg"
+          [fullWidth]="true"
+          (clicked)="startNewSale()"
+        >
+          <app-icon name="plus" [size]="20" slot="icon"></app-icon>
+          Nueva compra
+        </app-button>
+
+        <!-- Acciones secundarias: ghost, compactos, en fila -->
+        <div class="flex items-center justify-center gap-1 sm:gap-2">
+          <app-button variant="ghost" size="sm" (clicked)="printReceipt()" [loading]="printing" title="Imprimir Ticket">
+            <app-icon name="printer" [size]="16" slot="icon"></app-icon>
+            <span class="hidden sm:inline">Imprimir</span>
           </app-button>
 
-          <app-button
-            variant="outline"
-            size="md"
-            (clicked)="emailReceipt()"
-            [disabled]="!customerEmail"
-            [loading]="emailing"
-          >
-            <app-icon name="mail" [size]="18" slot="icon"></app-icon>
-            Email
+          <app-button variant="ghost" size="sm" (clicked)="emailReceipt()" [disabled]="!customerEmail" [loading]="emailing" title="Enviar por Email">
+            <app-icon name="mail" [size]="16" slot="icon"></app-icon>
+            <span class="hidden sm:inline">Email</span>
           </app-button>
 
-          <app-button
-            variant="outline"
-            size="md"
-            (clicked)="createInvoice()"
-            [disabled]="!orderId"
-            [loading]="creatingInvoice"
-          >
-            <app-icon name="file-text" [size]="18" slot="icon"></app-icon>
-            Crear Factura
-          </app-button>
-        </div>
-
-        <div class="flex gap-3">
-          <app-button
-            variant="outline"
-            size="md"
-            (clicked)="goToOrderDetail()"
-            [disabled]="!orderId"
-          >
-            <app-icon name="file-text" [size]="18" slot="icon"></app-icon>
-            Ver detalle
+          <app-button variant="ghost" size="sm" (clicked)="createInvoice()" [disabled]="!orderId" [loading]="creatingInvoice" title="Crear Factura">
+            <app-icon name="file-text" [size]="16" slot="icon"></app-icon>
+            <span class="hidden sm:inline">Factura</span>
           </app-button>
 
-          <app-button variant="primary" size="md" (clicked)="startNewSale()" class="shadow-sm">
-            <app-icon name="plus" [size]="18" slot="icon"></app-icon>
-            Nueva compra
+          <!-- Separador visual entre categorías -->
+          <div class="w-px h-5 bg-[var(--color-border)] mx-1"></div>
+
+          <app-button variant="ghost" size="sm" (clicked)="goToOrderDetail()" [disabled]="!orderId" title="Ver detalle de la orden">
+            <app-icon name="external-link" [size]="16" slot="icon"></app-icon>
+            <span class="hidden sm:inline">Ver detalle</span>
           </app-button>
         </div>
       </div>

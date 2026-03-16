@@ -4,42 +4,42 @@ import {
   EventEmitter,
   OnInit,
   OnDestroy,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+} from "@angular/core";
+import { CommonModule } from "@angular/common";
+import { FormsModule } from "@angular/forms";
+import { Subject, takeUntil } from "rxjs";
 
 import {
   SelectorComponent,
   SelectorOption,
-} from '../../../../../../shared/components/selector/selector.component';
-import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
-import { InputComponent } from '../../../../../../shared/components/input/input.component';
-import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
-import { TooltipComponent } from '../../../../../../shared/components/tooltip/tooltip.component';
+} from "../../../../../../shared/components/selector/selector.component";
+import { IconComponent } from "../../../../../../shared/components/icon/icon.component";
+import { ButtonComponent } from "../../../../../../shared/components/button/button.component";
+import { InputComponent } from "../../../../../../shared/components/input/input.component";
+import { BadgeComponent } from "../../../../../../shared/components/badge/badge.component";
+import { TooltipComponent } from "../../../../../../shared/components/tooltip/tooltip.component";
 
-import { PopCartService, ShippingMethod } from '../services/pop-cart.service';
-import { PopSupplier, PopLocation } from '../interfaces/pop-cart.interface';
+import { PopCartService, ShippingMethod } from "../services/pop-cart.service";
+import { PopSupplier, PopLocation } from "../interfaces/pop-cart.interface";
 
 // Local constants
 // Force rebuild 2
 const SHIPPING_METHOD_LABELS = {
-  supplier_transport: 'Transporte Proveedor',
-  freight: 'Flete',
-  pickup: 'Recolección',
-  other: 'Otro',
+  supplier_transport: "Transporte Proveedor",
+  freight: "Flete",
+  pickup: "Recolección",
+  other: "Otro",
 } as const;
 
-import { SuppliersService } from '../../services/suppliers.service';
-import { InventoryService } from '../../services/inventory.service';
+import { SuppliersService } from "../../services/suppliers.service";
+import { InventoryService } from "../../services/inventory.service";
 
 /**
  * POP Header Component
  * Displays supplier, warehouse, dates, and shipping method selectors
  */
 @Component({
-  selector: 'app-pop-header',
+  selector: "app-pop-header",
   standalone: true,
   imports: [
     CommonModule,
@@ -410,12 +410,12 @@ export class PopHeaderComponent implements OnInit, OnDestroy {
   // Selected values
   selectedSupplierId: number | null = null;
   selectedLocationId: number | null = null;
-  orderDate: string = '';
-  expectedDate: string = '';
-  shippingMethod: string = '';
+  orderDate: string = "";
+  expectedDate: string = "";
+  shippingMethod: string = "";
 
   // Computed
-  minExpectedDate: string = '';
+  minExpectedDate: string = "";
 
   // Mobile state
   showMobileSettings = false;
@@ -460,7 +460,7 @@ export class PopHeaderComponent implements OnInit, OnDestroy {
           this.expectedDate = this.formatDateForInput(state.expectedDate);
         }
         if (state.shippingMethod !== this.shippingMethod) {
-          this.shippingMethod = state.shippingMethod || '';
+          this.shippingMethod = state.shippingMethod || "";
         }
       });
   }
@@ -519,7 +519,7 @@ export class PopHeaderComponent implements OnInit, OnDestroy {
           }
         },
         error: (error) => {
-          console.error('Error loading suppliers:', error);
+          console.error("Error loading suppliers:", error);
         },
       });
   }
@@ -552,7 +552,7 @@ export class PopHeaderComponent implements OnInit, OnDestroy {
           }
         },
         error: (error) => {
-          console.error('Error loading locations:', error);
+          console.error("Error loading locations:", error);
         },
       });
   }
@@ -585,7 +585,9 @@ export class PopHeaderComponent implements OnInit, OnDestroy {
 
   onOrderDateChange(dateStr: string): void {
     if (dateStr) {
-      const date = new Date(dateStr);
+      // Parse YYYY-MM-DD to local time to avoid UTC offset bug
+      const [year, month, day] = dateStr.split("-").map(Number);
+      const date = new Date(year, month - 1, day);
       // Prevent loop if date matches
       this.popCartService.setOrderDate(date);
       this.minExpectedDate = dateStr;
@@ -594,7 +596,9 @@ export class PopHeaderComponent implements OnInit, OnDestroy {
 
   onExpectedDateChange(dateStr: string): void {
     if (dateStr) {
-      const date = new Date(dateStr);
+      // Parse YYYY-MM-DD to local time to avoid UTC offset bug
+      const [year, month, day] = dateStr.split("-").map(Number);
+      const date = new Date(year, month - 1, day);
       this.popCartService.setExpectedDate(date);
     } else {
       this.popCartService.setExpectedDate(undefined);
@@ -611,15 +615,17 @@ export class PopHeaderComponent implements OnInit, OnDestroy {
 
   private formatDateForInput(date: Date): string {
     const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
   }
 
   formatDateShort(dateStr: string): string {
-    if (!dateStr) return '';
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
+    if (!dateStr) return "";
+    // Parse YYYY-MM-DD to local time to avoid UTC offset bug
+    const [year, month, day] = dateStr.split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+    return date.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" });
   }
 
   // ============================================================
@@ -631,14 +637,14 @@ export class PopHeaderComponent implements OnInit, OnDestroy {
   }
 
   getSupplierName(): string {
-    if (!this.selectedSupplierId) return '';
+    if (!this.selectedSupplierId) return "";
     const supplier = this.suppliers.find(s => s.id === this.selectedSupplierId);
-    return supplier?.name || '';
+    return supplier?.name || "";
   }
 
   getLocationName(): string {
-    if (!this.selectedLocationId) return '';
+    if (!this.selectedLocationId) return "";
     const location = this.locations.find(l => l.id === this.selectedLocationId);
-    return location?.name || '';
+    return location?.name || "";
   }
 }

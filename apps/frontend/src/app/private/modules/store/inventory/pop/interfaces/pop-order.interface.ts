@@ -24,6 +24,10 @@ export interface PurchaseOrderItemRequest {
   discount_percentage?: number;
   tax_rate?: number;
   notes?: string;
+  // Batch/lot tracking fields
+  batch_number?: string;
+  manufacturing_date?: string;
+  expiration_date?: string;
   // New fields for prebulk items
   product_name?: string;
   sku?: string;
@@ -74,10 +78,18 @@ export function cartToPurchaseOrderRequest(
     (item: PopCartItem) => {
       const requestItem: PurchaseOrderItemRequest = {
         product_id: item.product.id,
-        product_variant_id: undefined, // TODO: Handle variants when implemented
+        product_variant_id: item.variant?.id,
         quantity: item.quantity,
         unit_price: item.unit_cost,
         notes: item.notes,
+        // Map lot/batch info
+        batch_number: item.lot_info?.batch_number,
+        manufacturing_date: item.lot_info?.manufacturing_date
+          ? new Date(item.lot_info.manufacturing_date).toISOString()
+          : undefined,
+        expiration_date: item.lot_info?.expiration_date
+          ? new Date(item.lot_info.expiration_date).toISOString()
+          : undefined,
       };
 
       if (item.is_prebulk && item.prebulk_data) {

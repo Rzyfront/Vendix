@@ -51,6 +51,7 @@ export class EmployeeListComponent {
   @Output() edit = new EventEmitter<Employee>();
   @Output() detail = new EventEmitter<Employee>();
   @Output() refresh = new EventEmitter<void>();
+  @Output() bulkUpload = new EventEmitter<void>();
 
   private store = inject(Store);
 
@@ -78,6 +79,7 @@ export class EmployeeListComponent {
 
   dropdownActions: DropdownAction[] = [
     { label: 'Nuevo Empleado', icon: 'plus', action: 'create', variant: 'primary' },
+    { label: 'Carga Masiva', icon: 'upload', action: 'bulk-upload' },
   ];
 
   tableActions: TableAction[] = [
@@ -112,6 +114,20 @@ export class EmployeeListComponent {
     },
     { key: 'position', label: 'Cargo', priority: 2, defaultValue: 'Sin cargo' },
     { key: 'department', label: 'Departamento', priority: 2, defaultValue: 'Sin departamento' },
+    {
+      key: 'cost_center',
+      label: 'Centro de Costo',
+      priority: 2,
+      badgeConfig: {
+        type: 'status',
+        colorMap: {
+          Administrativo: 'info',
+          Operativo: 'warn',
+          Ventas: 'success',
+        },
+      },
+      transform: (val: any) => this.getCostCenterLabel(val),
+    },
     {
       key: 'base_salary',
       label: 'Salario',
@@ -198,6 +214,9 @@ export class EmployeeListComponent {
       case 'create':
         this.create.emit();
         break;
+      case 'bulk-upload':
+        this.bulkUpload.emit();
+        break;
     }
   }
 
@@ -216,6 +235,15 @@ export class EmployeeListComponent {
       terminated: 'Terminado',
     };
     return labels[status] || status;
+  }
+
+  getCostCenterLabel(cc: string): string {
+    const labels: Record<string, string> = {
+      administrative: 'Administrativo',
+      operational: 'Operativo',
+      sales: 'Ventas',
+    };
+    return labels[cc] || 'Administrativo';
   }
 
   get hasFilters(): boolean {

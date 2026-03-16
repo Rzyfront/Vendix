@@ -1,3 +1,6 @@
+import { PermissionsGuard } from '../../auth/guards/permissions.guard';
+import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { UseGuards } from '@nestjs/common';
 import { Controller, Post, Get, Body, Param, Query } from '@nestjs/common';
 import { InventoryValidationService } from './services/inventory-validation.service';
 import { ResponseService } from '@common/responses/response.service';
@@ -5,6 +8,7 @@ import { ValidateConsolidatedStockDto } from './dto/validate-consolidated-stock.
 import { ValidateMultipleConsolidatedStockDto } from './dto/validate-multiple-consolidated-stock.dto';
 
 @Controller('store/inventory')
+@UseGuards(PermissionsGuard)
 export class InventoryController {
   constructor(
     private readonly inventoryValidationService: InventoryValidationService,
@@ -12,6 +16,7 @@ export class InventoryController {
   ) {}
 
   @Post('validate-consolidated-stock')
+  @Permissions('store:inventory:inventory:create')
   async validateConsolidatedStock(
     @Body() validateDto: ValidateConsolidatedStockDto,
   ) {
@@ -34,6 +39,7 @@ export class InventoryController {
   }
 
   @Post('validate-multiple-consolidated-stock')
+  @Permissions('store:inventory:inventory:create')
   async validateMultipleConsolidatedStock(
     @Body() validateDto: ValidateMultipleConsolidatedStockDto,
   ) {
@@ -56,6 +62,7 @@ export class InventoryController {
   }
 
   @Get('consolidated-stock/product/:productId')
+  @Permissions('store:inventory:inventory:read')
   async getConsolidatedStockByProduct(
     @Param('productId') productId: string,
     @Query('organization_id') organizationId?: number,

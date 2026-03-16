@@ -106,14 +106,14 @@ export class AccountingService {
   }
 
   postJournalEntry(id: number): Observable<ApiResponse<JournalEntry>> {
-    return this.http.post<ApiResponse<JournalEntry>>(
+    return this.http.patch<ApiResponse<JournalEntry>>(
       this.getApiUrl(`journal-entries/${id}/post`),
       {},
     );
   }
 
   voidJournalEntry(id: number): Observable<ApiResponse<JournalEntry>> {
-    return this.http.post<ApiResponse<JournalEntry>>(
+    return this.http.patch<ApiResponse<JournalEntry>>(
       this.getApiUrl(`journal-entries/${id}/void`),
       {},
     );

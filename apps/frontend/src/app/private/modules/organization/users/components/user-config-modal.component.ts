@@ -29,7 +29,14 @@ import { Subject, takeUntil } from 'rxjs';
 @Component({
   selector: 'app-user-config-modal',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, ButtonComponent, ModalComponent, InputComponent, TextareaComponent],
+  imports: [
+    CommonModule,
+    ReactiveFormsModule,
+    ButtonComponent,
+    ModalComponent,
+    InputComponent,
+    TextareaComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -294,6 +301,7 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
         inventory_locations: false,
         inventory_suppliers: false,
         inventory_movements: false,
+        inventory_transfers: false,
         customers: true,
         customers_all: true,
         customers_reviews: false,
@@ -313,9 +321,9 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
         expenses_reports: true,
         invoicing: true,
         accounting: true,
-        accounting_chart_of_accounts: false,
         accounting_journal_entries: false,
         accounting_fiscal_periods: false,
+        accounting_chart_of_accounts: false,
         accounting_reports: false,
         payroll: true,
         payroll_employees: false,
@@ -332,6 +340,7 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
         settings_domains: false,
         settings_users: true,
         settings_roles: true,
+        settings_cash_registers: false,
       },
       STORE_ECOMMERCE: {
         profile: true,

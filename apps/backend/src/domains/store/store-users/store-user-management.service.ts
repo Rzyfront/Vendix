@@ -12,6 +12,8 @@ import {
   UpdateStoreUserDto,
   QueryStoreUsersDto,
   ResetPasswordStoreUserDto,
+  UpdateUserRolesDto,
+  UpdateUserPanelUIDto,
 } from './dto';
 import * as bcrypt from 'bcryptjs';
 import { toTitleCase } from '@common/utils/format.util';
@@ -135,6 +137,13 @@ export class StoreUserManagementService {
       ];
     }
 
+    // Exclude users with "customer" role — they belong to the customers module
+    user_filter.user_roles = {
+      none: {
+        roles: { name: 'customer' },
+      },
+    };
+
     where.user = user_filter;
 
     const [total, data] = await Promise.all([
@@ -203,6 +212,22 @@ export class StoreUserManagementService {
             created_at: true,
             avatar_url: true,
             email_verified: true,
+            user_roles: {
+              include: {
+                roles: {
+                  select: {
+                    id: true,
+                    name: true,
+                    description: true,
+                    is_system_role: true,
+                  },
+                },
+              },
+            },
+            user_settings: {
+              where: { app_type: 'STORE_ADMIN' },
+              select: { config: true },
+            },
           },
         },
       },
@@ -212,9 +237,31 @@ export class StoreUserManagementService {
       throw new NotFoundException('User not found in this store');
     }
 
+    const { user_roles, user_settings, ...userData } = store_user.user;
+
+    // Extract roles from junction table
+    const roles = user_roles.map((ur: any) => ur.roles);
+
+    // Merge user's panel_ui with defaults so the frontend sees ALL available keys
+    const defaults = await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
+    const defaultPanelUI = defaults.panel_ui; // { ORG_ADMIN: {...}, STORE_ADMIN: {...}, ... }
+    const userConfig = (user_settings[0]?.config as any) || {};
+    const userPanelUI = userConfig.panel_ui || {};
+
+    // Merge: default keys as base, user overrides on top
+    const mergedPanelUI: Record<string, Record<string, boolean>> = {};
+    for (const appType of Object.keys(defaultPanelUI)) {
+      mergedPanelUI[appType] = {
+        ...defaultPanelUI[appType],
+        ...(userPanelUI[appType] || {}),
+      };
+    }
+
     return {
-      ...store_user.user,
+      ...userData,
       store_user_id: store_user.id,
+      roles,
+      panel_ui: mergedPanelUI,
     };
   }
 
@@ -292,17 +339,113 @@ export class StoreUserManagementService {
     });
   }
 
+  /** Roles that cannot be assigned or removed through the management UI */
+  private readonly IMMUTABLE_ROLES = ['owner', 'super_admin'];
+
+  async updateRoles(userId: number, dto: UpdateUserRolesDto) {
+    // Verify user belongs to this store
+    await this.findOne(userId);
+
+    // Reject if any requested role_id belongs to an immutable role
+    if (dto.role_ids.length > 0) {
+      const requested = await this.prisma.roles.findMany({
+        where: { id: { in: dto.role_ids } },
+        select: { id: true, name: true },
+      });
+
+      const forbidden = requested.filter((r) =>
+        this.IMMUTABLE_ROLES.includes(r.name.toLowerCase()),
+      );
+      if (forbidden.length > 0) {
+        throw new BadRequestException(
+          `Cannot assign immutable roles: ${forbidden.map((r) => r.name).join(', ')}`,
+        );
+      }
+    }
+
+    // Preserve immutable roles the user already has
+    const existingImmutable = await this.prisma.user_roles.findMany({
+      where: {
+        user_id: userId,
+        roles: { name: { in: this.IMMUTABLE_ROLES } },
+      },
+      select: { role_id: true },
+    });
+    const immutableIds = existingImmutable.map((r) => r.role_id);
+
+    // Remove only non-immutable roles
+    await this.prisma.user_roles.deleteMany({
+      where: {
+        user_id: userId,
+        role_id: { notIn: immutableIds },
+      },
+    });
+
+    // Assign new roles (immutable ones already excluded above)
+    if (dto.role_ids.length > 0) {
+      await this.prisma.user_roles.createMany({
+        data: dto.role_ids.map((role_id) => ({
+          user_id: userId,
+          role_id,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
+    return this.findOne(userId);
+  }
+
+  async updatePanelUI(userId: number, dto: UpdateUserPanelUIDto) {
+    // Verify user belongs to this store
+    await this.findOne(userId);
+
+    // Read existing user_settings to preserve preferences
+    const existing = await this.prisma.user_settings.findFirst({
+      where: { user_id: userId, app_type: 'STORE_ADMIN' },
+    });
+
+    const existingConfig = (existing?.config as any) || {};
+    const newConfig = {
+      ...existingConfig,
+      panel_ui: dto.panel_ui,
+    };
+
+    await this.prisma.user_settings.upsert({
+      where: {
+        user_id: userId,
+      },
+      create: {
+        user_id: userId,
+        app_type: 'STORE_ADMIN',
+        config: newConfig,
+      },
+      update: {
+        config: newConfig,
+      },
+    });
+
+    return this.findOne(userId);
+  }
+
   async getStats() {
+    const excludeCustomers = {
+      user: {
+        user_roles: {
+          none: { roles: { name: 'customer' } },
+        },
+      },
+    };
+
     const [total, activos, inactivos, pendientes] = await Promise.all([
-      this.prisma.store_users.count(),
+      this.prisma.store_users.count({ where: excludeCustomers }),
       this.prisma.store_users.count({
-        where: { user: { state: 'active' } },
+        where: { ...excludeCustomers, user: { ...excludeCustomers.user, state: 'active' } },
       }),
       this.prisma.store_users.count({
-        where: { user: { state: 'inactive' } },
+        where: { ...excludeCustomers, user: { ...excludeCustomers.user, state: 'inactive' } },
       }),
       this.prisma.store_users.count({
-        where: { user: { state: 'pending_verification' } },
+        where: { ...excludeCustomers, user: { ...excludeCustomers.user, state: 'pending_verification' } },
       }),
     ]);
 

@@ -6,6 +6,8 @@ import { invoicingReducer } from '../../private/modules/store/invoicing/state/re
 import { InvoicingEffects } from '../../private/modules/store/invoicing/state/effects/invoicing.effects';
 import { couponReducer } from '../../private/modules/store/marketing/coupons/state/reducers/coupon.reducer';
 import { CouponEffects } from '../../private/modules/store/marketing/coupons/state/effects/coupon.effects';
+import { storeUsersReducer } from '../../private/modules/store/settings/users/state/reducers/store-users.reducer';
+import { StoreUsersEffects } from '../../private/modules/store/settings/users/state/effects/store-users.effects';
 
 export const storeAdminRoutes: Routes = [
   {
@@ -132,6 +134,13 @@ export const storeAdminRoutes: Routes = [
             loadComponent: () =>
               import('../../private/modules/store/inventory/operations/stock-adjustments.component').then(
                 (c) => c.StockAdjustmentsComponent,
+              ),
+          },
+          {
+            path: 'transfers',
+            loadComponent: () =>
+              import('../../private/modules/store/inventory/transfers/transfers.component').then(
+                (c) => c.TransfersComponent,
               ),
           },
           {
@@ -338,6 +347,10 @@ export const storeAdminRoutes: Routes = [
               import('../../private/modules/store/settings/users/store-users-settings.component').then(
                 (c) => c.StoreUsersSettingsComponent,
               ),
+            providers: [
+              provideState('storeUsers', storeUsersReducer),
+              provideEffects(StoreUsersEffects),
+            ],
           },
           {
             path: 'roles',
@@ -405,6 +418,14 @@ export const storeAdminRoutes: Routes = [
           import('../../private/modules/store/expenses/expenses.routes').then(
             (m) => m.expensesRoutes,
           ),
+      },
+      // Cash Registers Routes
+      {
+        path: 'cash-registers',
+        loadComponent: () =>
+          import(
+            '../../private/modules/store/cash-registers/cash-registers.component'
+          ).then((c) => c.CashRegistersComponent),
       },
       // Invoicing Routes
       {

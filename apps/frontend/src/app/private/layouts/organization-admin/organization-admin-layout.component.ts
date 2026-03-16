@@ -57,7 +57,7 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
         class="main-content flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ease-in-out"
         [class.margin-desktop]="!sidebarRef?.isMobile"
         [style.margin-left]="
-          !sidebarRef?.isMobile ? (sidebarCollapsed ? '4rem' : '15rem') : '0'
+          !sidebarRef?.isMobile ? (sidebarCollapsed ? '3.5rem' : '12.5rem') : '0'
         "
       >
         <!-- Header (Fixed) -->

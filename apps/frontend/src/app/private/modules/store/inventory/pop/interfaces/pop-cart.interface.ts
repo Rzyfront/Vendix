@@ -16,12 +16,28 @@ export interface PopProduct {
     code?: string;
     price?: number;
     cost?: number;
+    cost_price?: number;
     stock?: number;
     image_url?: string;
     category_id?: number;
     is_active?: boolean;
     is_on_sale?: boolean;
     sale_price?: number;
+    pricing_type?: 'unit' | 'weight';
+    product_variants?: PopProductVariant[];
+    requires_batch_tracking?: boolean;
+}
+
+/**
+ * Product variant for POP selection
+ */
+export interface PopProductVariant {
+    id: number;
+    name?: string;
+    sku: string;
+    cost_price?: number;
+    stock_quantity?: number;
+    attributes?: Record<string, any>;
 }
 
 /**
@@ -109,6 +125,7 @@ export interface PreBulkData {
 export interface PopCartItem {
     id: string;
     product: PopProduct;
+    variant?: PopProductVariant;
     quantity: number;
     unit_cost: number;
     discount: number;
@@ -163,6 +180,7 @@ export interface PopCartState {
  */
 export interface AddToPopCartRequest {
     product: PopProduct;
+    variant?: PopProductVariant;
     quantity: number;
     unit_cost: number;
     lot_info?: LotInfo;
@@ -180,6 +198,8 @@ export interface UpdatePopCartItemRequest {
     unit_cost?: number;
     lot_info?: LotInfo;
     notes?: string;
+    variant?: PopProductVariant;
+    pricing_type?: 'unit' | 'weight';
 }
 
 /**

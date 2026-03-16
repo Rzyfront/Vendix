@@ -333,6 +333,8 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
       :host {
         display: block;
         height: 100%;
+        min-height: 0;
+        overflow: hidden;
       }
 
       .scrollbar-hide::-webkit-scrollbar {

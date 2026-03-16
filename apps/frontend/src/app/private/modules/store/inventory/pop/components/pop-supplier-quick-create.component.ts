@@ -48,11 +48,7 @@ import { SuppliersService } from '../../services/suppliers.service';
       title="Crear Proveedor Rápido"
       subtitle="Agrega un nuevo proveedor sin salir del punto de compra"
     >
-      <form
-        [formGroup]="supplierForm"
-        (ngSubmit)="onSubmit()"
-        class="mt-4"
-      >
+      <form [formGroup]="supplierForm" (ngSubmit)="onSubmit()" class="mt-4">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <!-- Name -->
           <div class="md:col-span-2">
@@ -121,7 +117,9 @@ import { SuppliersService } from '../../services/suppliers.service';
 
       <!-- Footer Actions -->
       <div slot="footer">
-        <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+        <div
+          class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
+        >
           <app-button variant="outline" (clicked)="onClose()">
             Cancelar
           </app-button>
@@ -158,7 +156,7 @@ export class PopSupplierQuickCreateComponent implements OnInit {
 
   private initForm(): void {
     this.supplierForm = this.fb.group({
-      name: ['', [Validators.required, Validators.minLength(3)]],
+      name: ['', [Validators.required, Validators.minLength(2)]],
       code: ['', [Validators.required]],
       email: ['', [Validators.email]],
       phone: [''],

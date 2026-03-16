@@ -8,17 +8,15 @@
   <app-purchase-order-list
     (viewOrder)="viewOrderDetails($event)"
     (create)="createOrder()"
-    (refresh)="refreshList()"
+    (refresh)="onOrderUpdated()"
     (statsUpdated)="onStatsUpdated($any($event))"
   ></app-purchase-order-list>
 
-  <!-- Detail Modal (keep in parent for navigation context) -->
-  <app-purchase-order-detail-modal
+  <!-- Detail Modal with tabs (Detalle, Recepciones, Pagos, Adjuntos, Historial) -->
+  <app-po-detail-modal
     [isOpen]="isDetailModalOpen"
     [order]="selectedOrder"
     (close)="closeDetailModal()"
-    (receive)="onReceiveOrder($event)"
-    (cancel)="onCancelOrder($event)"
-    (edit)="onEditOrder($event)"
-  ></app-purchase-order-detail-modal>
+    (orderUpdated)="onOrderUpdated()"
+  ></app-po-detail-modal>
 </div>

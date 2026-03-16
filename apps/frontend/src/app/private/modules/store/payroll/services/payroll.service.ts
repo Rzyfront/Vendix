@@ -67,6 +67,16 @@ export class PayrollService {
     return this.http.get<ApiResponse<AvailableUser[]>>(this.getApiUrl('employees/available-users'));
   }
 
+  // ─── Bulk Upload ───────────────────────────────────────
+
+  uploadBulkEmployeesJson(employees: any[]): Observable<ApiResponse<any>> {
+    return this.http.post<ApiResponse<any>>(this.getApiUrl('employees/bulk/upload'), { employees });
+  }
+
+  getBulkEmployeeTemplate(): Observable<Blob> {
+    return this.http.get(this.getApiUrl('employees/bulk/template/download'), { responseType: 'blob' });
+  }
+
   // ─── Payroll Runs ───────────────────────────────────────
 
   getPayrollRuns(query: QueryPayrollRunDto): Observable<PayrollListResponse> {

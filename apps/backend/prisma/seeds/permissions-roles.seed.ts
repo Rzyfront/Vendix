@@ -113,7 +113,7 @@ export async function seedPermissionsAndRoles(
     {
       name: 'organization:onboarding:update',
       description: 'Actualizar/Completar onboarding',
-      path: '/api/organization/onboarding/complete',
+      path: '/api/organization/onboarding/complete/:id',
       method: 'POST',
     },
 
@@ -597,25 +597,25 @@ export async function seedPermissionsAndRoles(
     {
       name: 'store:suppliers:create',
       description: 'Crear proveedor',
-      path: '/api/store/inventory/suppliers',
+      path: '/api/store/inventory/suppliers/unique-create',
       method: 'POST',
     },
     {
       name: 'store:suppliers:read',
       description: 'Leer proveedores',
-      path: '/api/store/inventory/suppliers',
+      path: '/api/store/inventory/suppliers/unique-read',
       method: 'GET',
     },
     {
       name: 'store:suppliers:update',
       description: 'Actualizar proveedor',
-      path: '/api/store/inventory/suppliers/:id',
+      path: '/api/store/inventory/suppliers/:id/:id',
       method: 'PATCH',
     },
     {
       name: 'store:suppliers:delete',
       description: 'Eliminar proveedor',
-      path: '/api/store/inventory/suppliers/:id',
+      path: '/api/store/inventory/suppliers/:id/:id',
       method: 'DELETE',
     },
 
@@ -623,25 +623,25 @@ export async function seedPermissionsAndRoles(
     {
       name: 'store:addresses:create',
       description: 'Crear dirección de tienda',
-      path: '/api/store/addresses',
+      path: '/api/store/addresses/unique-create',
       method: 'POST',
     },
     {
       name: 'store:addresses:read',
       description: 'Leer direcciones de tienda',
-      path: '/api/store/addresses',
+      path: '/api/store/addresses/unique-read',
       method: 'GET',
     },
     {
       name: 'store:addresses:update',
       description: 'Actualizar dirección de tienda',
-      path: '/api/store/addresses/:id',
+      path: '/api/store/addresses/:id/:id',
       method: 'PATCH',
     },
     {
       name: 'store:addresses:delete',
       description: 'Eliminar dirección de tienda',
-      path: '/api/store/addresses/:id',
+      path: '/api/store/addresses/:id/:id',
       method: 'DELETE',
     },
 
@@ -1050,6 +1050,31 @@ export async function seedPermissionsAndRoles(
       path: '/api/inventory/transactions',
       method: 'GET',
     },
+    // Stock Transfers
+    {
+      name: 'store:stock-transfers:create',
+      description: 'Crear transferencia de inventario',
+      path: '/api/store/stock-transfers',
+      method: 'POST',
+    },
+    {
+      name: 'store:stock-transfers:read',
+      description: 'Leer transferencias de inventario',
+      path: '/api/store/stock-transfers',
+      method: 'GET',
+    },
+    {
+      name: 'store:stock-transfers:update',
+      description: 'Actualizar transferencia de inventario',
+      path: '/api/store/stock-transfers/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:stock-transfers:delete',
+      description: 'Eliminar transferencia de inventario',
+      path: '/api/store/stock-transfers/:id',
+      method: 'DELETE',
+    },
     // Suppliers
     {
       name: 'store:suppliers:create',
@@ -1207,9 +1232,570 @@ export async function seedPermissionsAndRoles(
     },
     {
       name: 'store:promotions:manage',
-      description: 'Gestionar estado de promociones (activar, pausar, cancelar)',
+      description:
+        'Gestionar estado de promociones (activar, pausar, cancelar)',
       path: '/api/store/promotions/:id/activate',
       method: 'POST',
+    },
+
+    {
+      name: 'store:accounting:account_mappings:create',
+      description: 'Create accounting account mappings',
+      path: '/api/store/accounting/account-mappings',
+      method: 'POST',
+    },
+    {
+      name: 'store:accounting:account_mappings:read',
+      description: 'Read accounting account mappings',
+      path: '/api/store/accounting/account-mappings',
+      method: 'GET',
+    },
+    {
+      name: 'store:accounting:account_mappings:update',
+      description: 'Update accounting account mappings',
+      path: '/api/store/accounting/account-mappings',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:accounting:chart_of_accounts:create',
+      description: 'Create accounting chart of accounts',
+      path: '/api/store/accounting/chart-of-accounts',
+      method: 'POST',
+    },
+    {
+      name: 'store:accounting:chart_of_accounts:delete',
+      description: 'Delete accounting chart of accounts',
+      path: '/api/store/accounting/chart-of-accounts',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:accounting:chart_of_accounts:read',
+      description: 'Read accounting chart of accounts',
+      path: '/api/store/accounting/chart-of-accounts',
+      method: 'GET',
+    },
+    {
+      name: 'store:accounting:chart_of_accounts:update',
+      description: 'Update accounting chart of accounts',
+      path: '/api/store/accounting/chart-of-accounts',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:accounting:fiscal_periods:create',
+      description: 'Create accounting fiscal periods',
+      path: '/api/store/accounting/fiscal-periods',
+      method: 'POST',
+    },
+    {
+      name: 'store:accounting:fiscal_periods:delete',
+      description: 'Delete accounting fiscal periods',
+      path: '/api/store/accounting/fiscal-periods',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:accounting:fiscal_periods:read',
+      description: 'Read accounting fiscal periods',
+      path: '/api/store/accounting/fiscal-periods',
+      method: 'GET',
+    },
+    {
+      name: 'store:accounting:fiscal_periods:update',
+      description: 'Update accounting fiscal periods',
+      path: '/api/store/accounting/fiscal-periods',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:accounting:journal_entries:create',
+      description: 'Create accounting journal entries',
+      path: '/api/store/accounting/journal-entries',
+      method: 'POST',
+    },
+    {
+      name: 'store:accounting:journal_entries:delete',
+      description: 'Delete accounting journal entries',
+      path: '/api/store/accounting/journal-entries',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:accounting:journal_entries:post',
+      description: 'Post accounting journal entries',
+      path: '/api/store/accounting/journal-entries',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:accounting:journal_entries:read',
+      description: 'Read accounting journal entries',
+      path: '/api/store/accounting/journal-entries',
+      method: 'GET',
+    },
+    {
+      name: 'store:accounting:journal_entries:update',
+      description: 'Update accounting journal entries',
+      path: '/api/store/accounting/journal-entries/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:accounting:journal_entries:void',
+      description: 'Void accounting journal entries',
+      path: '/api/store/accounting/journal-entries/:id/void',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:accounting:reports:read',
+      description: 'Read accounting reports',
+      path: '/api/store/accounting/reports',
+      method: 'GET',
+    },
+    {
+      name: 'store:analytics:read',
+      description: 'Read analytics',
+      path: '/api/store/analytics',
+      method: 'GET',
+    },
+    {
+      name: 'store:expenses:approve',
+      description: 'Approve expenses',
+      path: '/api/store/expenses',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:expenses:cancel',
+      description: 'Cancel expenses',
+      path: '/api/store/expenses/:id/cancel',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:expenses:create',
+      description: 'Create expenses',
+      path: '/api/store/expenses',
+      method: 'POST',
+    },
+    {
+      name: 'store:expenses:delete',
+      description: 'Delete expenses',
+      path: '/api/store/expenses',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:expenses:pay',
+      description: 'Pay expenses',
+      path: '/api/store/expenses/:id/pay',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:expenses:read',
+      description: 'Read expenses',
+      path: '/api/store/expenses',
+      method: 'GET',
+    },
+    {
+      name: 'store:expenses:reject',
+      description: 'Reject expenses',
+      path: '/api/store/expenses/:id/reject',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:expenses:update',
+      description: 'Update expenses',
+      path: '/api/store/expenses/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:inventory:inventory:create',
+      description: 'Create inventory inventory',
+      path: '/api/store/inventory/inventory',
+      method: 'POST',
+    },
+    {
+      name: 'store:inventory:inventory:read',
+      description: 'Read inventory inventory',
+      path: '/api/store/inventory/inventory',
+      method: 'GET',
+    },
+    {
+      name: 'store:inventory:locations:create',
+      description: 'Create inventory locations',
+      path: '/api/store/inventory/locations',
+      method: 'POST',
+    },
+    {
+      name: 'store:inventory:locations:delete',
+      description: 'Delete inventory locations',
+      path: '/api/store/inventory/locations',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:inventory:locations:read',
+      description: 'Read inventory locations',
+      path: '/api/store/inventory/locations',
+      method: 'GET',
+    },
+    {
+      name: 'store:inventory:locations:update',
+      description: 'Update inventory locations',
+      path: '/api/store/inventory/locations',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:inventory:movements:create',
+      description: 'Create inventory movements',
+      path: '/api/store/inventory/movements',
+      method: 'POST',
+    },
+    {
+      name: 'store:inventory:movements:read',
+      description: 'Read inventory movements',
+      path: '/api/store/inventory/movements',
+      method: 'GET',
+    },
+    {
+      name: 'store:inventory:serial_numbers:create',
+      description: 'Create inventory serial numbers',
+      path: '/api/store/inventory/serial-numbers',
+      method: 'POST',
+    },
+    {
+      name: 'store:inventory:serial_numbers:delete',
+      description: 'Delete inventory serial numbers',
+      path: '/api/store/inventory/serial-numbers',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:inventory:serial_numbers:read',
+      description: 'Read inventory serial numbers',
+      path: '/api/store/inventory/serial-numbers',
+      method: 'GET',
+    },
+    {
+      name: 'store:inventory:serial_numbers:update',
+      description: 'Update inventory serial numbers',
+      path: '/api/store/inventory/serial-numbers',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:inventory:stock_levels:read',
+      description: 'Read inventory stock levels',
+      path: '/api/store/inventory/stock-levels',
+      method: 'GET',
+    },
+    {
+      name: 'store:inventory:suppliers:create',
+      description: 'Create inventory suppliers',
+      path: '/api/store/inventory/suppliers/unique-create',
+      method: 'POST',
+    },
+    {
+      name: 'store:inventory:suppliers:delete',
+      description: 'Delete inventory suppliers',
+      path: '/api/store/inventory/suppliers',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:inventory:suppliers:read',
+      description: 'Read inventory suppliers',
+      path: '/api/store/inventory/suppliers/unique-read',
+      method: 'GET',
+    },
+    {
+      name: 'store:inventory:suppliers:update',
+      description: 'Update inventory suppliers',
+      path: '/api/store/inventory/suppliers',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:orders:order_flow:create',
+      description: 'Create orders order flow',
+      path: '/api/store/orders/order-flow',
+      method: 'POST',
+    },
+    {
+      name: 'store:orders:order_flow:read',
+      description: 'Read orders order flow',
+      path: '/api/store/orders/order-flow',
+      method: 'GET',
+    },
+    {
+      name: 'store:orders:purchase_orders:approve',
+      description: 'Approve orders purchase orders',
+      path: '/api/store/orders/purchase-orders',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:orders:purchase_orders:cancel',
+      description: 'Cancel orders purchase orders',
+      path: '/api/store/orders/purchase-orders/:id/cancel',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:orders:purchase_orders:create',
+      description: 'Create orders purchase orders',
+      path: '/api/store/orders/purchase-orders',
+      method: 'POST',
+    },
+    {
+      name: 'store:orders:purchase_orders:delete',
+      description: 'Delete orders purchase orders',
+      path: '/api/store/orders/purchase-orders',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:orders:purchase_orders:read',
+      description: 'Read orders purchase orders',
+      path: '/api/store/orders/purchase-orders',
+      method: 'GET',
+    },
+    {
+      name: 'store:orders:purchase_orders:receive',
+      description: 'Receive orders purchase orders',
+      path: '/api/store/orders/purchase-orders/:id/receive',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:orders:purchase_orders:update',
+      description: 'Update orders purchase orders',
+      path: '/api/store/orders/purchase-orders/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:orders:purchase_orders:pay',
+      description: 'Register payments for purchase orders',
+      path: '/api/store/orders/purchase-orders/:id/payments',
+      method: 'POST',
+    },
+    {
+      name: 'store:orders:purchase_orders:attach',
+      description: 'Upload and manage purchase order attachments',
+      path: '/api/store/orders/purchase-orders/:id/attachments',
+      method: 'POST',
+    },
+    {
+      name: 'store:orders:return_orders:cancel',
+      description: 'Cancel orders return orders',
+      path: '/api/store/orders/return-orders',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:orders:return_orders:create',
+      description: 'Create orders return orders',
+      path: '/api/store/orders/return-orders',
+      method: 'POST',
+    },
+    {
+      name: 'store:orders:return_orders:delete',
+      description: 'Delete orders return orders',
+      path: '/api/store/orders/return-orders',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:orders:return_orders:process',
+      description: 'Process orders return orders',
+      path: '/api/store/orders/return-orders/:id/process',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:orders:return_orders:read',
+      description: 'Read orders return orders',
+      path: '/api/store/orders/return-orders',
+      method: 'GET',
+    },
+    {
+      name: 'store:orders:return_orders:update',
+      description: 'Update orders return orders',
+      path: '/api/store/orders/return-orders/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:orders:sales_orders:cancel',
+      description: 'Cancel orders sales orders',
+      path: '/api/store/orders/sales-orders',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:orders:sales_orders:confirm',
+      description: 'Confirm orders sales orders',
+      path: '/api/store/orders/sales-orders',
+      method: 'GET',
+    },
+    {
+      name: 'store:orders:sales_orders:create',
+      description: 'Create orders sales orders',
+      path: '/api/store/orders/sales-orders',
+      method: 'POST',
+    },
+    {
+      name: 'store:orders:sales_orders:delete',
+      description: 'Delete orders sales orders',
+      path: '/api/store/orders/sales-orders',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:orders:sales_orders:invoice',
+      description: 'Invoice orders sales orders',
+      path: '/api/store/orders/sales-orders/:id/invoice',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:orders:sales_orders:read',
+      description: 'Read orders sales orders',
+      path: '/api/store/orders/sales-orders/unique-read',
+      method: 'GET',
+    },
+    {
+      name: 'store:orders:sales_orders:ship',
+      description: 'Ship orders sales orders',
+      path: '/api/store/orders/sales-orders/:id/ship',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:orders:sales_orders:update',
+      description: 'Update orders sales orders',
+      path: '/api/store/orders/sales-orders/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:promotions:cancel',
+      description: 'Cancel promotions',
+      path: '/api/store/promotions',
+      method: 'PATCH',
+    },
+
+    // Cash Registers
+    {
+      name: 'store:cash_registers:read',
+      description: 'Read cash registers and sessions',
+      path: '/api/store/cash-registers/unique-read',
+      method: 'GET',
+    },
+    {
+      name: 'store:cash_registers:create',
+      description: 'Create cash registers',
+      path: '/api/store/cash-registers/unique-create',
+      method: 'POST',
+    },
+    {
+      name: 'store:cash_registers:update',
+      description: 'Update cash registers',
+      path: '/api/store/cash-registers/:id/unique-update',
+      method: 'PUT',
+    },
+    {
+      name: 'store:cash_registers:delete',
+      description: 'Delete/deactivate cash registers',
+      path: '/api/store/cash-registers/:id/unique-delete',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:cash_registers:open_session',
+      description: 'Open cash register sessions',
+      path: '/api/store/cash-registers/sessions/open',
+      method: 'POST',
+    },
+    {
+      name: 'store:cash_registers:close_session',
+      description: 'Close cash register sessions',
+      path: '/api/store/cash-registers/sessions/:id/close',
+      method: 'POST',
+    },
+    {
+      name: 'store:cash_registers:movements',
+      description: 'Manage cash register movements (cash in/out)',
+      path: '/api/store/cash-registers/sessions/:id/movements',
+      method: 'POST',
+    },
+    {
+      name: 'store:cash_registers:reports',
+      description: 'View cash register session reports',
+      path: '/api/store/cash-registers/sessions/:id/report',
+      method: 'GET',
+    },
+
+    // Nómina - Empleados
+    {
+      name: 'store:payroll:employees:create',
+      description: 'Crear empleados',
+      path: '/api/store/payroll/employees',
+      method: 'POST',
+    },
+    {
+      name: 'store:payroll:employees:read',
+      description: 'Leer empleados',
+      path: '/api/store/payroll/employees',
+      method: 'GET',
+    },
+    {
+      name: 'store:payroll:employees:update',
+      description: 'Actualizar empleados',
+      path: '/api/store/payroll/employees',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:payroll:employees:bulk:upload',
+      description: 'Carga masiva de empleados',
+      path: '/api/store/payroll/employees/bulk/upload',
+      method: 'POST',
+    },
+    {
+      name: 'store:payroll:employees:bulk:template',
+      description: 'Descargar plantilla carga masiva empleados',
+      path: '/api/store/payroll/employees/bulk/template/download',
+      method: 'GET',
+    },
+    // Nómina - Liquidaciones
+    {
+      name: 'store:payroll:runs:create',
+      description: 'Crear liquidaciones de nómina',
+      path: '/api/store/payroll/runs',
+      method: 'POST',
+    },
+    {
+      name: 'store:payroll:runs:read',
+      description: 'Leer liquidaciones de nómina',
+      path: '/api/store/payroll/runs',
+      method: 'GET',
+    },
+    {
+      name: 'store:payroll:runs:manage',
+      description: 'Gestionar liquidaciones (calcular, aprobar, enviar, pagar, cancelar)',
+      path: '/api/store/payroll/runs',
+      method: 'PATCH',
+    },
+    // Nómina - Reglas
+    {
+      name: 'store:payroll:rules:read',
+      description: 'Leer reglas de nómina',
+      path: '/api/store/payroll/rules',
+      method: 'GET',
+    },
+    {
+      name: 'store:payroll:rules:update',
+      description: 'Actualizar reglas de nómina',
+      path: '/api/store/payroll/rules',
+      method: 'PATCH',
+    },
+
+    {
+      name: 'superadmin:stores:create',
+      description: 'Create stores',
+      path: '/api/store/stores/unique-create',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:stores:delete',
+      description: 'Delete stores',
+      path: '/api/store/stores',
+      method: 'DELETE',
+    },
+    {
+      name: 'superadmin:stores:read',
+      description: 'Read stores',
+      path: '/api/store/stores/unique-read',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:stores:update',
+      description: 'Update stores',
+      path: '/api/store/stores',
+      method: 'PATCH',
     },
   ];
 
@@ -1231,22 +1817,35 @@ export async function seedPermissionsAndRoles(
 
   // Create permissions
   let permissionsCreated = 0;
+  let permissionsSkipped = 0;
   for (const permission of permissions) {
-    await client.permissions.upsert({
-      where: { name: permission.name },
-      update: {
-        description: permission.description,
-        path: permission.path,
-        method: permission.method as any,
-      },
-      create: {
-        name: permission.name,
-        description: permission.description,
-        path: permission.path,
-        method: permission.method as any,
-      },
-    });
-    permissionsCreated++;
+    try {
+      await client.permissions.upsert({
+        where: { name: permission.name },
+        update: {
+          description: permission.description,
+          path: permission.path,
+          method: permission.method as any,
+        },
+        create: {
+          name: permission.name,
+          description: permission.description,
+          path: permission.path,
+          method: permission.method as any,
+        },
+      });
+      permissionsCreated++;
+    } catch (e: any) {
+      // Skip unique constraint violations on (path, method)
+      if (e?.code === 'P2002') {
+        permissionsSkipped++;
+      } else {
+        throw e;
+      }
+    }
+  }
+  if (permissionsSkipped > 0) {
+    console.log(`   ⚠️  Skipped ${permissionsSkipped} permissions (duplicate path+method)`);
   }
 
   // Mark critical permissions as system permissions
@@ -1467,7 +2066,9 @@ export async function seedPermissionsAndRoles(
       p.name.includes('organization:stores:read') ||
       p.name.includes('organization:addresses:read') ||
       p.name.includes('store:addresses:read') ||
-      p.name.includes('store:taxes:read'),
+      p.name.includes('store:taxes:read') ||
+      p.name.includes('store:cash_registers:read') ||
+      p.name.includes('store:cash_registers:reports'),
   );
 
   for (const permission of supervisorPermissions) {
@@ -1498,7 +2099,11 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:coupons:validate') ||
       p.name.includes('organization:addresses:read') ||
       p.name.includes('store:addresses:read') ||
-      p.name.includes('store:taxes:read'),
+      p.name.includes('store:taxes:read') ||
+      p.name.includes('store:cash_registers:read') ||
+      p.name.includes('store:cash_registers:open_session') ||
+      p.name.includes('store:cash_registers:close_session') ||
+      p.name.includes('store:cash_registers:movements'),
   );
 
   for (const permission of employeePermissions) {

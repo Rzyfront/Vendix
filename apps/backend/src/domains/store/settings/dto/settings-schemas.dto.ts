@@ -212,6 +212,38 @@ export class ScaleSettingsDto {
   device?: ScaleDeviceConfigDto;
 }
 
+export class CashRegisterSettingsDto {
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  require_session_for_sales?: boolean;
+
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  allow_multiple_sessions_per_user?: boolean;
+
+  @ApiProperty({ example: true, required: false })
+  @IsOptional()
+  @IsBoolean()
+  auto_create_default_register?: boolean;
+
+  @ApiProperty({ example: true, required: false })
+  @IsOptional()
+  @IsBoolean()
+  require_closing_count?: boolean;
+
+  @ApiProperty({ example: true, required: false })
+  @IsOptional()
+  @IsBoolean()
+  track_non_cash_payments?: boolean;
+}
+
 export class PosSettingsDto {
   @ApiProperty({ example: false, required: false })
   @IsOptional()
@@ -281,6 +313,12 @@ export class PosSettingsDto {
   @ValidateNested()
   @Type(() => ScaleSettingsDto)
   scale?: ScaleSettingsDto;
+
+  @ApiProperty({ type: () => CashRegisterSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CashRegisterSettingsDto)
+  cash_register?: CashRegisterSettingsDto;
 }
 
 export class ReceiptsSettingsDto {

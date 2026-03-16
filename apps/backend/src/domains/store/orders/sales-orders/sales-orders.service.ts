@@ -13,6 +13,7 @@ import { StockLevelManager } from '../../inventory/shared/services/stock-level-m
 import { LocationsService } from '../../inventory/locations/locations.service';
 import { InventoryIntegrationService } from '../../inventory/shared/services/inventory-integration.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { S3Service } from '@common/services/s3.service';
 import { resolveCostPrice } from '../utils/resolve-cost-price';
 
 @Injectable()
@@ -23,6 +24,7 @@ export class SalesOrdersService {
     private readonly inventoryLocationsService: LocationsService,
     private readonly stockLevelManager: StockLevelManager,
     private readonly eventEmitter: EventEmitter2,
+    private readonly s3Service: S3Service,
   ) {}
 
   async create(createSalesOrderDto: CreateSalesOrderDto) {
@@ -61,7 +63,11 @@ export class SalesOrdersService {
           billing_addresses: true,
           sales_order_items: {
             include: {
-              products: true,
+              products: {
+                include: {
+                  product_images: { where: { is_main: true }, take: 1 },
+                },
+              },
               product_variants: true,
               inventory_locations: true,
             },
@@ -108,7 +114,11 @@ export class SalesOrdersService {
           billing_addresses: true,
           sales_order_items: {
             include: {
-              products: true,
+              products: {
+                include: {
+                  product_images: { where: { is_main: true }, take: 1 },
+                },
+              },
               product_variants: true,
               inventory_locations: true,
             },
@@ -118,7 +128,7 @@ export class SalesOrdersService {
     });
   }
 
-  findAll(query: SalesOrderQueryDto) {
+  async findAll(query: SalesOrderQueryDto) {
     const where: any = {
       customer_id: query.customer_id,
       status: query.status,
@@ -160,7 +170,7 @@ export class SalesOrdersService {
       ];
     }
 
-    return this.prisma.sales_orders.findMany({
+    const orders = await this.prisma.sales_orders.findMany({
       where,
       include: {
         customers: true,
@@ -168,7 +178,11 @@ export class SalesOrdersService {
         billing_addresses: true,
         sales_order_items: {
           include: {
-            products: true,
+            products: {
+              include: {
+                product_images: { where: { is_main: true }, take: 1 },
+              },
+            },
             product_variants: true,
             inventory_locations: true,
           },
@@ -178,6 +192,10 @@ export class SalesOrdersService {
         order_date: 'desc',
       },
     });
+
+    await Promise.all(orders.map((order) => this.signOrderItemImages(order)));
+
+    return orders;
   }
 
   findByStatus(status: sales_order_status_enum, query: SalesOrderQueryDto) {
@@ -194,8 +212,8 @@ export class SalesOrdersService {
     });
   }
 
-  findOne(id: number) {
-    return this.prisma.sales_orders.findUnique({
+  async findOne(id: number) {
+    const order = await this.prisma.sales_orders.findUnique({
       where: { id },
       include: {
         customers: true,
@@ -203,13 +221,23 @@ export class SalesOrdersService {
         billing_addresses: true,
         sales_order_items: {
           include: {
-            products: true,
+            products: {
+              include: {
+                product_images: { where: { is_main: true }, take: 1 },
+              },
+            },
             product_variants: true,
             inventory_locations: true,
           },
         },
       },
     });
+
+    if (order) {
+      await this.signOrderItemImages(order);
+    }
+
+    return order;
   }
 
   async update(id: number, updateSalesOrderDto: UpdateSalesOrderDto) {
@@ -240,7 +268,11 @@ export class SalesOrdersService {
           billing_addresses: true,
           sales_order_items: {
             include: {
-              products: true,
+              products: {
+                include: {
+                  product_images: { where: { is_main: true }, take: 1 },
+                },
+              },
               product_variants: true,
               inventory_locations: true,
             },
@@ -279,7 +311,11 @@ export class SalesOrdersService {
           billing_addresses: true,
           sales_order_items: {
             include: {
-              products: true,
+              products: {
+                include: {
+                  product_images: { where: { is_main: true }, take: 1 },
+                },
+              },
               product_variants: true,
               inventory_locations: true,
             },
@@ -373,7 +409,11 @@ export class SalesOrdersService {
           billing_addresses: true,
           sales_order_items: {
             include: {
-              products: true,
+              products: {
+                include: {
+                  product_images: { where: { is_main: true }, take: 1 },
+                },
+              },
               product_variants: true,
               inventory_locations: true,
             },
@@ -396,7 +436,11 @@ export class SalesOrdersService {
         billing_addresses: true,
         sales_order_items: {
           include: {
-            products: true,
+            products: {
+              include: {
+                product_images: { where: { is_main: true }, take: 1 },
+              },
+            },
             product_variants: true,
             inventory_locations: true,
           },
@@ -447,7 +491,11 @@ export class SalesOrdersService {
           billing_addresses: true,
           sales_order_items: {
             include: {
-              products: true,
+              products: {
+                include: {
+                  product_images: { where: { is_main: true }, take: 1 },
+                },
+              },
               product_variants: true,
               inventory_locations: true,
             },
@@ -461,6 +509,23 @@ export class SalesOrdersService {
     return this.prisma.sales_orders.delete({
       where: { id },
     });
+  }
+
+  /**
+   * Signs S3 image URLs for all products in sales order items.
+   */
+  private async signOrderItemImages(order: any): Promise<void> {
+    if (!order.sales_order_items?.length) return;
+
+    await Promise.all(
+      order.sales_order_items.map(async (item: any) => {
+        if (item.products?.product_images?.length) {
+          const mainImage = item.products.product_images[0];
+          mainImage.image_url = await this.s3Service.signUrl(mainImage.image_url);
+          item.products.image_url = mainImage.image_url;
+        }
+      }),
+    );
   }
 
   /**

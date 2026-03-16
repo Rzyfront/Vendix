@@ -190,9 +190,19 @@ export class SettingsService {
       // Update branding in store_settings.settings.branding (source of truth)
       await this.updateStoreBranding(store_id, dto.app);
 
-      // Delete app from dto - branding is the single source of truth
+      // Delete app and branding from dto - branding is managed by updateStoreBranding()
       // App will be built from branding in getSettings()
+      // Branding must also be removed because the frontend sends the ENTIRE settings object,
+      // which includes stale branding values from the previous GET response
       delete (dto as any).app;
+      delete (dto as any).branding;
+
+      // Re-read settings after branding update to avoid overwriting with stale data
+      const freshStoreSettings = await this.prisma.store_settings.findUnique({
+        where: { store_id },
+      });
+      currentSettings = (freshStoreSettings?.settings ||
+        getDefaultStoreSettings()) as StoreSettings;
     }
 
     // Merge solo las secciones enviadas

@@ -57,7 +57,6 @@ export class GeneralSettingsComponent implements OnInit {
   templates: any[] = [];
 
   // Pending file uploads (lazy — deferred until save)
-  pendingGeneralLogo: { file: File; preview: string } | null = null;
   pendingAppLogo: { file: File; preview: string } | null = null;
   pendingAppFavicon: { file: File; preview: string } | null = null;
 
@@ -155,11 +154,6 @@ export class GeneralSettingsComponent implements OnInit {
     this.lastSaved.set(null);
   }
 
-  onPendingGeneralLogo(event: { file: File; preview: string } | null): void {
-    this.pendingGeneralLogo = event;
-    this.hasUnsavedChanges.set(true);
-  }
-
   onPendingAppLogo(event: { file: File; preview: string } | null): void {
     this.pendingAppLogo = event;
     this.hasUnsavedChanges.set(true);
@@ -198,23 +192,36 @@ export class GeneralSettingsComponent implements OnInit {
     }
 
     try {
-      // Upload pending files to S3 before saving settings
-      if (this.pendingGeneralLogo) {
-        const result = await firstValueFrom(this.settings_service.uploadStoreLogo(this.pendingGeneralLogo.file));
-        this.settings = { ...this.settings, general: { ...this.settings.general, logo_url: result.key } };
-        this.pendingGeneralLogo = null;
-      }
+      // Upload pending brand assets to S3 in parallel before saving settings
+      const uploads: Promise<void>[] = [];
 
       if (this.pendingAppLogo) {
-        const result = await firstValueFrom(this.settings_service.uploadStoreLogo(this.pendingAppLogo.file));
-        this.settings = { ...this.settings, app: { ...this.settings.app, logo_url: result.key } };
-        this.pendingAppLogo = null;
+        const logoFile = this.pendingAppLogo.file;
+        uploads.push(
+          firstValueFrom(this.settings_service.uploadStoreLogo(logoFile)).then((result) => {
+            // Sync logo to both app and general (store table)
+            this.settings = {
+              ...this.settings,
+              app: { ...this.settings.app, logo_url: result.key },
+              general: { ...this.settings.general, logo_url: result.key },
+            };
+            this.pendingAppLogo = null;
+          }),
+        );
       }
 
       if (this.pendingAppFavicon) {
-        const result = await firstValueFrom(this.settings_service.uploadStoreFavicon(this.pendingAppFavicon.file));
-        this.settings = { ...this.settings, app: { ...this.settings.app, favicon_url: result.key } };
-        this.pendingAppFavicon = null;
+        const faviconFile = this.pendingAppFavicon.file;
+        uploads.push(
+          firstValueFrom(this.settings_service.uploadStoreFavicon(faviconFile)).then((result) => {
+            this.settings = { ...this.settings, app: { ...this.settings.app, favicon_url: result.key } };
+            this.pendingAppFavicon = null;
+          }),
+        );
+      }
+
+      if (uploads.length > 0) {
+        await Promise.all(uploads);
       }
 
       // Save all settings

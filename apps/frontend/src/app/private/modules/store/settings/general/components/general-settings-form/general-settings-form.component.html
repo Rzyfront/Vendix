@@ -8,31 +8,6 @@
           (inputChange)="onFieldChange()"></app-input>
         <app-selector [formControl]="storeTypeControl" label="Tipo de Tienda" [options]="storeTypes"
           (valueChange)="onFieldChange()" size="sm"></app-selector>
-        <!-- Logo Upload Section -->
-        <div class="space-y-1.5">
-          <label class="block text-xs font-medium text-gray-700">Logo de la Tienda</label>
-          <div class="flex items-center gap-4">
-            <div
-              class="w-16 h-16 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden relative group">
-              <img *ngIf="logoPreview" [src]="logoPreview" alt="Logo preview"
-                class="w-full h-full object-contain p-1" />
-              <div *ngIf="!logoPreview" class="text-gray-400 flex flex-col items-center">
-                <app-icon name="image" size="20"></app-icon>
-              </div>
-              <button *ngIf="logoPreview" type="button" (click)="removeLogo()"
-                class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-lg">
-                <app-icon name="x" size="12"></app-icon>
-              </button>
-            </div>
-            <div class="flex flex-col gap-1">
-              <app-button variant="outline" size="sm" (clicked)="triggerLogoInput()">
-                <app-icon name="upload" size="14" slot="icon"></app-icon>
-                <span>{{ logoPreview ? 'Cambiar' : 'Subir Logo' }}</span>
-              </app-button>
-              <p class="text-xs text-gray-500">PNG, JPG. Máx 2MB.</p>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -46,5 +21,31 @@
           (valueChange)="onFieldChange()" size="sm"></app-selector>
       </div>
     </div>
+  </div>
+
+  <!-- Store type consequence info (full width, below the grid) -->
+  <div class="mt-4 rounded-lg border px-3 py-2.5 text-xs leading-relaxed"
+    [ngClass]="{
+      'border-blue-200 bg-blue-50 text-blue-700': storeTypeControl.value === 'physical' || storeTypeControl.value === 'popup' || storeTypeControl.value === 'kiosko',
+      'border-purple-200 bg-purple-50 text-purple-700': storeTypeControl.value === 'online',
+      'border-emerald-200 bg-emerald-50 text-emerald-700': storeTypeControl.value === 'hybrid'
+    }">
+    <ng-container [ngSwitch]="storeTypeControl.value">
+      <ng-container *ngSwitchCase="'physical'">
+        <span class="font-semibold">Tienda Física:</span> El módulo de <strong>Tienda en línea</strong> no estará disponible. Tendrás acceso al <strong>Punto de Venta</strong> y todos los módulos de gestión presencial.
+      </ng-container>
+      <ng-container *ngSwitchCase="'popup'">
+        <span class="font-semibold">Tienda Pop-up:</span> El módulo de <strong>Tienda en línea</strong> no estará disponible. Tendrás acceso al <strong>Punto de Venta</strong> y todos los módulos de gestión presencial.
+      </ng-container>
+      <ng-container *ngSwitchCase="'kiosko'">
+        <span class="font-semibold">Kiosco:</span> El módulo de <strong>Tienda en línea</strong> no estará disponible. Tendrás acceso al <strong>Punto de Venta</strong> y todos los módulos de gestión presencial.
+      </ng-container>
+      <ng-container *ngSwitchCase="'online'">
+        <span class="font-semibold">Tienda Online:</span> Los módulos de <strong>Punto de Venta</strong> y <strong>Caja Registradora</strong> no estarán disponibles. Tendrás acceso a la <strong>Tienda en línea</strong> y todos los módulos de comercio digital.
+      </ng-container>
+      <ng-container *ngSwitchCase="'hybrid'">
+        <span class="font-semibold">Híbrida:</span> Todos los módulos estarán disponibles, incluyendo <strong>Punto de Venta</strong>, <strong>Tienda en línea</strong> y <strong>Caja Registradora</strong>.
+      </ng-container>
+    </ng-container>
   </div>
 </div>

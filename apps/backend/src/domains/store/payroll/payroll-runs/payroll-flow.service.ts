@@ -24,7 +24,7 @@ const VALID_TRANSITIONS: Record<PayrollStatus, PayrollStatus[]> = {
   draft: ['calculated', 'cancelled'],
   calculated: ['approved', 'draft', 'cancelled'],
   approved: ['sent', 'paid', 'cancelled'],
-  sent: ['accepted', 'rejected'],
+  sent: ['accepted', 'rejected', 'paid'],
   accepted: ['paid'],
   rejected: ['draft'],
   paid: [],
@@ -57,6 +57,7 @@ const PAYROLL_RUN_DETAIL_INCLUDE = {
           document_number: true,
           position: true,
           department: true,
+          cost_center: true,
         },
       },
     },
@@ -169,6 +170,17 @@ export class PayrollFlowService {
       include: PAYROLL_RUN_INCLUDE,
     });
 
+    // Build cost center breakdown from payroll items
+    const cost_center_breakdown: Record<string, { earnings: number; employer_costs: number }> = {};
+    for (const item of (run as any).payroll_items || []) {
+      const cc = item.employee?.cost_center || 'administrative';
+      if (!cost_center_breakdown[cc]) {
+        cost_center_breakdown[cc] = { earnings: 0, employer_costs: 0 };
+      }
+      cost_center_breakdown[cc].earnings += Number(item.total_earnings || 0);
+      cost_center_breakdown[cc].employer_costs += Number(item.total_employer_costs || 0);
+    }
+
     this.event_emitter.emit('payroll.approved', {
       payroll_run_id: id,
       organization_id: run.organization_id,
@@ -180,6 +192,7 @@ export class PayrollFlowService {
       health_deduction: Number(run.health_deduction || 0),
       pension_deduction: Number(run.pension_deduction || 0),
       approved_by: context.user_id,
+      cost_center_breakdown,
     });
 
     this.logger.log(`Payroll run #${id} approved by user #${context.user_id}`);

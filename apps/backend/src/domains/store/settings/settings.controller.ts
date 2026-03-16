@@ -81,7 +81,9 @@ export class SettingsController {
     },
   }))
   async updateSettings(@Body() dto: UpdateSettingsDto) {
-    const settings = await this.settingsService.updateSettings(dto);
+    await this.settingsService.updateSettings(dto);
+    // Re-read via getSettings() to return the full projection (including app from branding)
+    const settings = await this.settingsService.getSettings();
     return this.responseService.success(
       settings,
       'Settings updated successfully',

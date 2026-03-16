@@ -181,6 +181,11 @@ const APP_MODULES = {
           label: 'Movimientos',
           description: 'Historial de movimientos de inventario',
         },
+        {
+          key: 'inventory_transfers',
+          label: 'Transferencias',
+          description: 'Transferencias de inventario entre ubicaciones',
+        },
       ],
     },
 
@@ -276,11 +281,6 @@ const APP_MODULES = {
       isParent: true,
       children: [
         {
-          key: 'accounting_chart_of_accounts',
-          label: 'Plan de Cuentas',
-          description: 'Estructura de cuentas contables',
-        },
-        {
           key: 'accounting_journal_entries',
           label: 'Asientos Contables',
           description: 'Registro de asientos contables',
@@ -289,6 +289,11 @@ const APP_MODULES = {
           key: 'accounting_fiscal_periods',
           label: 'Periodos Fiscales',
           description: 'Gestión de periodos fiscales',
+        },
+        {
+          key: 'accounting_chart_of_accounts',
+          label: 'Plan de Cuentas',
+          description: 'Estructura de cuentas contables',
         },
         {
           key: 'accounting_reports',
@@ -374,6 +379,11 @@ const APP_MODULES = {
           key: 'settings_roles',
           label: 'Roles',
           description: 'Gestionar roles y permisos de la tienda',
+        },
+        {
+          key: 'settings_cash_registers',
+          label: 'Caja Registradora',
+          description: 'Gestión de cajas, sesiones y movimientos',
         },
       ],
     },
@@ -504,16 +514,16 @@ const APP_MODULES = {
                   <span>Default</span>
                 </div>
                 <div
-                  class="theme-box"
+                  class="theme-box disabled"
                   [class.active]="
                     settingsForm.get('preferences.theme')?.value === 'aura'
                   "
-                  (click)="selectTheme('aura')"
                 >
                   <div
                     class="theme-preview bg-gradient-to-br from-purple-500 to-pink-500"
                   ></div>
                   <span>Aura</span>
+                  <span class="coming-soon-label">Próximamente</span>
                 </div>
                 <div
                   class="theme-box"
@@ -524,6 +534,16 @@ const APP_MODULES = {
                 >
                   <div class="theme-preview bg-slate-700"></div>
                   <span>Mono</span>
+                </div>
+                <div
+                  class="theme-box disabled"
+                  [class.active]="
+                    settingsForm.get('preferences.theme')?.value === 'glass'
+                  "
+                >
+                  <div class="theme-preview glass-preview"></div>
+                  <span>Glass</span>
+                  <span class="coming-soon-label">Próximamente</span>
                 </div>
               </div>
             </div>

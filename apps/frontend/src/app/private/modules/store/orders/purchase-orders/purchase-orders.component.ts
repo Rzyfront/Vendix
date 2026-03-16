@@ -6,7 +6,7 @@ import { Subject, takeUntil } from 'rxjs';
 import { ToastService } from '../../../../../shared/components/index';
 
 // Interfaces
-import { PurchaseOrder, ReceivePurchaseOrderItemDto } from '../../inventory/interfaces';
+import { PurchaseOrder } from '../../inventory/interfaces';
 
 // Services
 import { PurchaseOrdersService } from '../../inventory/services/purchase-orders.service';
@@ -16,8 +16,10 @@ import {
   PurchaseOrderStatsComponent,
   PurchaseOrderStats,
   PurchaseOrderListComponent,
-  PurchaseOrderDetailModalComponent,
 } from './components';
+
+// New detail modal with tabs (receptions, payments, attachments, timeline)
+import { PoDetailModalComponent } from '../../inventory/pop/components/po-detail-modal/po-detail-modal.component';
 
 @Component({
   selector: 'app-purchase-orders',
@@ -26,7 +28,7 @@ import {
     CommonModule,
     PurchaseOrderStatsComponent,
     PurchaseOrderListComponent,
-    PurchaseOrderDetailModalComponent,
+    PoDetailModalComponent,
   ],
   templateUrl: './purchase-orders.component.html',
   styleUrls: ['./purchase-orders.component.scss'],
@@ -45,7 +47,6 @@ export class PurchaseOrdersComponent implements OnDestroy {
   // Modal state
   isDetailModalOpen = false;
   selectedOrder: PurchaseOrder | null = null;
-  isReceiving = false;
 
   private destroy$ = new Subject<void>();
 
@@ -65,10 +66,22 @@ export class PurchaseOrdersComponent implements OnDestroy {
     this.router.navigate(['/admin/inventory/pop']);
   }
 
-  // Handle view order from list
+  // Handle view order from list — fetch full order details for the modal
   viewOrderDetails(order: PurchaseOrder): void {
-    this.selectedOrder = order;
-    this.isDetailModalOpen = true;
+    this.purchaseOrdersService
+      .getPurchaseOrderById(order.id)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response: any) => {
+          this.selectedOrder = response.data || response;
+          this.isDetailModalOpen = true;
+        },
+        error: () => {
+          // Fallback to list data if detail fetch fails
+          this.selectedOrder = order;
+          this.isDetailModalOpen = true;
+        },
+      });
   }
 
   closeDetailModal(): void {
@@ -81,56 +94,10 @@ export class PurchaseOrdersComponent implements OnDestroy {
     this.stats = stats;
   }
 
-  // Refresh purchase orders list
-  refreshList(): void {
+  // Refresh purchase orders list (called when order is updated inside modal)
+  onOrderUpdated(): void {
     if (this.purchaseOrderList) {
       this.purchaseOrderList.loadOrders();
     }
-  }
-
-  // Handle receive order from detail modal
-  onReceiveOrder(event: { order_id: number; items: ReceivePurchaseOrderItemDto[] }): void {
-    if (this.isReceiving) return;
-
-    this.isReceiving = true;
-    this.purchaseOrdersService
-      .receivePurchaseOrder(event.order_id, event.items)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: () => {
-          this.toastService.success('Orden recibida exitosamente. Stock actualizado.');
-          this.refreshList();
-          this.closeDetailModal();
-          this.isReceiving = false;
-        },
-        error: (error) => {
-          this.toastService.error(error || 'Error al recibir la orden');
-          this.isReceiving = false;
-        },
-      });
-  }
-
-  // Handle cancel order from detail modal
-  onCancelOrder(orderId: number): void {
-    this.purchaseOrdersService
-      .cancelPurchaseOrder(orderId)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: () => {
-          this.toastService.success('Orden cancelada exitosamente');
-          this.refreshList();
-          this.closeDetailModal();
-        },
-        error: (error) => {
-          this.toastService.error(error || 'Error al cancelar la orden');
-        },
-      });
-  }
-
-  // Handle edit order from detail modal
-  onEditOrder(order: PurchaseOrder): void {
-    this.router.navigate(['/admin/inventory/pop'], {
-      queryParams: { orderId: order.id },
-    });
   }
 }

@@ -95,6 +95,14 @@ export function getDefaultStoreSettings(): StoreSettings {
           protocol: 'generic',
         },
       },
+      cash_register: {
+        enabled: false,
+        require_session_for_sales: false,
+        allow_multiple_sessions_per_user: false,
+        auto_create_default_register: true,
+        require_closing_count: true,
+        track_non_cash_payments: true,
+      },
     },
     receipts: {
       print_receipt: true,
@@ -152,9 +160,9 @@ export function getDefaultStoreSettings(): StoreSettings {
 
         // Contabilidad
         accounting: true,
-        accounting_chart_of_accounts: false,
         accounting_journal_entries: false,
         accounting_fiscal_periods: false,
+        accounting_chart_of_accounts: false,
         accounting_reports: false,
 
         // Nómina
@@ -174,6 +182,7 @@ export function getDefaultStoreSettings(): StoreSettings {
         settings_legal_documents: true,
         settings_users: true,
         settings_roles: true,
+        settings_cash_registers: false,
 
         // Ayuda
         help: true,

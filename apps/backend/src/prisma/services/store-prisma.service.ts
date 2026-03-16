@@ -32,6 +32,9 @@ export class StorePrismaService extends BasePrismaService {
     'promotions',
     'coupons',
     'quotations',
+    'cash_registers',
+    'cash_register_sessions',
+    'cash_register_movements',
   ];
 
   constructor() {
@@ -385,6 +388,27 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.purchase_orders;
   }
 
+  // Purchase order sub-resources (accessed via PO's FK, no direct org scope needed)
+  get purchase_order_receptions() {
+    return this.baseClient.purchase_order_receptions;
+  }
+
+  get purchase_order_reception_items() {
+    return this.baseClient.purchase_order_reception_items;
+  }
+
+  get purchase_order_attachments() {
+    return this.baseClient.purchase_order_attachments;
+  }
+
+  get purchase_order_payments() {
+    return this.baseClient.purchase_order_payments;
+  }
+
+  get inventory_cost_layers() {
+    return this.baseClient.inventory_cost_layers;
+  }
+
   // Global models (no scoping applied)
   get organizations() {
     return this.baseClient.organizations;
@@ -605,6 +629,19 @@ export class StorePrismaService extends BasePrismaService {
 
   get coupon_uses() {
     return this.scoped_client.coupon_uses;
+  }
+
+  // Cash Register models
+  get cash_registers() {
+    return this.scoped_client.cash_registers;
+  }
+
+  get cash_register_sessions() {
+    return this.scoped_client.cash_register_sessions;
+  }
+
+  get cash_register_movements() {
+    return this.scoped_client.cash_register_movements;
   }
 
   // Global tables (no store scoping)

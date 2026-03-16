@@ -83,6 +83,30 @@
       }
     </div>
 
+    <!-- Cash Register -->
+    <div>
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Caja Registradora</h4>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <app-setting-toggle [formControl]="cashRegisterEnabledControl" label="Habilitar Caja Registradora"
+          description="Control de apertura/cierre y movimientos de efectivo" (changed)="onFieldChange()"></app-setting-toggle>
+        <app-setting-toggle [formControl]="requireSessionForSalesControl" label="Requerir Sesión Activa"
+          description="Bloquear ventas POS sin caja abierta" [disabled]="!cashRegisterEnabledControl.value"
+          (changed)="onFieldChange()"></app-setting-toggle>
+        <app-setting-toggle [formControl]="requireClosingCountControl" label="Conteo Obligatorio al Cerrar"
+          description="Exigir conteo de efectivo al cerrar caja" [disabled]="!cashRegisterEnabledControl.value"
+          (changed)="onFieldChange()"></app-setting-toggle>
+        <app-setting-toggle [formControl]="trackNonCashPaymentsControl" label="Registrar Pagos No Efectivo"
+          description="Incluir tarjeta/transferencia en la sesión" [disabled]="!cashRegisterEnabledControl.value"
+          (changed)="onFieldChange()"></app-setting-toggle>
+        <app-setting-toggle [formControl]="allowMultipleSessionsControl" label="Múltiples Sesiones por Usuario"
+          description="Permitir abrir más de una caja por cajero" [disabled]="!cashRegisterEnabledControl.value"
+          (changed)="onFieldChange()"></app-setting-toggle>
+        <app-setting-toggle [formControl]="autoCreateDefaultRegisterControl" label="Auto-crear Caja por Defecto"
+          description="Crear 'Caja 1' (POS-01) al habilitar" [disabled]="!cashRegisterEnabledControl.value"
+          (changed)="onFieldChange()"></app-setting-toggle>
+      </div>
+    </div>
+
     <!-- Business Hours -->
     <div>
       <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Horarios de Atención</h4>

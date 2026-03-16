@@ -9,6 +9,21 @@ import { transfer_status_enum } from '@prisma/client';
 export class StockTransfersService {
   constructor(private prisma: StorePrismaService) {}
 
+  async getStats() {
+    const [total, draft, in_transit, completed, cancelled] = await Promise.all([
+      this.prisma.stock_transfers.count(),
+      this.prisma.stock_transfers.count({ where: { status: 'draft' } }),
+      this.prisma.stock_transfers.count({ where: { status: 'in_transit' } }),
+      this.prisma.stock_transfers.count({ where: { status: 'completed' } }),
+      this.prisma.stock_transfers.count({ where: { status: 'cancelled' } }),
+    ]);
+
+    return {
+      success: true,
+      data: { total, draft, in_transit, completed, cancelled },
+    };
+  }
+
   async create(createTransferDto: CreateTransferDto) {
     return this.prisma.$transaction(async (tx) => {
       // Validate source and destination locations are different

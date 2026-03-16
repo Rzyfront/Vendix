@@ -51,10 +51,10 @@ import {
             @for (variant of variants; track variant.id) {
               <button
                 class="w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left"
-                [class]="variant.stock > 0
+                [class]="isVariantAvailable(variant)
                   ? 'border-border hover:border-primary hover:bg-primary/5 cursor-pointer active:scale-[0.98]'
                   : 'border-border/50 opacity-50 cursor-not-allowed'"
-                [disabled]="variant.stock <= 0"
+                [disabled]="!isVariantAvailable(variant)"
                 (click)="onSelectVariant(variant)"
               >
                 <!-- Variant Image or Icon -->
@@ -89,14 +89,24 @@ import {
                   <span class="font-bold text-sm text-text-primary">
                     {{ getVariantFinalPrice(variant) | currency }}
                   </span>
-                  @if (variant.stock > 0) {
-                    <span class="text-xs mt-0.5"
-                      [class]="variant.stock <= 5 ? 'text-warning' : 'text-text-muted'"
-                    >
-                      {{ variant.stock }} disp.
+                  @if (getVariantPriceDiff(variant); as diff) {
+                    <span class="text-[10px] mt-0.5"
+                      [class]="diff > 0 ? 'text-error' : 'text-success'">
+                      {{ diff > 0 ? '+' : '' }}{{ diff | currency }}
                     </span>
+                  }
+                  @if (product.track_inventory !== false) {
+                    @if (variant.stock > 0) {
+                      <span class="text-xs mt-0.5"
+                        [class]="variant.stock <= 5 ? 'text-warning' : 'text-text-muted'"
+                      >
+                        {{ variant.stock }} disp.
+                      </span>
+                    } @else {
+                      <span class="text-xs text-error font-medium mt-0.5">Agotado</span>
+                    }
                   } @else {
-                    <span class="text-xs text-error font-medium mt-0.5">Agotado</span>
+                    <span class="text-xs text-info mt-0.5">Disponible</span>
                   }
                 </div>
               </button>
@@ -118,6 +128,31 @@ export class PosVariantSelectorComponent {
   @Output() variantSelected = new EventEmitter<PosProductVariant>();
   @Output() closed = new EventEmitter<void>();
 
+  /** Group variants by their first attribute for visual sections */
+  get groupedAttributes(): { name: string; variants: PosProductVariant[] }[] {
+    if (!this.variants?.length) return [];
+    // Only group if there are multiple attribute types
+    const firstVariant = this.variants[0];
+    if (!firstVariant?.attributes || firstVariant.attributes.length <= 1) return [];
+    const groups: Record<string, PosProductVariant[]> = {};
+    for (const v of this.variants) {
+      const groupKey = v.attributes?.[0]?.attribute_value || 'Otros';
+      if (!groups[groupKey]) groups[groupKey] = [];
+      groups[groupKey].push(v);
+    }
+    const groupName = firstVariant.attributes[0]?.attribute_name || 'Tipo';
+    return Object.entries(groups).map(([name, variants]) => ({
+      name: `${groupName}: ${name}`,
+      variants,
+    }));
+  }
+
+  /** Check if a variant is available considering track_inventory */
+  isVariantAvailable(variant: PosProductVariant): boolean {
+    if (this.product.track_inventory === false) return true;
+    return variant.stock > 0;
+  }
+
   getVariantLabel(variant: PosProductVariant): string {
     if (variant.attributes && variant.attributes.length > 0) {
       return variant.attributes.map(a => a.attribute_value).join(' / ');
@@ -137,8 +172,26 @@ export class PosVariantSelectorComponent {
     return basePrice * (1 + taxRate);
   }
 
+  /** Get price difference between variant and base product price */
+  getVariantPriceDiff(variant: PosProductVariant): number | null {
+    const variantPrice = this.getVariantFinalPrice(variant);
+    const basePrice = this.getBaseFinalPrice();
+    const diff = variantPrice - basePrice;
+    return Math.abs(diff) > 0.01 ? diff : null;
+  }
+
+  private getBaseFinalPrice(): number {
+    const taxRate = this.product.tax_assignments?.reduce((sum, ta) => {
+      return sum + (ta.tax_categories?.tax_rates?.reduce(
+        (rateSum, tr) => rateSum + parseFloat(tr.rate || '0'),
+        0,
+      ) || 0);
+    }, 0) || 0;
+    return this.product.price * (1 + taxRate);
+  }
+
   onSelectVariant(variant: PosProductVariant): void {
-    if (variant.stock <= 0) return;
+    if (!this.isVariantAvailable(variant)) return;
     this.variantSelected.emit(variant);
   }
 

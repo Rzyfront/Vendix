@@ -12,6 +12,7 @@ import {
   DeliveryType,
   OrderActionConfig,
   PayOrderDto,
+  RefundRecord,
 } from '../../interfaces/order.interface';
 import { AlertBannerComponent, DialogService, ModalComponent, ToastService, TimelineComponent } from '../../../../../../shared/components';
 import { TimelineStep, TimelineVariant } from '../../../../../../shared/components/timeline/timeline.interfaces';
@@ -29,6 +30,7 @@ import { ShippingMethodsService } from '../../../settings/shipping/services/ship
 import { StoreShippingMethod } from '../../../settings/shipping/interfaces/shipping-methods.interface';
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { OrderPaymentModalComponent } from '../../components/order-payment-modal/order-payment-modal.component';
+import { OrderRefundModalComponent } from '../../components/order-refund-modal/order-refund-modal.component';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { PosTicketService } from '../../../pos/services/pos-ticket.service';
 import { TicketData, TicketItem } from '../../../pos/models/ticket.model';
@@ -54,6 +56,7 @@ export interface LifecycleStep {
     ModalComponent,
     CurrencyPipe,
     OrderPaymentModalComponent,
+    OrderRefundModalComponent,
     TimelineComponent,
   ],
   templateUrl: './order-details-page.component.html',
@@ -62,6 +65,7 @@ export interface LifecycleStep {
 export class OrderDetailsPageComponent implements OnInit, OnDestroy {
   orderId: string | null = null;
   order = signal<Order | null>(null);
+  orderRefunds = signal<RefundRecord[]>([]);
   private rawTimeline = signal<any[]>([]);
   isLoading = signal(false);
   error: string | null = null;
@@ -93,11 +97,10 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
   selectedShippingMethodId = signal<number | null>(null);
   shippingAssignForm!: FormGroup;
 
-  // Reactive forms (ship, deliver, cancel, refund — pay is now in its own component)
+  // Reactive forms (ship, deliver, cancel — pay and refund are in their own components)
   shipForm!: FormGroup;
   deliverForm!: FormGroup;
   cancelForm!: FormGroup;
-  refundForm!: FormGroup;
 
   // Currency
   currencySymbol;
@@ -585,11 +588,6 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     this.cancelForm = this.fb.group({
       reason: ['', [Validators.required, Validators.minLength(3)]],
     });
-
-    this.refundForm = this.fb.group({
-      amount: [null],
-      reason: ['', [Validators.required, Validators.minLength(3)]],
-    });
   }
 
   ngOnInit(): void {
@@ -644,6 +642,9 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
           if (needsPayment) {
             this.loadPaymentMethods();
           }
+
+          // Load refund history
+          this.loadRefunds();
         },
         error: (err) => {
           console.error('Error loading order data:', err);
@@ -664,6 +665,26 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
         },
         error: () => {
           this.paymentMethods.set([]);
+        },
+      });
+  }
+
+  loadRefunds(): void {
+    if (!this.orderId) return;
+    this.ordersService
+      .getOrderRefunds(this.orderId)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (refunds) => {
+          this.orderRefunds.set(
+            (Array.isArray(refunds) ? refunds : []).map((r: any) => ({
+              ...r,
+              amount: Number(r.amount),
+            })),
+          );
+        },
+        error: () => {
+          this.orderRefunds.set([]);
         },
       });
   }
@@ -980,40 +1001,13 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
   }
 
   openRefundModal(): void {
-    const order = this.order();
-    this.refundForm.reset({
-      amount: order?.grand_total || 0,
-      reason: '',
-    });
     this.showRefundModal.set(true);
   }
 
-  submitRefund(): void {
-    if (this.refundForm.invalid || !this.orderId) return;
-
-    this.isProcessingAction.set(true);
-    const dto = this.refundForm.value;
-    if (dto.amount) {
-      dto.amount = Number(dto.amount);
-    } else {
-      delete dto.amount;
-    }
-
-    this.ordersService
-      .flowRefundOrder(this.orderId, dto)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: () => {
-          this.showRefundModal.set(false);
-          this.isProcessingAction.set(false);
-          this.toastService.success('Reembolso procesado exitosamente');
-          this.loadData();
-        },
-        error: (err) => {
-          this.isProcessingAction.set(false);
-          this.toastService.error(err.message || 'Error al procesar el reembolso');
-        },
-      });
+  onRefundSubmitted(): void {
+    this.showRefundModal.set(false);
+    this.toastService.success('Reembolso procesado exitosamente');
+    this.loadData();
   }
 
   copyTrackingNumber(): void {

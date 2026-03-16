@@ -1,3 +1,5 @@
+import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
+import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import {
   Controller,
   Get,
@@ -41,12 +43,14 @@ enum SerialNumberStatus {
 
 @ApiTags('inventory-serial-numbers')
 @Controller('store/inventory/serial-numbers')
+@UseGuards(PermissionsGuard)
 export class InventorySerialNumbersController {
   constructor(
     private readonly serialNumbersService: InventorySerialNumbersService,
   ) { }
 
   @Post('batch')
+  @Permissions('store:inventory:serial_numbers:create')
   @ApiOperation({ summary: 'Create serial numbers for a batch' })
   @ApiResponse({
     status: 201,
@@ -64,6 +68,7 @@ export class InventorySerialNumbersController {
   }
 
   @Get()
+  @Permissions('store:inventory:serial_numbers:read')
   @ApiOperation({ summary: 'Get all serial numbers for organization' })
   @ApiResponse({
     status: 200,
@@ -80,6 +85,7 @@ export class InventorySerialNumbersController {
   }
 
   @Get('status/:status')
+  @Permissions('store:inventory:serial_numbers:read')
   @ApiOperation({ summary: 'Get serial numbers by status' })
   @ApiParam({ name: 'status', enum: SerialNumberStatus })
   @ApiResponse({
@@ -99,6 +105,7 @@ export class InventorySerialNumbersController {
   }
 
   @Get('available')
+  @Permissions('store:inventory:serial_numbers:read')
   @ApiOperation({
     summary: 'Get available serial numbers for product/variant at location',
   })
@@ -119,6 +126,7 @@ export class InventorySerialNumbersController {
   }
 
   @Get(':id')
+  @Permissions('store:inventory:serial_numbers:read')
   @ApiOperation({ summary: 'Get serial number by ID' })
   @ApiParam({ name: 'id', description: 'Serial number ID' })
   @ApiResponse({
@@ -133,6 +141,7 @@ export class InventorySerialNumbersController {
   }
 
   @Get('number/:serialNumber')
+  @Permissions('store:inventory:serial_numbers:read')
   @ApiOperation({ summary: 'Get serial number by serial number string' })
   @ApiParam({ name: 'serialNumber', description: 'Serial number string' })
   @ApiResponse({
@@ -150,6 +159,7 @@ export class InventorySerialNumbersController {
   }
 
   @Patch(':id/status')
+  @Permissions('store:inventory:serial_numbers:update')
   @ApiOperation({ summary: 'Update serial number status' })
   @ApiParam({ name: 'id', description: 'Serial number ID' })
   @ApiResponse({
@@ -175,6 +185,7 @@ export class InventorySerialNumbersController {
   }
 
   @Patch(':id/transfer')
+  @Permissions('store:inventory:serial_numbers:update')
   @ApiOperation({ summary: 'Transfer serial number to another location' })
   @ApiParam({ name: 'id', description: 'Serial number ID' })
   @ApiResponse({
@@ -195,6 +206,7 @@ export class InventorySerialNumbersController {
   }
 
   @Patch(':id/sold')
+  @Permissions('store:inventory:serial_numbers:update')
   @ApiOperation({ summary: 'Mark serial number as sold' })
   @ApiParam({ name: 'id', description: 'Serial number ID' })
   @ApiResponse({ status: 200, description: 'Serial number marked as sold' })
@@ -211,6 +223,7 @@ export class InventorySerialNumbersController {
   }
 
   @Patch(':id/returned')
+  @Permissions('store:inventory:serial_numbers:update')
   @ApiOperation({ summary: 'Mark serial number as returned' })
   @ApiParam({ name: 'id', description: 'Serial number ID' })
   @ApiResponse({ status: 200, description: 'Serial number marked as returned' })
@@ -228,6 +241,7 @@ export class InventorySerialNumbersController {
   }
 
   @Patch(':id/damaged')
+  @Permissions('store:inventory:serial_numbers:update')
   @ApiOperation({ summary: 'Mark serial number as damaged' })
   @ApiParam({ name: 'id', description: 'Serial number ID' })
   @ApiResponse({ status: 200, description: 'Serial number marked as damaged' })
@@ -244,6 +258,7 @@ export class InventorySerialNumbersController {
   }
 
   @Delete(':id')
+  @Permissions('store:inventory:serial_numbers:delete')
   @ApiOperation({ summary: 'Delete serial number' })
   @ApiParam({ name: 'id', description: 'Serial number ID' })
   @ApiResponse({

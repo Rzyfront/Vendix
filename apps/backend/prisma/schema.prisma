@@ -77,6 +77,11 @@ model users {
   // Coupons
   coupon_uses               coupon_uses[]
 
+  // Cash Register
+  cash_register_sessions_opened  cash_register_sessions[] @relation("cash_register_sessions_opened_by")
+  cash_register_sessions_closed  cash_register_sessions[] @relation("cash_register_sessions_closed_by")
+  cash_register_movements        cash_register_movements[]
+
   // Promotions
   order_promotions_customer order_promotions[] @relation("order_promotions_customer")
 
@@ -89,6 +94,11 @@ model users {
   employees_link           employees[]           @relation("employees_user")
   payroll_runs_approved    payroll_runs[]        @relation("payroll_runs_approved_by")
   payroll_runs_created     payroll_runs[]        @relation("payroll_runs_created_by")
+
+  // Purchase order improvement relations
+  po_attachments_uploaded  purchase_order_attachments[] @relation("po_attachment_uploader")
+  po_payments_created      purchase_order_payments[]    @relation("po_payment_creator")
+  po_receptions_received   purchase_order_receptions[]  @relation("po_reception_receiver")
 
   // Campos de tracking de términos
   terms_accepted_version String?   @db.VarChar(20)
@@ -314,6 +324,7 @@ model organizations {
   payroll_runs                  payroll_runs[]
   dian_configurations           dian_configurations[]
   accounting_account_mappings   accounting_account_mappings[]
+  inventory_cost_layers         inventory_cost_layers[]
 
   @@index([onboarding])
   @@index([account_type])
@@ -399,11 +410,16 @@ model stores {
   accounting_entries         accounting_entries[]
   employees                  employees[]
   payroll_runs               payroll_runs[]
-  dian_configuration           dian_configurations?
+  dian_configurations          dian_configurations[]
   accounting_account_mappings  accounting_account_mappings[]
   quotations                   quotations[]
   promotions                     promotions[]
   coupons                        coupons[]
+
+  // Cash Register
+  cash_registers                   cash_registers[]
+  cash_register_sessions           cash_register_sessions[] @relation("cash_register_sessions_store")
+  cash_register_movements          cash_register_movements[]
 
   @@unique([organization_id, slug])
   @@index([onboarding])
@@ -611,6 +627,7 @@ model orders {
   order_promotions                                order_promotions[]
   coupon                                          coupons?                 @relation(fields: [coupon_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   coupon_uses                                     coupon_uses[]
+  cash_register_movements                         cash_register_movements[]
 
   @@unique([store_id, order_number])
   @@index([store_id, order_number])
@@ -675,7 +692,8 @@ model payments {
   store_payment_method_id Int?
   orders                  orders                 @relation(fields: [order_id], references: [id], onUpdate: NoAction)
   store_payment_method    store_payment_methods? @relation(fields: [store_payment_method_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  refunds                 refunds[]
+  refunds                     refunds[]
+  cash_register_movements     cash_register_movements[]
 }
 
 model product_categories {
@@ -742,6 +760,7 @@ model product_variants {
   wishlist_items           wishlist_items[]
   invoice_items            invoice_items[]
   quotation_items          quotation_items[]
+  inventory_cost_layers    inventory_cost_layers[]
 
   @@unique([product_id, sku])
 }
@@ -800,6 +819,7 @@ model products {
   quotation_items          quotation_items[]
   promotion_products       promotion_products[]
   coupon_products          coupon_products[]
+  inventory_cost_layers    inventory_cost_layers[]
 
   @@unique([store_id, slug])
   @@unique([store_id, sku])
@@ -807,15 +827,20 @@ model products {
 }
 
 model refund_items {
-  id            Int         @id @default(autoincrement())
-  refund_id     Int
-  order_item_id Int
-  quantity      Int
-  refund_amount Decimal?    @db.Decimal(12, 2)
-  reason        String?
-  created_at    DateTime?   @default(now()) @db.Timestamp(6)
-  order_items   order_items @relation(fields: [order_item_id], references: [id], onUpdate: NoAction)
-  refunds       refunds     @relation(fields: [refund_id], references: [id], onUpdate: NoAction)
+  id               Int                  @id @default(autoincrement())
+  refund_id        Int
+  order_item_id    Int
+  quantity         Int
+  refund_amount    Decimal?             @db.Decimal(12, 2)
+  tax_amount       Decimal?             @db.Decimal(12, 2)
+  discount_amount  Decimal?             @db.Decimal(12, 2)
+  inventory_action String?              @default("no_return") @db.VarChar(20)
+  location_id      Int?
+  reason           String?
+  created_at       DateTime?            @default(now()) @db.Timestamp(6)
+  order_items      order_items          @relation(fields: [order_item_id], references: [id], onUpdate: NoAction)
+  refunds          refunds              @relation(fields: [refund_id], references: [id], onUpdate: NoAction)
+  inventory_locations inventory_locations? @relation(fields: [location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 }
 
 model refunds {
@@ -824,8 +849,12 @@ model refunds {
   payment_id            Int?
   customer_id           Int?
   amount                Decimal            @db.Decimal(12, 2)
+  subtotal_refund       Decimal?           @default(0) @db.Decimal(12, 2)
+  tax_refund            Decimal?           @default(0) @db.Decimal(12, 2)
+  shipping_refund       Decimal?           @default(0) @db.Decimal(12, 2)
   currency              String?            @db.VarChar(10)
   reason                String?
+  notes                 String?            @db.Text
   state                 refunds_state_enum
   refund_method         String?            @db.VarChar(100)
   refund_transaction_id String?            @unique @db.VarChar(255)
@@ -919,6 +948,8 @@ model inventory_locations {
   stock_reservations       stock_reservations[]
   transfers_from           stock_transfers[]          @relation("from_location")
   transfers_to             stock_transfers[]          @relation("to_location")
+  inventory_cost_layers    inventory_cost_layers[]
+  refund_items             refund_items[]
 
   @@unique([organization_id, code])
   @@index([organization_id, store_id])
@@ -1191,12 +1222,18 @@ model purchase_orders {
   approved_by_user_id  Int?
   created_at           DateTime?                  @default(now()) @db.Timestamp(6)
   updated_at           DateTime?                  @default(now()) @db.Timestamp(6)
+  payment_status       purchase_order_payment_status_enum @default(unpaid)
+  payment_due_date     DateTime?                  @db.Timestamp(6)
   purchase_order_items purchase_order_items[]
   users                users?                     @relation("purchase_orders_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   users1               users?                     @relation("purchase_orders_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   location             inventory_locations        @relation(fields: [location_id], references: [id], onUpdate: NoAction)
   organizations        organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   suppliers            suppliers                  @relation(fields: [supplier_id], references: [id], onUpdate: NoAction)
+  inventory_cost_layers inventory_cost_layers[]
+  attachments          purchase_order_attachments[]
+  payments             purchase_order_payments[]
+  receptions           purchase_order_receptions[]
 
   @@unique([organization_id, order_number])
 }
@@ -1218,9 +1255,74 @@ model purchase_order_items {
   products           products          @relation(fields: [product_id], references: [id], onDelete: Cascade)
   product_variants   product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
   purchase_orders    purchase_orders   @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  reception_items    purchase_order_reception_items[]
 
   @@index([purchase_order_id])
   @@index([product_id, purchase_order_id])
+}
+
+model purchase_order_attachments {
+  id                      Int       @id @default(autoincrement())
+  purchase_order_id       Int
+  file_url                String    @db.VarChar(500)
+  file_name               String    @db.VarChar(255)
+  file_type               String    @db.VarChar(100)
+  file_size               Int
+  supplier_invoice_number String?   @db.VarChar(100)
+  supplier_invoice_date   DateTime?
+  supplier_invoice_amount Decimal?  @db.Decimal(12, 2)
+  notes                   String?   @db.Text
+  uploaded_by_user_id     Int?
+  created_at              DateTime  @default(now())
+
+  purchase_order          purchase_orders @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  uploaded_by             users?          @relation("po_attachment_uploader", fields: [uploaded_by_user_id], references: [id])
+
+  @@index([purchase_order_id])
+}
+
+model purchase_order_payments {
+  id                 Int       @id @default(autoincrement())
+  purchase_order_id  Int
+  amount             Decimal   @db.Decimal(12, 2)
+  payment_date       DateTime
+  payment_method     String    @db.VarChar(50)
+  reference          String?   @db.VarChar(255)
+  notes              String?   @db.Text
+  created_by_user_id Int?
+  created_at         DateTime  @default(now())
+
+  purchase_order     purchase_orders @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  created_by         users?          @relation("po_payment_creator", fields: [created_by_user_id], references: [id])
+
+  @@index([purchase_order_id])
+}
+
+model purchase_order_receptions {
+  id                  Int       @id @default(autoincrement())
+  purchase_order_id   Int
+  received_by_user_id Int?
+  notes               String?   @db.Text
+  received_at         DateTime  @default(now())
+
+  purchase_order      purchase_orders @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  received_by         users?          @relation("po_reception_receiver", fields: [received_by_user_id], references: [id])
+  items               purchase_order_reception_items[]
+
+  @@index([purchase_order_id])
+}
+
+model purchase_order_reception_items {
+  id                     Int       @id @default(autoincrement())
+  reception_id           Int
+  purchase_order_item_id Int
+  quantity_received      Int
+
+  reception              purchase_order_receptions @relation(fields: [reception_id], references: [id], onDelete: Cascade)
+  purchase_order_item    purchase_order_items      @relation(fields: [purchase_order_item_id], references: [id], onDelete: Cascade)
+
+  @@index([reception_id])
+  @@index([purchase_order_item_id])
 }
 
 model sales_orders {
@@ -1982,8 +2084,21 @@ enum reservation_status_enum {
 enum purchase_order_status_enum {
   draft
   approved
+  partial
   received
   cancelled
+}
+
+enum purchase_order_payment_status_enum {
+  unpaid
+  partial
+  paid
+}
+
+enum costing_method_enum {
+  weighted_average
+  fifo
+  lifo
 }
 
 enum sales_order_status_enum {
@@ -2169,6 +2284,12 @@ enum contract_type_enum {
   fixed_term
   service
   apprentice
+}
+
+enum cost_center_enum {
+  operational
+  administrative
+  sales
 }
 
 // ===== LEGAL DOCUMENTS DOMAIN =====
@@ -2769,6 +2890,7 @@ model employees {
   contract_type       contract_type_enum
   position            String?                @db.VarChar(100)
   department          String?                @db.VarChar(100)
+  cost_center         cost_center_enum       @default(administrative)
   base_salary         Decimal                @db.Decimal(12, 2)
   payment_frequency   payroll_frequency_enum @default(monthly)
   bank_name           String?                @db.VarChar(100)
@@ -2856,12 +2978,24 @@ model payroll_items {
 
 // ===== DIAN ELECTRONIC INVOICING =====
 
+enum dian_nit_type_enum {
+  NIT
+  CC
+  CE
+  TI
+  PP
+  NIT_EXTRANJERIA
+}
+
 model dian_configurations {
   id                             Int                          @id @default(autoincrement())
   organization_id                Int
-  store_id                       Int                          @unique
+  store_id                       Int
+  name                           String                       @db.VarChar(100)
   nit                            String                       @db.VarChar(20)
+  nit_type                       dian_nit_type_enum           @default(NIT)
   nit_dv                         String?                      @db.VarChar(1)
+  is_default                     Boolean                      @default(false)
   software_id                    String                       @db.VarChar(100)
   software_pin_encrypted         String                       @db.Text
   certificate_s3_key             String?                      @db.Text
@@ -2878,6 +3012,8 @@ model dian_configurations {
   store           stores           @relation(fields: [store_id], references: [id], onDelete: Cascade)
   dian_audit_logs dian_audit_logs[]
 
+  @@unique([store_id, nit])
+  @@index([store_id])
   @@index([organization_id])
 }
 
@@ -3056,5 +3192,121 @@ model coupon_uses {
   customer users?  @relation(fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([coupon_id, customer_id])
+  @@index([order_id])
+}
+
+model inventory_cost_layers {
+  id                 Int               @id @default(autoincrement())
+  organization_id    Int
+  product_id         Int
+  product_variant_id Int?
+  location_id        Int
+  purchase_order_id  Int?
+  quantity_remaining Int               @default(0)
+  unit_cost          Decimal           @db.Decimal(12, 4)
+  received_at        DateTime          @default(now()) @db.Timestamp(6)
+  batch_number       String?           @db.VarChar(100)
+  manufacturing_date DateTime?         @db.Timestamp(6)
+  expiration_date    DateTime?         @db.Timestamp(6)
+  created_at         DateTime?         @default(now()) @db.Timestamp(6)
+
+  organizations       organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  products            products             @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  product_variants    product_variants?    @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
+  inventory_locations inventory_locations  @relation(fields: [location_id], references: [id], onDelete: Cascade)
+  purchase_orders     purchase_orders?     @relation(fields: [purchase_order_id], references: [id])
+
+  @@index([product_id, product_variant_id, location_id, received_at])
+  @@index([organization_id])
+}
+
+// ============================================================================
+// CASH REGISTER MODULE
+// ============================================================================
+
+enum cash_register_session_status_enum {
+  open
+  closed
+  suspended
+}
+
+enum cash_register_movement_type_enum {
+  opening_balance
+  sale
+  refund
+  cash_in
+  cash_out
+  closing_balance
+}
+
+model cash_registers {
+  id                     Int       @id @default(autoincrement())
+  store_id               Int
+  name                   String    @db.VarChar(100)
+  code                   String    @db.VarChar(50)
+  description            String?   @db.VarChar(255)
+  is_active              Boolean   @default(true)
+  default_opening_amount Decimal?  @db.Decimal(12, 2)
+  created_at             DateTime? @default(now()) @db.Timestamp(6)
+  updated_at             DateTime? @default(now()) @db.Timestamp(6)
+
+  store    stores                   @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  sessions cash_register_sessions[]
+
+  @@unique([store_id, code])
+  @@index([store_id, is_active])
+}
+
+model cash_register_sessions {
+  id                      Int                                @id @default(autoincrement())
+  cash_register_id        Int
+  store_id                Int
+  opened_by               Int
+  closed_by               Int?
+  status                  cash_register_session_status_enum  @default(open)
+  opened_at               DateTime                           @default(now()) @db.Timestamp(6)
+  closed_at               DateTime?                          @db.Timestamp(6)
+  opening_amount          Decimal                            @db.Decimal(12, 2)
+  expected_closing_amount Decimal?                           @db.Decimal(12, 2)
+  actual_closing_amount   Decimal?                           @db.Decimal(12, 2)
+  difference              Decimal?                           @db.Decimal(12, 2)
+  closing_notes           String?
+  summary                 Json?
+  created_at              DateTime?                          @default(now()) @db.Timestamp(6)
+  updated_at              DateTime?                          @default(now()) @db.Timestamp(6)
+
+  cash_register stores                     @relation("cash_register_sessions_store", fields: [store_id], references: [id], onUpdate: NoAction)
+  register      cash_registers             @relation(fields: [cash_register_id], references: [id], onUpdate: NoAction)
+  opened_by_user  users                    @relation("cash_register_sessions_opened_by", fields: [opened_by], references: [id], onUpdate: NoAction)
+  closed_by_user  users?                   @relation("cash_register_sessions_closed_by", fields: [closed_by], references: [id], onUpdate: NoAction)
+  movements     cash_register_movements[]
+
+  @@index([store_id, status])
+  @@index([cash_register_id, status])
+  @@index([opened_by, status])
+}
+
+model cash_register_movements {
+  id             Int                                @id @default(autoincrement())
+  session_id     Int
+  store_id       Int
+  user_id        Int
+  type           cash_register_movement_type_enum
+  amount         Decimal                            @db.Decimal(12, 2)
+  payment_method String?                            @db.VarChar(50)
+  reference      String?                            @db.VarChar(255)
+  order_id       Int?
+  payment_id     Int?
+  notes          String?
+  created_at     DateTime?                          @default(now()) @db.Timestamp(6)
+
+  session  cash_register_sessions @relation(fields: [session_id], references: [id], onUpdate: NoAction)
+  store    stores                 @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  user     users                  @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+  order    orders?                @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  payment  payments?              @relation(fields: [payment_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([session_id, type])
+  @@index([store_id])
   @@index([order_id])
 }

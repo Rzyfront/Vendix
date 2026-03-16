@@ -4,7 +4,6 @@ import {
   OnDestroy,
   signal,
   HostListener,
-  ChangeDetectorRef,
 } from '@angular/core';
 import { Subject, takeUntil } from 'rxjs';
 import { CommonModule } from '@angular/common';
@@ -40,12 +39,17 @@ import { PosCustomerModalComponent } from './components/pos-customer-modal.compo
 import { PosPaymentInterfaceComponent } from './components/pos-payment-interface.component';
 import { PosOrderConfirmationComponent } from './components/pos-order-confirmation.component';
 import { PosCartComponent } from './cart/pos-cart.component';
-import { PosRegisterConfigModalComponent } from './components/pos-register-config-modal.component';
 import { PosMobileFooterComponent } from './components/pos-mobile-footer.component';
 import { PosCartModalComponent } from './components/pos-cart-modal.component';
 import { PosShippingModalComponent } from './components/pos-shipping-modal/pos-shipping-modal.component';
 import { StoreSettingsService } from '../settings/general/services/store-settings.service';
 import { QuotationsService } from '../quotations/services/quotations.service';
+import { PosCashRegisterService, CashRegisterSession } from './services/pos-cash-register.service';
+import { PosSessionStatusBarComponent } from './components/pos-session-status-bar.component';
+import { PosSessionOpenModalComponent } from './components/pos-session-open-modal.component';
+import { PosSessionCloseModalComponent } from './components/pos-session-close-modal.component';
+import { PosCashMovementModalComponent } from './components/pos-cash-movement-modal.component';
+import { PosSessionDetailModalComponent } from './components/pos-session-detail-modal.component';
 
 @Component({
   selector: 'app-pos',
@@ -62,14 +66,18 @@ import { QuotationsService } from '../quotations/services/quotations.service';
     PosPaymentInterfaceComponent,
     PosOrderConfirmationComponent,
     PosCartComponent,
-    PosRegisterConfigModalComponent,
     BadgeComponent,
     PosMobileFooterComponent,
     PosCartModalComponent,
     PosShippingModalComponent,
+    PosSessionStatusBarComponent,
+    PosSessionOpenModalComponent,
+    PosSessionCloseModalComponent,
+    PosCashMovementModalComponent,
+    PosSessionDetailModalComponent,
   ],
   template: `
-    <div class="h-full flex flex-col gap-4 lg:gap-6 overflow-hidden pos-container">
+    <div class="flex flex-col gap-4 lg:gap-6 overflow-hidden pos-container">
       <!-- POS Stats (hidden on mobile and in quotation mode) -->
       @if (!isQuotationMode()) {
         <div class="flex-none hidden lg:block">
@@ -186,28 +194,25 @@ import { QuotationsService } from '../quotations/services/quotations.service';
                 <span class="hidden sm:inline">Cliente</span>
               </app-button>
 
-              <!-- Settings Button -->
-              <app-button
-                variant="ghost"
-                size="xsm"
-                (clicked)="onOpenRegisterConfigModal()"
-                title="Configurar Caja"
-                class="w-9 h-9 lg:w-10 lg:h-10 flex items-center justify-center rounded-lg text-text-secondary hover:text-primary hover:bg-primary-light/10 transition-colors"
-                customClasses="!p-0 !h-full !w-full !rounded-lg"
-              >
-                <app-icon
-                  name="settings"
-                  [size]="isMobile() ? 18 : 20"
-                  class="currentColor"
-                ></app-icon>
-              </app-button>
+              <!-- Cash Register Session Status Bar -->
+              @if (cashRegisterEnabled) {
+                <app-pos-session-status-bar
+                  [session]="activeSession"
+                  [showOpenButton]="true"
+                  (openClicked)="showSessionOpenModal = true"
+                  (closeClicked)="showSessionCloseModal = true"
+                  (movementClicked)="showCashMovementModal = true"
+                  (detailClicked)="showSessionDetailModal = true"
+                ></app-pos-session-status-bar>
+              }
+
             </div>
           </div>
         </div>
 
         <!-- Main Content Grid -->
         <div
-          class="flex-1 h-0 p-3 lg:p-6 min-h-0 overflow-hidden pos-main-content relative"
+          class="flex-1 flex flex-col p-3 lg:p-6 min-h-0 overflow-hidden pos-main-content relative"
         >
           @if (isOutOfHours && !canBypassSchedule) {
             <!-- Out of hours overlay -->
@@ -281,10 +286,10 @@ import { QuotationsService } from '../quotations/services/quotations.service';
             </div>
           }
 
-          <!-- Desktop: Grid 3 columns with sidebar cart -->
-          <div class="hidden lg:grid lg:grid-cols-3 gap-6 h-full">
-            <!-- Products Area (Left Side - 2 columns) -->
-            <div class="lg:col-span-2 h-full min-h-0">
+          <!-- Desktop: Flex layout with sidebar cart -->
+          <div class="hidden lg:flex gap-6 flex-1 min-h-0 overflow-hidden">
+            <!-- Products Area (Left Side - 2/3) -->
+            <div class="flex-[2] min-h-0 min-w-0 overflow-hidden">
               <app-pos-product-selection
                 class="h-full block"
                 (productSelected)="onProductSelected($event)"
@@ -292,8 +297,8 @@ import { QuotationsService } from '../quotations/services/quotations.service';
               ></app-pos-product-selection>
             </div>
 
-            <!-- Cart Area (Right Side - 1 column) -->
-            <div class="h-full min-h-0">
+            <!-- Cart Area (Right Side - 1/3) -->
+            <div class="flex-1 min-h-0 min-w-0 overflow-hidden">
               <app-pos-cart
                 class="h-full block"
                 [isEditMode]="isEditMode()"
@@ -307,7 +312,7 @@ import { QuotationsService } from '../quotations/services/quotations.service';
           </div>
 
           <!-- Mobile: Full width products only -->
-          <div class="lg:hidden h-full pb-20">
+          <div class="lg:hidden flex-1 min-h-0 pb-20">
             <app-pos-product-selection
               class="h-full block"
               (productSelected)="onProductSelected($event)"
@@ -375,7 +380,6 @@ import { QuotationsService } from '../quotations/services/quotations.service';
         (closed)="onPaymentModalClosed()"
         (paymentCompleted)="onPaymentCompleted($event)"
         (requestCustomer)="onOpenCustomerModal()"
-        (requestRegisterConfig)="onOpenRegisterConfigModal()"
         (customerSelected)="onPaymentCustomerSelected($event)"
       ></app-pos-payment-interface>
 
@@ -395,11 +399,34 @@ import { QuotationsService } from '../quotations/services/quotations.service';
         (viewDetail)="onViewOrderDetail($event)"
       ></app-pos-order-confirmation>
 
-      <app-pos-register-config-modal
-        [isOpen]="showRegisterConfigModal"
-        (closed)="onRegisterConfigModalClosed()"
-        (saved)="onRegisterConfigSaved($event)"
-      ></app-pos-register-config-modal>
+      <!-- Cash Register Modals -->
+      @if (cashRegisterEnabled) {
+        <app-pos-session-open-modal
+          [isOpen]="showSessionOpenModal"
+          (isOpenChange)="showSessionOpenModal = $event"
+          (sessionOpened)="onSessionOpened($event)"
+        ></app-pos-session-open-modal>
+
+        <app-pos-session-close-modal
+          [isOpen]="showSessionCloseModal"
+          [session]="activeSession"
+          (isOpenChange)="showSessionCloseModal = $event"
+          (sessionClosed)="onSessionClosed($event)"
+        ></app-pos-session-close-modal>
+
+        <app-pos-cash-movement-modal
+          [isOpen]="showCashMovementModal"
+          [sessionId]="activeSession?.id || null"
+          (isOpenChange)="showCashMovementModal = $event"
+          (movementCreated)="onMovementCreated($event)"
+        ></app-pos-cash-movement-modal>
+
+        <app-pos-session-detail-modal
+          [isOpen]="showSessionDetailModal"
+          [session]="activeSession"
+          (isOpenChange)="showSessionDetailModal = $event"
+        ></app-pos-session-detail-modal>
+      }
     </div>
   `,
   styles: [
@@ -407,11 +434,9 @@ import { QuotationsService } from '../quotations/services/quotations.service';
       :host {
         display: block;
         height: 100%;
+        overflow: hidden;
       }
-
-      .pos-container {
-        height: 100%;
-      }
+      .pos-container { height: 100%; }
 
       /* iOS-style blur header */
       .pos-header {
@@ -420,10 +445,10 @@ import { QuotationsService } from '../quotations/services/quotations.service';
         -webkit-backdrop-filter: blur(20px);
       }
 
-      /* Mobile optimizations */
+      /* Mobile: space for fixed footer */
       @media (max-width: 1023px) {
         .pos-main-content {
-          padding-bottom: 80px; /* Space for mobile footer */
+          padding-bottom: 80px;
         }
       }
     `,
@@ -441,7 +466,7 @@ export class PosComponent implements OnInit, OnDestroy {
   selectedPaymentMethod: any = null;
 
   showShippingModal = false;
-  showRegisterConfigModal = false;
+
 
   showOrderConfirmation = false;
   showCartModal = false;
@@ -464,6 +489,14 @@ export class PosComponent implements OnInit, OnDestroy {
   isEditMode = signal(false);
   editingOrderId = signal<string | null>(null);
   editingOrderNumber = signal<string | null>(null);
+
+  // Cash Register
+  cashRegisterEnabled = false;
+  activeSession: CashRegisterSession | null = null;
+  showSessionOpenModal = false;
+  showSessionCloseModal = false;
+  showCashMovementModal = false;
+  showSessionDetailModal = false;
 
   // Quotation mode
   isQuotationMode = signal(false);
@@ -500,7 +533,6 @@ export class PosComponent implements OnInit, OnDestroy {
     private paymentService: PosPaymentService,
     private toastService: ToastService,
     private dialogService: DialogService,
-    private cdr: ChangeDetectorRef,
     private router: Router,
     private store: Store,
     private route: ActivatedRoute,
@@ -508,6 +540,7 @@ export class PosComponent implements OnInit, OnDestroy {
     private ordersService: StoreOrdersService,
     private settingsService: StoreSettingsService,
     private quotationsService: QuotationsService,
+    private cashRegisterService: PosCashRegisterService,
   ) {}
 
   @HostListener('window:resize')
@@ -529,6 +562,13 @@ export class PosComponent implements OnInit, OnDestroy {
     this.checkEditMode();
     this.checkQuotationMode();
     this.validateScheduleOnInit();
+
+    // Listen for lazy session validation from payment service
+    this.paymentService.sessionRequired$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(() => {
+        this.showSessionOpenModal = true;
+      });
   }
 
   /**
@@ -884,17 +924,6 @@ export class PosComponent implements OnInit, OnDestroy {
     }
   }
 
-  onOpenRegisterConfigModal(): void {
-    this.showRegisterConfigModal = true;
-  }
-
-  onRegisterConfigModalClosed(): void {
-    this.showRegisterConfigModal = false;
-  }
-
-  onRegisterConfigSaved(registerId: string): void {
-    this.toastService.success(`Caja configurada: ${registerId}`);
-  }
 
   onOrderConfirmationClosed(): void {
     this.showOrderConfirmation = false;
@@ -1229,6 +1258,41 @@ export class PosComponent implements OnInit, OnDestroy {
             settings.pos.enable_schedule_validation || false;
           this.businessHours = settings.pos.business_hours || {};
 
+          // Initialize cash register feature
+          const crEnabled = settings.pos.cash_register?.enabled || false;
+          this.cashRegisterEnabled = crEnabled;
+          this.cashRegisterService.setFeatureEnabled(crEnabled);
+          this.paymentService.setRequireSessionForSales(
+            settings.pos.cash_register?.require_session_for_sales || false,
+          );
+          if (crEnabled) {
+            this.initCashRegisterSession();
+          }
+
+          // Fallback: si NgRx no tiene cash_register (localStorage desactualizado),
+          // consultar directamente al backend
+          if (!settings.pos.cash_register) {
+            this.settingsService
+              .getSettings()
+              .pipe(takeUntil(this.destroy$))
+              .subscribe((response) => {
+                const freshSettings = response?.data;
+                if (freshSettings?.pos?.cash_register) {
+                  const crFresh =
+                    freshSettings.pos.cash_register.enabled || false;
+                  this.cashRegisterEnabled = crFresh;
+                  this.cashRegisterService.setFeatureEnabled(crFresh);
+                  this.paymentService.setRequireSessionForSales(
+                    freshSettings.pos.cash_register
+                      .require_session_for_sales || false,
+                  );
+                  if (crFresh) {
+                    this.initCashRegisterSession();
+                  }
+                }
+              });
+          }
+
           // Only apply local fallback if backend hasn't handled schedule validation
           if (
             !this.scheduleHandledByBackend &&
@@ -1379,5 +1443,43 @@ export class PosComponent implements OnInit, OnDestroy {
     }
 
     return 'Consultar configuración';
+  }
+
+  // =============================================
+  // Cash Register Methods
+  // =============================================
+
+  private initCashRegisterSession(): void {
+    this.cashRegisterService.fetchActiveSession()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((session) => {
+        this.activeSession = session;
+        // Status bar shows session state — no auto-pop modal.
+        // User can open session voluntarily via status bar button,
+        // or will be prompted at the moment of a transactional action.
+      });
+  }
+
+  onSessionOpened(session: CashRegisterSession): void {
+    this.activeSession = session;
+    this.showSessionOpenModal = false;
+    this.toastService.success(`Caja "${session.register?.name}" abierta`);
+  }
+
+  onSessionClosed(session: CashRegisterSession): void {
+    this.activeSession = null;
+    this.showSessionCloseModal = false;
+
+    const diff = Number(session.difference || 0);
+    const diffStr = diff >= 0 ? `+$${diff.toFixed(2)}` : `-$${Math.abs(diff).toFixed(2)}`;
+    this.toastService.info(
+      `Caja cerrada. Diferencia: ${diffStr}`,
+      'Cierre de Caja',
+      6000,
+    );
+  }
+
+  onMovementCreated(_movement: any): void {
+    this.showCashMovementModal = false;
   }
 }

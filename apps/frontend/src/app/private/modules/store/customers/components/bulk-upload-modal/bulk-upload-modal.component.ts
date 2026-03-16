@@ -8,11 +8,15 @@ import {
   IconComponent,
   ToastService,
 } from '../../../../../../shared/components';
+import {
+  StepsLineComponent,
+  StepsLineItem,
+} from '../../../../../../shared/components/steps-line/steps-line.component';
 
 @Component({
   selector: 'app-customer-bulk-upload-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent],
+  imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent, StepsLineComponent],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -23,104 +27,81 @@ import {
       (closed)="onCancel()"
       subtitle="Importa múltiples clientes desde un archivo Excel"
     >
-      <!-- Initial State: Instructions & Upload -->
-      <div *ngIf="!uploadResults && !parsedData" class="space-y-6">
-        <!-- Template Download Section -->
-        <div>
-          <h4 class="text-sm font-medium text-gray-700 mb-3">
-            1. Descarga la plantilla
-          </h4>
-          <div
-            class="border-2 border-indigo-100 hover:border-indigo-500 bg-indigo-50 rounded-lg p-4 cursor-pointer transition-all shadow-sm hover:shadow-md group"
-            (click)="downloadTemplate()"
-          >
-            <div class="flex items-center mb-2">
-              <div
-                class="p-2 bg-indigo-100 rounded-full text-indigo-600 mr-3 group-hover:bg-indigo-600 group-hover:text-white transition-colors"
-              >
-                <app-icon name="users" [size]="20"></app-icon>
-              </div>
-              <h4 class="font-bold text-indigo-900">Plantilla de Clientes</h4>
-            </div>
-            <p class="text-xs text-indigo-700 mb-3 leading-relaxed">
-              Incluye: Correo, Nombre, Apellido, Documento, Tipo Documento y Teléfono.
-              Con 10 ejemplos para guiarte.
-            </p>
-            <div
-              class="flex items-center text-xs font-bold text-indigo-600 group-hover:text-indigo-800"
-            >
-              <app-icon name="download" [size]="14" class="mr-1"></app-icon>
-              DESCARGAR EXCEL
-            </div>
-          </div>
-        </div>
+      <!-- Steps Indicator -->
+      <app-steps-line
+        [steps]="steps"
+        [currentStep]="currentStep"
+        size="sm"
+      ></app-steps-line>
 
-        <!-- File Upload Section -->
-        <div>
-          <h4 class="text-sm font-medium text-gray-700 mb-3">
-            2. Sube tu archivo completo
-          </h4>
-          <div
-            class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-500 hover:bg-blue-50 transition-all cursor-pointer"
-            (dragover)="onDragOver($event)"
-            (dragleave)="onDragLeave($event)"
-            (drop)="onDrop($event)"
-            (click)="fileInput.click()"
-            [class.border-blue-500]="isDragging"
-            [class.bg-blue-50]="isDragging"
-          >
-            <input
-              #fileInput
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              class="hidden"
-              (change)="onFileSelected($event)"
-            />
-
-            <div *ngIf="!selectedFile">
-              <app-icon
-                name="upload-cloud"
-                [size]="48"
-                class="mx-auto text-gray-400 mb-4"
-                [class.text-blue-500]="isDragging"
-              ></app-icon>
-              <p class="text-gray-900 font-medium">
-                Arrastra tu archivo Excel (.xlsx) aquí
-              </p>
-              <p class="text-gray-500 text-sm mt-1">
-                o haz clic para seleccionar
-              </p>
-              <p class="text-xs text-indigo-500 mt-2 font-medium">
-                Máximo 1000 clientes por archivo
-              </p>
-            </div>
-
-            <div *ngIf="selectedFile">
-              <div class="animate-pulse flex flex-col items-center">
-                <app-icon
-                  name="loader"
-                  [size]="48"
-                  class="text-primary mb-4 animate-spin"
-                ></app-icon>
-                <p class="text-sm text-gray-500">Procesando archivo...</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Error Messages (Pre-upload) -->
+      <!-- ═══ STEP 0: Cargar Datos ═══ -->
+      <div *ngIf="currentStep === 0" class="space-y-5 mt-2">
+        <!-- Template Download -->
         <div
-          *ngIf="uploadError"
-          class="bg-red-50 p-4 rounded-lg border border-red-100 text-red-700 text-sm"
+          class="border-2 border-indigo-100 hover:border-indigo-500 bg-indigo-50 rounded-lg p-4 cursor-pointer transition-all shadow-sm hover:shadow-md group"
+          (click)="downloadTemplate()"
         >
+          <div class="flex items-center mb-2">
+            <div class="p-2 bg-indigo-100 rounded-full text-indigo-600 mr-3 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+              <app-icon name="users" [size]="20"></app-icon>
+            </div>
+            <h4 class="font-bold text-indigo-900">Plantilla de Clientes</h4>
+          </div>
+          <p class="text-xs text-indigo-700 mb-3 leading-relaxed">
+            Incluye: Correo (opcional), Nombre, Apellido, Documento, Tipo Documento y Teléfono.
+            Con 10 ejemplos para guiarte.
+          </p>
+          <div class="flex items-center text-xs font-bold text-indigo-600 group-hover:text-indigo-800">
+            <app-icon name="download" [size]="14" class="mr-1"></app-icon>
+            DESCARGAR EXCEL
+          </div>
+        </div>
+
+        <!-- File Upload Zone -->
+        <div
+          class="border-2 border-dashed rounded-lg p-8 text-center transition-all cursor-pointer"
+          [class.border-blue-500]="isDragging"
+          [class.bg-blue-50]="isDragging"
+          [class.border-gray-300]="!isDragging"
+          [class.hover:border-blue-500]="!isDragging"
+          [class.hover:bg-blue-50]="!isDragging"
+          (dragover)="onDragOver($event)"
+          (dragleave)="onDragLeave($event)"
+          (drop)="onDrop($event)"
+          (click)="fileInput.click()"
+        >
+          <input
+            #fileInput
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            class="hidden"
+            (change)="onFileSelected($event)"
+          />
+          <div *ngIf="!isProcessingFile">
+            <app-icon
+              name="upload-cloud"
+              [size]="48"
+              class="mx-auto text-gray-400 mb-4"
+              [class.text-blue-500]="isDragging"
+            ></app-icon>
+            <p class="text-gray-900 font-medium">Arrastra tu archivo Excel (.xlsx) aquí</p>
+            <p class="text-gray-500 text-sm mt-1">o haz clic para seleccionar</p>
+            <p class="text-xs text-indigo-500 mt-2 font-medium">Máximo 1000 clientes por archivo</p>
+          </div>
+          <div *ngIf="isProcessingFile" class="animate-pulse flex flex-col items-center">
+            <app-icon name="loader" [size]="48" class="text-primary mb-4 animate-spin"></app-icon>
+            <p class="text-sm text-gray-500">Procesando archivo...</p>
+          </div>
+        </div>
+
+        <!-- Error Messages -->
+        <div *ngIf="uploadError" class="bg-red-50 p-4 rounded-lg border border-red-100 text-red-700 text-sm">
           <div class="font-medium flex items-center mb-1">
             <app-icon name="alert-circle" [size]="16" class="mr-2"></app-icon>
             Error en la carga
           </div>
           <div *ngIf="isErrorMessageArray(); else singleError" class="mt-2">
-            <ul
-              class="list-disc list-inside space-y-1 max-h-40 overflow-y-auto"
-            >
+            <ul class="list-disc list-inside space-y-1 max-h-40 overflow-y-auto">
               <li *ngFor="let msg of uploadError">{{ msg }}</li>
             </ul>
           </div>
@@ -130,30 +111,18 @@ import {
         </div>
       </div>
 
-      <!-- Preview State -->
-      <div *ngIf="parsedData && !uploadResults" class="space-y-4">
-        <div
-          class="bg-green-50 p-4 rounded-lg border border-green-100 flex items-center justify-between"
-        >
+      <!-- ═══ STEP 1: Verificar ═══ -->
+      <div *ngIf="currentStep === 1 && parsedData" class="space-y-4 mt-2">
+        <div class="bg-green-50 p-4 rounded-lg border border-green-100 flex items-center justify-between">
           <div class="flex items-center">
-            <app-icon
-              name="check-circle"
-              [size]="24"
-              class="text-green-500 mr-3"
-            ></app-icon>
+            <app-icon name="check-circle" [size]="24" class="text-green-500 mr-3"></app-icon>
             <div>
               <h4 class="text-sm font-medium text-green-900">
-                Archivo procesado correctamente
+                {{ parsedData.length }} clientes encontrados
               </h4>
-              <p class="text-sm text-green-700">
-                Se encontraron {{ parsedData.length }} clientes para cargar.
-              </p>
             </div>
           </div>
-          <button
-            (click)="resetState()"
-            class="text-sm text-red-500 hover:text-red-700 font-medium"
-          >
+          <button (click)="goToStep(0)" class="text-xs text-red-500 hover:text-red-700 font-medium">
             Cambiar archivo
           </button>
         </div>
@@ -163,171 +132,164 @@ import {
           <table class="min-w-full divide-y divide-gray-200 text-sm">
             <thead class="bg-gray-50">
               <tr>
-                <th class="px-3 py-2 text-left font-medium text-gray-500">
-                  Correo
-                </th>
-                <th class="px-3 py-2 text-left font-medium text-gray-500">
-                  Nombre
-                </th>
-                <th class="px-3 py-2 text-left font-medium text-gray-500">
-                  Apellido
-                </th>
-                <th class="px-3 py-2 text-left font-medium text-gray-500">
-                  Documento
-                </th>
-                <th class="px-3 py-2 text-left font-medium text-gray-500">
-                  Teléfono
-                </th>
+                <th class="px-3 py-2 text-left font-medium text-gray-500">Fila</th>
+                <th class="px-3 py-2 text-left font-medium text-gray-500">Correo</th>
+                <th class="px-3 py-2 text-left font-medium text-gray-500">Nombre</th>
+                <th class="px-3 py-2 text-left font-medium text-gray-500">Apellido</th>
+                <th class="px-3 py-2 text-left font-medium text-gray-500">Documento</th>
+                <th class="px-3 py-2 text-left font-medium text-gray-500">Teléfono</th>
               </tr>
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
               <tr *ngFor="let item of parsedData.slice(0, 5)">
-                <td class="px-3 py-2 text-gray-900 text-xs">
-                  {{ item.email || '-' }}
-                </td>
-                <td class="px-3 py-2 text-gray-700">
-                  {{ item.first_name || '-' }}
-                </td>
-                <td class="px-3 py-2 text-gray-700">
-                  {{ item.last_name || '-' }}
-                </td>
-                <td class="px-3 py-2 text-gray-500 font-mono text-xs">
-                  {{ item.document_number || '-' }}
-                </td>
-                <td class="px-3 py-2 text-gray-500 text-xs">
-                  {{ item.phone || '-' }}
-                </td>
+                <td class="px-3 py-2 text-gray-400 text-xs">{{ item.row_number }}</td>
+                <td class="px-3 py-2 text-gray-900 text-xs">{{ item.email || '-' }}</td>
+                <td class="px-3 py-2 text-gray-700">{{ item.first_name || '-' }}</td>
+                <td class="px-3 py-2 text-gray-700">{{ item.last_name || '-' }}</td>
+                <td class="px-3 py-2 text-gray-500 font-mono text-xs">{{ item.document_number || '-' }}</td>
+                <td class="px-3 py-2 text-gray-500 text-xs">{{ item.phone || '-' }}</td>
               </tr>
             </tbody>
           </table>
-          <div
-            class="bg-gray-50 px-3 py-2 text-xs text-gray-500 text-center"
-            *ngIf="parsedData.length > 5"
-          >
+          <div *ngIf="parsedData.length > 5" class="bg-gray-50 px-3 py-2 text-xs text-gray-500 text-center">
             ... y {{ parsedData.length - 5 }} más
           </div>
         </div>
+
+        <!-- Warnings -->
+        <div *ngIf="warnings.length > 0" class="bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-yellow-800 text-xs">
+          <div class="font-medium flex items-center mb-1">
+            <app-icon name="alert-triangle" [size]="14" class="mr-1"></app-icon>
+            Advertencias
+          </div>
+          <ul class="list-disc list-inside space-y-0.5 max-h-32 overflow-y-auto">
+            <li *ngFor="let w of warnings">{{ w }}</li>
+          </ul>
+        </div>
       </div>
 
-      <!-- Results View -->
-      <div *ngIf="uploadResults" class="space-y-6">
-        <div class="bg-white border rounded-lg overflow-hidden">
-          <div
-            class="bg-gray-50 p-4 border-b flex justify-between items-center"
-          >
-            <h4 class="font-medium text-gray-900">Resumen de Carga</h4>
-            <span class="text-sm text-gray-500">
-              Procesados: {{ uploadResults.total_processed || 0 }}
-            </span>
-          </div>
-          <div class="p-4 grid grid-cols-2 gap-4">
-            <div class="bg-green-50 p-3 rounded border border-green-100">
-              <div class="text-sm text-green-600 font-medium">Exitosos</div>
-              <div class="text-2xl font-bold text-green-700">
-                {{ uploadResults.successful || 0 }}
-              </div>
-            </div>
-            <div class="bg-red-50 p-3 rounded border border-red-100">
-              <div class="text-sm text-red-600 font-medium">Fallidos</div>
-              <div class="text-2xl font-bold text-red-700">
-                {{ uploadResults.failed || 0 }}
-              </div>
-            </div>
-          </div>
+      <!-- ═══ STEP 2: Resultados ═══ -->
+      <div *ngIf="currentStep === 2" class="space-y-5 mt-2">
+        <!-- Uploading state -->
+        <div *ngIf="isUploading" class="py-12 flex flex-col items-center">
+          <app-icon name="loader" [size]="48" class="text-primary mb-4 animate-spin"></app-icon>
+          <p class="text-sm font-medium text-gray-700">Procesando {{ parsedData?.length }} clientes...</p>
+          <p class="text-xs text-gray-500 mt-1">Esto puede tomar unos segundos</p>
         </div>
 
-        <div
-          *ngIf="uploadResults.failed > 0"
-          class="border rounded-lg overflow-hidden"
-        >
-          <div
-            class="bg-red-50 p-3 border-b border-red-100 text-red-800 font-medium text-sm flex items-center"
-          >
-            <app-icon name="alert-triangle" [size]="16" class="mr-2"></app-icon>
-            Detalle de Errores
+        <!-- Results -->
+        <div *ngIf="!isUploading && uploadResults" class="space-y-5">
+          <div class="bg-white border rounded-lg overflow-hidden">
+            <div class="bg-gray-50 p-4 border-b flex justify-between items-center">
+              <h4 class="font-medium text-gray-900">Resumen de Carga</h4>
+              <span class="text-sm text-gray-500">
+                Procesados: {{ uploadResults.total_processed || 0 }}
+              </span>
+            </div>
+            <div class="p-4 grid grid-cols-2 gap-4">
+              <div class="bg-green-50 p-3 rounded border border-green-100">
+                <div class="text-xs text-green-600 font-medium">Exitosos</div>
+                <div class="text-2xl font-bold text-green-700">{{ uploadResults.successful || 0 }}</div>
+              </div>
+              <div class="bg-red-50 p-3 rounded border border-red-100">
+                <div class="text-xs text-red-600 font-medium">Fallidos</div>
+                <div class="text-2xl font-bold text-red-700">{{ uploadResults.failed || 0 }}</div>
+              </div>
+            </div>
           </div>
-          <div class="max-h-60 overflow-y-auto bg-white">
-            <table class="min-w-full divide-y divide-gray-200">
-              <thead class="bg-gray-50">
-                <tr>
-                  <th
-                    scope="col"
-                    class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                  >
-                    Cliente
-                  </th>
-                  <th
-                    scope="col"
-                    class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                  >
-                    Error
-                  </th>
-                </tr>
-              </thead>
-              <tbody class="bg-white divide-y divide-gray-200">
-                <ng-container
-                  *ngFor="let result of uploadResults.results; let i = index"
-                >
-                  <tr *ngIf="result.status === 'error'">
-                    <td
-                      class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900"
-                    >
-                      {{ parsedData?.[i]?.email || 'Cliente ' + (i + 1) }}
-                    </td>
-                    <td class="px-4 py-2 text-sm text-red-600">
-                      {{ result.message }}
-                    </td>
+
+          <!-- Error Detail -->
+          <div *ngIf="uploadResults.failed > 0" class="border rounded-lg overflow-hidden">
+            <div class="bg-red-50 p-3 border-b border-red-100 text-red-800 font-medium text-sm flex items-center">
+              <app-icon name="alert-triangle" [size]="16" class="mr-2"></app-icon>
+              Detalle de Errores
+            </div>
+            <div class="max-h-60 overflow-y-auto bg-white">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Cliente</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Error</th>
                   </tr>
-                </ng-container>
-              </tbody>
-            </table>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                  <ng-container *ngFor="let result of uploadResults.results; let i = index">
+                    <tr *ngIf="result.status === 'error'">
+                      <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                        Fila {{ result.row_number || (i + 1) }}:
+                        {{ getCustomerLabel(result, i) }}
+                      </td>
+                      <td class="px-4 py-2 text-sm text-red-600">{{ result.message }}</td>
+                    </tr>
+                  </ng-container>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
 
-      <div
-        slot="footer"
-        class="flex justify-end gap-3 pt-6 border-t border-gray-200 mt-6"
-      >
-        <app-button
-          variant="outline"
-          (clicked)="onCancel()"
-          [disabled]="isUploading"
-        >
-          {{ uploadResults ? 'Cerrar' : 'Cancelar' }}
-        </app-button>
-        <app-button
-          *ngIf="parsedData && !uploadResults"
-          variant="primary"
-          (clicked)="uploadData()"
-          [disabled]="isUploading"
-          [loading]="isUploading"
-        >
-          <app-icon name="upload" [size]="16" slot="icon"></app-icon>
-          Iniciar Carga de {{ parsedData.length }} Clientes
-        </app-button>
+      <!-- Footer -->
+      <div slot="footer" class="flex justify-between gap-3 pt-6 border-t border-gray-200 mt-6">
+        <div>
+          <app-button
+            *ngIf="currentStep === 1"
+            variant="ghost"
+            size="sm"
+            (clicked)="goToStep(0)"
+            [disabled]="isUploading"
+          >
+            <app-icon name="arrow-left" [size]="14" slot="icon"></app-icon>
+            Atrás
+          </app-button>
+        </div>
+        <div class="flex gap-3">
+          <app-button
+            variant="outline"
+            (clicked)="onCancel()"
+            [disabled]="isUploading"
+          >
+            {{ currentStep === 2 && uploadResults ? 'Cerrar' : 'Cancelar' }}
+          </app-button>
+          <app-button
+            *ngIf="currentStep === 1 && parsedData"
+            variant="primary"
+            (clicked)="confirmUpload()"
+            [disabled]="isUploading"
+            [loading]="isUploading"
+          >
+            <app-icon name="upload" [size]="16" slot="icon"></app-icon>
+            Cargar {{ parsedData.length }} Clientes
+          </app-button>
+        </div>
       </div>
     </app-modal>
   `,
-  styles: [
-    `
-      :host {
-        display: block;
-      }
-    `,
-  ],
+  styles: [`
+    :host { display: block; }
+  `],
 })
 export class CustomerBulkUploadModalComponent {
   @Input() isOpen = false;
   @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() uploadComplete = new EventEmitter<void>();
 
-  selectedFile: File | null = null;
+  // Steps
+  steps: StepsLineItem[] = [
+    { label: 'Cargar Datos' },
+    { label: 'Verificar' },
+    { label: 'Resultados' },
+  ];
+  currentStep = 0;
+
+  // State
+  isProcessingFile = false;
   isDragging = false;
   isUploading = false;
   uploadError: any = null;
   parsedData: any[] | null = null;
   uploadResults: any = null;
+  warnings: string[] = [];
 
   private customersService = inject(CustomersService);
   private toastService = inject(ToastService);
@@ -359,12 +321,24 @@ export class CustomerBulkUploadModalComponent {
   }
 
   resetState() {
-    this.selectedFile = null;
+    this.currentStep = 0;
+    this.isProcessingFile = false;
     this.isDragging = false;
     this.isUploading = false;
     this.uploadError = null;
     this.uploadResults = null;
     this.parsedData = null;
+    this.warnings = [];
+  }
+
+  goToStep(step: number) {
+    if (step === 0) {
+      this.parsedData = null;
+      this.uploadError = null;
+      this.warnings = [];
+      this.isProcessingFile = false;
+    }
+    this.currentStep = step;
   }
 
   downloadTemplate() {
@@ -377,9 +351,8 @@ export class CustomerBulkUploadModalComponent {
         link.click();
         window.URL.revokeObjectURL(url);
       },
-      error: (error: Error) => {
+      error: () => {
         this.toastService.error('Error al descargar la plantilla');
-        console.error(error);
       },
     });
   }
@@ -400,7 +373,6 @@ export class CustomerBulkUploadModalComponent {
     event.preventDefault();
     event.stopPropagation();
     this.isDragging = false;
-
     const files = event.dataTransfer?.files;
     if (files && files.length > 0) {
       this.processFile(files[0]);
@@ -417,18 +389,15 @@ export class CustomerBulkUploadModalComponent {
   processFile(file: File) {
     const allowedExtensions = ['.csv', '.xlsx', '.xls'];
     const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
-    const isValidExtension = allowedExtensions.includes(fileExtension);
 
-    if (!isValidExtension) {
-      this.toastService.error(
-        'Por favor selecciona un archivo válido (.xlsx o .csv)',
-      );
+    if (!allowedExtensions.includes(fileExtension)) {
+      this.toastService.error('Por favor selecciona un archivo válido (.xlsx o .csv)');
       return;
     }
 
-    this.selectedFile = file;
+    this.isProcessingFile = true;
     this.uploadError = null;
-    this.uploadResults = null;
+    this.warnings = [];
 
     const reader: FileReader = new FileReader();
 
@@ -439,18 +408,14 @@ export class CustomerBulkUploadModalComponent {
         const wsname: string = wb.SheetNames[0];
         const ws: XLSX.WorkSheet = wb.Sheets[wsname];
 
-        // Convertir a JSON array de arrays para inspeccionar encabezados
         const rawData = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
 
         if (!rawData || rawData.length < 2) {
-          this.toastService.error(
-            'El archivo debe contener al menos una fila de encabezados y una fila de datos',
-          );
-          this.resetState();
+          this.toastService.error('El archivo debe contener al menos una fila de encabezados y una fila de datos');
+          this.isProcessingFile = false;
           return;
         }
 
-        // Procesar encabezados
         const rawHeaders = rawData[0] as string[];
         const headerMap: Record<number, string> = {};
 
@@ -463,8 +428,9 @@ export class CustomerBulkUploadModalComponent {
           }
         });
 
-        // Procesar datos
         const customers: any[] = [];
+        const warnings: string[] = [];
+
         for (let i = 1; i < rawData.length; i++) {
           const row = rawData[i] as any[];
           if (!row || row.length === 0) continue;
@@ -484,43 +450,52 @@ export class CustomerBulkUploadModalComponent {
             }
           });
 
-          if (hasData && customer['email']) {
+          // Fix: no requerir email — solo nombre O documento
+          if (hasData && (customer['first_name'] || customer['document_number'])) {
+            customer['row_number'] = i + 1; // fila Excel (1-based + header)
+
+            // Generar warnings
+            if (!customer['email']) {
+              warnings.push(`Fila ${i + 1}: ${customer['first_name'] || 'Sin nombre'} ${customer['last_name'] || ''} — sin correo electrónico`);
+            }
+            if (!customer['document_number']) {
+              warnings.push(`Fila ${i + 1}: ${customer['first_name'] || 'Sin nombre'} ${customer['last_name'] || ''} — sin número de documento`);
+            }
+
             customers.push(customer);
           }
         }
 
+        this.isProcessingFile = false;
+
         if (customers.length === 0) {
-          this.toastService.warning(
-            'No se encontraron clientes válidos en el archivo',
-          );
-          this.resetState();
+          this.toastService.warning('No se encontraron clientes válidos en el archivo');
           return;
         }
 
         if (customers.length > 1000) {
-          this.toastService.error(
-            `El archivo excede el límite de 1000 clientes (tiene ${customers.length}). Por favor divídelo en varios archivos.`,
-          );
-          this.resetState();
+          this.toastService.error(`El archivo excede el límite de 1000 clientes (tiene ${customers.length}).`);
           return;
         }
 
         this.parsedData = customers;
+        this.warnings = warnings;
+        // Auto-advance to step 1
+        this.currentStep = 1;
       } catch (err) {
         console.error('Error parsing file:', err);
-        this.toastService.error(
-          'Error al procesar el archivo. Verifica el formato.',
-        );
-        this.resetState();
+        this.isProcessingFile = false;
+        this.toastService.error('Error al procesar el archivo. Verifica el formato.');
       }
     };
 
     reader.readAsBinaryString(file);
   }
 
-  uploadData() {
+  confirmUpload() {
     if (!this.parsedData) return;
 
+    this.currentStep = 2;
     this.isUploading = true;
     this.uploadError = null;
 
@@ -528,21 +503,18 @@ export class CustomerBulkUploadModalComponent {
       next: (response: any) => {
         this.isUploading = false;
         const data = response.data || response;
+        this.uploadResults = data;
 
         if (data.failed > 0 || !data.success) {
-          this.uploadResults = data;
-          this.toastService.warning(
-            'La carga se completó con algunos errores.',
-          );
+          this.toastService.warning('La carga se completó con algunos errores.');
         } else {
-          this.toastService.success('Clientes cargados exitosamente');
+          this.toastService.success(`${data.successful} clientes cargados exitosamente`);
           this.uploadComplete.emit();
-          this.onCancel();
         }
       },
       error: (error: any) => {
         this.isUploading = false;
-        this.uploadError = error;
+        this.uploadError = error?.error?.message || 'Error en la carga masiva';
 
         if (error?.error?.details) {
           this.uploadResults = error.error.details;
@@ -553,5 +525,14 @@ export class CustomerBulkUploadModalComponent {
         this.toastService.error('Error en la carga masiva');
       },
     });
+  }
+
+  getCustomerLabel(result: any, index: number): string {
+    const parsed = this.parsedData?.[index];
+    if (parsed) {
+      const name = [parsed.first_name, parsed.last_name].filter(Boolean).join(' ');
+      if (name) return name;
+    }
+    return `Cliente ${index + 1}`;
   }
 }

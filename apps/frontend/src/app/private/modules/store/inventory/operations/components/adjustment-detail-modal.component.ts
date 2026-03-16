@@ -317,16 +317,44 @@ import { InventoryAdjustment, AdjustmentType } from '../../interfaces';
       <!-- Footer -->
       <div
         slot="footer"
-        class="flex justify-end px-6 py-4 bg-gray-50 rounded-b-xl"
+        class="flex justify-between px-6 py-4 bg-gray-50 rounded-b-xl"
       >
-        <app-button
-          variant="outline"
-          type="button"
-          (clicked)="onClose()"
-          customClasses="!rounded-xl font-bold"
-        >
-          Cerrar
-        </app-button>
+        <div>
+          @if (isPending && adjustment) {
+            <app-button
+              variant="outline"
+              type="button"
+              (clicked)="deleteAdjustment.emit(adjustment)"
+              [loading]="isProcessing"
+              [disabled]="isProcessing"
+              customClasses="!rounded-xl font-bold !text-error !border-error hover:!bg-error/5"
+            >
+              Eliminar
+            </app-button>
+          }
+        </div>
+        <div class="flex gap-3">
+          <app-button
+            variant="outline"
+            type="button"
+            (clicked)="onClose()"
+            customClasses="!rounded-xl font-bold"
+          >
+            Cerrar
+          </app-button>
+          @if (isPending && adjustment) {
+            <app-button
+              variant="primary"
+              type="button"
+              (clicked)="approve.emit(adjustment)"
+              [loading]="isProcessing"
+              [disabled]="isProcessing"
+              customClasses="!rounded-xl font-bold shadow-md shadow-primary-200"
+            >
+              Aprobar
+            </app-button>
+          }
+        </div>
       </div>
     </app-modal>
   `,
@@ -334,9 +362,16 @@ import { InventoryAdjustment, AdjustmentType } from '../../interfaces';
 export class AdjustmentDetailModalComponent {
   @Input() isOpen = false;
   @Input() adjustment: InventoryAdjustment | null = null;
+  @Input() isProcessing = false;
 
   @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() close = new EventEmitter<void>();
+  @Output() approve = new EventEmitter<InventoryAdjustment>();
+  @Output() deleteAdjustment = new EventEmitter<InventoryAdjustment>();
+
+  get isPending(): boolean {
+    return !!this.adjustment && !this.adjustment.approved_at;
+  }
 
   private typeConfig: Record<
     AdjustmentType,

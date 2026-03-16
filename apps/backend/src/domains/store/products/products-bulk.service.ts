@@ -70,13 +70,16 @@ export class ProductsBulkService {
         'Cantidad Inicial',
       ];
       exampleData = [
-        {
-          Nombre: 'Camiseta Básica Blanca',
-          SKU: 'CAM-BAS-BLA-001',
-          'Precio Venta': 15000,
-          'Precio Compra': 8000,
-          'Cantidad Inicial': 50,
-        },
+        { Nombre: 'Camiseta Básica Blanca', SKU: 'CAM-BAS-BLA-001', 'Precio Venta': 15000, 'Precio Compra': 8000, 'Cantidad Inicial': 50 },
+        { Nombre: 'Pantalón Jean Clásico', SKU: 'PAN-JEA-CLA-032', 'Precio Venta': 45000, 'Precio Compra': 22000, 'Cantidad Inicial': 30 },
+        { Nombre: 'Audífonos Bluetooth Sport', SKU: 'AUD-BLU-SPO-007', 'Precio Venta': 89000, 'Precio Compra': 42000, 'Cantidad Inicial': 15 },
+        { Nombre: 'Protector Solar FPS 50', SKU: 'PRO-SOL-FPS-050', 'Precio Venta': 32000, 'Precio Compra': 18000, 'Cantidad Inicial': 80 },
+        { Nombre: 'Silla Ergonómica Oficina', SKU: 'SIL-ERG-OFI-100', 'Precio Venta': 250000, 'Precio Compra': 145000, 'Cantidad Inicial': 5 },
+        { Nombre: 'Café Orgánico 500g', SKU: 'CAF-ORG-500-012', 'Precio Venta': 28000, 'Precio Compra': 15000, 'Cantidad Inicial': 120 },
+        { Nombre: 'Balón Fútbol Profesional', SKU: 'BAL-FUT-PRO-005', 'Precio Venta': 75000, 'Precio Compra': 38000, 'Cantidad Inicial': 25 },
+        { Nombre: 'Mochila Escolar 40L', SKU: 'MOC-ESC-40L-018', 'Precio Venta': 55000, 'Precio Compra': 27000, 'Cantidad Inicial': 40 },
+        { Nombre: 'Lámpara LED Escritorio', SKU: 'LAM-LED-ESC-003', 'Precio Venta': 42000, 'Precio Compra': 19000, 'Cantidad Inicial': 0 },
+        { Nombre: 'Toalla Microfibra XL', SKU: 'TOA-MIC-XL-025', 'Precio Venta': 18000, 'Precio Compra': 7500, 'Cantidad Inicial': 200 },
       ];
     } else {
       headers = [
@@ -96,22 +99,16 @@ export class ProductsBulkService {
         'Precio Oferta',
       ];
       exampleData = [
-        {
-          Nombre: 'Zapatillas Running Pro',
-          SKU: 'ZAP-RUN-PRO-42',
-          'Precio Venta': 85000,
-          'Precio Compra': 45000,
-          Margen: 45,
-          'Cantidad Inicial': 20,
-          Descripción: 'Zapatillas ideales para correr largas distancias.',
-          Marca: 'Nike',
-          Categorías: 'Deportes, Calzado, Running',
-          Estado: 'activo',
-          'Disponible Ecommerce': 'Si',
-          Peso: 0.8,
-          'En Oferta': 'No',
-          'Precio Oferta': 0,
-        },
+        { Nombre: 'Zapatillas Running Pro', SKU: 'ZAP-RUN-PRO-42', 'Precio Venta': 85000, 'Precio Compra': 45000, Margen: 45, 'Cantidad Inicial': 20, Descripción: 'Zapatillas ideales para correr largas distancias.', Marca: 'Nike', Categorías: 'Deportes, Calzado, Running', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.8, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Smartphone Galaxy A54', SKU: 'SMR-GAL-A54-128', 'Precio Venta': 1200000, 'Precio Compra': 750000, Margen: 60, 'Cantidad Inicial': 10, Descripción: 'Smartphone Samsung con pantalla AMOLED y 128GB.', Marca: 'Samsung', Categorías: 'Tecnología, Celulares', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.2, 'En Oferta': 'Si', 'Precio Oferta': 1050000 },
+        { Nombre: 'Leche Entera 1L', SKU: 'LEC-ENT-1L-COL', 'Precio Venta': 5200, 'Precio Compra': 3800, Margen: 37, 'Cantidad Inicial': 200, Descripción: 'Leche entera pasteurizada de origen colombiano.', Marca: 'Colanta', Categorías: 'Alimentos, Lácteos', Estado: 'activo', 'Disponible Ecommerce': 'No', Peso: 1.05, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Camiseta Dry-Fit Running', SKU: 'CAM-DRY-RUN-M01', 'Precio Venta': 65000, 'Precio Compra': 32000, Margen: 50, 'Cantidad Inicial': 35, Descripción: 'Camiseta deportiva transpirable para hombre.', Marca: 'Adidas', Categorías: 'Deportes, Ropa Deportiva', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.15, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Escritorio Plegable Madera', SKU: 'ESC-PLE-MAD-120', 'Precio Venta': 180000, 'Precio Compra': 95000, Margen: 47, 'Cantidad Inicial': 8, Descripción: 'Escritorio plegable de madera 120x60cm para home office.', Marca: 'Muebles Express', Categorías: 'Hogar, Muebles, Oficina', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 15, 'En Oferta': 'Si', 'Precio Oferta': 155000 },
+        { Nombre: 'Aceite de Oliva Extra Virgen 500ml', SKU: 'ACE-OLI-EXV-500', 'Precio Venta': 38000, 'Precio Compra': 24000, Margen: 58, 'Cantidad Inicial': 60, Descripción: 'Aceite de oliva importado, primera prensada en frío.', Marca: 'Olivetto', Categorías: 'Alimentos, Aceites', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.55, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Teclado Mecánico RGB', SKU: 'TEC-MEC-RGB-K70', 'Precio Venta': 320000, 'Precio Compra': 180000, Margen: 78, 'Cantidad Inicial': 12, Descripción: 'Teclado mecánico con switches Cherry MX e iluminación RGB.', Marca: 'Corsair', Categorías: 'Tecnología, Periféricos, Gaming', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 1.2, 'En Oferta': 'Si', 'Precio Oferta': 280000 },
+        { Nombre: 'Bloqueador Solar Facial SPF 60', SKU: 'BLO-SOL-FAC-060', 'Precio Venta': 48000, 'Precio Compra': 28000, Margen: 71, 'Cantidad Inicial': 45, Descripción: 'Protector solar facial oil-free con SPF 60.', Marca: 'La Roche-Posay', Categorías: 'Belleza, Cuidado Personal', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.1, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Cuerda de Saltar Profesional', SKU: 'CUE-SAL-PRO-300', 'Precio Venta': 22000, 'Precio Compra': 9000, Margen: 59, 'Cantidad Inicial': 0, Descripción: 'Cuerda de saltar con rodamientos y mangos antideslizantes.', Marca: 'Everlast', Categorías: 'Deportes, Fitness', Estado: 'inactivo', 'Disponible Ecommerce': 'No', Peso: 0.3, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Set Ollas Antiadherentes x5', SKU: 'SET-OLL-ANT-5PC', 'Precio Venta': 145000, 'Precio Compra': 72000, Margen: 50, 'Cantidad Inicial': 18, Descripción: 'Juego de 5 ollas con recubrimiento antiadherente cerámico.', Marca: 'T-fal', Categorías: 'Hogar, Cocina', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 4.5, 'En Oferta': 'Si', 'Precio Oferta': 125000 },
       ];
     }
 

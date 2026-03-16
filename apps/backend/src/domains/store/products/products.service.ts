@@ -520,6 +520,7 @@ export class ProductsService {
       include_stock,
       include_variants,
       category_id,
+      track_inventory,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -553,6 +554,7 @@ export class ProductsService {
           some: { category_id },
         },
       }),
+      ...(track_inventory !== undefined && { track_inventory }),
     };
 
     const [products, total] = await Promise.all([
@@ -674,6 +676,7 @@ export class ProductsService {
 
               return {
                 id: variant.id,
+                name: variant.name,
                 sku: variant.sku,
                 price_override: variant.price_override
                   ? Number(variant.price_override)
@@ -682,6 +685,7 @@ export class ProductsService {
                   ? Number(variant.cost_price)
                   : null,
                 stock: variantStock,
+                stock_quantity: variantStock,
                 image_url: variantImageUrl,
                 attributes: this.parseVariantAttributes(variant.attributes),
               };
@@ -702,6 +706,7 @@ export class ProductsService {
             state: product.state,
             pricing_type: String(product.pricing_type),
             track_inventory: product.track_inventory,
+            requires_batch_tracking: product.requires_batch_tracking,
             image_url: signed_image_url || null,
             brand: product.brands,
             categories:
@@ -755,6 +760,19 @@ export class ProductsService {
         const raw_image_url = product.product_images?.[0]?.image_url || null;
         const signed_image_url = await this.s3Service.signUrl(raw_image_url);
 
+        // Map variant data when requested
+        const mapped_variants = include_variants
+          ? (product as any).product_variants?.map((variant: any) => ({
+              id: variant.id,
+              name: variant.name,
+              sku: variant.sku,
+              price_override: variant.price_override ? Number(variant.price_override) : null,
+              cost_price: variant.cost_price ? Number(variant.cost_price) : null,
+              stock_quantity: variant.stock_levels?.[0]?.quantity_available ?? variant.stock_quantity ?? 0,
+              attributes: this.parseVariantAttributes(variant.attributes),
+            })) || []
+          : undefined;
+
         return {
           id: product.id,
           name: product.name,
@@ -767,7 +785,9 @@ export class ProductsService {
           sku: product.sku,
           cost_price: product.cost_price,
           state: product.state,
+          pricing_type: String(product.pricing_type),
           track_inventory: product.track_inventory,
+          requires_batch_tracking: product.requires_batch_tracking,
           image_url: signed_image_url || null,
           brand: product.brands,
           categories:
@@ -788,6 +808,10 @@ export class ProductsService {
             })) || [],
           stock_levels: product.stock_levels,
           stores: product.stores,
+          ...(include_variants && {
+            has_variants: (mapped_variants?.length ?? 0) > 0,
+            product_variants: mapped_variants,
+          }),
         };
       }),
     );

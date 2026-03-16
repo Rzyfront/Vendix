@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -22,10 +23,6 @@ import { UpdateDianConfigDto } from './dto/update-dian-config.dto';
 import { DianXmlSignerService } from '../providers/dian-direct/dian-xml-signer.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
-/**
- * Controller for DIAN configuration endpoints.
- * Manages the store's DIAN electronic invoicing setup.
- */
 @Controller('store/invoicing/dian-config')
 export class DianConfigController {
   constructor(
@@ -37,8 +34,35 @@ export class DianConfigController {
 
   @Get()
   @Permissions('invoicing:read')
-  async getConfig() {
-    const result = await this.dian_config_service.getConfig();
+  async getConfigs() {
+    const result = await this.dian_config_service.getConfigs();
+    return this.response_service.success(result);
+  }
+
+  @Get('audit-logs')
+  @Permissions('invoicing:read')
+  async getAuditLogs(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('config_id') config_id?: string,
+  ) {
+    const result = await this.dian_config_service.getAuditLogs(
+      page ? parseInt(page, 10) : 1,
+      limit ? parseInt(limit, 10) : 20,
+      config_id ? parseInt(config_id, 10) : undefined,
+    );
+    return this.response_service.paginated(
+      result.data,
+      result.total,
+      result.page,
+      result.limit,
+    );
+  }
+
+  @Get(':id')
+  @Permissions('invoicing:read')
+  async getConfigById(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dian_config_service.getConfigById(id);
     return this.response_service.success(result);
   }
 
@@ -57,6 +81,20 @@ export class DianConfigController {
     @Body() dto: UpdateDianConfigDto,
   ) {
     const result = await this.dian_config_service.update(id, dto);
+    return this.response_service.success(result);
+  }
+
+  @Delete(':id')
+  @Permissions('invoicing:write')
+  async deleteConfig(@Param('id', ParseIntPipe) id: number) {
+    await this.dian_config_service.deleteConfig(id);
+    return this.response_service.success(null, 'Configuration deleted');
+  }
+
+  @Patch(':id/set-default')
+  @Permissions('invoicing:write')
+  async setDefault(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dian_config_service.setDefault(id);
     return this.response_service.success(result);
   }
 
@@ -124,56 +162,27 @@ export class DianConfigController {
     });
   }
 
-  /**
-   * Tests connectivity to DIAN web services.
-   */
-  @Post('test-connection')
+  @Post(':id/test-connection')
   @Permissions('invoicing:write')
   @HttpCode(HttpStatus.OK)
-  async testConnection() {
-    const result = await this.dian_test_service.testConnection();
+  async testConnection(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dian_test_service.testConnection(id);
     return this.response_service.success(result);
   }
 
-  /**
-   * Runs the DIAN test set for enablement.
-   */
-  @Post('run-test-set')
+  @Post(':id/run-test-set')
   @Permissions('invoicing:write')
   @HttpCode(HttpStatus.OK)
-  async runTestSet() {
-    const result = await this.dian_test_service.runTestSet();
+  async runTestSet(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dian_test_service.runTestSet(id);
     return this.response_service.success(result);
   }
 
-  /**
-   * Gets test results from the last test set execution.
-   */
-  @Get('test-results')
+  @Get(':id/test-results')
   @Permissions('invoicing:read')
-  async getTestResults() {
-    const result = await this.dian_test_service.getTestResults();
+  async getTestResults(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dian_test_service.getTestResults(id);
     return this.response_service.success(result);
   }
 
-  /**
-   * Gets audit logs for DIAN operations.
-   */
-  @Get('audit-logs')
-  @Permissions('invoicing:read')
-  async getAuditLogs(
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-  ) {
-    const result = await this.dian_config_service.getAuditLogs(
-      page ? parseInt(page, 10) : 1,
-      limit ? parseInt(limit, 10) : 20,
-    );
-    return this.response_service.paginated(
-      result.data,
-      result.total,
-      result.page,
-      result.limit,
-    );
-  }
 }

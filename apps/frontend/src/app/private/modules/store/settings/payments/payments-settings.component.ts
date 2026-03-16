@@ -39,10 +39,13 @@ import {
   template: `
     <div class="w-full md:space-y-4">
       <!-- Stats: Sticky on mobile, static on desktop -->
-      <div class="stats-container !mb-0 md:!mb-6 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div
+        class="stats-container !mb-0 md:!mb-6 sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         <app-stats
           title="Total Métodos"
           [value]="payment_method_stats()?.total_methods || 0"
+          smallText="Métodos en plataforma"
           iconName="credit-card"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
@@ -50,6 +53,7 @@ import {
         <app-stats
           title="Activos"
           [value]="payment_method_stats()?.enabled_methods || 0"
+          smallText="Listos para usar"
           iconName="check-circle"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
@@ -57,6 +61,7 @@ import {
         <app-stats
           title="Requieren Config"
           [value]="payment_method_stats()?.requires_config || 0"
+          smallText="Acción requerida"
           iconName="settings"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-600"
@@ -64,6 +69,7 @@ import {
         <app-stats
           title="Transacciones"
           [value]="payment_method_stats()?.successful_transactions || 0"
+          smallText="Pagos completados"
           iconName="check"
           iconBgColor="bg-purple-100"
           iconColor="text-purple-600"
@@ -71,14 +77,22 @@ import {
       </div>
 
       <!-- Content Container: Transparent on mobile, surface on desktop -->
-      <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-                  md:border md:border-border">
+      <div
+        class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
+                  md:border md:border-border"
+      >
         <!-- Search Section: Sticky on mobile, static on desktop -->
-        <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                    md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
-          <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-            <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
-                       md:text-lg md:font-semibold md:text-text-primary">
+        <div
+          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                    md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+        >
+          <div
+            class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+          >
+            <h2
+              class="text-[13px] font-bold text-gray-600 tracking-wide
+                       md:text-lg md:font-semibold md:text-text-primary"
+            >
               Métodos de Pago ({{ filtered_methods().length }})
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
@@ -121,7 +135,9 @@ import {
         <!-- Loading State -->
         @if (is_loading()) {
           <div class="p-4 md:p-6 text-center">
-            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
             <p class="mt-2 text-text-secondary">Cargando métodos de pago...</p>
           </div>
         }
@@ -129,14 +145,26 @@ import {
         <!-- Empty State -->
         @if (!is_loading() && filtered_methods().length === 0) {
           <div class="p-8 text-center">
-            <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
-              <app-icon name="credit-card" [size]="24" class="text-gray-400"></app-icon>
+            <div
+              class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center"
+            >
+              <app-icon
+                name="credit-card"
+                [size]="24"
+                class="text-gray-400"
+              ></app-icon>
             </div>
             @if (search_term()) {
-              <p class="text-sm text-text-secondary">No se encontraron métodos con ese criterio</p>
+              <p class="text-sm text-text-secondary">
+                No se encontraron métodos con ese criterio
+              </p>
             } @else {
-              <p class="text-sm text-text-secondary">No hay métodos de pago configurados</p>
-              <p class="text-xs text-gray-400 mt-1">Agrega tu primer método de pago</p>
+              <p class="text-sm text-text-secondary">
+                No hay métodos de pago configurados
+              </p>
+              <p class="text-xs text-gray-400 mt-1">
+                Agrega tu primer método de pago
+              </p>
             }
           </div>
         }
@@ -152,8 +180,14 @@ import {
       (closed)="closeAddModal()"
     >
       <div slot="header">
-        <div class="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center border border-blue-100">
-          <app-icon name="credit-card" [size]="20" class="text-blue-600"></app-icon>
+        <div
+          class="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center border border-blue-100"
+        >
+          <app-icon
+            name="credit-card"
+            [size]="20"
+            class="text-blue-600"
+          ></app-icon>
         </div>
       </div>
 
@@ -170,8 +204,12 @@ import {
 
       @if (is_loading_available()) {
         <div class="p-4 text-center">
-          <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-          <p class="mt-2 text-sm text-text-secondary">Cargando métodos disponibles...</p>
+          <div
+            class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"
+          ></div>
+          <p class="mt-2 text-sm text-text-secondary">
+            Cargando métodos disponibles...
+          </p>
         </div>
       }
 
@@ -187,10 +225,18 @@ import {
         ></app-responsive-data-view>
       }
 
-      @if (!is_loading_available() && filtered_available_methods().length === 0) {
+      @if (
+        !is_loading_available() && filtered_available_methods().length === 0
+      ) {
         <div class="p-6 text-center">
-          <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-green-50 flex items-center justify-center">
-            <app-icon name="check-circle" [size]="24" class="text-green-500"></app-icon>
+          <div
+            class="w-12 h-12 mx-auto mb-3 rounded-full bg-green-50 flex items-center justify-center"
+          >
+            <app-icon
+              name="check-circle"
+              [size]="24"
+              class="text-green-500"
+            ></app-icon>
           </div>
           <p class="text-sm text-text-secondary">
             @if (modal_search_term()) {
@@ -242,18 +288,34 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
   table_columns: TableColumn[] = [
     { key: 'display_name', label: 'Método', sortable: true, priority: 1 },
     {
-      key: 'type', label: 'Tipo', badge: true, priority: 2,
+      key: 'type',
+      label: 'Tipo',
+      badge: true,
+      priority: 2,
       badgeConfig: {
         type: 'custom',
-        colorMap: { cash: '#64748b', card: '#3b82f6', paypal: '#7c3aed', bank_transfer: '#f59e0b' },
+        colorMap: {
+          cash: '#64748b',
+          card: '#3b82f6',
+          paypal: '#7c3aed',
+          bank_transfer: '#f59e0b',
+        },
       },
       transform: (v: string) => this.getTypeLabel(v),
     },
     {
-      key: 'state', label: 'Estado', badge: true, priority: 2,
+      key: 'state',
+      label: 'Estado',
+      badge: true,
+      priority: 2,
       badgeConfig: {
         type: 'custom',
-        colorMap: { enabled: '#22c55e', disabled: '#6b7280', requires_configuration: '#f59e0b', available: '#3b82f6' },
+        colorMap: {
+          enabled: '#22c55e',
+          disabled: '#6b7280',
+          requires_configuration: '#f59e0b',
+          available: '#3b82f6',
+        },
       },
       transform: (v: string) => this.getStateLabel(v),
     },
@@ -265,28 +327,44 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     subtitleKey: 'provider',
     subtitleTransform: (item: CombinedPaymentMethod) =>
       item.is_store_method
-        ? (item.store_payment_method?.system_payment_method?.provider || 'Personalizado')
-        : (item.provider || 'Sistema'),
+        ? item.store_payment_method?.system_payment_method?.provider ||
+          'Personalizado'
+        : item.provider || 'Sistema',
     avatarFallbackIcon: 'credit-card',
     avatarShape: 'square',
     badgeKey: 'state',
     badgeConfig: {
       type: 'custom',
       size: 'sm',
-      colorMap: { enabled: '#22c55e', disabled: '#6b7280', requires_configuration: '#f59e0b', available: '#3b82f6' },
+      colorMap: {
+        enabled: '#22c55e',
+        disabled: '#6b7280',
+        requires_configuration: '#f59e0b',
+        available: '#3b82f6',
+      },
     },
     badgeTransform: (v: string) => this.getStateLabel(v),
     detailKeys: [
-      { key: 'type', label: 'Tipo', transform: (v: string) => this.getTypeLabel(v) },
-      { key: 'is_store_method', label: 'Origen', transform: (v: boolean) => v ? 'Tienda' : 'Sistema' },
+      {
+        key: 'type',
+        label: 'Tipo',
+        transform: (v: string) => this.getTypeLabel(v),
+      },
+      {
+        key: 'is_store_method',
+        label: 'Origen',
+        transform: (v: boolean) => (v ? 'Tienda' : 'Sistema'),
+      },
     ],
   };
 
   // Shared actions for main list
   table_actions: TableAction[] = [
     {
-      label: (item: CombinedPaymentMethod) => item.state === 'enabled' ? 'Desactivar' : 'Activar',
-      icon: (item: CombinedPaymentMethod) => item.state === 'enabled' ? 'pause' : 'check-circle',
+      label: (item: CombinedPaymentMethod) =>
+        item.state === 'enabled' ? 'Desactivar' : 'Activar',
+      icon: (item: CombinedPaymentMethod) =>
+        item.state === 'enabled' ? 'pause' : 'check-circle',
       action: (item: CombinedPaymentMethod) => this.toggleMethod(item),
       show: (item: CombinedPaymentMethod) => item.is_store_method,
     },
@@ -303,10 +381,18 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
   modal_columns: TableColumn[] = [
     { key: 'display_name', label: 'Método', priority: 1 },
     {
-      key: 'type', label: 'Tipo', badge: true, priority: 2,
+      key: 'type',
+      label: 'Tipo',
+      badge: true,
+      priority: 2,
       badgeConfig: {
         type: 'custom',
-        colorMap: { cash: '#64748b', card: '#3b82f6', paypal: '#7c3aed', bank_transfer: '#f59e0b' },
+        colorMap: {
+          cash: '#64748b',
+          card: '#3b82f6',
+          paypal: '#7c3aed',
+          bank_transfer: '#f59e0b',
+        },
       },
       transform: (v: string) => this.getTypeLabel(v),
     },
@@ -316,14 +402,20 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
   modal_card_config: ItemListCardConfig = {
     titleKey: 'display_name',
     subtitleKey: 'description',
-    subtitleTransform: (item: SystemPaymentMethod) => item.description || 'Sin descripción',
+    subtitleTransform: (item: SystemPaymentMethod) =>
+      item.description || 'Sin descripción',
     avatarFallbackIcon: 'plus-circle',
     avatarShape: 'square',
     badgeKey: 'type',
     badgeConfig: {
       type: 'custom',
       size: 'sm',
-      colorMap: { cash: '#64748b', card: '#3b82f6', paypal: '#7c3aed', bank_transfer: '#f59e0b' },
+      colorMap: {
+        cash: '#64748b',
+        card: '#3b82f6',
+        paypal: '#7c3aed',
+        bank_transfer: '#f59e0b',
+      },
     },
     badgeTransform: (v: string) => this.getTypeLabel(v),
   };
@@ -343,12 +435,14 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
   readonly all_methods = computed<CombinedPaymentMethod[]>(() => {
     const store_methods = this.payment_methods();
     const available_methods = this.available_payment_methods();
-    const enabled_ids = new Set(store_methods.map(m => m.system_payment_method_id));
+    const enabled_ids = new Set(
+      store_methods.map((m) => m.system_payment_method_id),
+    );
 
     const combined: CombinedPaymentMethod[] = [];
 
     // Add store payment methods
-    store_methods.forEach(store_method => {
+    store_methods.forEach((store_method) => {
       combined.push({
         id: store_method.id,
         display_name: store_method.display_name,
@@ -365,8 +459,8 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
 
     // Add available methods that are NOT yet added to store
     available_methods
-      .filter(m => !enabled_ids.has(m.id))
-      .forEach(available_method => {
+      .filter((m) => !enabled_ids.has(m.id))
+      .forEach((available_method) => {
         combined.push({
           id: available_method.id,
           display_name: available_method.display_name,
@@ -387,10 +481,11 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     const term = this.search_term().toLowerCase();
     const methods = this.all_methods();
     if (!term) return methods;
-    return methods.filter(m =>
-      m.display_name?.toLowerCase().includes(term) ||
-      m.type?.toLowerCase().includes(term) ||
-      m.provider?.toLowerCase().includes(term)
+    return methods.filter(
+      (m) =>
+        m.display_name?.toLowerCase().includes(term) ||
+        m.type?.toLowerCase().includes(term) ||
+        m.provider?.toLowerCase().includes(term),
     );
   });
 
@@ -398,18 +493,19 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     const term = this.modal_search_term().toLowerCase();
     const methods = this.available_payment_methods();
     if (!term) return methods;
-    return methods.filter(m =>
-      m.display_name?.toLowerCase().includes(term) ||
-      m.type?.toLowerCase().includes(term) ||
-      m.provider?.toLowerCase().includes(term) ||
-      m.description?.toLowerCase().includes(term)
+    return methods.filter(
+      (m) =>
+        m.display_name?.toLowerCase().includes(term) ||
+        m.type?.toLowerCase().includes(term) ||
+        m.provider?.toLowerCase().includes(term) ||
+        m.description?.toLowerCase().includes(term),
     );
   });
 
   constructor(
     private payment_methods_service: PaymentMethodsService,
     private toast_service: ToastService,
-    private dialog_service: DialogService
+    private dialog_service: DialogService,
   ) {}
 
   ngOnInit(): void {
@@ -452,7 +548,9 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
           this.is_loading.set(false);
         },
         error: (error: any) => {
-          this.toast_service.error('Error al cargar métodos de pago: ' + error.message);
+          this.toast_service.error(
+            'Error al cargar métodos de pago: ' + error.message,
+          );
           this.payment_methods.set([]);
           this.is_loading.set(false);
         },
@@ -470,7 +568,9 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
           this.is_loading_stats.set(false);
         },
         error: (error: any) => {
-          this.toast_service.error('Error al cargar estadísticas: ' + error.message);
+          this.toast_service.error(
+            'Error al cargar estadísticas: ' + error.message,
+          );
           this.payment_method_stats.set(null);
           this.is_loading_stats.set(false);
         },
@@ -489,7 +589,9 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
           this.is_loading_available.set(false);
         },
         error: (error: any) => {
-          this.toast_service.error('Error al cargar métodos disponibles: ' + error.message);
+          this.toast_service.error(
+            'Error al cargar métodos disponibles: ' + error.message,
+          );
           this.available_payment_methods.set([]);
           this.is_loading_available.set(false);
         },
@@ -515,14 +617,18 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
             .pipe(takeUntil(this.destroy$))
             .subscribe({
               next: () => {
-                this.toast_service.success('Método de pago agregado correctamente');
+                this.toast_service.success(
+                  'Método de pago agregado correctamente',
+                );
                 this.enabling_method_id.set(null);
                 this.loadPaymentMethods();
                 this.loadPaymentMethodStats();
                 this.loadAvailablePaymentMethods();
               },
               error: (error: any) => {
-                this.toast_service.error('Error al agregar método de pago: ' + error.message);
+                this.toast_service.error(
+                  'Error al agregar método de pago: ' + error.message,
+                );
                 this.enabling_method_id.set(null);
               },
             });
@@ -556,7 +662,9 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
                   this.loadPaymentMethodStats();
                 },
                 error: (error: any) => {
-                  this.toast_service.error('Error al desactivar método: ' + error.message);
+                  this.toast_service.error(
+                    'Error al desactivar método: ' + error.message,
+                  );
                 },
               });
           }
@@ -572,7 +680,9 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
             this.loadPaymentMethodStats();
           },
           error: (error: any) => {
-            this.toast_service.error('Error al activar método: ' + error.message);
+            this.toast_service.error(
+              'Error al activar método: ' + error.message,
+            );
           },
         });
     }

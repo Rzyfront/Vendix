@@ -16,6 +16,9 @@ import {
 
 @Injectable()
 export class StoreRolesService {
+  /** Core roles that are never exposed to store-level UIs */
+  private readonly HIDDEN_ROLES = ['owner', 'super_admin'];
+
   constructor(
     private readonly prisma: StorePrismaService,
   ) {}
@@ -50,9 +53,10 @@ export class StoreRolesService {
     }
 
     // Roles are NOT auto-scoped in StorePrismaService, so we filter manually.
-    // Include both org-specific roles AND system roles.
+    // Include both org-specific roles AND system roles, but exclude core hidden roles.
     const roles = await this.prisma.roles.findMany({
       where: {
+        name: { notIn: this.HIDDEN_ROLES },
         OR: [
           { organization_id },
           { is_system_role: true },
@@ -339,6 +343,7 @@ export class StoreRolesService {
       await Promise.all([
         this.prisma.roles.count({
           where: {
+            name: { notIn: this.HIDDEN_ROLES },
             OR: [
               { organization_id },
               { is_system_role: true },
@@ -346,7 +351,10 @@ export class StoreRolesService {
           },
         }),
         this.prisma.roles.count({
-          where: { is_system_role: true },
+          where: {
+            is_system_role: true,
+            name: { notIn: this.HIDDEN_ROLES },
+          },
         }),
         this.prisma.permissions.count({
           where: {

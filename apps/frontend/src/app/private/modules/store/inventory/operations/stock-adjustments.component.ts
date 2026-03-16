@@ -1,25 +1,28 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Router } from '@angular/router';
-import { Subscription } from 'rxjs';
+import { Subject, takeUntil } from 'rxjs';
+import { HttpClient } from '@angular/common/http';
+import { map } from 'rxjs/operators';
 
-// Shared Components
 import {
   StatsComponent,
   ToastService,
   FilterValues,
+  SelectorOption,
 } from '../../../../../shared/components/index';
-import { ConfirmationModalComponent } from '../../../../../shared/components/confirmation-modal/confirmation-modal.component';
+import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
+import { environment } from '../../../../../../environments/environment';
 
-// Local Components
 import { AdjustmentDetailModalComponent } from './components/adjustment-detail-modal.component';
+import { AdjustmentCreateModalComponent } from './components/adjustment-create-modal.component';
 import { AdjustmentListComponent } from './components/adjustment-list';
 
-// Services
 import { InventoryService } from '../services';
-
-// Interfaces
-import { InventoryAdjustment, AdjustmentType } from '../interfaces';
+import {
+  InventoryAdjustment,
+  AdjustmentType,
+  BatchCreateAdjustmentsRequest,
+} from '../interfaces';
 
 @Component({
   selector: 'app-stock-adjustments',
@@ -27,13 +30,13 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
   imports: [
     CommonModule,
     StatsComponent,
-    ConfirmationModalComponent,
     AdjustmentDetailModalComponent,
+    AdjustmentCreateModalComponent,
     AdjustmentListComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
-      <!-- Stats Grid: sticky at top on mobile, static on desktop -->
+      <!-- Stats Grid -->
       <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Total Ajustes"
@@ -85,42 +88,42 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
         (pageChange)="changePage($event)"
       ></app-adjustment-list>
 
-      <!-- Instruction Modal -->
-      @if (is_info_modal_open) {
-        <app-confirmation-modal
-          title="Crear Nuevo Ajuste"
-          message="Para realizar un ajuste de inventario, por favor busca el producto en la lista de Productos y selecciona la opción 'Realizar Ajuste' en el detalle del producto."
-          confirmText="Ir a Productos"
-          cancelText="Entendido"
-          confirmVariant="primary"
-          [isOpen]="true"
-          (confirm)="navigateToProducts()"
-          (cancel)="closeInfoModal()"
-        ></app-confirmation-modal>
-      }
+      <!-- Create Modal (Wizard) -->
+      <app-adjustment-create-modal
+        [isOpen]="showCreateModal()"
+        [isSubmitting]="isSubmitting()"
+        [locations]="locationOptions()"
+        (isOpenChange)="showCreateModal.set($event)"
+        (cancel)="showCreateModal.set(false)"
+        (save)="onCreateDraft($event)"
+        (saveAndComplete)="onCreateAndComplete($event)"
+      ></app-adjustment-create-modal>
 
       <!-- Detail Modal -->
       <app-adjustment-detail-modal
         [isOpen]="is_detail_modal_open"
         [adjustment]="selected_adjustment"
+        [isProcessing]="isSubmitting()"
         (isOpenChange)="is_detail_modal_open = $event"
         (close)="closeDetailModal()"
+        (approve)="onApprove($event)"
+        (deleteAdjustment)="onDelete($event)"
       ></app-adjustment-detail-modal>
     </div>
   `,
 })
 export class StockAdjustmentsComponent implements OnInit, OnDestroy {
+  private inventoryService = inject(InventoryService);
+  private toastService = inject(ToastService);
+  private dialogService = inject(DialogService);
+  private http = inject(HttpClient);
+
   // Data
   adjustments: InventoryAdjustment[] = [];
   filtered_adjustments: InventoryAdjustment[] = [];
 
   // Stats
-  stats = {
-    total: 0,
-    losses: 0,
-    damages: 0,
-    corrections: 0,
-  };
+  stats = { total: 0, losses: 0, damages: 0, corrections: 0 };
 
   // Pagination
   pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
@@ -131,24 +134,24 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
 
   // UI State
   is_loading = false;
-  is_info_modal_open = false;
   is_detail_modal_open = false;
   selected_adjustment: InventoryAdjustment | null = null;
 
-  private subscriptions: Subscription[] = [];
+  // Signals
+  showCreateModal = signal(false);
+  isSubmitting = signal(false);
+  locationOptions = signal<SelectorOption[]>([]);
 
-  constructor(
-    private inventoryService: InventoryService,
-    private toastService: ToastService,
-    private router: Router,
-  ) {}
+  private destroy$ = new Subject<void>();
 
   ngOnInit(): void {
     this.loadAdjustments();
+    this.loadLocations();
   }
 
   ngOnDestroy(): void {
-    this.subscriptions.forEach((sub) => sub.unsubscribe());
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
   // ============================================================
@@ -163,31 +166,48 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
       offset: (this.pagination.page - 1) * this.pagination.limit,
     };
 
-    const sub = this.inventoryService.getAdjustments(query).subscribe({
-      next: (response) => {
-        if (response.data?.adjustments) {
-          this.adjustments = response.data.adjustments;
-          this.pagination.total = response.data.total;
-          this.pagination.totalPages = Math.ceil(
-            response.data.total / this.pagination.limit,
+    this.inventoryService.getAdjustments(query)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response) => {
+          if (response.data?.adjustments) {
+            this.adjustments = response.data.adjustments;
+            this.pagination.total = response.data.total;
+            this.pagination.totalPages = Math.ceil(
+              response.data.total / this.pagination.limit,
+            );
+            this.applyFilters();
+            this.calculateStats();
+          }
+          if (this.adjustments.length === 0 && this.pagination.page > 1) {
+            this.pagination.page--;
+            this.loadAdjustments();
+            return;
+          }
+          this.is_loading = false;
+        },
+        error: (error) => {
+          this.toastService.error(error || 'Error al cargar ajustes');
+          this.is_loading = false;
+        },
+      });
+  }
+
+  loadLocations(): void {
+    this.http.get<any>(`${environment.apiUrl}/store/inventory/locations`)
+      .pipe(
+        map((r) => r.data || r),
+        takeUntil(this.destroy$),
+      )
+      .subscribe({
+        next: (locations: any[]) => {
+          const arr = Array.isArray(locations) ? locations : [];
+          this.locationOptions.set(
+            arr.map((l) => ({ value: l.id, label: l.name })),
           );
-          this.applyFilters();
-          this.calculateStats();
-        }
-        // Edge case: página vacía, retroceder
-        if (this.adjustments.length === 0 && this.pagination.page > 1) {
-          this.pagination.page--;
-          this.loadAdjustments();
-          return;
-        }
-        this.is_loading = false;
-      },
-      error: (error) => {
-        this.toastService.error(error || 'Error al cargar ajustes');
-        this.is_loading = false;
-      },
-    });
-    this.subscriptions.push(sub);
+        },
+        error: () => {},
+      });
   }
 
   applyFilters(): void {
@@ -256,25 +276,12 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
-        this.openCreateModal();
+        this.showCreateModal.set(true);
         break;
       case 'refresh':
         this.loadAdjustments();
         break;
     }
-  }
-
-  openCreateModal(): void {
-    this.is_info_modal_open = true;
-  }
-
-  closeInfoModal(): void {
-    this.is_info_modal_open = false;
-  }
-
-  navigateToProducts(): void {
-    this.is_info_modal_open = false;
-    this.router.navigate(['/admin/products']);
   }
 
   viewDetail(adjustment: InventoryAdjustment): void {
@@ -285,5 +292,107 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
   closeDetailModal(): void {
     this.is_detail_modal_open = false;
     this.selected_adjustment = null;
+  }
+
+  // ============================================================
+  // Create Actions
+  // ============================================================
+
+  onCreateDraft(dto: BatchCreateAdjustmentsRequest): void {
+    this.isSubmitting.set(true);
+    this.inventoryService.batchCreateAdjustments(dto)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Ajustes creados como borrador');
+          this.showCreateModal.set(false);
+          this.isSubmitting.set(false);
+          this.refresh();
+        },
+        error: (err) => {
+          this.toastService.error(err || 'Error al crear ajustes');
+          this.isSubmitting.set(false);
+        },
+      });
+  }
+
+  onCreateAndComplete(dto: BatchCreateAdjustmentsRequest): void {
+    this.isSubmitting.set(true);
+    this.inventoryService.batchCreateAndComplete(dto)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Ajustes creados y aprobados. Movimientos de inventario aplicados.');
+          this.showCreateModal.set(false);
+          this.isSubmitting.set(false);
+          this.refresh();
+        },
+        error: (err) => {
+          this.toastService.error(err || 'Error al crear y aprobar ajustes');
+          this.isSubmitting.set(false);
+        },
+      });
+  }
+
+  // ============================================================
+  // Detail Actions
+  // ============================================================
+
+  async onApprove(adjustment: InventoryAdjustment): Promise<void> {
+    const confirmed = await this.dialogService.confirm({
+      title: 'Aprobar ajuste',
+      message: `¿Aprobar el ajuste de ${adjustment.products?.name || 'producto'}? (${adjustment.quantity_change > 0 ? '+' : ''}${adjustment.quantity_change} unidades)`,
+      confirmText: 'Aprobar',
+      cancelText: 'Cancelar',
+    });
+    if (!confirmed) return;
+
+    this.isSubmitting.set(true);
+    this.inventoryService.approveAdjustment(adjustment.id, 0)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Ajuste aprobado');
+          this.is_detail_modal_open = false;
+          this.isSubmitting.set(false);
+          this.refresh();
+        },
+        error: (err) => {
+          this.toastService.error(err || 'Error al aprobar');
+          this.isSubmitting.set(false);
+        },
+      });
+  }
+
+  async onDelete(adjustment: InventoryAdjustment): Promise<void> {
+    const confirmed = await this.dialogService.confirm({
+      title: 'Eliminar ajuste',
+      message: `¿Eliminar el ajuste de ${adjustment.products?.name || 'producto'}? Esta accion no se puede deshacer.`,
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+      confirmVariant: 'danger',
+    });
+    if (!confirmed) return;
+
+    this.isSubmitting.set(true);
+    this.inventoryService.deleteAdjustment(adjustment.id)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Ajuste eliminado');
+          this.is_detail_modal_open = false;
+          this.isSubmitting.set(false);
+          this.refresh();
+        },
+        error: (err) => {
+          this.toastService.error(err || 'Error al eliminar');
+          this.isSubmitting.set(false);
+        },
+      });
+  }
+
+  private refresh(): void {
+    this.inventoryService.invalidateCache();
+    this.loadAdjustments();
   }
 }

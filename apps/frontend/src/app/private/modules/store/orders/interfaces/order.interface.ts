@@ -512,3 +512,92 @@ export interface OrderPaymentMethod {
   requiresReference: boolean;
   referenceLabel?: string;
 }
+
+// ── Refund Flow Types ──────────────────────────────────────
+
+export type InventoryAction = 'restock' | 'write_off' | 'no_return';
+export type RefundMethod = 'original_payment' | 'cash' | 'bank_transfer' | 'store_credit';
+
+export interface RefundItemRequest {
+  order_item_id: number;
+  quantity: number;
+  inventory_action: InventoryAction;
+  location_id?: number;
+  reason?: string;
+}
+
+export interface CreateRefundRequest {
+  items: RefundItemRequest[];
+  include_shipping: boolean;
+  refund_method: RefundMethod;
+  reason: string;
+  notes?: string;
+}
+
+export interface RefundItemCalculation {
+  order_item_id: number;
+  product_name: string;
+  variant_sku?: string;
+  variant_attributes?: string;
+  image_url?: string;
+  quantity: number;
+  unit_price: number;
+  gross_amount: number;
+  discount_amount: number;
+  net_amount: number;
+  tax_amount: number;
+  refund_amount: number;
+  inventory_action: string;
+  location_id?: number;
+  reason?: string;
+}
+
+export interface RefundCalculationResult {
+  items: RefundItemCalculation[];
+  subtotal_refund: number;
+  tax_refund: number;
+  shipping_refund: number;
+  total_refund: number;
+  is_full_refund: boolean;
+  already_refunded: number;
+  max_refundable: number;
+}
+
+export interface RefundRecord {
+  id: number;
+  order_id: number;
+  amount: number;
+  subtotal_refund?: number;
+  tax_refund?: number;
+  shipping_refund?: number;
+  reason?: string;
+  notes?: string;
+  state: string;
+  refund_method?: string;
+  processed_at?: string;
+  created_at: string;
+  refund_items: RefundItemRecord[];
+  users?: {
+    id: number;
+    first_name: string;
+    last_name: string;
+    email: string;
+  };
+}
+
+export interface RefundItemRecord {
+  id: number;
+  order_item_id: number;
+  quantity: number;
+  refund_amount: number;
+  tax_amount?: number;
+  discount_amount?: number;
+  inventory_action?: string;
+  reason?: string;
+  order_items?: OrderItem;
+  inventory_locations?: {
+    id: number;
+    name: string;
+    code: string;
+  };
+}

@@ -132,6 +132,12 @@ import { SelectorComponent, SelectorOption } from '../../../../../../../shared/c
                 formControlName="department"
                 [control]="employeeForm.get('department')"
               ></app-input>
+
+              <app-selector
+                label="Centro de Costo"
+                formControlName="cost_center"
+                [options]="costCenterOptions"
+              ></app-selector>
             </div>
           </div>
 
@@ -300,6 +306,12 @@ export class EmployeeDetailComponent implements OnChanges {
     { label: 'Nivel V (6.960%)', value: 5 },
   ];
 
+  costCenterOptions: SelectorOption[] = [
+    { label: 'Administrativo', value: 'administrative' },
+    { label: 'Operativo / Producción', value: 'operational' },
+    { label: 'Ventas', value: 'sales' },
+  ];
+
   constructor(
     private fb: FormBuilder,
     private store: Store
@@ -316,6 +328,7 @@ export class EmployeeDetailComponent implements OnChanges {
       contract_type: ['indefinite', [Validators.required]],
       position: [''],
       department: [''],
+      cost_center: ['administrative'],
       base_salary: [null, [Validators.required, Validators.min(1)]],
       payment_frequency: ['monthly', [Validators.required]],
       bank_name: [''],
@@ -362,6 +375,7 @@ export class EmployeeDetailComponent implements OnChanges {
       contract_type: employee.contract_type,
       position: employee.position || '',
       department: employee.department || '',
+      cost_center: employee.cost_center || 'administrative',
       base_salary: employee.base_salary,
       payment_frequency: employee.payment_frequency,
       bank_name: employee.bank_name || '',
@@ -393,6 +407,7 @@ export class EmployeeDetailComponent implements OnChanges {
         contract_type: formValue.contract_type,
         position: formValue.position || undefined,
         department: formValue.department || undefined,
+        cost_center: formValue.cost_center || undefined,
         base_salary: Number(formValue.base_salary),
         payment_frequency: formValue.payment_frequency,
         bank_name: formValue.bank_name || undefined,

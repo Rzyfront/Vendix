@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, combineLatest } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
@@ -13,6 +13,19 @@ import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
 })
 export class MenuFilterService {
   private authFacade = inject(AuthFacade);
+
+  /**
+   * Modules hidden per store type.
+   * - physical/popup/kiosko: hide ecommerce (no online store)
+   * - online: hide POS and cash registers (no physical presence)
+   * - hybrid: show everything
+   */
+  private storeTypeHiddenModules: Record<string, string[]> = {
+    physical: ['ecommerce'],
+    popup: ['ecommerce'],
+    kiosko: ['ecommerce'],
+    online: ['pos', 'settings_cash_registers'],
+  };
 
   /**
    * Mapping between menu item labels and panel_ui module keys.
@@ -36,7 +49,7 @@ export class MenuFilterService {
     // STORE_ADMIN - Módulos principales (sin hijos)
     'Punto de Venta': 'pos',
     Productos: 'products',
-    'E-commerce': 'ecommerce',
+    'Tienda en línea': 'ecommerce',
 
     // STORE_ADMIN - Órdenes (padre + submódulos)
     Órdenes: 'orders',
@@ -51,6 +64,7 @@ export class MenuFilterService {
     Ubicaciones: 'inventory_locations',
     Proveedores: 'inventory_suppliers',
     Movimientos: 'inventory_movements',
+    Transferencias: 'inventory_transfers',
 
     // STORE_ADMIN - Clientes (padre + submódulos)
     Clientes: 'customers',
@@ -68,6 +82,9 @@ export class MenuFilterService {
     Ventas: 'analytics_sales',
     Tráfico: 'analytics_traffic',
     Rendimiento: 'analytics_performance',
+
+    // Caja Registradora (submodule of Configuración)
+    'Caja Registradora': 'settings_cash_registers',
 
     // Gastos
     Gastos: 'expenses',
@@ -110,13 +127,23 @@ export class MenuFilterService {
    * @returns Observable of filtered menu items
    */
   filterMenuItems(menuItems: MenuItem[]): Observable<MenuItem[]> {
-    return this.authFacade
-      .getVisibleModules$()
-      .pipe(
-        map((visibleModules) =>
-          this.filterItemsRecursive(menuItems, visibleModules),
-        ),
-      );
+    return combineLatest([
+      this.authFacade.getVisibleModules$(),
+      this.authFacade.userStoreType$,
+      this.authFacade.storeSettings$,
+    ]).pipe(
+      map(([visibleModules, loginStoreType, storeSettings]) => {
+        // Prefer store_settings.general.store_type (updated on save) over user.store.store_type (login snapshot)
+        const storeType = storeSettings?.general?.store_type || loginStoreType;
+        // Remove modules hidden by store type from visible list
+        const hiddenByStoreType =
+          this.storeTypeHiddenModules[storeType || ''] || [];
+        const effectiveModules = hiddenByStoreType.length > 0
+          ? visibleModules.filter((m) => !hiddenByStoreType.includes(m))
+          : visibleModules;
+        return this.filterItemsRecursive(menuItems, effectiveModules);
+      }),
+    );
   }
 
   /**

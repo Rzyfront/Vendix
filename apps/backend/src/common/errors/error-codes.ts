@@ -441,6 +441,26 @@ export const ErrorCodes = {
     httpStatus: 403,
     devMessage: 'Access denied to customer',
   },
+  CUST_BULK_001: {
+    code: 'CUST_BULK_001',
+    httpStatus: 400,
+    devMessage: 'Bulk upload batch size exceeded',
+  },
+  CUST_BULK_002: {
+    code: 'CUST_BULK_002',
+    httpStatus: 400,
+    devMessage: 'Bulk upload row validation failed',
+  },
+  CUST_BULK_003: {
+    code: 'CUST_BULK_003',
+    httpStatus: 409,
+    devMessage: 'Duplicate email in bulk upload batch',
+  },
+  CUST_BULK_004: {
+    code: 'CUST_BULK_004',
+    httpStatus: 400,
+    devMessage: 'Store context required for bulk upload',
+  },
 
   // Shipping
   SHIP_FIND_001: {
@@ -689,6 +709,31 @@ export const ErrorCodes = {
     code: 'PAYROLL_PERM_001',
     httpStatus: 403,
     devMessage: 'Access denied to payroll resource',
+  },
+  PAYROLL_BULK_001: {
+    code: 'PAYROLL_BULK_001',
+    httpStatus: 400,
+    devMessage: 'Bulk upload batch size exceeded',
+  },
+  PAYROLL_BULK_002: {
+    code: 'PAYROLL_BULK_002',
+    httpStatus: 400,
+    devMessage: 'Bulk upload row validation failed',
+  },
+  PAYROLL_BULK_003: {
+    code: 'PAYROLL_BULK_003',
+    httpStatus: 400,
+    devMessage: 'Duplicate document in bulk upload batch',
+  },
+  PAYROLL_BULK_004: {
+    code: 'PAYROLL_BULK_004',
+    httpStatus: 400,
+    devMessage: 'Email required when is_user is true',
+  },
+  PAYROLL_BULK_005: {
+    code: 'PAYROLL_BULK_005',
+    httpStatus: 409,
+    devMessage: 'User already linked to another employee',
   },
 
   // Accounting

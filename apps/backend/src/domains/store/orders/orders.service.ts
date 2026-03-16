@@ -226,7 +226,19 @@ export class OrdersService {
       },
       include: {
         stores: { select: { id: true, name: true, store_code: true } },
-        order_items: { include: { products: true, product_variants: true } },
+        order_items: {
+          include: {
+            products: {
+              include: {
+                product_images: {
+                  where: { is_main: true },
+                  take: 1,
+                },
+              },
+            },
+            product_variants: true,
+          },
+        },
         addresses_orders_billing_address_idToaddresses: true,
         addresses_orders_shipping_address_idToaddresses: true,
         payments: true,
@@ -280,10 +292,10 @@ export class OrdersService {
 
     await Promise.all(
       order.order_items.map(async (item: any) => {
-        if (item.products?.image_url) {
-          item.products.image_url = await this.s3Service.signUrl(
-            item.products.image_url,
-          );
+        if (item.products?.product_images?.length) {
+          const mainImage = item.products.product_images[0];
+          mainImage.image_url = await this.s3Service.signUrl(mainImage.image_url);
+          item.products.image_url = mainImage.image_url;
         }
       }),
     );
@@ -322,7 +334,19 @@ export class OrdersService {
       data: { ...updateOrderDto, updated_at: new Date() },
       include: {
         stores: { select: { id: true, name: true, store_code: true } },
-        order_items: { include: { products: true, product_variants: true } },
+        order_items: {
+          include: {
+            products: {
+              include: {
+                product_images: {
+                  where: { is_main: true },
+                  take: 1,
+                },
+              },
+            },
+            product_variants: true,
+          },
+        },
         addresses_orders_billing_address_idToaddresses: true,
         addresses_orders_shipping_address_idToaddresses: true,
         payments: true,
@@ -419,7 +443,19 @@ export class OrdersService {
         where: { id },
         include: {
           stores: { select: { id: true, name: true, store_code: true } },
-          order_items: { include: { products: true, product_variants: true } },
+          order_items: {
+          include: {
+            products: {
+              include: {
+                product_images: {
+                  where: { is_main: true },
+                  take: 1,
+                },
+              },
+            },
+            product_variants: true,
+          },
+        },
           addresses_orders_billing_address_idToaddresses: true,
           addresses_orders_shipping_address_idToaddresses: true,
           payments: true,
