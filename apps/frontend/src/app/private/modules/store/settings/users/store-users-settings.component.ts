@@ -1,595 +1,369 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, inject, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
-import {
-  StoreUser,
-  StoreUserQuery,
-  StoreUserStats,
-  StoreUserState,
-  PaginatedStoreUsersResponse,
-} from './interfaces/store-user.interface';
-import { StoreUsersManagementService } from './services/store-users-management.service';
-
+import { Store } from '@ngrx/store';
+import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
+import { InputsearchComponent } from '../../../../../shared/components/inputsearch/inputsearch.component';
+import { ResponsiveDataViewComponent } from '../../../../../shared/components/responsive-data-view/responsive-data-view.component';
+import { TableColumn, TableAction } from '../../../../../shared/components/table/table.component';
+import { ItemListCardConfig } from '../../../../../shared/components/item-list/item-list.interfaces';
+import { ButtonComponent } from '../../../../../shared/components/button/button.component';
+import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
+import { OptionsDropdownComponent } from '../../../../../shared/components/options-dropdown/options-dropdown.component';
+import { FilterConfig, FilterValues } from '../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   StoreUserCreateModalComponent,
   StoreUserEditModalComponent,
 } from './components/index';
-
+import * as StoreUsersActions from './state/actions/store-users.actions';
 import {
-  TableColumn,
-  TableAction,
-  DialogService,
-  ToastService,
-  StatsComponent,
-  ButtonComponent,
-  IconComponent,
-  InputsearchComponent,
-  ResponsiveDataViewComponent,
-  ItemListCardConfig,
-} from '../../../../../shared/components/index';
-import {
-  FormsModule,
-  ReactiveFormsModule,
-  FormBuilder,
-  FormGroup,
-} from '@angular/forms';
-
-interface StatItem {
-  title: string;
-  value: number;
-  smallText: string;
-  iconName: string;
-  iconBgColor: string;
-  iconColor: string;
-}
+  selectUsers,
+  selectUsersLoading,
+  selectStats,
+} from './state/selectors/store-users.selectors';
+import { StoreUser, StoreUserState } from './interfaces/store-user.interface';
 
 @Component({
   selector: 'app-store-users-settings',
   standalone: true,
   imports: [
     CommonModule,
-    FormsModule,
-    ReactiveFormsModule,
+    StatsComponent,
+    InputsearchComponent,
+    ResponsiveDataViewComponent,
+    ButtonComponent,
+    IconComponent,
+    OptionsDropdownComponent,
     StoreUserCreateModalComponent,
     StoreUserEditModalComponent,
-    ResponsiveDataViewComponent,
-    InputsearchComponent,
-    StatsComponent,
-    IconComponent,
-    ButtonComponent,
   ],
   template: `
     <div class="w-full">
-      <!-- Stats Grid: sticky at top on mobile -->
+      <!-- Stats Cards -->
       <div
         class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
-          *ngFor="let item of statsItems"
-          [title]="item.title"
-          [value]="item.value"
-          [smallText]="item.smallText"
-          [iconName]="item.iconName"
-          [iconBgColor]="item.iconBgColor"
-          [iconColor]="item.iconColor"
+          title="Total Usuarios"
+          [value]="stats()?.total ?? 0"
+          smallText="en la tienda"
+          iconName="users"
+          iconBgColor="bg-primary/10"
+          iconColor="text-primary"
+        ></app-stats>
+        <app-stats
+          title="Activos"
+          [value]="stats()?.activos ?? 0"
+          [smallText]="getPercentText(stats()?.activos ?? 0)"
+          iconName="check-circle"
+          iconBgColor="bg-green-100"
+          iconColor="text-green-600"
+        ></app-stats>
+        <app-stats
+          title="Inactivos"
+          [value]="stats()?.inactivos ?? 0"
+          [smallText]="getPercentText(stats()?.inactivos ?? 0)"
+          iconName="user-x"
+          iconBgColor="bg-gray-100"
+          iconColor="text-gray-600"
+        ></app-stats>
+        <app-stats
+          title="Pendientes"
+          [value]="stats()?.pendientes ?? 0"
+          [smallText]="getPercentText(stats()?.pendientes ?? 0)"
+          iconName="clock"
+          iconBgColor="bg-yellow-100"
+          iconColor="text-yellow-600"
         ></app-stats>
       </div>
 
-      <!-- Users Table Header -->
+      <!-- Data Table -->
       <div
-        class="p-2 md:px-6 md:py-4 border-b border-border sticky top-0 bg-surface z-10"
+        class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
+               md:border md:border-border"
       >
+        <!-- Search Section -->
         <div
-          class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 md:gap-4"
+          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                 md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
         >
-          <!-- Titulo y contador -->
-          <div class="flex-1 min-w-0">
-            <h2 class="text-lg font-semibold text-text-primary">
-              Usuarios ({{ users.length }})
-            </h2>
-          </div>
-
-          <!-- Controles compactos -->
           <div
-            class="flex flex-wrap items-center gap-3 w-full md:w-auto"
-            [formGroup]="filterForm"
+            class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
           >
-            <!-- Busqueda -->
-            <app-inputsearch
-              class="min-w-[200px] flex-1 md:flex-none"
-              size="sm"
-              placeholder="Buscar usuarios..."
-              [debounceTime]="500"
-              (searchChange)="onSearchChange($event)"
-            ></app-inputsearch>
-
-            <!-- Filtro por estado -->
-            <select
-              formControlName="state"
-              class="px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm min-w-[140px]"
-              [disabled]="isLoading"
+            <h2
+              class="text-[13px] font-bold text-gray-600 tracking-wide
+                     md:text-lg md:font-semibold md:text-text-primary"
             >
-              <option *ngFor="let state of userStates" [value]="state.value">
-                {{ state.label }}
-              </option>
-            </select>
-
-            <!-- Botones de accion -->
-            <div class="flex gap-2 items-center">
+              Usuarios ({{ users().length }})
+            </h2>
+            <div class="flex items-center gap-2 w-full md:w-auto">
+              <app-inputsearch
+                class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                placeholder="Buscar usuarios..."
+                [debounceTime]="300"
+                (searchChange)="onSearch($event)"
+              />
+              <app-options-dropdown
+                [filters]="stateFilterConfigs"
+                [filterValues]="filterValues"
+                (filterChange)="onFilterChange($event)"
+              />
               <app-button
                 variant="outline"
                 size="sm"
-                (clicked)="refreshUsers()"
-                [disabled]="isLoading"
-                title="Actualizar"
-              >
-                <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
-              </app-button>
-              <app-button
-                variant="primary"
-                size="sm"
-                (clicked)="createUser()"
+                customClasses="w-9 h-9 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
+                (clicked)="openCreateModal()"
                 title="Nuevo Usuario"
               >
-                <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                <span class="hidden md:inline ml-2">Nuevo</span>
+                <app-icon slot="icon" name="plus" [size]="18"></app-icon>
               </app-button>
             </div>
           </div>
         </div>
 
         <!-- Loading State -->
-        <div *ngIf="isLoading" class="p-2 md:p-6 text-center">
-          <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-          ></div>
-          <p class="mt-2 text-text-secondary">Cargando usuarios...</p>
-        </div>
+        @if (loading()) {
+          <div class="p-4 md:p-6 text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <p class="mt-2 text-text-secondary">Cargando usuarios...</p>
+          </div>
+        }
 
-        <!-- Empty State -->
-        <div *ngIf="!isLoading && users.length === 0" class="p-8 text-center">
-          <app-icon
-            name="users"
-            [size]="48"
-            class="text-text-secondary mx-auto mb-4"
-          ></app-icon>
-          <h3 class="text-lg font-medium text-text-primary mb-2">
-            {{ getEmptyStateTitle() }}
-          </h3>
-          <p class="text-text-secondary mb-4">
-            {{ getEmptyStateDescription() }}
-          </p>
-          <app-button variant="primary" size="sm" (clicked)="createUser()">
-            <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-            Crear Usuario
-          </app-button>
-        </div>
-
-        <!-- Responsive Data View -->
-        <app-responsive-data-view
-          *ngIf="users.length > 0"
-          [data]="users"
-          [columns]="tableColumns"
-          [actions]="tableActions"
-          [cardConfig]="cardConfig"
-          [loading]="isLoading"
-          (sort)="onSortChange($event.column, $event.direction)"
-        >
-        </app-responsive-data-view>
+        <!-- Data View -->
+        @if (!loading()) {
+          <div class="px-2 pb-2 pt-3 md:p-4">
+            <app-responsive-data-view
+              [data]="users()"
+              [columns]="columns"
+              [cardConfig]="cardConfig"
+              [actions]="actions"
+              [loading]="loading()"
+              emptyMessage="No hay usuarios registrados"
+              emptyIcon="users"
+            />
+          </div>
+        }
       </div>
+    </div>
 
-      <!-- Create User Modal -->
-      <app-store-user-create-modal
-        [(isOpen)]="showCreateModal"
-        (onUserCreated)="onUserCreated()"
-      ></app-store-user-create-modal>
+    <!-- Create Modal -->
+    <app-store-user-create-modal
+      [(isOpen)]="showCreateModal"
+      (onUserCreated)="onUserCreated()"
+    />
 
-      <!-- Edit User Modal -->
+    <!-- Edit Modal -->
+    @if (editingUser()) {
       <app-store-user-edit-modal
-        *ngIf="currentUser"
-        [user]="currentUser"
+        [user]="editingUser()!"
         [(isOpen)]="showEditModal"
         (onUserUpdated)="onUserUpdated()"
-      ></app-store-user-edit-modal>
-    </div>
+      />
+    }
   `,
+  styles: [
+    `
+      :host {
+        display: block;
+        width: 100%;
+      }
+    `,
+  ],
 })
-export class StoreUsersSettingsComponent implements OnInit, OnDestroy {
-  users: StoreUser[] = [];
-  userStats: StoreUserStats | null = null;
-  statsItems: StatItem[] = [];
-  isLoading = false;
-  currentUser: StoreUser | null = null;
+export class StoreUsersSettingsComponent implements OnInit {
+  private store = inject(Store);
+  private dialogService = inject(DialogService);
+
+  users = this.store.selectSignal(selectUsers);
+  loading = this.store.selectSignal(selectUsersLoading);
+  stats = this.store.selectSignal(selectStats);
+
   showCreateModal = false;
   showEditModal = false;
-  searchSubject = new Subject<string>();
-  private destroy$ = new Subject<void>();
+  editingUser = signal<StoreUser | null>(null);
 
-  // Form for filters
-  filterForm: FormGroup;
+  filterValues: FilterValues = { state: null };
 
-  // Table configuration
-  tableColumns: TableColumn[] = [
+  stateFilterConfigs: FilterConfig[] = [
+    {
+      key: 'state',
+      label: 'Estado',
+      type: 'select',
+      placeholder: 'Todos',
+      options: [
+        { value: StoreUserState.ACTIVE, label: 'Activos' },
+        { value: StoreUserState.INACTIVE, label: 'Inactivos' },
+        { value: StoreUserState.PENDING_VERIFICATION, label: 'Pendientes' },
+        { value: StoreUserState.SUSPENDED, label: 'Suspendidos' },
+      ],
+    },
+  ];
+
+  columns: TableColumn[] = [
     {
       key: 'first_name',
       label: 'Nombre',
       sortable: true,
-      width: '120px',
-      priority: 1,
+      transform: (_val: any, row: any) => `${row.first_name} ${row.last_name}`,
     },
-    {
-      key: 'last_name',
-      label: 'Apellido',
-      sortable: true,
-      width: '120px',
-      priority: 1,
-    },
-    {
-      key: 'email',
-      label: 'Email',
-      sortable: true,
-      width: '200px',
-      priority: 1,
-    },
+    { key: 'email', label: 'Email', sortable: true },
     {
       key: 'state',
       label: 'Estado',
-      sortable: true,
-      width: '120px',
-      align: 'center',
       badge: true,
-      priority: 1,
       badgeConfig: {
-        type: 'status',
-        size: 'sm',
+        type: 'custom',
+        colorMap: {
+          Activo: 'green',
+          Inactivo: 'gray',
+          Pendiente: 'yellow',
+          Suspendido: 'orange',
+          Archivado: 'red',
+        },
       },
-      transform: (value: StoreUserState) => this.getStateDisplay(value).text,
+      transform: (val: any) => this.getStateLabel(val),
     },
     {
       key: 'created_at',
-      label: 'Fecha Creacion',
+      label: 'Creado',
       sortable: true,
-      width: '140px',
       priority: 3,
-      transform: (value: string) => this.formatDate(value),
+      transform: (val: any) => new Date(val).toLocaleDateString('es-CO'),
     },
   ];
 
-  // Card configuration for mobile
   cardConfig: ItemListCardConfig = {
     titleKey: 'first_name',
     titleTransform: (item: StoreUser) => `${item.first_name} ${item.last_name}`,
     subtitleKey: 'email',
     badgeKey: 'state',
     badgeConfig: {
-      type: 'status',
+      type: 'custom',
       size: 'sm',
+      colorMap: {
+        Activo: '#22c55e',
+        Inactivo: '#9ca3af',
+        Pendiente: '#eab308',
+        Suspendido: '#f97316',
+      },
     },
-    badgeTransform: (value: StoreUserState) => this.getStateDisplay(value).text,
+    badgeTransform: (val: any) => this.getStateLabel(val),
+    footerKey: 'state',
+    footerLabel: 'Estado',
+    footerStyle: 'prominent',
+    footerTransform: (val: any) => this.getStateLabel(val),
     detailKeys: [
       {
         key: 'created_at',
-        label: 'Fecha',
-        transform: (v) => this.formatDate(v),
+        label: 'Creado',
+        icon: 'calendar',
+        transform: (val: any) => new Date(val).toLocaleDateString('es-CO'),
+      },
+      {
+        key: 'last_login',
+        label: 'Ultimo acceso',
+        icon: 'clock',
+        transform: (val: any) =>
+          val ? new Date(val).toLocaleDateString('es-CO') : 'Nunca',
       },
     ],
   };
 
-  tableActions: TableAction[] = [
+  actions: TableAction[] = [
     {
-      label: 'Editar',
+      label: 'Gestionar',
       icon: 'edit',
-      action: (user: StoreUser) => this.editUser(user),
-      variant: 'success',
+      variant: 'primary',
+      action: (user: StoreUser) => this.openEditModal(user),
     },
     {
       label: 'Desactivar',
       icon: 'user-x',
-      action: (user: StoreUser) => this.toggleUserStatus(user),
       variant: 'danger',
+      action: (user: StoreUser) => this.toggleUserStatus(user),
       show: (user: StoreUser) => user.state === StoreUserState.ACTIVE,
     },
     {
       label: 'Reactivar',
       icon: 'user-check',
-      action: (user: StoreUser) => this.toggleUserStatus(user),
       variant: 'success',
+      action: (user: StoreUser) => this.toggleUserStatus(user),
       show: (user: StoreUser) => user.state !== StoreUserState.ACTIVE,
     },
   ];
 
-  // Pagination
-  pagination = {
-    page: 1,
-    limit: 10,
-    total: 0,
-    totalPages: 0,
-  };
-
-  // Filter states
-  userStates = [
-    { value: '', label: 'Todos los estados' },
-    { value: StoreUserState.ACTIVE, label: 'Activo' },
-    { value: StoreUserState.INACTIVE, label: 'Inactivo' },
-    {
-      value: StoreUserState.PENDING_VERIFICATION,
-      label: 'Pendiente de Verificacion',
-    },
-    { value: StoreUserState.SUSPENDED, label: 'Suspendido' },
-    { value: StoreUserState.ARCHIVED, label: 'Archivado' },
-  ];
-
-  constructor(
-    private storeUsersService: StoreUsersManagementService,
-    private fb: FormBuilder,
-    private dialogService: DialogService,
-    private toastService: ToastService,
-  ) {
-    this.filterForm = this.fb.group({
-      search: [''],
-      state: [''],
-    });
-
-    // Setup search debounce
-    this.searchSubject
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
-      .subscribe((searchTerm: string) => {
-        this.filterForm.patchValue(
-          { search: searchTerm },
-          { emitEvent: false },
-        );
-        this.pagination.page = 1;
-        this.loadUsers();
-      });
+  ngOnInit() {
+    this.store.dispatch(StoreUsersActions.loadUsers());
+    this.store.dispatch(StoreUsersActions.loadStats());
   }
 
-  ngOnInit(): void {
-    this.loadUsers();
-    this.loadStats();
-
-    // Subscribe to form changes (state filter)
-    this.filterForm.valueChanges
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(() => {
-        this.pagination.page = 1;
-        this.loadUsers();
-      });
+  onSearch(search: string) {
+    this.store.dispatch(StoreUsersActions.setSearch({ search }));
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+  onFilterChange(values: FilterValues) {
+    this.filterValues = values;
+    const state_filter = (values['state'] as string) || '';
+    this.store.dispatch(StoreUsersActions.setStateFilter({ state_filter }));
   }
 
-  loadUsers(): void {
-    this.isLoading = true;
-    const filters = this.filterForm.value;
-    const query: StoreUserQuery = {
-      page: this.pagination.page,
-      limit: this.pagination.limit,
-      search: filters.search || undefined,
-      state: filters.state || undefined,
-    };
-
-    this.storeUsersService
-      .getUsers(query)
-      .subscribe({
-        next: (response: PaginatedStoreUsersResponse) => {
-          this.users = response.data || [];
-
-          if (response.pagination) {
-            this.pagination = {
-              page: response.pagination.page || 1,
-              limit: response.pagination.limit || 10,
-              total: response.pagination.total || 0,
-              totalPages: response.pagination.total_pages || 0,
-            };
-          } else {
-            this.pagination = {
-              page: 1,
-              limit: 10,
-              total: this.users.length,
-              totalPages: 1,
-            };
-          }
-        },
-        error: (error) => {
-          console.error('Error loading store users:', error);
-          this.users = [];
-          this.pagination = {
-            page: 1,
-            limit: 10,
-            total: 0,
-            totalPages: 0,
-          };
-        },
-      })
-      .add(() => {
-        this.isLoading = false;
-      });
-  }
-
-  loadStats(): void {
-    this.storeUsersService.getStats().subscribe({
-      next: (stats) => {
-        this.userStats = stats;
-        this.updateStatsItems();
-      },
-      error: (err) => console.error('Error loading store user stats', err),
-    });
-  }
-
-  private updateStatsItems(): void {
-    const s = this.userStats || {
-      total: 0,
-      activos: 0,
-      inactivos: 0,
-      pendientes: 0,
-    };
-    const total = s.total || 0;
-
-    this.statsItems = [
-      {
-        title: 'Total Usuarios',
-        value: total,
-        smallText: 'en la tienda',
-        iconName: 'users',
-        iconBgColor: 'bg-primary/10',
-        iconColor: 'text-primary',
-      },
-      {
-        title: 'Activos',
-        value: s.activos || 0,
-        smallText: `${this.calculatePercentage(s.activos || 0, total)}% del total`,
-        iconName: 'check-circle',
-        iconBgColor: 'bg-green-100',
-        iconColor: 'text-green-600',
-      },
-      {
-        title: 'Inactivos',
-        value: s.inactivos || 0,
-        smallText: `${this.calculatePercentage(s.inactivos || 0, total)}% del total`,
-        iconName: 'user-x',
-        iconBgColor: 'bg-gray-100',
-        iconColor: 'text-gray-600',
-      },
-      {
-        title: 'Pendientes',
-        value: s.pendientes || 0,
-        smallText: `${this.calculatePercentage(s.pendientes || 0, total)}% del total`,
-        iconName: 'clock',
-        iconBgColor: 'bg-yellow-100',
-        iconColor: 'text-yellow-600',
-      },
-    ];
-  }
-
-  private calculatePercentage(part: number, total: number): number {
-    if (total === 0) return 0;
-    return Math.round((part / total) * 100);
-  }
-
-  onSearchChange(searchTerm: string): void {
-    this.searchSubject.next(searchTerm);
-  }
-
-  onPageChange(page: number): void {
-    this.pagination.page = page;
-    this.loadUsers();
-  }
-
-  onSortChange(column: string, direction: 'asc' | 'desc' | null): void {
-    this.loadUsers();
-  }
-
-  refreshUsers(): void {
-    this.storeUsersService.invalidateCache();
-    this.loadUsers();
-    this.loadStats();
-  }
-
-  createUser(): void {
+  openCreateModal() {
     this.showCreateModal = true;
   }
 
-  onUserCreated(): void {
+  onUserCreated() {
     this.showCreateModal = false;
-    this.storeUsersService.invalidateCache();
-    this.loadUsers();
-    this.loadStats();
   }
 
-  editUser(user: StoreUser): void {
-    this.currentUser = user;
+  openEditModal(user: StoreUser) {
+    this.editingUser.set(user);
     this.showEditModal = true;
   }
 
-  onUserUpdated(): void {
+  onUserUpdated() {
     this.showEditModal = false;
-    this.currentUser = null;
-    this.storeUsersService.invalidateCache();
-    this.loadUsers();
-    this.loadStats();
+    this.editingUser.set(null);
+    this.store.dispatch(StoreUsersActions.loadUsers());
+    this.store.dispatch(StoreUsersActions.loadStats());
   }
 
-  toggleUserStatus(user: StoreUser): void {
+  toggleUserStatus(user: StoreUser) {
     const isActive = user.state === StoreUserState.ACTIVE;
     const actionText = isActive ? 'desactivar' : 'reactivar';
-    const actionTitle = isActive ? 'Desactivar' : 'Reactivar';
 
     this.dialogService
       .confirm({
-        title: `${actionTitle} Usuario`,
-        message: `Estas seguro de que deseas ${actionText} al usuario "${user.first_name} ${user.last_name}"?`,
-        confirmText: actionTitle,
+        title: `${isActive ? 'Desactivar' : 'Reactivar'} Usuario`,
+        message: `¿Estas seguro de que deseas ${actionText} al usuario "${user.first_name} ${user.last_name}"?`,
+        confirmText: isActive ? 'Desactivar' : 'Reactivar',
         cancelText: 'Cancelar',
         confirmVariant: 'danger',
       })
       .then((confirmed) => {
         if (confirmed) {
-          const action$ = isActive
-            ? this.storeUsersService.deactivateUser(user.id)
-            : this.storeUsersService.reactivateUser(user.id);
-
-          action$.subscribe({
-            next: () => {
-              this.storeUsersService.invalidateCache();
-              this.loadUsers();
-              this.loadStats();
-              this.toastService.success(
-                `Usuario ${isActive ? 'desactivado' : 'reactivado'} exitosamente`,
-              );
-            },
-            error: (error) => {
-              console.error(`Error ${actionText} user:`, error);
-              this.toastService.error(`Error al ${actionText} el usuario`);
-            },
-          });
+          if (isActive) {
+            this.store.dispatch(StoreUsersActions.deactivateUser({ id: user.id }));
+          } else {
+            this.store.dispatch(StoreUsersActions.reactivateUser({ id: user.id }));
+          }
         }
       });
   }
 
-  getStateDisplay(state: StoreUserState): { text: string; class: string } {
-    switch (state) {
-      case StoreUserState.ACTIVE:
-        return { text: 'Activo', class: 'bg-green-100 text-green-800' };
-      case StoreUserState.INACTIVE:
-        return { text: 'Inactivo', class: 'bg-gray-100 text-gray-800' };
-      case StoreUserState.PENDING_VERIFICATION:
-        return { text: 'Pendiente', class: 'bg-yellow-100 text-yellow-800' };
-      case StoreUserState.SUSPENDED:
-        return { text: 'Suspendido', class: 'bg-orange-100 text-orange-800' };
-      case StoreUserState.ARCHIVED:
-        return { text: 'Archivado', class: 'bg-red-100 text-red-800' };
-      default:
-        return { text: 'Desconocido', class: 'bg-gray-100 text-gray-800' };
-    }
+  getStateLabel(state: string): string {
+    const map: Record<string, string> = {
+      active: 'Activo',
+      inactive: 'Inactivo',
+      pending_verification: 'Pendiente',
+      suspended: 'Suspendido',
+      archived: 'Archivado',
+    };
+    return map[state] || state;
   }
 
-  formatDate(dateString: string): string {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('es-ES', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  }
-
-  getEmptyStateTitle(): string {
-    const filters = this.filterForm.value;
-    if (filters.search || filters.state) {
-      return 'No se encontraron usuarios con esos filtros';
-    }
-    return 'No hay usuarios registrados';
-  }
-
-  getEmptyStateDescription(): string {
-    const filters = this.filterForm.value;
-    if (filters.search || filters.state) {
-      return 'Intenta ajustar los terminos de busqueda o filtros';
-    }
-    return 'Comienza creando el primer usuario de la tienda.';
+  getPercentText(value: number): string {
+    const total = this.stats()?.total || 0;
+    if (total === 0) return '0% del total';
+    return `${Math.round((value / total) * 100)}% del total`;
   }
 }

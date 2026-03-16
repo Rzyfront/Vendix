@@ -23,6 +23,9 @@ import {
   DeliverOrderDto,
   CancelOrderDto,
   RefundOrderDto,
+  CreateRefundRequest,
+  RefundCalculationResult,
+  RefundRecord,
 } from '../interfaces/order.interface';
 
 // Caché estático global (persiste entre instancias del servicio)
@@ -471,6 +474,41 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error refunding order:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
+  // ── Professional Refund Flow ──────────────────────────────
+
+  previewRefund(orderId: string, dto: CreateRefundRequest): Observable<RefundCalculationResult> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/refund/preview`;
+    return this.http.post<any>(url, dto).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error previewing refund:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
+  createRefund(orderId: string, dto: CreateRefundRequest): Observable<any> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/refund`;
+    return this.http.post<any>(url, dto).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error creating refund:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
+  getOrderRefunds(orderId: string): Observable<RefundRecord[]> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/refunds`;
+    return this.http.get<any>(url).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error fetching order refunds:', error);
         return throwError(() => new Error(this.extractErrorMessage(error)));
       }),
     );

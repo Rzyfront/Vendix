@@ -21,6 +21,7 @@
   // Mobile layout (< 640px): Block layout with icon in corner
   @media (max-width: 639px) {
     @apply p-3 block relative w-full h-full;
+    min-height: 88px; // Prevent skeleton collapse during loading
   }
 }
 

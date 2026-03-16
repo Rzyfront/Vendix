@@ -15,9 +15,11 @@ import {
   ShipOrderDto,
   DeliverOrderDto,
   CancelOrderDto,
-  RefundOrderDto,
   CancelPaymentDto,
 } from './dto';
+import { SettingsService } from '../../settings/settings.service';
+import { SessionsService } from '../../cash-registers/sessions/sessions.service';
+import { MovementsService } from '../../cash-registers/movements/movements.service';
 
 type OrderState = order_state_enum;
 
@@ -42,6 +44,9 @@ export class OrderFlowService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly settingsService: SettingsService,
+    private readonly sessionsService: SessionsService,
+    private readonly movementsService: MovementsService,
   ) {}
 
   private async getOrder(orderId: number) {
@@ -252,6 +257,10 @@ export class OrderFlowService {
       });
 
       this.logger.log(`Order #${orderId} payment registered while shipped`);
+
+      // Record cash register movement (non-blocking)
+      this.recordPayOrderCashMovement(order.store_id, orderId, Number(order.grand_total), paymentMethod.system_payment_method.type).catch(() => {});
+
       return {
         order: updatedOrder,
         payment: { transaction_id: transactionId, change },
@@ -301,6 +310,10 @@ export class OrderFlowService {
         });
 
         this.logger.log(`Order #${orderId} paid directly, moved to processing (requires fulfillment)`);
+
+        // Record cash register movement (non-blocking)
+        this.recordPayOrderCashMovement(order.store_id, orderId, Number(order.grand_total), paymentMethod.system_payment_method.type).catch(() => {});
+
         return {
           order: updatedOrder,
           payment: { transaction_id: transactionId, change },
@@ -314,6 +327,10 @@ export class OrderFlowService {
       });
 
       this.logger.log(`Order #${orderId} paid directly and finished`);
+
+      // Record cash register movement (non-blocking)
+      this.recordPayOrderCashMovement(order.store_id, orderId, Number(order.grand_total), paymentMethod.system_payment_method.type).catch(() => {});
+
       return {
         order: updatedOrder,
         payment: { transaction_id: transactionId, change },
@@ -573,60 +590,6 @@ export class OrderFlowService {
   }
 
   /**
-   * Refund an order (from delivered or finished)
-   */
-  async refundOrder(orderId: number, dto: RefundOrderDto) {
-    const order = await this.getOrder(orderId);
-
-    if (!REFUNDABLE_STATES.includes(order.state as OrderState)) {
-      throw new BadRequestException(
-        `Cannot refund order in state '${order.state}'. ` +
-        `Refunds are only allowed from: [${REFUNDABLE_STATES.join(', ')}]`
-      );
-    }
-
-    const refundAmount = dto.amount ?? Number(order.grand_total);
-    if (refundAmount > Number(order.grand_total)) {
-      throw new BadRequestException('Refund amount cannot exceed order total');
-    }
-
-    // Create refund record
-    await this.prisma.refunds.create({
-      data: {
-        order_id: orderId,
-        amount: refundAmount,
-        reason: dto.reason,
-        state: 'completed',
-        processed_at: new Date(),
-      },
-    });
-
-    // Update the original payment state to 'refunded'
-    const activePayment = order.payments.find(
-      (p) => p.state === 'succeeded' || p.state === 'pending'
-    );
-    if (activePayment) {
-      await this.prisma.payments.update({
-        where: { id: activePayment.id },
-        data: {
-          state: 'refunded',
-          updated_at: new Date(),
-        },
-      });
-    }
-
-    this.validateTransition(order.state as OrderState, 'refunded');
-    const updatedOrder = await this.updateOrderState(orderId, 'refunded', {
-      refunded_at: new Date(),
-      refund_reason: dto.reason,
-      refund_amount: refundAmount,
-    });
-
-    this.logger.log(`Order #${orderId} refunded: ${dto.reason} (amount: ${refundAmount})`);
-    return updatedOrder;
-  }
-
-  /**
    * Auto-finish orders that have been delivered for more than 24 hours
    * Called by the scheduled job
    * Note: Uses updated_at as proxy for delivered_at since that field isn't in schema
@@ -673,6 +636,43 @@ export class OrderFlowService {
   async getValidTransitions(orderId: number): Promise<OrderState[]> {
     const order = await this.getOrder(orderId);
     return VALID_TRANSITIONS[order.state as OrderState] || [];
+  }
+
+  /**
+   * Record a sale movement in the cash register if the feature is enabled
+   * and the user has an active session. Non-blocking.
+   */
+  private async recordPayOrderCashMovement(
+    storeId: number,
+    orderId: number,
+    amount: number,
+    paymentMethodType: string,
+  ): Promise<void> {
+    try {
+      const settings = await this.settingsService.getSettings();
+      const cr_settings = (settings as any)?.pos?.cash_register;
+      if (!cr_settings?.enabled) return;
+
+      // Only track non-cash if setting enabled
+      if (paymentMethodType !== 'cash' && !cr_settings.track_non_cash_payments) return;
+
+      const userId = RequestContextService.getUserId();
+      if (!userId) return;
+
+      const session = await this.sessionsService.getActiveSession(userId);
+      if (!session) return;
+
+      await this.movementsService.recordSaleMovement(session.id, {
+        store_id: storeId,
+        user_id: userId,
+        amount,
+        payment_method: paymentMethodType,
+        order_id: orderId,
+        payment_id: 0, // Payment ID not available in this flow
+      });
+    } catch {
+      // Non-critical: don't fail the payment if movement recording fails
+    }
   }
 
   private async generateTransactionId(): Promise<string> {

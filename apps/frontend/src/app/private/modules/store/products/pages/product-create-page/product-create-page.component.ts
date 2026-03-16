@@ -20,6 +20,7 @@ import {
 import {
   ButtonComponent,
   InputComponent,
+  InputButtonsComponent,
   ToastService,
   IconComponent,
   SelectorComponent,
@@ -55,7 +56,7 @@ import { BrandQuickCreateComponent } from '../../components/brand-quick-create.c
 import { TaxQuickCreateComponent } from '../../components/tax-quick-create.component';
 import { AdjustmentCreateModalComponent } from '../../../inventory/operations/components/adjustment-create-modal.component';
 import { InventoryService } from '../../../inventory/services/inventory.service';
-import { CreateAdjustmentDto } from '../../../inventory/interfaces';
+import { BatchCreateAdjustmentsRequest } from '../../../inventory/interfaces';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
 
@@ -90,6 +91,7 @@ interface GeneratedVariant {
     FormsModule,
     ButtonComponent,
     InputComponent,
+    InputButtonsComponent,
     IconComponent,
     SelectorComponent,
     MultiSelectorComponent,
@@ -367,6 +369,7 @@ export class ProductCreatePageComponent implements OnInit {
   variantAttributes: VariantAttribute[] = [];
   generatedVariants: GeneratedVariant[] = [];
   removedVariantKeys = new Set<string>();
+  expandedVariantIndex = signal<number | null>(null);
 
   // New Attribute Input
   newAttributeName = '';
@@ -379,6 +382,7 @@ export class ProductCreatePageComponent implements OnInit {
   isTaxCategoryCreateOpen = false;
   isAdjustmentModalOpen = false;
   isAdjusting = false;
+  adjustmentLocationOptions: SelectorOption[] = [];
 
   // Trigger for computed units to react to non-signal form state changes
   private formUpdateTrigger = signal(0);
@@ -802,6 +806,15 @@ export class ProductCreatePageComponent implements OnInit {
   }
 
   // Variant Attribute Management
+  addQuickAttribute(name: string): void {
+    // Don't add if an attribute with the same name already exists
+    if (this.variantAttributes.some(a => a.name.toLowerCase() === name.toLowerCase())) {
+      this.toastService.warning(`El atributo "${name}" ya existe`);
+      return;
+    }
+    this.variantAttributes.push({ name, values: [] });
+  }
+
   addAttribute(): void {
     this.variantAttributes.push({ name: '', values: [] });
   }
@@ -830,7 +843,7 @@ export class ProductCreatePageComponent implements OnInit {
     this.generateVariants();
   }
 
-  generateVariants(): void {
+  generateVariants(showToast = false): void {
     // Filter incomplete attributes
     const validAttributes = this.variantAttributes.filter(
       (attr) => attr.name && attr.values.length > 0,
@@ -838,6 +851,13 @@ export class ProductCreatePageComponent implements OnInit {
 
     if (validAttributes.length === 0) {
       this.generatedVariants = [];
+      return;
+    }
+
+    // Validate: warn if any attribute has a name but no values
+    const incomplete = this.variantAttributes.filter(a => a.name && a.values.length === 0);
+    if (incomplete.length > 0 && showToast) {
+      this.toastService.warning(`El atributo "${incomplete[0].name}" no tiene valores`);
       return;
     }
 
@@ -888,6 +908,10 @@ export class ProductCreatePageComponent implements OnInit {
         };
       })
       .filter(Boolean) as GeneratedVariant[];
+
+    if (showToast && this.generatedVariants.length > 0) {
+      this.toastService.success(`Se generaron ${this.generatedVariants.length} variantes`);
+    }
   }
 
   private cartesian(args: any[][]): any[] {
@@ -975,6 +999,41 @@ export class ProductCreatePageComponent implements OnInit {
 
   trackByIndex(index: number): number {
     return index;
+  }
+
+  get previewVariantCount(): number {
+    const validAttributes = this.variantAttributes.filter(
+      (attr) => attr.name && attr.values.length > 0,
+    );
+    if (validAttributes.length === 0) return 0;
+    return validAttributes.reduce((total, attr) => total * attr.values.length, 1);
+  }
+
+  applyBasePriceToAll(): void {
+    const basePrice = Number(this.productForm.get('base_price')?.value || 0);
+    const baseCost = Number(this.productForm.get('cost_price')?.value || 0);
+    const baseMargin = Number(this.productForm.get('profit_margin')?.value || 0);
+    this.generatedVariants.forEach(v => {
+      v.price = basePrice;
+      v.cost_price = baseCost;
+      v.profit_margin = baseMargin;
+    });
+    this.toastService.success(`Precio base aplicado a ${this.generatedVariants.length} variantes`);
+  }
+
+  applyBaseCostToAll(): void {
+    const baseCost = Number(this.productForm.get('cost_price')?.value || 0);
+    const baseMargin = Number(this.productForm.get('profit_margin')?.value || 0);
+    this.generatedVariants.forEach(v => {
+      v.cost_price = baseCost;
+      v.profit_margin = baseMargin;
+      v.price = Number((baseCost * (1 + baseMargin / 100)).toFixed(2));
+    });
+    this.toastService.success(`Costo base aplicado a ${this.generatedVariants.length} variantes`);
+  }
+
+  toggleVariantExpand(idx: number): void {
+    this.expandedVariantIndex.update(current => current === idx ? null : idx);
   }
 
   async removeVariant(idx: number): Promise<void> {
@@ -1475,6 +1534,15 @@ export class ProductCreatePageComponent implements OnInit {
   // Adjustment Modal
   openAdjustmentModal(): void {
     this.isAdjustmentModalOpen = true;
+    if (this.adjustmentLocationOptions.length === 0) {
+      this.inventoryService.getLocations().subscribe({
+        next: (response) => {
+          const locations = response.data || [];
+          this.adjustmentLocationOptions = locations.map((l: any) => ({ value: l.id, label: l.name }));
+        },
+        error: () => {},
+      });
+    }
   }
 
   openStockAdjustment(): void {
@@ -1493,36 +1561,58 @@ export class ProductCreatePageComponent implements OnInit {
     this.isAdjustmentModalOpen = false;
   }
 
-  onAdjustmentSave(dto: CreateAdjustmentDto): void {
+  onAdjustmentSave(dto: BatchCreateAdjustmentsRequest): void {
     this.isAdjusting = true;
-    this.inventoryService.createAdjustment(dto).subscribe({
+    this.inventoryService.batchCreateAdjustments(dto).subscribe({
       next: () => {
-        this.toastService.success(
-          'Ajuste de inventario realizado correctamente',
-        );
+        this.toastService.success('Ajustes de inventario creados como borrador');
         this.isAdjusting = false;
         this.closeAdjustmentModal();
-        // Reload product to see stock changes (optional but good)
         if (this.productId) {
           this.loadProduct(this.productId);
         }
-        // Redirect to adjustments history as per plan
-        this.router.navigate(['/admin/inventory/adjustments']);
       },
       error: (err) => {
-        console.error('Error creating adjustment', err);
-        this.toastService.error('Error al realizar el ajuste');
+        console.error('Error creating adjustments', err);
+        this.toastService.error('Error al realizar los ajustes');
         this.isAdjusting = false;
       },
     });
   }
 
-  // Product states (copiado de order-details)
-  readonly productStateOptions = ['active', 'inactive', 'archived'] as const;
+  onAdjustmentSaveAndComplete(dto: BatchCreateAdjustmentsRequest): void {
+    this.isAdjusting = true;
+    this.inventoryService.batchCreateAndComplete(dto).subscribe({
+      next: () => {
+        this.toastService.success('Ajustes creados y aplicados correctamente');
+        this.isAdjusting = false;
+        this.closeAdjustmentModal();
+        if (this.productId) {
+          this.loadProduct(this.productId);
+        }
+      },
+      error: (err) => {
+        console.error('Error creating adjustments', err);
+        this.toastService.error('Error al realizar los ajustes');
+        this.isAdjusting = false;
+      },
+    });
+  }
 
-  // Método de actualización (con confirmación como en órdenes)
-  updateProductState(newState: string): void {
-    if (this.productForm.get('state')?.value === newState) return;
+  // Product states
+  readonly productStateOptions = ['active', 'inactive', 'archived'] as const;
+  readonly productStateButtonOptions = [
+    { value: 'active', label: 'Active' },
+    { value: 'inactive', label: 'Inactive' },
+    { value: 'archived', label: 'Archived' },
+  ];
+
+  // Confirmación de cambio de estado (solo en edición)
+  onStateChange(newState: string): void {
+    if (!this.isEditMode()) return; // En creación no requiere confirmación
+
+    const previousState = this.productForm.get('state')?.value;
+    if (previousState === newState) return;
 
     this.dialogService
       .confirm({
@@ -1533,10 +1623,17 @@ export class ProductCreatePageComponent implements OnInit {
         confirmVariant: 'danger',
       })
       .then((confirmed: boolean) => {
-        if (confirmed) {
-          this.productForm.get('state')?.setValue(newState);
+        if (!confirmed) {
+          // Revert: el formControl ya cambió vía CVA, restaurar al valor previo
+          this.productForm.get('state')?.setValue(previousState, { emitEvent: false });
+          this.cdr.detectChanges();
         }
       });
+  }
+
+  /** @deprecated Use onStateChange instead */
+  updateProductState(newState: string): void {
+    this.productForm.get('state')?.setValue(newState);
   }
 
   // Helper methods (copiados de order-details)

@@ -1,3 +1,6 @@
+import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
+import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { UseGuards } from '@nestjs/common';
 import {
   Controller,
   Get,
@@ -14,6 +17,7 @@ import { MovementQueryDto } from './dto/movement-query.dto';
 import { ResponseService } from '@common/responses/response.service';
 
 @Controller('store/inventory/movements')
+@UseGuards(PermissionsGuard)
 export class MovementsController {
   constructor(
     private readonly movementsService: MovementsService,
@@ -21,6 +25,7 @@ export class MovementsController {
   ) {}
 
   @Post()
+  @Permissions('store:inventory:movements:create')
   async create(@Body() createMovementDto: CreateMovementDto) {
     try {
       const result = await this.movementsService.create(createMovementDto);
@@ -38,6 +43,7 @@ export class MovementsController {
   }
 
   @Get()
+  @Permissions('store:inventory:movements:read')
   async findAll(@Query() query: MovementQueryDto) {
     try {
       const result = await this.movementsService.findAll(query);
@@ -64,6 +70,7 @@ export class MovementsController {
   }
 
   @Get('product/:productId')
+  @Permissions('store:inventory:movements:read')
   async findByProduct(
     @Param('productId') productId: string,
     @Query() query: MovementQueryDto,
@@ -87,6 +94,7 @@ export class MovementsController {
   }
 
   @Get('location/:locationId')
+  @Permissions('store:inventory:movements:read')
   async findByLocation(
     @Param('locationId') locationId: string,
     @Query() query: MovementQueryDto,
@@ -110,6 +118,7 @@ export class MovementsController {
   }
 
   @Get('user/:userId')
+  @Permissions('store:inventory:movements:read')
   async findByUser(
     @Param('userId') userId: string,
     @Query() query: MovementQueryDto,
@@ -130,6 +139,7 @@ export class MovementsController {
   }
 
   @Get(':id')
+  @Permissions('store:inventory:movements:read')
   async findOne(@Param('id') id: string) {
     try {
       const result = await this.movementsService.findOne(+id);

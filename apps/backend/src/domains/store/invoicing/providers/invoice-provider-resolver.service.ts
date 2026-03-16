@@ -39,6 +39,7 @@ export class InvoiceProviderResolver {
           store_id: context.store_id,
           enablement_status: { in: ['testing', 'enabled'] },
         },
+        orderBy: { is_default: 'desc' },
       });
 
       if (dian_config) {

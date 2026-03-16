@@ -18,11 +18,12 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 import { PopCartService } from '../services/pop-cart.service';
 import { ProductsService } from '../../../products/services/products.service';
 import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
+import { PopProductConfigModalComponent, PopProductConfigResult } from './pop-product-config-modal.component';
 
 @Component({
   selector: 'app-pop-product-selection',
   standalone: true,
-  imports: [CommonModule, IconComponent, InputsearchComponent, OptionsDropdownComponent, PopBulkDataModalComponent],
+  imports: [CommonModule, IconComponent, InputsearchComponent, OptionsDropdownComponent, PopBulkDataModalComponent, PopProductConfigModalComponent],
   schemas: [NO_ERRORS_SCHEMA],
   template: `
     <div class="h-full flex flex-col bg-surface rounded-card shadow-card border border-border">
@@ -195,11 +196,18 @@ import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
       </div>
     </div>
     
-    <app-pop-bulk-data-modal 
+    <app-pop-bulk-data-modal
         [isOpen]="bulkModalOpen"
         (close)="bulkModalOpen = false"
         (dataLoaded)="onBulkDataLoaded($event)"
     ></app-pop-bulk-data-modal>
+
+    <app-pop-product-config-modal
+        [isOpen]="configModalOpen"
+        [product]="configModalProduct"
+        (confirmed)="onProductConfigConfirmed($event)"
+        (closed)="configModalOpen = false"
+    ></app-pop-product-config-modal>
   `,
   styles: [
     `
@@ -248,6 +256,8 @@ export class PopProductSelectionComponent implements OnInit, OnDestroy {
   addingToCart = new Set<string>();
 
   bulkModalOpen = false;
+  configModalOpen = false;
+  configModalProduct: any = null;
 
   // Dropdown actions configuration
   dropdownActions: DropdownAction[] = [
@@ -309,8 +319,10 @@ export class PopProductSelectionComponent implements OnInit, OnDestroy {
   private filterProducts(): void {
     const filters: any = {
       page: 1,
-      limit: 50,
-      state: 'active'
+      limit: 25,
+      state: 'active',
+      track_inventory: true,
+      include_variants: true,
     };
 
     if (this.searchQuery) {
@@ -339,22 +351,71 @@ export class PopProductSelectionComponent implements OnInit, OnDestroy {
   onAddToCart(product: any): void {
     this.addingToCart.add(product.id);
 
-    // Map to POP expected structure if needed, or just pass the product
-    // PopCartService expects 'cost' not 'cost_price' in some places, OR it adapts.
-    // Let's ensure we pass unit_cost correctly.
-    // PopCartService.addItem uses product.cost or product.unit_price or product.cost_price depending on what's available?
-    // Let's check addItem in PopCartService: "unit_cost: product.cost || 0"
-    // The product from ProductsService has 'cost_price'. We should normalize it or let service handle it.
-    // Ideally map it here.
-
     const popProduct = {
       ...product,
-      cost: Number(product.cost_price || product.price || 0)
+      cost: Number(product.cost_price || product.price || 0),
+      cost_price: Number(product.cost_price || 0),
+      pricing_type: product.pricing_type || 'unit',
+      requires_batch_tracking: product.requires_batch_tracking || false,
     };
+
+    // If product has variants or requires batch tracking, open config modal
+    const hasVariants = product.product_variants?.length > 0;
+    const needsConfig = hasVariants || product.requires_batch_tracking;
+
+    if (needsConfig) {
+      this.configModalProduct = popProduct;
+      this.configModalOpen = true;
+      this.addingToCart.delete(product.id);
+      return;
+    }
 
     this.cartService.addItem(popProduct, 1);
     this.toastService.success(`${product.name} agregado al carrito`);
     this.addingToCart.delete(product.id);
+  }
+
+  onProductConfigConfirmed(result: PopProductConfigResult): void {
+    if (!this.configModalProduct) return;
+
+    const product = {
+      ...this.configModalProduct,
+      pricing_type: result.pricing_type || this.configModalProduct.pricing_type,
+    };
+
+    if (result.variants?.length) {
+      // Multi-variant: add one cart item per selected variant
+      result.variants.forEach(variant => {
+        this.cartService.addToCart({
+          product,
+          variant,
+          quantity: 1,
+          unit_cost: variant.cost_price ? Number(variant.cost_price) : result.unit_cost,
+          lot_info: result.lot_info,
+        }).subscribe();
+      });
+
+      const count = result.variants.length;
+      this.toastService.success(
+        count === 1
+          ? `${product.name} agregado al carrito`
+          : `${count} variantes de ${product.name} agregadas al carrito`
+      );
+    } else {
+      // Single item (no variants)
+      this.cartService.addToCart({
+        product,
+        variant: result.variant,
+        quantity: result.quantity,
+        unit_cost: result.unit_cost,
+        lot_info: result.lot_info,
+      }).subscribe();
+
+      this.toastService.success(`${product.name} agregado al carrito`);
+    }
+
+    this.configModalOpen = false;
+    this.configModalProduct = null;
   }
 
   onImageError(event: any): void {

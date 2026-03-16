@@ -1,18 +1,25 @@
 import { Component, Output, EventEmitter, Input, ViewChild, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+import { FormBuilder, FormGroup, Validators, ReactiveFormsModule, FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable, map } from 'rxjs';
-import { createExpense } from '../../state/actions/expenses.actions';
+import { loadExpenses, loadExpensesSummary, loadExpenseCategories } from '../../state/actions/expenses.actions';
 import { selectActiveExpenseCategories, selectExpensesLoading } from '../../state/selectors/expenses.selectors';
 import { ExpenseCategory } from '../../interfaces/expense.interface';
 import { ExpensesService } from '../../services/expenses.service';
-import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
-import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
-import { InputComponent } from '../../../../../../shared/components/input/input.component';
-import { SelectorComponent, SelectorOption } from '../../../../../../shared/components/selector/selector.component';
-import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
-import { FileUploadDropzoneComponent } from '../../../../../../shared/components/file-upload-dropzone/file-upload-dropzone.component';
+import {
+  ModalComponent,
+  ButtonComponent,
+  InputComponent,
+  SelectorComponent,
+  SelectorOption,
+  TextareaComponent,
+  FileUploadDropzoneComponent,
+  IconComponent,
+  StepsLineComponent,
+  StepsLineItem,
+} from '../../../../../../shared/components';
+import { ExpenseCategoryQuickCreateComponent } from '../expense-category-quick-create.component';
 
 @Component({
   selector: 'vendix-expense-create',
@@ -20,106 +27,283 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
   imports: [
     CommonModule,
     ReactiveFormsModule,
+    FormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
     SelectorComponent,
     TextareaComponent,
-    FileUploadDropzoneComponent
+    FileUploadDropzoneComponent,
+    IconComponent,
+    StepsLineComponent,
+    ExpenseCategoryQuickCreateComponent,
   ],
   template: `
     <app-modal
       [isOpen]="isOpen"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
-      title="Nuevo Gasto"
+      [title]="currentStep === 1 ? 'Nuevo Gasto' : 'Confirmar Gasto'"
       size="md"
     >
-      <div class="p-4">
-        <form [formGroup]="expenseForm" (ngSubmit)="onSubmit()" class="space-y-4">
+      <!-- Steps -->
+      <app-steps-line
+        [steps]="steps"
+        [currentStep]="currentStep - 1"
+        size="md"
+        primaryColor="var(--color-primary)"
+        secondaryColor="var(--color-secondary)"
+        class="mb-4 block"
+      ></app-steps-line>
 
-          <!-- Description -->
-          <app-input
-            label="Descripción"
-            formControlName="description"
-            [control]="expenseForm.get('description')"
-            placeholder="Ej: Pago de servicios públicos"
-            [required]="true"
-          ></app-input>
+      <!-- STEP 1: PREPARAR -->
+      @if (currentStep === 1) {
+        <div class="p-4">
+          <form [formGroup]="expenseForm" class="space-y-4">
 
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <!-- Amount -->
+            <!-- Description -->
             <app-input
-              label="Monto"
-              type="number"
-              formControlName="amount"
-              [control]="expenseForm.get('amount')"
-              [required]="true"
-              min="0"
-              step="0.01"
-              [prefixIcon]="true"
-            >
-              <span slot="prefix-icon" class="text-text-secondary">$</span>
-            </app-input>
-
-            <!-- Date -->
-            <app-input
-              label="Fecha"
-              type="date"
-              formControlName="expense_date"
-              [control]="expenseForm.get('expense_date')"
+              label="Descripción"
+              formControlName="description"
+              [control]="expenseForm.get('description')"
+              placeholder="Ej: Pago de servicios públicos"
               [required]="true"
             ></app-input>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <!-- Amount -->
+              <app-input
+                label="Monto"
+                type="number"
+                formControlName="amount"
+                [control]="expenseForm.get('amount')"
+                [required]="true"
+                min="0"
+                step="0.01"
+                [prefixIcon]="true"
+              >
+                <span slot="prefix-icon" class="text-text-secondary">$</span>
+              </app-input>
+
+              <!-- Date -->
+              <app-input
+                label="Fecha"
+                type="date"
+                formControlName="expense_date"
+                [control]="expenseForm.get('expense_date')"
+                [required]="true"
+              ></app-input>
+            </div>
+
+            <!-- Category with quick-create button -->
+            <div>
+              <label class="block text-sm font-medium text-text-primary mb-1">Categoría</label>
+              <div class="flex gap-2 items-end">
+                <app-selector
+                  class="flex-1"
+                  formControlName="category_id"
+                  [options]="(categoryOptions$ | async) || []"
+                  placeholder="Seleccione una categoría"
+                ></app-selector>
+                <button
+                  type="button"
+                  (click)="showCategoryQuickCreate = true"
+                  class="flex items-center justify-center w-10 h-10 rounded-xl border border-border bg-surface hover:bg-primary/5 hover:border-primary text-text-secondary hover:text-primary transition-colors shrink-0"
+                  title="Crear categoría"
+                >
+                  <app-icon name="plus" [size]="18"></app-icon>
+                </button>
+              </div>
+            </div>
+
+            <!-- Notes -->
+            <app-textarea
+              label="Notas Adicionales"
+              formControlName="notes"
+              [control]="expenseForm.get('notes')"
+              placeholder="Detalles adicionales..."
+              [rows]="3"
+            ></app-textarea>
+
+            <!-- Receipt Upload -->
+            <div class="space-y-2">
+              <label class="text-sm font-medium text-text-primary">Comprobante</label>
+              <app-file-upload-dropzone
+                label="Subir comprobante"
+                helperText="Imagenes o PDF"
+                accept="image/*,application/pdf"
+                (fileSelected)="onFileSelected($event)"
+                (fileRemoved)="onFileRemoved()"
+              ></app-file-upload-dropzone>
+            </div>
+
+          </form>
+        </div>
+
+        <!-- Quick Create Category Modal -->
+        <vendix-expense-category-quick-create
+          [isOpen]="showCategoryQuickCreate"
+          (isOpenChange)="showCategoryQuickCreate = $event"
+          (created)="onCategoryCreated($event)"
+        ></vendix-expense-category-quick-create>
+      }
+
+      <!-- STEP 2: CONFIRMAR -->
+      @if (currentStep === 2) {
+        <div class="p-4 space-y-4">
+          <!-- Summary Card -->
+          <div class="rounded-xl border border-border overflow-hidden">
+            <!-- Description -->
+            <div class="p-4 border-b border-border">
+              <p class="text-xs text-text-secondary mb-1">Descripción</p>
+              <p class="text-sm font-medium text-text-primary">{{ expenseForm.value.description }}</p>
+            </div>
+
+            <!-- Amount + Date -->
+            <div class="grid grid-cols-2 divide-x divide-border border-b border-border">
+              <div class="p-4">
+                <p class="text-xs text-text-secondary mb-1">Monto</p>
+                <p class="text-lg font-bold text-primary">$ {{ expenseForm.value.amount | number:'1.2-2' }}</p>
+              </div>
+              <div class="p-4">
+                <p class="text-xs text-text-secondary mb-1">Fecha</p>
+                <p class="text-sm font-medium text-text-primary">{{ expenseForm.value.expense_date }}</p>
+              </div>
+            </div>
+
+            <!-- Category -->
+            <div class="p-4 border-b border-border">
+              <p class="text-xs text-text-secondary mb-1">Categoría</p>
+              <p class="text-sm font-medium text-text-primary">{{ getCategoryName() || 'Sin categoría' }}</p>
+            </div>
+
+            <!-- Notes -->
+            @if (expenseForm.value.notes) {
+              <div class="p-4 border-b border-border">
+                <p class="text-xs text-text-secondary mb-1">Notas</p>
+                <p class="text-sm text-text-primary">{{ expenseForm.value.notes }}</p>
+              </div>
+            }
+
+            <!-- Receipt -->
+            <div class="p-4">
+              <p class="text-xs text-text-secondary mb-1">Comprobante</p>
+              <div class="flex items-center gap-2">
+                <app-icon [name]="receiptFile ? 'file-check' : 'file'" [size]="16"
+                  [class]="receiptFile ? 'text-success' : 'text-text-secondary'"></app-icon>
+                <p class="text-sm text-text-primary">
+                  {{ receiptFile ? receiptFile.name : 'No adjunto' }}
+                </p>
+              </div>
+            </div>
           </div>
 
-          <!-- Category -->
-          <app-selector
-            label="Categoría"
-            formControlName="category_id"
-            [options]="(categoryOptions$ | async) || []"
-            placeholder="Seleccione una categoría"
-          ></app-selector>
+          <!-- Approve Checkbox -->
+          <label class="flex items-start gap-3 p-3 bg-success/5 rounded-xl border border-success/20 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              [(ngModel)]="confirmApprove"
+              class="mt-0.5 w-4 h-4 rounded border-border text-success focus:ring-success"
+            />
+            <div>
+              <p class="text-sm font-medium text-text-primary">Aprobar inmediatamente</p>
+              <p class="text-xs text-text-secondary mt-0.5">
+                El gasto se creará en estado "aprobado" directamente, omitiendo la revisión.
+              </p>
+            </div>
+          </label>
 
-          <!-- Notes -->
-          <app-textarea
-            label="Notas Adicionales"
-            formControlName="notes"
-            [control]="expenseForm.get('notes')"
-            placeholder="Detalles adicionales..."
-            [rows]="3"
-          ></app-textarea>
+          <!-- Pay Checkbox (only if approved) -->
+          @if (confirmApprove) {
+            <label class="flex items-start gap-3 p-3 bg-primary/5 rounded-xl border border-primary/20 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                [(ngModel)]="confirmPay"
+                class="mt-0.5 w-4 h-4 rounded border-border text-primary focus:ring-primary"
+              />
+              <div>
+                <p class="text-sm font-medium text-text-primary">Marcar como pagado</p>
+                <p class="text-xs text-text-secondary mt-0.5">
+                  Además de aprobar, el gasto se registrará como pagado inmediatamente.
+                </p>
+              </div>
+            </label>
+          }
+        </div>
+      }
 
-          <!-- Receipt Upload -->
-          <div class="space-y-2">
-            <label class="text-sm font-medium text-text-primary">Comprobante</label>
-            <app-file-upload-dropzone
-              label="Subir comprobante"
-              helperText="Imagenes o PDF"
-              accept="image/*,application/pdf"
-              (fileSelected)="onFileSelected($event)"
-              (fileRemoved)="onFileRemoved()"
-            ></app-file-upload-dropzone>
-          </div>
-
-        </form>
-      </div>
-
-       <!-- Footer -->
-      <div slot="footer">
-        <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+      <!-- Footer -->
+      <div
+        slot="footer"
+        class="flex justify-between gap-3 px-6 py-4 bg-gray-50 rounded-b-xl"
+      >
+        <div>
+          @if (currentStep > 1) {
+            <app-button variant="outline" type="button" (clicked)="goToStep(currentStep - 1)" customClasses="!rounded-xl">
+              <app-icon name="arrow-left" [size]="14" class="mr-1.5" slot="icon"></app-icon>
+              Atrás
+            </app-button>
+          }
+        </div>
+        <div class="flex gap-3">
           <app-button
             variant="outline"
-            (clicked)="onClose()">
+            type="button"
+            (clicked)="onClose()"
+            customClasses="!rounded-xl"
+          >
             Cancelar
           </app-button>
-
-          <app-button
-            variant="primary"
-            (clicked)="onSubmit()"
-            [disabled]="expenseForm.invalid || submitting"
-            [loading]="submitting">
-            Guardar Gasto
-          </app-button>
+          @if (currentStep < 2) {
+            <app-button
+              variant="primary"
+              type="button"
+              (clicked)="goToStep(currentStep + 1)"
+              [disabled]="!canAdvance()"
+              customClasses="!rounded-xl font-bold shadow-md shadow-primary-200"
+            >
+              Continuar
+              <app-icon name="arrow-right" [size]="14" class="ml-1.5" slot="icon"></app-icon>
+            </app-button>
+          } @else {
+            <app-button
+              variant="outline"
+              type="button"
+              (clicked)="onSubmit('pending')"
+              [loading]="submitting"
+              [disabled]="submitting"
+              customClasses="!rounded-xl font-bold"
+            >
+              <app-icon name="file-text" [size]="14" class="mr-1.5" slot="icon"></app-icon>
+              Guardar
+            </app-button>
+            @if (confirmApprove && !confirmPay) {
+              <app-button
+                variant="primary"
+                type="button"
+                (clicked)="onSubmit('approved')"
+                [loading]="submitting"
+                [disabled]="submitting"
+                customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all"
+              >
+                <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon"></app-icon>
+                Guardar y Aprobar
+              </app-button>
+            }
+            @if (confirmApprove && confirmPay) {
+              <app-button
+                variant="primary"
+                type="button"
+                (clicked)="onSubmit('paid')"
+                [loading]="submitting"
+                [disabled]="submitting"
+                customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all"
+              >
+                <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon"></app-icon>
+                Guardar y Pagar
+              </app-button>
+            }
+          }
         </div>
       </div>
     </app-modal>
@@ -138,6 +322,16 @@ export class ExpenseCreateComponent {
 
   receiptFile: File | null = null;
   submitting = false;
+
+  // Steps
+  currentStep = 1;
+  steps: StepsLineItem[] = [
+    { label: 'PREPARAR', completed: false },
+    { label: 'CONFIRMAR', completed: false },
+  ];
+  confirmApprove = false;
+  confirmPay = false;
+  showCategoryQuickCreate = false;
 
   @ViewChild('dropzone') dropzoneRef!: FileUploadDropzoneComponent;
 
@@ -166,6 +360,47 @@ export class ExpenseCreateComponent {
     });
   }
 
+  // --- Step Navigation ---
+
+  canAdvance(): boolean {
+    if (this.currentStep === 1) {
+      return this.expenseForm.valid;
+    }
+    return true;
+  }
+
+  goToStep(step: number): void {
+    if (step > this.currentStep && !this.canAdvance()) {
+      this.expenseForm.markAllAsTouched();
+      return;
+    }
+    this.currentStep = step;
+    this.steps = this.steps.map((s, i) => ({
+      ...s,
+      completed: i < step - 1,
+    }));
+  }
+
+  // --- Category Quick Create ---
+
+  getCategoryName(): string {
+    const categoryId = this.expenseForm.value.category_id;
+    if (!categoryId) return '';
+    let name = '';
+    this.categories$.pipe(
+      map(cats => cats.find(c => c.id === +categoryId)?.name || '')
+    ).subscribe(n => name = n).unsubscribe();
+    return name;
+  }
+
+  onCategoryCreated(category: ExpenseCategory): void {
+    this.store.dispatch(loadExpenseCategories());
+    this.expenseForm.patchValue({ category_id: category.id });
+    this.showCategoryQuickCreate = false;
+  }
+
+  // --- File Handling ---
+
   onFileSelected(file: File): void {
     this.receiptFile = file;
   }
@@ -174,7 +409,9 @@ export class ExpenseCreateComponent {
     this.receiptFile = null;
   }
 
-  onSubmit() {
+  // --- Submit ---
+
+  onSubmit(targetState: 'pending' | 'approved' | 'paid' = 'pending') {
     if (this.expenseForm.invalid) {
       this.expenseForm.markAllAsTouched();
       return;
@@ -186,37 +423,63 @@ export class ExpenseCreateComponent {
     const categoryId = formValue.category_id ? Number(formValue.category_id) : undefined;
     const expenseDate = new Date(formValue.expense_date);
 
-    const dispatchCreate = (receiptUrl?: string) => {
-      this.store.dispatch(createExpense({
-        expense: {
-          description: formValue.description,
-          amount: Number(formValue.amount),
-          category_id: categoryId,
-          expense_date: expenseDate,
-          notes: formValue.notes,
-          receipt_url: receiptUrl,
-        }
-      }));
+    const createAndFinish = (receiptUrl?: string) => {
+      this.expensesService.createExpense({
+        description: formValue.description,
+        amount: Number(formValue.amount),
+        category_id: categoryId,
+        expense_date: expenseDate,
+        notes: formValue.notes,
+        receipt_url: receiptUrl,
+      }).subscribe({
+        next: (response) => {
+          const expenseId = response.data?.id;
+          if (!expenseId || targetState === 'pending') {
+            this.finishSubmit();
+            return;
+          }
 
-      this.submitting = false;
-      this.resetForm();
-      this.onClose();
-    };
-
-    // Upload receipt first if present, then create expense
-    if (this.receiptFile) {
-      this.expensesService.uploadReceipt(this.receiptFile).subscribe({
-        next: (result: { key: string; url: string }) => dispatchCreate(result.key),
+          // Approve first (required for both 'approved' and 'paid')
+          this.expensesService.approveExpense(expenseId).subscribe({
+            next: () => {
+              if (targetState === 'paid') {
+                this.expensesService.payExpense(expenseId).subscribe({
+                  next: () => this.finishSubmit(),
+                  error: () => this.finishSubmit(), // approved but not paid — still refresh
+                });
+              } else {
+                this.finishSubmit();
+              }
+            },
+            error: () => this.finishSubmit(), // created but not approved — still refresh
+          });
+        },
         error: () => {
-          // Create without receipt if upload fails
           this.submitting = false;
-          dispatchCreate();
         }
       });
+    };
+
+    // Upload receipt first if present
+    if (this.receiptFile) {
+      this.expensesService.uploadReceipt(this.receiptFile).subscribe({
+        next: (result: { key: string; url: string }) => createAndFinish(result.key),
+        error: () => createAndFinish(),
+      });
     } else {
-      dispatchCreate();
+      createAndFinish();
     }
   }
+
+  private finishSubmit(): void {
+    this.store.dispatch(loadExpenses());
+    this.store.dispatch(loadExpensesSummary());
+    this.submitting = false;
+    this.resetForm();
+    this.onClose();
+  }
+
+  // --- Reset & Close ---
 
   private resetForm(): void {
     this.expenseForm.reset({
@@ -224,6 +487,14 @@ export class ExpenseCreateComponent {
     });
     this.receiptFile = null;
     this.dropzoneRef?.clear();
+    this.currentStep = 1;
+    this.confirmApprove = false;
+    this.confirmPay = false;
+    this.showCategoryQuickCreate = false;
+    this.steps = [
+      { label: 'PREPARAR', completed: false },
+      { label: 'CONFIRMAR', completed: false },
+    ];
   }
 
   onClose() {

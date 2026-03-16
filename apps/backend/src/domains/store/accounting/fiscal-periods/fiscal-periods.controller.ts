@@ -1,3 +1,6 @@
+import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
+import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { UseGuards } from '@nestjs/common';
 import {
   Controller,
   Get,
@@ -16,6 +19,7 @@ import { CreateFiscalPeriodDto } from './dto/create-fiscal-period.dto';
 import { UpdateFiscalPeriodDto } from './dto/update-fiscal-period.dto';
 
 @Controller('store/accounting/fiscal-periods')
+@UseGuards(PermissionsGuard)
 export class FiscalPeriodsController {
   constructor(
     private readonly fiscal_periods_service: FiscalPeriodsService,
@@ -23,18 +27,21 @@ export class FiscalPeriodsController {
   ) {}
 
   @Get()
+  @Permissions('store:accounting:fiscal_periods:read')
   async findAll() {
     const result = await this.fiscal_periods_service.findAll();
     return this.response_service.success(result);
   }
 
   @Get(':id')
+  @Permissions('store:accounting:fiscal_periods:read')
   async findOne(@Param('id') id: string) {
     const result = await this.fiscal_periods_service.findOne(+id);
     return this.response_service.success(result);
   }
 
   @Post()
+  @Permissions('store:accounting:fiscal_periods:create')
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() create_dto: CreateFiscalPeriodDto) {
     const result = await this.fiscal_periods_service.create(create_dto);
@@ -42,6 +49,7 @@ export class FiscalPeriodsController {
   }
 
   @Put(':id')
+  @Permissions('store:accounting:fiscal_periods:update')
   async update(
     @Param('id') id: string,
     @Body() update_dto: UpdateFiscalPeriodDto,
@@ -51,6 +59,7 @@ export class FiscalPeriodsController {
   }
 
   @Patch(':id/close')
+  @Permissions('store:accounting:fiscal_periods:update')
   @HttpCode(HttpStatus.OK)
   async close(@Param('id') id: string) {
     const result = await this.fiscal_periods_service.close(+id);
@@ -58,6 +67,7 @@ export class FiscalPeriodsController {
   }
 
   @Delete(':id')
+  @Permissions('store:accounting:fiscal_periods:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id') id: string) {
     await this.fiscal_periods_service.remove(+id);

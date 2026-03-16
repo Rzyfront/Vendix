@@ -1,3 +1,6 @@
+import { PermissionsGuard } from '../../auth/guards/permissions.guard';
+import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { UseGuards } from '@nestjs/common';
 import {
   Controller,
   Get,
@@ -15,6 +18,7 @@ import { AnalyticsQueryDto, SalesAnalyticsQueryDto, InventoryAnalyticsQueryDto, 
 import { ResponseService } from '../../../common/responses/response.service';
 
 @Controller('store/analytics')
+@UseGuards(PermissionsGuard)
 export class AnalyticsController {
   constructor(
     private readonly sales_analytics_service: SalesAnalyticsService,
@@ -28,12 +32,14 @@ export class AnalyticsController {
   // ==================== OVERVIEW ANALYTICS ====================
 
   @Get('overview/summary')
+  @Permissions('store:analytics:read')
   async getOverviewSummary(@Query() query: AnalyticsQueryDto) {
     const result = await this.overview_analytics_service.getOverviewSummary(query);
     return this.response_service.success(result);
   }
 
   @Get('overview/trends')
+  @Permissions('store:analytics:read')
   async getOverviewTrends(@Query() query: AnalyticsQueryDto) {
     const result = await this.overview_analytics_service.getOverviewTrends(query);
     return this.response_service.success(result);
@@ -42,48 +48,56 @@ export class AnalyticsController {
   // ==================== SALES ANALYTICS ====================
 
   @Get('sales/summary')
+  @Permissions('store:analytics:read')
   async getSalesSummary(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesSummary(query);
     return this.response_service.success(result);
   }
 
   @Get('sales/by-product')
+  @Permissions('store:analytics:read')
   async getSalesByProduct(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesByProduct(query);
     return this.response_service.success(result);
   }
 
   @Get('sales/by-category')
+  @Permissions('store:analytics:read')
   async getSalesByCategory(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesByCategory(query);
     return this.response_service.success(result);
   }
 
   @Get('sales/by-payment-method')
+  @Permissions('store:analytics:read')
   async getSalesByPaymentMethod(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesByPaymentMethod(query);
     return this.response_service.success(result);
   }
 
   @Get('sales/trends')
+  @Permissions('store:analytics:read')
   async getSalesTrends(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesTrends(query);
     return this.response_service.success(result);
   }
 
   @Get('sales/by-customer')
+  @Permissions('store:analytics:read')
   async getSalesByCustomer(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesByCustomer(query);
     return this.response_service.success(result);
   }
 
   @Get('sales/by-channel')
+  @Permissions('store:analytics:read')
   async getSalesByChannel(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesByChannel(query);
     return this.response_service.success(result);
   }
 
   @Get('sales/export')
+  @Permissions('store:analytics:read')
   async exportSalesAnalytics(
     @Query() query: SalesAnalyticsQueryDto,
     @Res({ passthrough: true }) res: Response,
@@ -128,30 +142,35 @@ export class AnalyticsController {
   // ==================== PRODUCTS ANALYTICS ====================
 
   @Get('products/summary')
+  @Permissions('store:analytics:read')
   async getProductsSummary(@Query() query: ProductsAnalyticsQueryDto) {
     const result = await this.products_analytics_service.getProductsSummary(query);
     return this.response_service.success(result);
   }
 
   @Get('products/top-sellers')
+  @Permissions('store:analytics:read')
   async getTopSellingProducts(@Query() query: ProductsAnalyticsQueryDto) {
     const result = await this.products_analytics_service.getTopSellingProducts(query);
     return this.response_service.success(result);
   }
 
   @Get('products/trends')
+  @Permissions('store:analytics:read')
   async getProductsTrends(@Query() query: ProductsAnalyticsQueryDto) {
     const result = await this.products_analytics_service.getProductsTrends(query);
     return this.response_service.success(result);
   }
 
   @Get('products/table')
+  @Permissions('store:analytics:read')
   async getProductsTable(@Query() query: ProductsAnalyticsQueryDto) {
     const result = await this.products_analytics_service.getProductsTable(query);
     return result;
   }
 
   @Get('products/export')
+  @Permissions('store:analytics:read')
   async exportProductsAnalytics(
     @Query() query: ProductsAnalyticsQueryDto,
     @Res({ passthrough: true }) res: Response,
@@ -187,48 +206,56 @@ export class AnalyticsController {
   // ==================== INVENTORY ANALYTICS ====================
 
   @Get('inventory/summary')
+  @Permissions('store:analytics:read')
   async getInventorySummary(@Query() query: InventoryAnalyticsQueryDto) {
     const result = await this.inventory_analytics_service.getInventorySummary(query);
     return this.response_service.success(result);
   }
 
   @Get('inventory/stock-levels')
+  @Permissions('store:analytics:read')
   async getStockLevels(@Query() query: InventoryAnalyticsQueryDto) {
     const result = await this.inventory_analytics_service.getStockLevels(query);
     return this.response_service.success(result);
   }
 
   @Get('inventory/low-stock')
+  @Permissions('store:analytics:read')
   async getLowStockAlerts(@Query() query: InventoryAnalyticsQueryDto) {
     const result = await this.inventory_analytics_service.getLowStockAlerts(query);
     return this.response_service.success(result);
   }
 
   @Get('inventory/movements')
+  @Permissions('store:analytics:read')
   async getStockMovements(@Query() query: InventoryAnalyticsQueryDto) {
     const result = await this.inventory_analytics_service.getStockMovements(query);
     return this.response_service.success(result);
   }
 
   @Get('inventory/valuation')
+  @Permissions('store:analytics:read')
   async getInventoryValuation(@Query() query: InventoryAnalyticsQueryDto) {
     const result = await this.inventory_analytics_service.getInventoryValuation(query);
     return this.response_service.success(result);
   }
 
   @Get('inventory/movement-summary')
+  @Permissions('store:analytics:read')
   async getMovementSummary(@Query() query: InventoryAnalyticsQueryDto) {
     const result = await this.inventory_analytics_service.getMovementSummary(query);
     return this.response_service.success(result);
   }
 
   @Get('inventory/movement-trends')
+  @Permissions('store:analytics:read')
   async getMovementTrends(@Query() query: InventoryAnalyticsQueryDto) {
     const result = await this.inventory_analytics_service.getMovementTrends(query);
     return this.response_service.success(result);
   }
 
   @Get('inventory/movements/export')
+  @Permissions('store:analytics:read')
   async exportMovementsXlsx(
     @Query() query: InventoryAnalyticsQueryDto,
     @Res({ passthrough: true }) res: Response,
@@ -251,6 +278,7 @@ export class AnalyticsController {
   }
 
   @Get('inventory/export')
+  @Permissions('store:analytics:read')
   async exportInventoryAnalytics(
     @Query() query: InventoryAnalyticsQueryDto,
     @Res({ passthrough: true }) res: Response,
@@ -281,24 +309,28 @@ export class AnalyticsController {
   // ==================== CUSTOMERS ANALYTICS ====================
 
   @Get('customers/summary')
+  @Permissions('store:analytics:read')
   async getCustomersSummary(@Query() query: AnalyticsQueryDto) {
     const result = await this.customers_analytics_service.getCustomersSummary(query);
     return this.response_service.success(result);
   }
 
   @Get('customers/trends')
+  @Permissions('store:analytics:read')
   async getCustomersTrends(@Query() query: AnalyticsQueryDto) {
     const result = await this.customers_analytics_service.getCustomersTrends(query);
     return this.response_service.success(result);
   }
 
   @Get('customers/top')
+  @Permissions('store:analytics:read')
   async getTopCustomers(@Query() query: AnalyticsQueryDto) {
     const result = await this.customers_analytics_service.getTopCustomers(query);
     return this.response_service.success(result);
   }
 
   @Get('customers/export')
+  @Permissions('store:analytics:read')
   async exportCustomersAnalytics(
     @Query() query: AnalyticsQueryDto,
     @Res({ passthrough: true }) res: Response,

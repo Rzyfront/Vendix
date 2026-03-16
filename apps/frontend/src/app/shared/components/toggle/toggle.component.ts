@@ -20,6 +20,14 @@ import { FormStyleVariant } from '../../types/form.types';
       multi: true,
     },
   ],
+  styles: [
+    `
+      :host {
+        display: inline-flex;
+        align-items: center;
+      }
+    `,
+  ],
   template: `
     <button
       type="button"

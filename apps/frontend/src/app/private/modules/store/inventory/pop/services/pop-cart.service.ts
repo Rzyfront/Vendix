@@ -5,6 +5,7 @@ import {
   LotInfo,
   PreBulkData,
   PopProduct,
+  PopProductVariant,
   PopSupplier,
   PopLocation,
   ShippingMethod,
@@ -385,9 +386,12 @@ export class PopCartService {
       };
     }
 
-    // For regular products, check if already in cart
+    // For regular products, check if already in cart (same product + same variant)
     const existingItemIndex = currentState.items.findIndex(
-      (item) => item.product.id === request.product.id && !item.is_prebulk,
+      (item) =>
+        item.product.id === request.product.id &&
+        !item.is_prebulk &&
+        (item.variant?.id ?? null) === (request.variant?.id ?? null),
     );
 
     let updatedItems: PopCartItem[];
@@ -410,6 +414,7 @@ export class PopCartService {
       const newItem: PopCartItem = {
         id: this.generateItemId(),
         product: request.product,
+        variant: request.variant,
         quantity: request.quantity,
         unit_cost: request.unit_cost,
         discount: 0,
@@ -454,13 +459,25 @@ export class PopCartService {
     }
 
     const updatedItems = [...currentState.items];
-    updatedItems[itemIndex] = {
+    const updatedItem = {
       ...item,
       quantity: request.quantity ?? item.quantity,
       unit_cost: request.unit_cost ?? item.unit_cost,
       lot_info: request.lot_info ?? item.lot_info,
       notes: request.notes ?? item.notes,
     };
+
+    // Update variant if provided
+    if (request.variant !== undefined) {
+      updatedItem.variant = request.variant;
+    }
+
+    // Update pricing_type if provided
+    if (request.pricing_type) {
+      updatedItem.product = { ...updatedItem.product, pricing_type: request.pricing_type };
+    }
+
+    updatedItems[itemIndex] = updatedItem;
     this.recalculateItemTotals(updatedItems[itemIndex]);
 
     return {
@@ -558,9 +575,34 @@ export class PopCartService {
         is_active: true
       };
 
+      // Restore variant info from purchase order item
+      const variantData = item.product_variants;
+      let variant: PopProductVariant | undefined;
+      if (item.product_variant_id && variantData) {
+        variant = {
+          id: variantData.id || item.product_variant_id,
+          name: variantData.name,
+          sku: variantData.sku || '',
+          cost_price: variantData.cost_price,
+          stock_quantity: variantData.stock_quantity,
+          attributes: variantData.attributes,
+        };
+      }
+
+      // Restore lot/batch info from purchase order item
+      let lotInfo: LotInfo | undefined;
+      if (item.batch_number || item.manufacturing_date || item.expiration_date) {
+        lotInfo = {
+          batch_number: item.batch_number,
+          manufacturing_date: item.manufacturing_date ? new Date(item.manufacturing_date) : undefined,
+          expiration_date: item.expiration_date ? new Date(item.expiration_date) : undefined,
+        };
+      }
+
       const cartItem: PopCartItem = {
         id: this.generateItemId(),
         product: popProduct,
+        variant,
         quantity: item.quantity_ordered || item.quantity,
         unit_cost: item.unit_cost || item.unit_price,
         discount: item.discount_percentage || 0,
@@ -568,7 +610,7 @@ export class PopCartService {
         subtotal: ((item.quantity_ordered || item.quantity) * (item.unit_cost || item.unit_price)),
         tax_amount: 0,
         total: 0,
-        lot_info: undefined,
+        lot_info: lotInfo,
         notes: item.notes,
         is_prebulk: false,
         addedAt: new Date()
@@ -607,5 +649,5 @@ export class PopCartService {
 }
 
 // Export types for use in components
-export type { ShippingMethod, PaymentTermPreset, LotInfo, PreBulkData, PopSupplier, PopLocation, PopProduct };
+export type { ShippingMethod, PaymentTermPreset, LotInfo, PreBulkData, PopSupplier, PopLocation, PopProduct, PopProductVariant };
 export type { PopCartItem, PopCartSummary, PopCartState, AddToPopCartRequest, UpdatePopCartItemRequest };

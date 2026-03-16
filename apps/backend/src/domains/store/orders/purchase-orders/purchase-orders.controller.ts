@@ -1,3 +1,6 @@
+import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
+import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
 import {
   Controller,
   Get,
@@ -8,13 +11,18 @@ import {
   Delete,
   Query,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
+import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
+import { RegisterPaymentDto } from './dto/register-payment.dto';
+import { AddAttachmentDto } from './dto/add-attachment.dto';
 import { ResponseService } from '@common/responses/response.service';
 
 @Controller('store/orders/purchase-orders')
+@UseGuards(PermissionsGuard)
 export class PurchaseOrdersController {
   constructor(
     private readonly purchaseOrdersService: PurchaseOrdersService,
@@ -22,6 +30,7 @@ export class PurchaseOrdersController {
   ) {}
 
   @Post()
+  @Permissions('store:orders:purchase_orders:create')
   async create(@Body() createPurchaseOrderDto: CreatePurchaseOrderDto) {
     try {
       const result = await this.purchaseOrdersService.create(
@@ -41,6 +50,7 @@ export class PurchaseOrdersController {
   }
 
   @Get()
+  @Permissions('store:orders:purchase_orders:read')
   async findAll(@Query() query: PurchaseOrderQueryDto) {
     try {
       const result = await this.purchaseOrdersService.findAll(query);
@@ -67,6 +77,7 @@ export class PurchaseOrdersController {
   }
 
   @Get('draft')
+  @Permissions('store:orders:purchase_orders:read')
   async findDrafts(@Query() query: PurchaseOrderQueryDto) {
     try {
       const result = await this.purchaseOrdersService.findByStatus(
@@ -87,6 +98,7 @@ export class PurchaseOrdersController {
   }
 
   @Get('approved')
+  @Permissions('store:orders:purchase_orders:read')
   async findApproved(@Query() query: PurchaseOrderQueryDto) {
     try {
       const result = await this.purchaseOrdersService.findByStatus(
@@ -107,6 +119,7 @@ export class PurchaseOrdersController {
   }
 
   @Get('pending')
+  @Permissions('store:orders:purchase_orders:read')
   async findPending(@Query() query: PurchaseOrderQueryDto) {
     try {
       const result = await this.purchaseOrdersService.findPending(query);
@@ -124,6 +137,7 @@ export class PurchaseOrdersController {
   }
 
   @Get('supplier/:supplierId')
+  @Permissions('store:orders:purchase_orders:read')
   async findBySupplier(
     @Param('supplierId') supplierId: string,
     @Query() query: PurchaseOrderQueryDto,
@@ -146,7 +160,174 @@ export class PurchaseOrdersController {
     }
   }
 
+  // ===== Sub-resource routes (BEFORE :id to avoid route conflicts) =====
+
+  @Get(':id/receptions')
+  @Permissions('store:orders:purchase_orders:read')
+  async getReceptions(@Param('id') id: string) {
+    try {
+      const result = await this.purchaseOrdersService.getReceptions(+id);
+      return this.responseService.success(
+        result,
+        'Recepciones obtenidas exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener las recepciones',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Get(':id/cost-summary')
+  @Permissions('store:orders:purchase_orders:read')
+  async getCostSummary(@Param('id') id: string) {
+    try {
+      const result = await this.purchaseOrdersService.getCostSummary(+id);
+      return this.responseService.success(
+        result,
+        'Resumen de costos obtenido exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener el resumen de costos',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Get(':id/timeline')
+  @Permissions('store:orders:purchase_orders:read')
+  async getTimeline(@Param('id') id: string) {
+    try {
+      const result = await this.purchaseOrdersService.getTimeline(+id);
+      return this.responseService.success(
+        result,
+        'Timeline obtenido exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener el timeline',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Post(':id/attachments')
+  @Permissions('store:orders:purchase_orders:attach')
+  @UseInterceptors(FileInterceptor('file'))
+  async addAttachment(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() dto: AddAttachmentDto,
+  ) {
+    try {
+      if (!file) {
+        return this.responseService.error(
+          'No se proporcionó un archivo',
+          'File is required',
+          400,
+        );
+      }
+      const result = await this.purchaseOrdersService.addAttachment(+id, file, dto);
+      return this.responseService.created(
+        result,
+        'Archivo adjunto agregado exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al agregar el archivo adjunto',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Get(':id/attachments')
+  @Permissions('store:orders:purchase_orders:read')
+  async getAttachments(@Param('id') id: string) {
+    try {
+      const result = await this.purchaseOrdersService.getAttachments(+id);
+      return this.responseService.success(
+        result,
+        'Archivos adjuntos obtenidos exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener los archivos adjuntos',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Delete(':id/attachments/:attachmentId')
+  @Permissions('store:orders:purchase_orders:attach')
+  async removeAttachment(
+    @Param('id') id: string,
+    @Param('attachmentId') attachmentId: string,
+  ) {
+    try {
+      const result = await this.purchaseOrdersService.removeAttachment(+attachmentId);
+      return this.responseService.success(
+        result,
+        'Archivo adjunto eliminado exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al eliminar el archivo adjunto',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Post(':id/payments')
+  @Permissions('store:orders:purchase_orders:pay')
+  async registerPayment(
+    @Param('id') id: string,
+    @Body() dto: RegisterPaymentDto,
+  ) {
+    try {
+      const result = await this.purchaseOrdersService.registerPayment(+id, dto);
+      return this.responseService.created(
+        result,
+        'Pago registrado exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al registrar el pago',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Get(':id/payments')
+  @Permissions('store:orders:purchase_orders:read')
+  async getPayments(@Param('id') id: string) {
+    try {
+      const result = await this.purchaseOrdersService.getPayments(+id);
+      return this.responseService.success(
+        result,
+        'Pagos obtenidos exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener los pagos',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  // ===== Main :id route =====
+
   @Get(':id')
+  @Permissions('store:orders:purchase_orders:read')
   async findOne(@Param('id') id: string) {
     try {
       const result = await this.purchaseOrdersService.findOne(+id);
@@ -164,6 +345,7 @@ export class PurchaseOrdersController {
   }
 
   @Patch(':id')
+  @Permissions('store:orders:purchase_orders:update')
   async update(
     @Param('id') id: string,
     @Body() updatePurchaseOrderDto: UpdatePurchaseOrderDto,
@@ -187,6 +369,7 @@ export class PurchaseOrdersController {
   }
 
   @Patch(':id/approve')
+  @Permissions('store:orders:purchase_orders:approve')
   async approve(@Param('id') id: string) {
     try {
       const result = await this.purchaseOrdersService.approve(+id);
@@ -204,6 +387,7 @@ export class PurchaseOrdersController {
   }
 
   @Patch(':id/cancel')
+  @Permissions('store:orders:purchase_orders:cancel')
   async cancel(@Param('id') id: string) {
     try {
       const result = await this.purchaseOrdersService.cancel(+id);
@@ -221,16 +405,13 @@ export class PurchaseOrdersController {
   }
 
   @Patch(':id/receive')
+  @Permissions('store:orders:purchase_orders:receive')
   async receive(
     @Param('id') id: string,
-    @Body()
-    receiveData: { items: Array<{ id: number; quantity_received: number }> },
+    @Body() dto: ReceivePurchaseOrderDto,
   ) {
     try {
-      const result = await this.purchaseOrdersService.receive(
-        +id,
-        receiveData.items,
-      );
+      const result = await this.purchaseOrdersService.receive(+id, dto);
       return this.responseService.success(
         result,
         'Orden de compra recibida exitosamente',
@@ -245,6 +426,7 @@ export class PurchaseOrdersController {
   }
 
   @Delete(':id')
+  @Permissions('store:orders:purchase_orders:delete')
   async remove(@Param('id') id: string) {
     try {
       await this.purchaseOrdersService.remove(+id);

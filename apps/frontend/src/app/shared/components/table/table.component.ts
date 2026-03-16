@@ -18,6 +18,8 @@ export interface TableColumn {
   align?: 'left' | 'center' | 'right';
   template?: TemplateRef<any>;
   transform?: (value: any, item?: any) => string;
+  cellClass?: (value: any, item?: any) => string;
+  cellStyle?: (value: any, item?: any) => Record<string, string>;
   defaultValue?: string;
   badge?: boolean;
   badgeConfig?: {
@@ -403,7 +405,11 @@ export class TableComponent implements AfterContentInit {
         suspended: 'suspended',
         archived: 'draft',
         draft: 'draft',
+        posted: 'completed',
+        voided: 'error',
         completed: 'completed',
+        finished: 'completed',
+        cancelled: 'error',
         error: 'error',
         warning: 'warning',
       };

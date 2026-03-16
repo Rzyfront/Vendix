@@ -82,7 +82,7 @@
 
             <!-- Default content (only when not a badge, not an image, and no custom template) -->
             <ng-container *ngIf="!column.badge && !column.template && column.type !== 'image'">
-              <span class="cell-content">
+              <span class="cell-content" [ngClass]="column.cellClass ? column.cellClass(getNestedValue(item, column.key), item) : ''" [ngStyle]="column.cellStyle ? column.cellStyle(getNestedValue(item, column.key), item) : {}">
                 <ng-container *ngIf="
                     getNestedValue(item, column.key) !== null &&
                       getNestedValue(item, column.key) !== undefined &&

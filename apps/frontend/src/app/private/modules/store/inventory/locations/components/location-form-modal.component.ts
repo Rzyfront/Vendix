@@ -7,7 +7,7 @@ import {
   ModalComponent,
   ButtonComponent,
   InputComponent,
-  ToggleComponent,
+  SettingToggleComponent,
   SelectorComponent,
   IconComponent,
 } from '../../../../../../shared/components/index';
@@ -27,7 +27,7 @@ import { CountryService, Country, Department, City } from '../../../../../../ser
     ModalComponent,
     ButtonComponent,
     InputComponent,
-    ToggleComponent,
+    SettingToggleComponent,
     SelectorComponent,
     IconComponent,
   ],
@@ -72,11 +72,12 @@ import { CountryService, Country, Department, City } from '../../../../../../ser
                 placeholder="Seleccionar tipo"
               ></app-selector>
             </div>
-            <div class="col-span-2 md:col-span-1 flex flex-col justify-end pb-1.5">
-               <div class="flex items-center gap-3 bg-background-secondary/50 p-2.5 rounded-xl border border-border-subtle">
-                <app-toggle formControlName="is_active"></app-toggle>
-                <span class="text-sm font-medium text-text-primary">Ubicación activa</span>
-              </div>
+            <div class="col-span-2 md:col-span-1 flex flex-col justify-end">
+              <app-setting-toggle
+                formControlName="is_active"
+                label="Ubicación activa"
+                description="Desactiva para ocultar esta ubicación"
+              ></app-setting-toggle>
             </div>
           </div>
 

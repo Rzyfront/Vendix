@@ -68,6 +68,10 @@ export class CreateEmployeeDto {
   department?: string;
 
   @IsOptional()
+  @IsEnum(['operational', 'administrative', 'sales'])
+  cost_center?: 'operational' | 'administrative' | 'sales';
+
+  @IsOptional()
   @IsString()
   @MaxLength(100)
   bank_name?: string;

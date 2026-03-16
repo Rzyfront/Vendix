@@ -23,7 +23,16 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'expense.paid.accounts_payable': '2205',
   'expense.paid.cash': '1105',
   'payroll.approved.payroll_expense': '5105',
-  'payroll.approved.social_security': '5110',
+  'payroll.approved.social_security': '5105',
+  // Cost center: Administrative
+  'payroll.approved.payroll_expense.administrative': '5105',
+  'payroll.approved.social_security.administrative': '5105',
+  // Cost center: Operational (Mano de Obra Directa - Costo)
+  'payroll.approved.payroll_expense.operational': '7205',
+  'payroll.approved.social_security.operational': '7205',
+  // Cost center: Sales (Gastos de Personal - Ventas)
+  'payroll.approved.payroll_expense.sales': '5205',
+  'payroll.approved.social_security.sales': '5205',
   'payroll.approved.salaries_payable': '2505',
   'payroll.approved.health_payable': '2370',
   'payroll.approved.pension_payable': '2380',
@@ -36,6 +45,8 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'refund.completed.cash': '1105',
   'purchase_order.received.inventory': '1435',
   'purchase_order.received.accounts_payable': '2205',
+  'purchase_order.payment.accounts_payable': '2205',
+  'purchase_order.payment.cash_bank': '1110',
   'inventory.adjusted.inventory': '1435',
   'inventory.adjusted.shrinkage': '5295',
   // Phase 1: IVA on direct POS sales
@@ -47,6 +58,9 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'credit_sale.created.vat_payable': '2408',
   // Phase 1: Refund VAT reversal
   'refund.completed.vat_payable': '2408',
+  // Phase 2: Sales discounts (POS coupons, manual discounts)
+  'payment.received.sales_discount': '4175',
+  'credit_sale.created.sales_discount': '4175',
 };
 
 /**

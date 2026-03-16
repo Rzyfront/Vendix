@@ -217,6 +217,15 @@ export interface NotificationsSettings {
   new_order_alerts_phone: string | null;
 }
 
+export interface CashRegisterSettings {
+  enabled: boolean;
+  require_session_for_sales: boolean;
+  allow_multiple_sessions_per_user: boolean;
+  auto_create_default_register: boolean;
+  require_closing_count: boolean;
+  track_non_cash_payments: boolean;
+}
+
 export interface PosSettings {
   allow_anonymous_sales: boolean;
   anonymous_sales_as_default: boolean;
@@ -230,6 +239,7 @@ export interface PosSettings {
   max_discount_percentage: number;
   allow_refund_without_approval: boolean;
   scale?: ScaleSettings;
+  cash_register?: CashRegisterSettings;
 }
 
 export interface ScaleSettings {

@@ -13,6 +13,7 @@ export interface Employee {
   contract_type: 'indefinite' | 'fixed_term' | 'service' | 'apprentice';
   position?: string;
   department?: string;
+  cost_center?: 'operational' | 'administrative' | 'sales';
   base_salary: number;
   payment_frequency: 'monthly' | 'biweekly' | 'weekly';
   bank_name?: string;
@@ -101,6 +102,7 @@ export interface CreateEmployeeDto {
   contract_type: 'indefinite' | 'fixed_term' | 'service' | 'apprentice';
   position?: string;
   department?: string;
+  cost_center?: 'operational' | 'administrative' | 'sales';
   base_salary: number;
   payment_frequency: 'monthly' | 'biweekly' | 'weekly';
   bank_name?: string;

@@ -12,6 +12,7 @@ import {
   FilterConfig,
   DropdownAction,
   FilterValues,
+  PaginationComponent,
 } from '../../../../../../../shared/components';
 import { Ticket, TicketStatus, TicketPriority, TicketCategory } from '../../models/ticket.model';
 
@@ -25,9 +26,10 @@ import { Ticket, TicketStatus, TicketPriority, TicketCategory } from '../../mode
     OptionsDropdownComponent,
     IconComponent,
     ButtonComponent,
+    PaginationComponent,
   ],
   template: `
-    <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border md:min-h-[600px]">
+    <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border">
       <!-- Search Section (sticky on mobile) -->
       <div class="sticky top-[99px] bg-background px-2 py-1.5 -mt-[5px] md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
         <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
@@ -90,6 +92,18 @@ import { Ticket, TicketStatus, TicketPriority, TicketCategory } from '../../mode
           tableSize="md"
           (rowClick)="onRowClick($event)"
         ></app-responsive-data-view>
+
+        <!-- Pagination -->
+        <div *ngIf="totalPages > 1" class="mt-4 border-t border-border pt-4">
+          <app-pagination
+            [currentPage]="page"
+            [total]="totalItems"
+            [limit]="limit"
+            [totalPages]="totalPages"
+            infoStyle="none"
+            (pageChange)="onPageChange($event)"
+          ></app-pagination>
+        </div>
       </div>
     </div>
   `,
@@ -98,11 +112,18 @@ export class TicketListComponent implements OnInit {
   @Input() tickets: Ticket[] = [];
   @Input() loading = false;
   @Input() totalItems = 0;
+  @Input() page = 1;
+  @Input() limit = 10;
+
+  get totalPages(): number {
+    return Math.ceil(this.totalItems / this.limit);
+  }
 
   @Output() search = new EventEmitter<string>();
   @Output() filter = new EventEmitter<FilterValues>();
   @Output() create = new EventEmitter<void>();
   @Output() viewDetail = new EventEmitter<Ticket>();
+  @Output() pageChange = new EventEmitter<number>();
 
   filterConfigs: FilterConfig[] = [
     {
@@ -263,6 +284,10 @@ export class TicketListComponent implements OnInit {
     if (action === 'create') {
       this.create.emit();
     }
+  }
+
+  onPageChange(page: number): void {
+    this.pageChange.emit(page);
   }
 
   onRowClick(row: any): void {

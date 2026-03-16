@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
+import { Actions, ofType } from '@ngrx/effects';
 import { Observable, Subject } from 'rxjs';
 import { takeUntil, filter } from 'rxjs/operators';
 
@@ -8,6 +9,7 @@ import {
   loadPayrollRuns,
   loadPayrollRunStats,
   loadPayrollRun,
+  cancelPayrollRunSuccess,
 } from '../state/actions/payroll.actions';
 import {
   selectPayrollRuns,
@@ -59,6 +61,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 })
 export class PayrollRunsPageComponent implements OnInit, OnDestroy {
   private store = inject(Store);
+  private actions$ = inject(Actions);
   private currencyService = inject(CurrencyFormatService);
   private destroy$ = new Subject<void>();
 
@@ -77,6 +80,14 @@ export class PayrollRunsPageComponent implements OnInit, OnDestroy {
       if (this.isPayrollRunDetailModalOpen && this.selectedPayrollRun?.id === run.id) {
         this.selectedPayrollRun = run;
       }
+    });
+
+    // Close detail modal after cancel succeeds (the detail component no longer closes it immediately)
+    this.actions$.pipe(
+      ofType(cancelPayrollRunSuccess),
+      takeUntil(this.destroy$),
+    ).subscribe(() => {
+      this.isPayrollRunDetailModalOpen = false;
     });
   }
 

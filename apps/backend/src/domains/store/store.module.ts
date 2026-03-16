@@ -29,6 +29,7 @@ import { StoreRolesModule } from './roles/store-roles.module';
 import { PromotionsModule } from './promotions/promotions.module';
 import { CouponsModule } from './coupons/coupons.module';
 import { QuotationsModule } from './quotations/quotations.module';
+import { CashRegistersModule } from './cash-registers/cash-registers.module';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { QuotationsModule } from './quotations/quotations.module';
     PromotionsModule,
     CouponsModule,
     QuotationsModule,
+    CashRegistersModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],

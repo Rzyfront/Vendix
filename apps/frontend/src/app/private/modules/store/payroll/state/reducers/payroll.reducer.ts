@@ -199,6 +199,8 @@ export const payrollReducer = createReducer(
   })),
 
   // ─── Payroll Run State Transitions ──────────────────────
+  // Uses currentPayrollRunLoading (not payrollRunsLoading) to avoid
+  // cascading loading cycles when payrollRunMutationSuccess$ reloads the list.
   on(
     PayrollActions.calculatePayrollRun,
     PayrollActions.approvePayrollRun,
@@ -207,7 +209,7 @@ export const payrollReducer = createReducer(
     PayrollActions.cancelPayrollRun,
     (state) => ({
       ...state,
-      payrollRunsLoading: true,
+      currentPayrollRunLoading: true,
       error: null,
     }),
   ),
@@ -220,7 +222,7 @@ export const payrollReducer = createReducer(
     (state, { payrollRun }) => ({
       ...state,
       currentPayrollRun: payrollRun,
-      payrollRunsLoading: false,
+      currentPayrollRunLoading: false,
       error: null,
     }),
   ),
@@ -232,7 +234,7 @@ export const payrollReducer = createReducer(
     PayrollActions.cancelPayrollRunFailure,
     (state, { error }) => ({
       ...state,
-      payrollRunsLoading: false,
+      currentPayrollRunLoading: false,
       error,
     }),
   ),

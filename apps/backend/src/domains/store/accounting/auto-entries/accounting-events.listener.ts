@@ -48,6 +48,7 @@ export class AccountingEventsListener {
     amount: number;
     subtotal_amount?: number;
     tax_amount?: number;
+    discount_amount?: number;
     currency: string;
     payment_method: string;
     user_id?: number;
@@ -63,6 +64,7 @@ export class AccountingEventsListener {
         amount: Number(event.amount),
         subtotal_amount: event.subtotal_amount != null ? Number(event.subtotal_amount) : undefined,
         tax_amount: event.tax_amount != null ? Number(event.tax_amount) : undefined,
+        discount_amount: event.discount_amount != null ? Number(event.discount_amount) : undefined,
         user_id: event.user_id,
       });
       this.logger.log(`Auto-entry created for payment.received #${event.payment_id}`);
@@ -82,6 +84,7 @@ export class AccountingEventsListener {
     order_number?: string;
     subtotal_amount: number;
     tax_amount: number;
+    discount_amount?: number;
     total_amount: number;
     user_id?: number;
   }) {
@@ -93,6 +96,7 @@ export class AccountingEventsListener {
         order_number: event.order_number,
         subtotal_amount: Number(event.subtotal_amount),
         tax_amount: Number(event.tax_amount),
+        discount_amount: event.discount_amount != null ? Number(event.discount_amount) : undefined,
         total_amount: Number(event.total_amount),
         user_id: event.user_id,
       });
@@ -167,6 +171,7 @@ export class AccountingEventsListener {
     health_deduction: number;
     pension_deduction: number;
     approved_by: number;
+    cost_center_breakdown?: Record<string, { earnings: number; employer_costs: number }>;
   }) {
     try {
       await this.auto_entry_service.onPayrollApproved({
@@ -180,6 +185,7 @@ export class AccountingEventsListener {
         health_deduction: Number(event.health_deduction),
         pension_deduction: Number(event.pension_deduction),
         user_id: event.approved_by,
+        cost_center_breakdown: event.cost_center_breakdown,
       });
       this.logger.log(`Auto-entry created for payroll.approved #${event.payroll_run_id}`);
     } catch (error) {
@@ -291,6 +297,31 @@ export class AccountingEventsListener {
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for purchase_order.received #${event.purchase_order_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  @OnEvent('purchase_order.payment')
+  async handlePurchaseOrderPayment(event: {
+    purchase_order_id: number;
+    organization_id: number;
+    amount: number;
+    payment_method: string;
+    user_id?: number;
+  }) {
+    try {
+      await this.auto_entry_service.onPurchaseOrderPayment({
+        purchase_order_id: event.purchase_order_id,
+        organization_id: event.organization_id,
+        amount: Number(event.amount),
+        payment_method: event.payment_method,
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for purchase_order.payment PO #${event.purchase_order_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for purchase_order.payment PO #${event.purchase_order_id}: ${error.message}`,
         error.stack,
       );
     }

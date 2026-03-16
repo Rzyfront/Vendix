@@ -236,7 +236,7 @@ export class QuotationListComponent {
       icon: 'arrow-right-circle',
       variant: 'success',
       action: (item: Quotation) => this.convert.emit(item),
-      show: (item: Quotation) => item.status === 'accepted',
+      show: (item: Quotation) => ['draft', 'sent', 'accepted'].includes(item.status),
     },
     {
       label: 'Editar',

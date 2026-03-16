@@ -507,6 +507,11 @@ export class ProductQueryDto {
   @IsBoolean()
   @Type(() => Boolean)
   include_variants?: boolean = false;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  track_inventory?: boolean;
 }
 
 // Product Variants DTOs

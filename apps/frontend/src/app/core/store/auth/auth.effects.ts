@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { of } from 'rxjs';
-import { map, mergeMap, catchError, tap } from 'rxjs/operators';
+import { map, mergeMap, catchError, tap, withLatestFrom, filter } from 'rxjs/operators';
 import { Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { AuthService } from '../../services/auth.service';
@@ -18,6 +18,7 @@ import { ConfigFacade } from '../config';
 import { AuthFacade } from './auth.facade';
 import { isTokenExpired } from '../persistence';
 import { ThemeService } from '../../services/theme.service';
+import { TenantFacade } from '../tenant';
 import * as AuthActions from './auth.actions';
 import * as ConfigActions from '../config/config.actions';
 
@@ -34,6 +35,7 @@ export class AuthEffects {
   private themeService = inject(ThemeService);
   private onboardingWizardService = inject(OnboardingWizardService);
   private tokenRefreshTimer = inject(TokenRefreshTimerService);
+  private tenantFacade = inject(TenantFacade);
   private store = inject(Store);
 
   login$ = createEffect(() =>
@@ -588,6 +590,42 @@ export class AuthEffects {
           }
 
           this.themeService.applyUserTheme(theme);
+        }),
+      ),
+    { dispatch: false },
+  );
+
+  // Apply branding colors from store_settings on login, restore, or settings update
+  // Only applies on non-Vendix domains (custom domains use their own branding)
+  applyBrandingFromStoreSettings$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(
+          AuthActions.updateStoreSettingsSuccess,
+          AuthActions.loginSuccess,
+          AuthActions.loginCustomerSuccess,
+          AuthActions.restoreAuthState,
+        ),
+        withLatestFrom(this.tenantFacade.isVendixDomain$),
+        filter(([_, isVendixDomain]) => !isVendixDomain),
+        tap(([action]) => {
+          const storeSettings = (action as any).store_settings;
+          if (!storeSettings?.app) return;
+
+          const app = storeSettings.app;
+          this.themeService.applyBranding({
+            logo: { url: app.logo_url || '', alt: app.name || 'Store' },
+            colors: {
+              primary: app.primary_color,
+              secondary: app.secondary_color,
+              accent: app.accent_color || '#FFFFFF',
+              background: '#FFFFFF',
+              surface: '#F8F9FA',
+              text: { primary: '#1a1a1a', secondary: '#6b7280', muted: '#9ca3af' },
+            },
+            fonts: { primary: 'Inter' },
+            favicon: app.favicon_url,
+          });
         }),
       ),
     { dispatch: false },

@@ -10,6 +10,8 @@ import {
   InventoryAdjustment,
   CreateAdjustmentDto,
   AdjustmentQueryDto,
+  AdjustableProduct,
+  BatchCreateAdjustmentsRequest,
   InventoryMovement,
   CreateMovementDto,
   MovementQueryDto,
@@ -136,6 +138,43 @@ export class InventoryService {
   deleteAdjustment(id: number): Observable<ApiResponse<void>> {
     return this.http
       .delete<ApiResponse<void>>(`${this.base_url}/adjustments/${id}`)
+      .pipe(catchError(this.handleError));
+  }
+
+  searchAdjustableProducts(
+    search: string,
+    location_id: number,
+    limit?: number,
+  ): Observable<ApiResponse<AdjustableProduct[]>> {
+    let params = new HttpParams()
+      .set('search', search)
+      .set('location_id', location_id.toString());
+    if (limit) params = params.set('limit', limit.toString());
+
+    return this.http
+      .get<
+        ApiResponse<AdjustableProduct[]>
+      >(`${this.base_url}/adjustments/search-products`, { params })
+      .pipe(catchError(this.handleError));
+  }
+
+  batchCreateAdjustments(
+    dto: BatchCreateAdjustmentsRequest,
+  ): Observable<ApiResponse<InventoryAdjustment[]>> {
+    return this.http
+      .post<
+        ApiResponse<InventoryAdjustment[]>
+      >(`${this.base_url}/adjustments/batch`, dto)
+      .pipe(catchError(this.handleError));
+  }
+
+  batchCreateAndComplete(
+    dto: BatchCreateAdjustmentsRequest,
+  ): Observable<ApiResponse<InventoryAdjustment[]>> {
+    return this.http
+      .post<
+        ApiResponse<InventoryAdjustment[]>
+      >(`${this.base_url}/adjustments/batch-complete`, dto)
       .pipe(catchError(this.handleError));
   }
 

@@ -93,8 +93,42 @@
 // ==================== Theme Selection ====================
 .theme-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 0.75rem;
+}
+
+// Glass theme preview
+.glass-preview {
+  background:
+    linear-gradient(135deg,
+      rgba(255, 255, 255, 0.4) 0%,
+      rgba(255, 255, 255, 0.1) 50%,
+      rgba(var(--color-primary-rgb, 126, 215, 165), 0.2) 100%
+    ) !important;
+  backdrop-filter: blur(4px);
+  position: relative;
+  overflow: hidden;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: linear-gradient(
+      45deg,
+      transparent 30%,
+      rgba(255, 255, 255, 0.3) 50%,
+      transparent 70%
+    );
+    animation: glass-shimmer 3s ease-in-out infinite;
+  }
+}
+
+@keyframes glass-shimmer {
+  0% { transform: translateX(-100%) rotate(45deg); }
+  100% { transform: translateX(100%) rotate(45deg); }
 }
 
 .theme-box {
@@ -134,6 +168,23 @@
       font-weight: var(--fw-bold);
     }
   }
+
+  &.disabled {
+    pointer-events: none;
+    opacity: 0.45;
+
+    .theme-preview {
+      filter: grayscale(0.4);
+    }
+  }
+}
+
+.coming-soon-label {
+  font-size: 9px;
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 // ==================== Modules Section ====================

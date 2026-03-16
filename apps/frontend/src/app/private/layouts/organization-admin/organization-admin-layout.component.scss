@@ -37,6 +37,19 @@ main {
   background-color: var(--color-background);
 }
 
+/* ===== Glass Theme Overrides ===== */
+:host-context([data-theme-preset="glass"]) {
+  main {
+    background: rgba(255, 255, 255, 0.25);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+
+  .main-content {
+    background: transparent;
+  }
+}
+
 /* Ensure proper spacing */
 .p-6 {
   padding: 1.5rem;

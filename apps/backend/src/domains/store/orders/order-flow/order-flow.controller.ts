@@ -1,3 +1,5 @@
+import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
+import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import {
   Controller,
   Post,
@@ -11,6 +13,7 @@ import {
   Req,
 } from '@nestjs/common';
 import { OrderFlowService } from './order-flow.service';
+import { RefundFlowService } from './services/refund-flow.service';
 import {
   PayOrderDto,
   ShipOrderDto,
@@ -18,6 +21,7 @@ import {
   CancelOrderDto,
   RefundOrderDto,
   CancelPaymentDto,
+  CreateRefundDto,
 } from './dto';
 import { ResponseService } from '@common/responses/response.service';
 import { RolesGuard } from '../../../auth/guards/roles.guard';
@@ -25,19 +29,23 @@ import { Roles } from '../../../auth/decorators/roles.decorator';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 
 @Controller('store/orders/:orderId/flow')
+@UseGuards(PermissionsGuard)
 export class OrderFlowController {
   constructor(
     private readonly orderFlowService: OrderFlowService,
+    private readonly refundFlowService: RefundFlowService,
     private readonly responseService: ResponseService,
   ) {}
 
   @Get('transitions')
+  @Permissions('store:orders:order_flow:read')
   async getValidTransitions(@Param('orderId', ParseIntPipe) orderId: number) {
     const transitions = await this.orderFlowService.getValidTransitions(orderId);
     return this.responseService.success(transitions, 'Valid transitions retrieved');
   }
 
   @Post('pay')
+  @Permissions('store:orders:order_flow:create')
   @HttpCode(HttpStatus.OK)
   async payOrder(
     @Param('orderId', ParseIntPipe) orderId: number,
@@ -48,6 +56,7 @@ export class OrderFlowController {
   }
 
   @Post('ship')
+  @Permissions('store:orders:order_flow:create')
   @HttpCode(HttpStatus.OK)
   async shipOrder(
     @Param('orderId', ParseIntPipe) orderId: number,
@@ -58,6 +67,7 @@ export class OrderFlowController {
   }
 
   @Post('deliver')
+  @Permissions('store:orders:order_flow:create')
   @HttpCode(HttpStatus.OK)
   async deliverOrder(
     @Param('orderId', ParseIntPipe) orderId: number,
@@ -68,6 +78,7 @@ export class OrderFlowController {
   }
 
   @Post('confirm-delivery')
+  @Permissions('store:orders:order_flow:create')
   @HttpCode(HttpStatus.OK)
   async confirmDelivery(@Param('orderId', ParseIntPipe) orderId: number) {
     const order = await this.orderFlowService.confirmDelivery(orderId);
@@ -75,6 +86,7 @@ export class OrderFlowController {
   }
 
   @Post('confirm-payment')
+  @Permissions('store:orders:order_flow:create')
   @HttpCode(HttpStatus.OK)
   async confirmPayment(@Param('orderId', ParseIntPipe) orderId: number) {
     const order = await this.orderFlowService.confirmPayment(orderId);
@@ -82,6 +94,7 @@ export class OrderFlowController {
   }
 
   @Post('cancel-payment')
+  @Permissions('store:orders:order_flow:create')
   @HttpCode(HttpStatus.OK)
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'OWNER', 'ADMIN')
@@ -96,6 +109,7 @@ export class OrderFlowController {
   }
 
   @Post('cancel')
+  @Permissions('store:orders:order_flow:create')
   @HttpCode(HttpStatus.OK)
   async cancelOrder(
     @Param('orderId', ParseIntPipe) orderId: number,
@@ -106,12 +120,40 @@ export class OrderFlowController {
   }
 
   @Post('refund')
+  @Permissions('store:orders:order_flow:create')
   @HttpCode(HttpStatus.OK)
   async refundOrder(
     @Param('orderId', ParseIntPipe) orderId: number,
-    @Body() dto: RefundOrderDto,
+    @Body() dto: CreateRefundDto,
   ) {
-    const order = await this.orderFlowService.refundOrder(orderId, dto);
-    return this.responseService.success(order, 'Order refunded successfully');
+    const refund = await this.refundFlowService.createRefund(orderId, dto);
+    return this.responseService.success(refund, 'Order refunded successfully');
+  }
+
+  @Post('refund/preview')
+  @Permissions('store:orders:order_flow:read')
+  @HttpCode(HttpStatus.OK)
+  async previewRefund(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Body() dto: CreateRefundDto,
+  ) {
+    const preview = await this.refundFlowService.previewRefund(orderId, dto);
+    return this.responseService.success(preview, 'Refund preview calculated');
+  }
+}
+
+@Controller('store/orders/:orderId/refunds')
+@UseGuards(PermissionsGuard)
+export class OrderRefundsController {
+  constructor(
+    private readonly refundFlowService: RefundFlowService,
+    private readonly responseService: ResponseService,
+  ) {}
+
+  @Get()
+  @Permissions('store:orders:order_flow:read')
+  async getOrderRefunds(@Param('orderId', ParseIntPipe) orderId: number) {
+    const refunds = await this.refundFlowService.getOrderRefunds(orderId);
+    return this.responseService.success(refunds, 'Order refunds retrieved');
   }
 }

@@ -1,15 +1,25 @@
-import { Component, OnChanges, SimpleChanges, Output, EventEmitter, Input, inject } from '@angular/core';
+import { Component, OnChanges, OnDestroy, SimpleChanges, Output, EventEmitter, Input, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
-import { Observable } from 'rxjs';
+import { Actions, ofType } from '@ngrx/effects';
+import { Observable, Subject } from 'rxjs';
+import { takeUntil, take } from 'rxjs/operators';
 import {
   calculatePayrollRun,
+  calculatePayrollRunSuccess,
   approvePayrollRun,
+  approvePayrollRunSuccess,
   sendPayrollRun,
+  sendPayrollRunSuccess,
   payPayrollRun,
+  payPayrollRunSuccess,
   cancelPayrollRun,
+  calculatePayrollRunFailure,
+  approvePayrollRunFailure,
+  sendPayrollRunFailure,
+  payPayrollRunFailure,
 } from '../../../state/actions/payroll.actions';
-import { selectPayrollRunsLoading } from '../../../state/selectors/payroll.selectors';
+import { selectCurrentPayrollRunLoading } from '../../../state/selectors/payroll.selectors';
 import { PayrollRun, PayrollItem } from '../../../interfaces/payroll.interface';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
@@ -220,103 +230,136 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
           </div>
         </div>
 
-        <!-- No Items -->
-        <div *ngIf="!payrollRun.items || payrollRun.items.length === 0" class="p-6 text-center text-text-secondary">
-          <app-icon name="file-text" [size]="40" class="text-gray-300 mb-2"></app-icon>
-          <p>No hay ítems en esta nómina.</p>
-          <p class="text-xs mt-1" *ngIf="payrollRun.status === 'draft'">Calcule la nómina para generar el desglose.</p>
+        <!-- No Items (Empty State) -->
+        <div *ngIf="!payrollRun.items || payrollRun.items.length === 0"
+          class="py-12 flex flex-col items-center rounded-lg border-2 border-dashed border-border">
+          <div class="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mb-4">
+            <app-icon name="file-text" [size]="28" class="text-gray-400"></app-icon>
+          </div>
+          <p class="text-sm font-medium text-text-primary mb-1">No hay items en esta nomina</p>
+          <p class="text-xs text-text-secondary" *ngIf="payrollRun.status === 'draft'">
+            Calcule la nomina para generar el desglose por empleado.
+          </p>
+          <p class="text-xs text-text-secondary" *ngIf="payrollRun.status !== 'draft'">
+            Esta nomina no tiene items registrados.
+          </p>
         </div>
 
         <!-- State Transition Actions -->
-        <div class="mt-5 pt-4 border-t border-border space-y-2"
+        <div class="mt-6 pt-4 border-t border-border"
           *ngIf="payrollRun.status !== 'paid' && payrollRun.status !== 'cancelled'">
-          <span class="text-xs font-medium text-text-secondary uppercase tracking-wide">Acciones</span>
+          <h3 class="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Acciones</h3>
 
-          <!-- Draft: Calculate -->
-          <div *ngIf="payrollRun.status === 'draft'" class="grid grid-cols-2 gap-2">
-            <app-button
-              variant="primary"
-              size="sm"
-              [fullWidth]="true"
-              (clicked)="onCalculate()"
-              [loading]="(loading$ | async) || false"
-            >
-              Calcular Nómina
-            </app-button>
+          <!-- Fast-track: process all remaining steps -->
+          <div *ngIf="getRemainingSteps(payrollRun.status).length > 1 && !fastTracking"
+            class="mb-3 p-3 bg-primary/5 rounded-xl border border-primary/15">
+            <div class="flex items-start gap-3">
+              <div class="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                <app-icon name="zap" [size]="16" class="text-primary"></app-icon>
+              </div>
+              <div class="flex-1 min-w-0">
+                <span class="text-xs font-semibold text-text-primary block mb-0.5">Procesamiento rapido</span>
+                <span class="text-[11px] text-text-secondary block mb-2">
+                  {{ getRemainingStepsLabel(payrollRun.status) }}
+                </span>
+                <app-button
+                  variant="primary"
+                  size="sm"
+                  [fullWidth]="true"
+                  (clicked)="onFastTrack()"
+                  [loading]="(loading$ | async) || false"
+                >
+                  <app-icon name="skip-forward" [size]="16" slot="icon"></app-icon>
+                  Procesar Completo
+                </app-button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Fast-track progress indicator -->
+          <div *ngIf="fastTracking"
+            class="mb-3 p-3 bg-blue-50 rounded-xl border border-blue-200">
+            <div class="flex items-center gap-2 mb-2">
+              <div class="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+              <span class="text-xs font-semibold text-blue-800">Procesando: {{ fastTrackCurrentLabel }}</span>
+            </div>
+            <div class="w-full bg-blue-200 rounded-full h-1.5">
+              <div class="bg-blue-600 h-1.5 rounded-full transition-all duration-500"
+                [style.width.%]="fastTrackProgress"></div>
+            </div>
+          </div>
+
+          <!-- Step-by-step actions -->
+          <div class="space-y-2" *ngIf="!fastTracking">
+            <!-- Divider when fast-track is available -->
+            <div *ngIf="getRemainingSteps(payrollRun.status).length > 1"
+              class="flex items-center gap-3 py-1">
+              <div class="flex-1 h-px bg-border"></div>
+              <span class="text-[10px] font-bold text-text-secondary uppercase tracking-widest">Paso a paso</span>
+              <div class="flex-1 h-px bg-border"></div>
+            </div>
+
+            <!-- Draft: Calculate -->
+            <ng-container *ngIf="payrollRun.status === 'draft'">
+              <app-button
+                variant="primary"
+                [fullWidth]="true"
+                (clicked)="onCalculate()"
+                [loading]="(loading$ | async) || false"
+              >
+                <app-icon name="calculator" [size]="16" slot="icon"></app-icon>
+                Calcular Nomina
+              </app-button>
+            </ng-container>
+
+            <!-- Calculated: Approve -->
+            <ng-container *ngIf="payrollRun.status === 'calculated'">
+              <app-button
+                variant="success"
+                [fullWidth]="true"
+                (clicked)="onApprove()"
+                [loading]="(loading$ | async) || false"
+              >
+                <app-icon name="check-circle" [size]="16" slot="icon"></app-icon>
+                Aprobar
+              </app-button>
+            </ng-container>
+
+            <!-- Approved: Send -->
+            <ng-container *ngIf="payrollRun.status === 'approved'">
+              <app-button
+                variant="primary"
+                [fullWidth]="true"
+                (clicked)="onSend()"
+                [loading]="(loading$ | async) || false"
+              >
+                <app-icon name="send" [size]="16" slot="icon"></app-icon>
+                Enviar
+              </app-button>
+            </ng-container>
+
+            <!-- Sent/Accepted: Pay -->
+            <ng-container *ngIf="payrollRun.status === 'sent' || payrollRun.status === 'accepted'">
+              <app-button
+                variant="success"
+                [fullWidth]="true"
+                (clicked)="onPay()"
+                [loading]="(loading$ | async) || false"
+              >
+                <app-icon name="banknote" [size]="16" slot="icon"></app-icon>
+                Marcar Pagada
+              </app-button>
+            </ng-container>
+
+            <!-- Cancel -->
             <app-button
               variant="outline-danger"
-              size="sm"
               [fullWidth]="true"
               (clicked)="onCancel()"
               [loading]="(loading$ | async) || false"
             >
-              Cancelar
-            </app-button>
-          </div>
-
-          <!-- Calculated: Approve / Cancel -->
-          <div *ngIf="payrollRun.status === 'calculated'" class="grid grid-cols-2 gap-2">
-            <app-button
-              variant="success"
-              size="sm"
-              [fullWidth]="true"
-              (clicked)="onApprove()"
-              [loading]="(loading$ | async) || false"
-            >
-              Aprobar
-            </app-button>
-            <app-button
-              variant="outline-warning"
-              size="sm"
-              [fullWidth]="true"
-              (clicked)="onCancel()"
-              [loading]="(loading$ | async) || false"
-            >
-              Cancelar
-            </app-button>
-          </div>
-
-          <!-- Approved: Send / Cancel -->
-          <div *ngIf="payrollRun.status === 'approved'" class="grid grid-cols-2 gap-2">
-            <app-button
-              variant="primary"
-              size="sm"
-              [fullWidth]="true"
-              (clicked)="onSend()"
-              [loading]="(loading$ | async) || false"
-            >
-              Enviar
-            </app-button>
-            <app-button
-              variant="outline-warning"
-              size="sm"
-              [fullWidth]="true"
-              (clicked)="onCancel()"
-              [loading]="(loading$ | async) || false"
-            >
-              Cancelar
-            </app-button>
-          </div>
-
-          <!-- Sent: Pay / Cancel -->
-          <div *ngIf="payrollRun.status === 'sent' || payrollRun.status === 'accepted'" class="grid grid-cols-2 gap-2">
-            <app-button
-              variant="success"
-              size="sm"
-              [fullWidth]="true"
-              (clicked)="onPay()"
-              [loading]="(loading$ | async) || false"
-            >
-              Marcar Pagada
-            </app-button>
-            <app-button
-              variant="outline-warning"
-              size="sm"
-              [fullWidth]="true"
-              (clicked)="onCancel()"
-              [loading]="(loading$ | async) || false"
-            >
-              Cancelar
+              <app-icon name="x-circle" [size]="16" slot="icon"></app-icon>
+              Cancelar Nomina
             </app-button>
           </div>
         </div>
@@ -336,7 +379,7 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
     </app-modal>
   `
 })
-export class PayrollRunDetailComponent implements OnChanges {
+export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
   @Input() isOpen = false;
   @Input() payrollRun: PayrollRun | null = null;
   @Output() isOpenChange = new EventEmitter<boolean>();
@@ -344,14 +387,43 @@ export class PayrollRunDetailComponent implements OnChanges {
   loading$: Observable<boolean>;
   expandedItems: Record<number, boolean> = {};
 
+  // Fast-track state
+  fastTracking = false;
+  fastTrackCurrentLabel = '';
+  fastTrackProgress = 0;
+
+  private destroy$ = new Subject<void>();
+  private fastTrackCancel$ = new Subject<void>();
+  private actions$ = inject(Actions);
+
+  private readonly STEPS_ORDER = ['draft', 'calculated', 'approved', 'sent', 'paid'] as const;
+  private readonly STEP_CONFIG: Record<string, { label: string; totalWeight: number }> = {
+    draft: { label: 'Calculando nomina...', totalWeight: 25 },
+    calculated: { label: 'Aprobando...', totalWeight: 50 },
+    approved: { label: 'Enviando...', totalWeight: 75 },
+    sent: { label: 'Registrando pago...', totalWeight: 100 },
+  };
+
   constructor(private store: Store) {
-    this.loading$ = this.store.select(selectPayrollRunsLoading);
+    this.loading$ = this.store.select(selectCurrentPayrollRunLoading);
   }
 
   ngOnChanges(changes: SimpleChanges) {
     if (changes['payrollRun']) {
-      this.expandedItems = {};
+      const prev = changes['payrollRun'].previousValue;
+      const curr = changes['payrollRun'].currentValue;
+      if (prev?.id !== curr?.id) {
+        this.expandedItems = {};
+        this.stopFastTrack();
+      }
     }
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+    this.fastTrackCancel$.next();
+    this.fastTrackCancel$.complete();
   }
 
   toggleItem(index: number): void {
@@ -367,7 +439,110 @@ export class PayrollRunDetailComponent implements OnChanges {
     return (value || 0).toLocaleString('es-CO');
   }
 
-  // State transition actions
+  // ── Fast-track ──────────────────────────────────────────
+
+  getRemainingSteps(status: string): string[] {
+    const idx = this.STEPS_ORDER.indexOf(status as any);
+    if (idx === -1) return [];
+    return this.STEPS_ORDER.slice(idx + 1) as unknown as string[];
+  }
+
+  getRemainingStepsLabel(status: string): string {
+    const steps = this.getRemainingSteps(status);
+    const labels: Record<string, string> = {
+      calculated: 'Calcular',
+      approved: 'Aprobar',
+      sent: 'Enviar',
+      paid: 'Pagar',
+    };
+    return steps.map(s => labels[s] || s).join(' → ');
+  }
+
+  onFastTrack(): void {
+    if (!this.payrollRun) return;
+    this.fastTracking = true;
+    this.fastTrackCancel$ = new Subject<void>();
+    this.dispatchNextStep(this.payrollRun.status, this.payrollRun.id);
+  }
+
+  private dispatchNextStep(currentStatus: string, id: number): void {
+    const config = this.STEP_CONFIG[currentStatus];
+    if (!config) {
+      this.stopFastTrack();
+      return;
+    }
+
+    this.fastTrackCurrentLabel = config.label;
+    this.fastTrackProgress = config.totalWeight - 25;
+
+    // Map status to action + success/failure actions
+    const actionMap: Record<string, { dispatch: any; success: any; failure: any; nextStatus: string }> = {
+      draft: {
+        dispatch: calculatePayrollRun({ id }),
+        success: calculatePayrollRunSuccess,
+        failure: calculatePayrollRunFailure,
+        nextStatus: 'calculated',
+      },
+      calculated: {
+        dispatch: approvePayrollRun({ id }),
+        success: approvePayrollRunSuccess,
+        failure: approvePayrollRunFailure,
+        nextStatus: 'approved',
+      },
+      approved: {
+        dispatch: sendPayrollRun({ id }),
+        success: sendPayrollRunSuccess,
+        failure: sendPayrollRunFailure,
+        nextStatus: 'sent',
+      },
+      sent: {
+        dispatch: payPayrollRun({ id }),
+        success: payPayrollRunSuccess,
+        failure: payPayrollRunFailure,
+        nextStatus: 'paid',
+      },
+    };
+
+    const step = actionMap[currentStatus];
+    if (!step) {
+      this.stopFastTrack();
+      return;
+    }
+
+    // Listen for success or failure
+    this.actions$.pipe(
+      ofType(step.success, step.failure),
+      take(1),
+      takeUntil(this.fastTrackCancel$),
+      takeUntil(this.destroy$),
+    ).subscribe((action) => {
+      if (action.type === step.failure.type) {
+        this.stopFastTrack();
+        return;
+      }
+
+      this.fastTrackProgress = this.STEP_CONFIG[currentStatus]?.totalWeight || 100;
+
+      if (step.nextStatus === 'paid') {
+        // All done
+        setTimeout(() => this.stopFastTrack(), 500);
+      } else {
+        this.dispatchNextStep(step.nextStatus, id);
+      }
+    });
+
+    this.store.dispatch(step.dispatch);
+  }
+
+  private stopFastTrack(): void {
+    this.fastTracking = false;
+    this.fastTrackCurrentLabel = '';
+    this.fastTrackProgress = 0;
+    this.fastTrackCancel$.next();
+  }
+
+  // ── Step-by-step actions ────────────────────────────────
+
   onCalculate(): void {
     if (this.payrollRun) {
       this.store.dispatch(calculatePayrollRun({ id: this.payrollRun.id }));
@@ -395,11 +570,11 @@ export class PayrollRunDetailComponent implements OnChanges {
   onCancel(): void {
     if (this.payrollRun) {
       this.store.dispatch(cancelPayrollRun({ id: this.payrollRun.id }));
-      this.onClose();
     }
   }
 
   onClose() {
+    this.stopFastTrack();
     this.isOpenChange.emit(false);
   }
 

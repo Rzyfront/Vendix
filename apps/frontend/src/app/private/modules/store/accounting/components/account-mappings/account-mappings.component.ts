@@ -61,6 +61,8 @@ const MAPPING_LABELS: Record<string, string> = {
   'credit_sale.created.accounts_receivable': 'Cuentas por Cobrar (Venta a Credito)',
   'credit_sale.created.revenue': 'Ingresos (Venta a Credito)',
   'credit_sale.created.vat_payable': 'IVA por Pagar (Venta a Credito)',
+  'payment.received.sales_discount': 'Descuentos en Ventas (POS)',
+  'credit_sale.created.sales_discount': 'Descuentos en Ventas (Credito)',
 };
 
 const GROUP_DEFINITIONS: Array<{ key: string; label: string; icon: string; prefixes: string[] }> = [

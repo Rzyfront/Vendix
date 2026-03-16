@@ -6,7 +6,6 @@ import {
   OnInit,
   OnChanges,
   inject,
-  OnDestroy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
@@ -14,9 +13,6 @@ import { InputComponent } from '../../../../../../../shared/components/input/inp
 import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 import { CurrencyService } from '../../../../../../../services/currency.service';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
-import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
-import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
-import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 
 export interface GeneralSettings {
   // Campos de store_settings (existentes)
@@ -25,7 +21,7 @@ export interface GeneralSettings {
   language: string;
   tax_included: boolean;
 
-  // Campos de la tabla stores (NUEVOS)
+  // Campos de la tabla stores
   name?: string;
   logo_url?: string | null;
   store_type?: 'physical' | 'online' | 'hybrid' | 'popup' | 'kiosko';
@@ -34,26 +30,20 @@ export interface GeneralSettings {
 @Component({
   selector: 'app-general-settings-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, InputComponent, SelectorComponent, IconComponent, ButtonComponent],
+  imports: [CommonModule, ReactiveFormsModule, InputComponent, SelectorComponent],
   templateUrl: './general-settings-form.component.html',
   styleUrls: ['./general-settings-form.component.scss'],
 })
-export class GeneralSettingsForm implements OnInit, OnChanges, OnDestroy {
+export class GeneralSettingsForm implements OnInit, OnChanges {
   @Input() settings!: GeneralSettings;
   @Output() settingsChange = new EventEmitter<GeneralSettings>();
-  @Output() pendingLogoUpload = new EventEmitter<{ file: File; preview: string } | null>();
 
   private currencyService = inject(CurrencyService);
   private currencyFormatService = inject(CurrencyFormatService);
-  private toastService = inject(ToastService);
-  logoPreview: string | null = null;
-  private blobPreviewUrl: string | null = null;
-  private logoInputRef: HTMLInputElement | null = null;
 
   form: FormGroup = new FormGroup({
     // Campos de stores
     name: new FormControl(''),
-    logo_url: new FormControl(null),
     store_type: new FormControl('physical'),
     // Campos de store_settings
     timezone: new FormControl('America/Bogota'),
@@ -95,10 +85,6 @@ export class GeneralSettingsForm implements OnInit, OnChanges, OnDestroy {
   // Typed getters for FormControls
   get nameControl(): FormControl<string> {
     return this.form.get('name') as FormControl<string>;
-  }
-
-  get logoUrlControl(): FormControl<string | null> {
-    return this.form.get('logo_url') as FormControl<string | null>;
   }
 
   get storeTypeControl(): FormControl<string> {
@@ -162,10 +148,6 @@ export class GeneralSettingsForm implements OnInit, OnChanges, OnDestroy {
   patchForm() {
     if (this.settings) {
       this.form.patchValue(this.settings);
-      // Preserve local blob preview if user already selected a file (pending upload)
-      if (!this.blobPreviewUrl) {
-        this.logoPreview = this.settings.logo_url || null;
-      }
     }
   }
 
@@ -175,60 +157,4 @@ export class GeneralSettingsForm implements OnInit, OnChanges, OnDestroy {
     }
   }
 
-  triggerLogoInput(): void {
-    if (!this.logoInputRef) {
-      this.logoInputRef = document.createElement('input');
-      this.logoInputRef.type = 'file';
-      this.logoInputRef.accept = 'image/*';
-      this.logoInputRef.addEventListener('change', (e) => this.onLogoFileSelect(e));
-    }
-    this.logoInputRef.click();
-  }
-
-  onLogoFileSelect(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    const files = input.files;
-    if (!files || files.length === 0) return;
-
-    const file = files[0];
-
-    if (!file.type.startsWith('image/')) {
-      this.toastService.warning('Solo se permiten archivos de imagen');
-      return;
-    }
-    if (file.size > 2 * 1024 * 1024) {
-      this.toastService.warning('El logo excede el tamaño máximo de 2MB');
-      return;
-    }
-
-    // Revoke previous blob URL if any
-    if (this.blobPreviewUrl) {
-      URL.revokeObjectURL(this.blobPreviewUrl);
-    }
-
-    // Create local preview — no S3 upload yet (lazy upload on save)
-    this.blobPreviewUrl = URL.createObjectURL(file);
-    this.logoPreview = this.blobPreviewUrl;
-    this.pendingLogoUpload.emit({ file, preview: this.blobPreviewUrl });
-    this.onFieldChange();
-
-    input.value = '';
-  }
-
-  removeLogo(): void {
-    if (this.blobPreviewUrl) {
-      URL.revokeObjectURL(this.blobPreviewUrl);
-      this.blobPreviewUrl = null;
-    }
-    this.logoPreview = null;
-    this.logoUrlControl.setValue(null);
-    this.pendingLogoUpload.emit(null);
-    this.onFieldChange();
-  }
-
-  ngOnDestroy(): void {
-    if (this.blobPreviewUrl) {
-      URL.revokeObjectURL(this.blobPreviewUrl);
-    }
-  }
 }

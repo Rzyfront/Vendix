@@ -15,8 +15,8 @@ import { TourModalComponent } from '../../../shared/components/tour/tour-modal/t
 import { TourService } from '../../../shared/components/tour/services/tour.service';
 import { POS_TOUR_CONFIG } from '../../../shared/components/tour/configs/pos-tour.config';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
-import { Observable, Subject } from 'rxjs';
-import { takeUntil, map } from 'rxjs/operators';
+import { Observable, Subject, combineLatest } from 'rxjs';
+import { takeUntil, map, distinctUntilChanged, skip, pairwise } from 'rxjs/operators';
 
 @Component({
   selector: 'app-store-admin-layout',
@@ -44,6 +44,7 @@ import { takeUntil, map } from 'rxjs/operators';
         [isVendixDomain]="isVendixDomain"
         [collapsed]="sidebarCollapsed"
         [showFooter]="true"
+        [shimmer]="sidebarShimmer"
         (expandSidebar)="toggleSidebar()"
       >
         <!-- Footer Content -->
@@ -81,9 +82,9 @@ import { takeUntil, map } from 'rxjs/operators';
         class="main-content flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ease-in-out"
         [class.margin-desktop]="!sidebarRef?.isMobile"
         [style.margin-left]="
-          !sidebarRef?.isMobile ? (sidebarCollapsed ? '4rem' : '15rem') : '0'
+          !sidebarRef?.isMobile ? (sidebarCollapsed ? '3.5rem' : '12.5rem') : '0'
         "
-        [style.--sidebar-width-current]="sidebarCollapsed ? '4rem' : '15rem'"
+        [style.--sidebar-width-current]="sidebarCollapsed ? '3.5rem' : '12.5rem'"
       >
         <!-- Header -->
         <app-header
@@ -95,10 +96,10 @@ import { takeUntil, map } from 'rxjs/operators';
 
         <!-- Page Content -->
         <main
-          class="flex-1 overflow-y-auto overflow-x-hidden px-1 md:px-4 transition-all duration-300 ease-in-out"
+          class="flex-1 flex flex-col overflow-y-auto overflow-x-hidden px-1 md:px-4 transition-all duration-300 ease-in-out"
           style="background-color: var(--background);"
         >
-          <div class="w-full">
+          <div class="w-full grow shrink-0">
             <router-outlet></router-outlet>
           </div>
         </main>
@@ -143,6 +144,9 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   showTourModal = false;
   private tourService = inject(TourService);
   readonly posTourConfig = POS_TOUR_CONFIG;
+
+  // Sidebar shimmer effect on store type change
+  sidebarShimmer = false;
 
   // Panel UI menu filtering
   private menuFilterService = inject(MenuFilterService);
@@ -201,6 +205,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           route: '/admin/inventory/adjustments',
         },
         {
+          label: 'Transferencias',
+          icon: 'circle',
+          route: '/admin/inventory/transfers',
+        },
+        {
           label: 'Movimientos',
           icon: 'circle',
           route: '/admin/inventory/movements',
@@ -234,7 +243,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       ],
     },
     {
-      label: 'E-commerce',
+      label: 'Tienda en línea',
       icon: 'shopping-bag',
       route: '/admin/ecommerce',
     },
@@ -310,11 +319,6 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       icon: 'book-open',
       children: [
         {
-          label: 'Plan de Cuentas',
-          icon: 'circle',
-          route: '/admin/accounting/chart-of-accounts',
-        },
-        {
           label: 'Asientos Contables',
           icon: 'circle',
           route: '/admin/accounting/journal-entries',
@@ -323,6 +327,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           label: 'Periodos Fiscales',
           icon: 'circle',
           route: '/admin/accounting/fiscal-periods',
+        },
+        {
+          label: 'Plan de Cuentas',
+          icon: 'circle',
+          route: '/admin/accounting/chart-of-accounts',
         },
         {
           label: 'Reportes',
@@ -386,6 +395,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           label: 'Roles',
           icon: 'circle',
           route: '/admin/settings/roles',
+        },
+        {
+          label: 'Caja Registradora',
+          icon: 'circle',
+          route: '/admin/cash-registers',
         },
         {
           label: 'Métodos de Pago',
@@ -463,6 +477,19 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       this.filteredMenuItems = items;
     });
 
+    // Trigger shimmer animation when store_type changes (skip initial emission)
+    combineLatest([
+      this.authFacade.userStoreType$,
+      this.authFacade.storeSettings$,
+    ]).pipe(
+      map(([loginType, settings]) => settings?.general?.store_type || loginType),
+      distinctUntilChanged(),
+      skip(1), // Skip initial value — only react to actual changes
+      takeUntil(this.destroy$),
+    ).subscribe(() => {
+      this.sidebarShimmer = true;
+      setTimeout(() => { this.sidebarShimmer = false; }, 950);
+    });
 
     // Subscribe to domain hostname for sidebar vlink
     this.storeDomainHostname$

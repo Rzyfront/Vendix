@@ -96,6 +96,8 @@ export interface ProductVariant {
   id: number;
   product_id: number;
   sku: string;
+  name?: string;
+  attributes?: Record<string, any>;
   price_override?: number;
   cost_price?: number;
   profit_margin?: number;

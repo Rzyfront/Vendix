@@ -1,3 +1,6 @@
+import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
+import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { UseGuards } from '@nestjs/common';
 import {
   Controller,
   Get,
@@ -17,6 +20,7 @@ import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.i
 import { ResponseService } from '@common/responses/response.service';
 
 @Controller('store/inventory/locations')
+@UseGuards(PermissionsGuard)
 export class LocationsController {
   constructor(
     private readonly locationsService: LocationsService,
@@ -24,6 +28,7 @@ export class LocationsController {
   ) {}
 
   @Post()
+  @Permissions('store:inventory:locations:create')
   async create(
     @Body() createLocationDto: CreateLocationDto,
     @Req() req: AuthenticatedRequest,
@@ -44,6 +49,7 @@ export class LocationsController {
   }
 
   @Get()
+  @Permissions('store:inventory:locations:read')
   async findAll(
     @Query() query: LocationQueryDto,
     @Req() req: AuthenticatedRequest,
@@ -73,6 +79,7 @@ export class LocationsController {
   }
 
   @Get(':id')
+  @Permissions('store:inventory:locations:read')
   async findOne(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     try {
       const result = await this.locationsService.findOne(+id);
@@ -90,6 +97,7 @@ export class LocationsController {
   }
 
   @Patch(':id')
+  @Permissions('store:inventory:locations:update')
   async update(
     @Param('id') id: string,
     @Body() updateLocationDto: UpdateLocationDto,
@@ -111,6 +119,7 @@ export class LocationsController {
   }
 
   @Delete(':id')
+  @Permissions('store:inventory:locations:delete')
   async remove(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     try {
       await this.locationsService.remove(+id);

@@ -9,6 +9,20 @@ export interface StoreUser {
   last_login?: string;
   created_at: string;
   store_user_id?: number;
+  avatar_url?: string;
+}
+
+export interface Role {
+  id: number;
+  name: string;
+  description?: string;
+  is_system_role?: boolean;
+}
+
+export interface StoreUserDetail extends StoreUser {
+  roles: Role[];
+  panel_ui: Record<string, Record<string, boolean>>;
+  email_verified?: boolean;
 }
 
 export enum StoreUserState {
@@ -39,6 +53,15 @@ export interface UpdateStoreUserDto {
   last_name?: string;
   email?: string;
   username?: string;
+  phone?: string;
+}
+
+export interface UpdateUserRolesDto {
+  role_ids: number[];
+}
+
+export interface UpdateUserPanelUIDto {
+  panel_ui: Record<string, Record<string, boolean>>;
 }
 
 export interface StoreUserQuery {

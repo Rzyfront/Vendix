@@ -13,13 +13,18 @@ import { CreateTransferDto } from './dto/create-transfer.dto';
 import { UpdateTransferDto } from './dto/update-transfer.dto';
 import { TransferQueryDto } from './dto/transfer-query.dto';
 
-@Controller('store/orders/stock-transfers')
+@Controller('store/stock-transfers')
 export class StockTransfersController {
   constructor(private readonly stockTransfersService: StockTransfersService) {}
 
   @Post()
   create(@Body() createTransferDto: CreateTransferDto) {
     return this.stockTransfersService.create(createTransferDto);
+  }
+
+  @Get('stats')
+  getStats() {
+    return this.stockTransfersService.getStats();
   }
 
   @Get()

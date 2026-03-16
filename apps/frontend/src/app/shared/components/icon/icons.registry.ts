@@ -172,6 +172,18 @@ import {
   Cpu,
   // Accounting icon
   BookOpen,
+  // Offer/sale icon
+  Flame,
+  // POP detail icons
+  Paperclip,
+  FileDown,
+  Ban,
+  // Permissions modal icons
+  FileSearch,
+  Folders,
+  ArrowLeftRight,
+  LayoutGrid,
+  SearchX,
 } from 'lucide-angular';
 
 /**
@@ -401,6 +413,22 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // Accounting icon
   'book-open': BookOpen,
+
+  // Offer/sale icon
+  flame: Flame,
+
+  // POP detail icons
+  paperclip: Paperclip,
+  'file-down': FileDown,
+  ban: Ban,
+
+  // Permissions modal icons
+  'bar-chart-3': BarChart3,
+  'file-search': FileSearch,
+  folders: Folders,
+  'arrow-left-right': ArrowLeftRight,
+  'layout-grid': LayoutGrid,
+  'search-x': SearchX,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

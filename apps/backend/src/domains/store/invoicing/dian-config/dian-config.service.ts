@@ -6,10 +6,6 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { CreateDianConfigDto } from './dto/create-dian-config.dto';
 import { UpdateDianConfigDto } from './dto/update-dian-config.dto';
 
-/**
- * Service for managing DIAN configurations per store.
- * Handles encryption of sensitive fields (PIN, certificate password).
- */
 @Injectable()
 export class DianConfigService {
   private readonly logger = new Logger(DianConfigService.name);
@@ -27,76 +23,89 @@ export class DianConfigService {
     return context;
   }
 
-  /**
-   * Gets the DIAN configuration for the current store.
-   * Masks sensitive fields (PIN, certificate password).
-   */
-  async getConfig() {
-    const context = this.getContext();
-
-    const config = await this.prisma.dian_configurations.findFirst({
-      where: { store_id: context.store_id },
-    });
-
-    if (!config) {
-      return null;
-    }
-
-    // Mask sensitive fields
+  private maskSensitiveFields(config: any) {
     return {
       ...config,
-      software_pin_encrypted: config.software_pin_encrypted
-        ? '****'
-        : null,
+      software_pin_encrypted: config.software_pin_encrypted ? '****' : null,
       certificate_password_encrypted:
         config.certificate_password_encrypted ? '****' : null,
     };
   }
 
   /**
+   * Gets all DIAN configurations for the current store.
+   * Ordered by: default first, then by creation date.
+   */
+  async getConfigs() {
+    const context = this.getContext();
+
+    const configs = await this.prisma.dian_configurations.findMany({
+      where: { store_id: context.store_id },
+      orderBy: [{ is_default: 'desc' }, { created_at: 'asc' }],
+    });
+
+    return configs.map((c) => this.maskSensitiveFields(c));
+  }
+
+  /**
+   * Gets a single DIAN configuration by ID.
+   */
+  async getConfigById(id: number) {
+    const config = await this.prisma.dian_configurations.findFirst({
+      where: { id },
+    });
+
+    if (!config) {
+      throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
+    }
+
+    return this.maskSensitiveFields(config);
+  }
+
+  /**
    * Creates a new DIAN configuration for the current store.
+   * Allows multiple configurations per store (multi-NIT).
    */
   async create(dto: CreateDianConfigDto) {
     const context = this.getContext();
 
-    // Check if config already exists
-    const existing = await this.prisma.dian_configurations.findFirst({
+    // Check if this is the first config for this store
+    const existing_count = await this.prisma.dian_configurations.count({
       where: { store_id: context.store_id },
     });
 
-    if (existing) {
-      throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_002);
-    }
+    const should_be_default = dto.is_default || existing_count === 0;
 
     const config = await this.prisma.dian_configurations.create({
       data: {
         organization_id: context.organization_id,
         store_id: context.store_id,
+        name: dto.name,
         nit: dto.nit,
+        nit_type: dto.nit_type || 'NIT',
         nit_dv: dto.nit_dv,
+        is_default: should_be_default,
         software_id: dto.software_id,
-        software_pin_encrypted: this.encryption.encrypt(
-          dto.software_pin,
-        ),
+        software_pin_encrypted: this.encryption.encrypt(dto.software_pin),
         environment: dto.environment || 'test',
         enablement_status: 'not_started',
         test_set_id: dto.test_set_id,
       },
     });
 
+    if (should_be_default) {
+      await this.ensureSingleDefault(config.id);
+    }
+
     this.logger.log(
-      `DIAN config created for store ${context.store_id}`,
+      `DIAN config "${dto.name}" created for store ${context.store_id}`,
     );
 
-    return {
-      ...config,
-      software_pin_encrypted: '****',
-      certificate_password_encrypted: null,
-    };
+    return this.maskSensitiveFields(config);
   }
 
   /**
-   * Updates the DIAN configuration.
+   * Updates a DIAN configuration.
    */
   async update(id: number, dto: UpdateDianConfigDto) {
     const config = await this.prisma.dian_configurations.findFirst({
@@ -109,33 +118,31 @@ export class DianConfigService {
 
     const update_data: any = {};
 
+    if (dto.name !== undefined) update_data.name = dto.name;
     if (dto.nit !== undefined) update_data.nit = dto.nit;
+    if (dto.nit_type !== undefined) update_data.nit_type = dto.nit_type;
     if (dto.nit_dv !== undefined) update_data.nit_dv = dto.nit_dv;
-    if (dto.software_id !== undefined)
-      update_data.software_id = dto.software_id;
+    if (dto.is_default !== undefined) update_data.is_default = dto.is_default;
+    if (dto.software_id !== undefined) update_data.software_id = dto.software_id;
     if (dto.software_pin !== undefined)
       update_data.software_pin_encrypted = this.encryption.encrypt(
         dto.software_pin,
       );
-    if (dto.environment !== undefined)
-      update_data.environment = dto.environment;
-    if (dto.test_set_id !== undefined)
-      update_data.test_set_id = dto.test_set_id;
+    if (dto.environment !== undefined) update_data.environment = dto.environment;
+    if (dto.test_set_id !== undefined) update_data.test_set_id = dto.test_set_id;
 
     const updated = await this.prisma.dian_configurations.update({
       where: { id },
       data: update_data,
     });
 
+    if (dto.is_default === true) {
+      await this.ensureSingleDefault(id);
+    }
+
     this.logger.log(`DIAN config ${id} updated`);
 
-    return {
-      ...updated,
-      software_pin_encrypted: '****',
-      certificate_password_encrypted: updated.certificate_password_encrypted
-        ? '****'
-        : null,
-    };
+    return this.maskSensitiveFields(updated);
   }
 
   /**
@@ -159,25 +166,18 @@ export class DianConfigService {
       where: { id },
       data: {
         certificate_s3_key: s3_key,
-        certificate_password_encrypted:
-          this.encryption.encrypt(password),
+        certificate_password_encrypted: this.encryption.encrypt(password),
         certificate_expiry: expiry,
       },
     });
 
-    this.logger.log(
-      `Certificate updated for DIAN config ${id}`,
-    );
+    this.logger.log(`Certificate updated for DIAN config ${id}`);
 
-    return {
-      ...updated,
-      software_pin_encrypted: '****',
-      certificate_password_encrypted: '****',
-    };
+    return this.maskSensitiveFields(updated);
   }
 
   /**
-   * Updates the enablement status of the DIAN configuration.
+   * Updates the enablement status of a DIAN configuration.
    */
   async updateStatus(
     id: number,
@@ -208,31 +208,121 @@ export class DianConfigService {
   }
 
   /**
-   * Gets audit logs for the current store's DIAN configuration.
+   * Sets a configuration as the default for the store.
    */
-  async getAuditLogs(page = 1, limit = 20) {
-    const context = this.getContext();
-
+  async setDefault(id: number) {
     const config = await this.prisma.dian_configurations.findFirst({
-      where: { store_id: context.store_id },
+      where: { id },
     });
 
     if (!config) {
-      return { data: [], total: 0, page, limit };
+      throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
+    }
+
+    await this.prisma.dian_configurations.update({
+      where: { id },
+      data: { is_default: true },
+    });
+
+    await this.ensureSingleDefault(id);
+
+    this.logger.log(`DIAN config ${id} set as default`);
+
+    return this.getConfigById(id);
+  }
+
+  /**
+   * Deletes a DIAN configuration.
+   * If the deleted config was the default, promotes the next one.
+   */
+  async deleteConfig(id: number) {
+    const context = this.getContext();
+
+    const config = await this.prisma.dian_configurations.findFirst({
+      where: { id },
+    });
+
+    if (!config) {
+      throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
+    }
+
+    await this.prisma.dian_configurations.delete({
+      where: { id },
+    });
+
+    // If deleted config was the default, promote the next one
+    if (config.is_default) {
+      const next = await this.prisma.dian_configurations.findFirst({
+        where: { store_id: context.store_id },
+        orderBy: { created_at: 'asc' },
+      });
+
+      if (next) {
+        await this.prisma.dian_configurations.update({
+          where: { id: next.id },
+          data: { is_default: true },
+        });
+      }
+    }
+
+    this.logger.log(`DIAN config ${id} deleted`);
+  }
+
+  /**
+   * Gets audit logs for the current store's DIAN configurations.
+   * Optionally filtered by config_id.
+   */
+  async getAuditLogs(page = 1, limit = 20, config_id?: number) {
+    const context = this.getContext();
+
+    let where_clause: any;
+
+    if (config_id) {
+      where_clause = { dian_configuration_id: config_id };
+    } else {
+      const configs = await this.prisma.dian_configurations.findMany({
+        where: { store_id: context.store_id },
+        select: { id: true },
+      });
+
+      const config_ids = configs.map((c) => c.id);
+
+      if (config_ids.length === 0) {
+        return { data: [], total: 0, page, limit };
+      }
+
+      where_clause = { dian_configuration_id: { in: config_ids } };
     }
 
     const [data, total] = await Promise.all([
       this.prisma.dian_audit_logs.findMany({
-        where: { dian_configuration_id: config.id },
+        where: where_clause,
         orderBy: { created_at: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
       }),
       this.prisma.dian_audit_logs.count({
-        where: { dian_configuration_id: config.id },
+        where: where_clause,
       }),
     ]);
 
     return { data, total, page, limit };
+  }
+
+  /**
+   * Ensures only one config is marked as default per store.
+   * Sets is_default=false for all configs except the given one.
+   */
+  private async ensureSingleDefault(config_id: number) {
+    const context = this.getContext();
+
+    await this.prisma.dian_configurations.updateMany({
+      where: {
+        store_id: context.store_id,
+        id: { not: config_id },
+        is_default: true,
+      },
+      data: { is_default: false },
+    });
   }
 }

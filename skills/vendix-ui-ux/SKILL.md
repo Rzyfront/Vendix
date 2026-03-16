@@ -11,6 +11,37 @@ metadata:
   auto_invoke: "Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns"
 ---
 
+# ⚠️ OBLIGATORIEDAD ABSOLUTA - LEER ANTES DE CONTINUAR
+
+**ESTAS REGLAS NO SON OPCIONALES. SON OBLIGATORIAS.**
+
+Este skill contiene estándares de DISEÑO Y UX que DEBEN seguirse en TODA la codebase de Vendix.
+No importa si "funciona" — si no cumple con estas reglas, el código NO será aceptado.
+
+###🚨 REGLAS CRÍTICAS (NO NEGOCIABLES):
+
+1. **Mobile-First es OBLIGATORIO** — Si escribes estilos desktop-first (usando `max-width`), será rechazado
+2. **Accesibilidad es OBLIGATORIA** — Contraste, touch targets 44px, labels en formularios, focus states
+3. **Tokens de diseño son OBLIGATORIOS** — Usar `var(--color-*)`, nunca hardcodear colores
+4. **HTML semántico es OBLIGATORIO** — `<button>` para acciones, `<a>` para enlaces, nunca `<div (click)>`
+5. **Animaciones GPU son OBLIGATORIAS** — Solo `transform` y `opacity`, nunca `width/height/margin`
+6. **Patrones de Skills son OBLIGATORIOS** — Usar TODOS los patrones descritos en skills complementarias (vendix-frontend-component, vendix-frontend-standard-module, vendix-frontend-data-display, vendix-frontend-stats-cards, vendix-frontend-theme, vendix-frontend-modal, vendix-frontend-icons, vendix-angular-forms, vendix-ecommerce-checkout, vendix-settings-system, vendix-product-pricing)
+
+###📋 CHECKLIST OBLIGATORIO ANTES DE CADA PR:
+
+- [ ] ¿Mi diseño es mobile-first? (base styles para móvil, no desktop)
+- [ ] ¿Mi contraste cumple WCAG AA? (4.5:1 texto, 3:1 UI)
+- [ ] ¿Mis touch targets son ≥ 44px?
+- [ ] ¿Estoy usando variables CSS en vez de colores hardcodeados?
+- [ ] ¿Todos mis formularios tienen labels?
+- [ ] ¿Todos mis elementos interactivos tienen focus states visibles?
+- [ ] ¿Estoy usando HTML semántico?
+- [ ] ¿Estoy aplicando los patrones de las skills complementarias? (componentes, módulos estándar, tablas, stats, theming, modals, icons, formularios, checkout, settings, pricing)
+
+**SI NO CUMPLES ESTAS REGLAS, EL CÓDIGO SERÁ RECHAZADO EN REVIEW.**
+
+---
+
 # Vendix UI/UX — Mobile-First Design Skill
 
 > **Principal mobile-first design skill** — Design philosophy, accessibility, UX patterns, and visual quality checklist for all Vendix apps.
@@ -46,12 +77,12 @@ Choose and COMMIT to a visual direction. Timid design fails:
 
 ### Vendix App Context
 
-| App               | Usage Context                       | UX Priority                                     |
-| ----------------- | ----------------------------------- | ----------------------------------------------- |
-| `STORE_ECOMMERCE` | Customer on mobile, shopping        | Speed, simplicity, conversion                   |
-| `STORE_ADMIN`     | Store owner, mobile/tablet/desktop  | Efficiency, dense data, quick actions            |
-| `STORE_POS`       | In-store salesperson, tablet/desktop| Extreme speed, touch-first, minimal friction     |
-| `ORG_ADMIN`       | Administrator, desktop              | Complex data, multi-store, reports               |
+| App               | Usage Context                        | UX Priority                                  |
+| ----------------- | ------------------------------------ | -------------------------------------------- |
+| `STORE_ECOMMERCE` | Customer on mobile, shopping         | Speed, simplicity, conversion                |
+| `STORE_ADMIN`     | Store owner, mobile/tablet/desktop   | Efficiency, dense data, quick actions        |
+| `STORE_POS`       | In-store salesperson, tablet/desktop | Extreme speed, touch-first, minimal friction |
+| `ORG_ADMIN`       | Administrator, desktop               | Complex data, multi-store, reports           |
 
 > **Complementary skill:** `vendix-app-architecture` — Full details of each app and its domain.
 
@@ -71,13 +102,13 @@ Mobile (base)  →  Tablet (sm/md)  →  Desktop (lg+)
 
 ### Vendix Breakpoints (via PrimeNG + CSS)
 
-| Breakpoint | Value    | Usage                              |
-| ---------- | -------- | ---------------------------------- |
-| Base       | `0px`    | Mobile — default styles            |
-| `sm`       | `640px`  | Large mobile / small tablet        |
-| `md`       | `768px`  | Tablet — main layout change        |
-| `lg`       | `1024px` | Desktop                            |
-| `xl`       | `1280px` | Large desktop                      |
+| Breakpoint | Value    | Usage                       |
+| ---------- | -------- | --------------------------- |
+| Base       | `0px`    | Mobile — default styles     |
+| `sm`       | `640px`  | Large mobile / small tablet |
+| `md`       | `768px`  | Tablet — main layout change |
+| `lg`       | `1024px` | Desktop                     |
+| `xl`       | `1280px` | Large desktop               |
 
 ### Mobile-First SCSS Pattern
 
@@ -220,12 +251,12 @@ These are HARD requirements, not suggestions.
 
 ### Color Contrast (WCAG 2.1 AA)
 
-| Element                          | Minimum Ratio |
-| -------------------------------- | ------------- |
-| Body text                        | 4.5:1         |
-| Large text (18pt+ or 14pt bold)  | 3:1           |
-| UI components, icons             | 3:1           |
-| Focus indicators                 | 3:1           |
+| Element                         | Minimum Ratio |
+| ------------------------------- | ------------- |
+| Body text                       | 4.5:1         |
+| Large text (18pt+ or 14pt bold) | 3:1           |
+| UI components, icons            | 3:1           |
+| Focus indicators                | 3:1           |
 
 ### Touch Targets (Critical for Mobile-First)
 
@@ -376,12 +407,12 @@ $ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1); // Bounce effect
 
 ### Navigation Guidelines
 
-| Scenario           | Pattern              |
-| ------------------ | -------------------- |
-| 10+ sections       | Collapsible sidebar  |
-| 3–6 sections       | Top navigation       |
-| Secondary nav      | Tabs (max 6)         |
-| Deep hierarchy     | Breadcrumbs          |
+| Scenario       | Pattern             |
+| -------------- | ------------------- |
+| 10+ sections   | Collapsible sidebar |
+| 3–6 sections   | Top navigation      |
+| Secondary nav  | Tabs (max 6)        |
+| Deep hierarchy | Breadcrumbs         |
 
 ### Dashboard Content Hierarchy
 
@@ -591,29 +622,29 @@ This skill defines **what** to do (principles and standards). The following skil
 
 ### Component Implementation
 
-| Need                   | Skill                       | Description                                |
-| ---------------------- | --------------------------- | ------------------------------------------ |
-| Component structure    | `vendix-frontend-component` | Folders, naming, signals, OnPush           |
-| Typed forms            | `vendix-angular-forms`      | Reactive Forms, `FormControl<T>`, getters  |
-| Modals                 | `vendix-frontend-modal`     | `ModalComponent`, open/close, NG0100       |
-| Icons                  | `vendix-frontend-icons`     | Registration and usage of Lucide with `<app-icon>` |
+| Need                | Skill                       | Description                                        |
+| ------------------- | --------------------------- | -------------------------------------------------- |
+| Component structure | `vendix-frontend-component` | Folders, naming, signals, OnPush                   |
+| Typed forms         | `vendix-angular-forms`      | Reactive Forms, `FormControl<T>`, getters          |
+| Modals              | `vendix-frontend-modal`     | `ModalComponent`, open/close, NG0100               |
+| Icons               | `vendix-frontend-icons`     | Registration and usage of Lucide with `<app-icon>` |
 
 ### Layout and Data
 
-| Need                        | Skill                             | Description                                |
-| --------------------------- | --------------------------------- | ------------------------------------------ |
-| Standard admin module       | `vendix-frontend-standard-module` | Stats + search + table, z-index stack      |
-| Responsive tables and cards | `vendix-frontend-data-display`    | `ResponsiveDataViewComponent` auto-switch  |
-| Stats with horizontal scroll | `vendix-frontend-stats-cards`    | `StatsComponent`, `.stats-container`       |
-| Sticky headers              | `vendix-frontend-sticky-header`  | Glassmorphism, z-30, detail pages          |
+| Need                         | Skill                             | Description                               |
+| ---------------------------- | --------------------------------- | ----------------------------------------- |
+| Standard admin module        | `vendix-frontend-standard-module` | Stats + search + table, z-index stack     |
+| Responsive tables and cards  | `vendix-frontend-data-display`    | `ResponsiveDataViewComponent` auto-switch |
+| Stats with horizontal scroll | `vendix-frontend-stats-cards`     | `StatsComponent`, `.stats-container`      |
+| Sticky headers               | `vendix-frontend-sticky-header`   | Glassmorphism, z-30, detail pages         |
 
 ### Theming and State
 
-| Need                  | Skill                          | Description                            |
-| --------------------- | ------------------------------ | -------------------------------------- |
-| CSS variables, branding | `vendix-frontend-theme`      | `ThemeService`, multi-tenant branding  |
-| NgRx state            | `vendix-frontend-state`        | Reducers, actions, selectors, effects  |
-| Lazy routing          | `vendix-frontend-lazy-routing` | Lazy-loaded routes for sub-modules     |
+| Need                    | Skill                          | Description                           |
+| ----------------------- | ------------------------------ | ------------------------------------- |
+| CSS variables, branding | `vendix-frontend-theme`        | `ThemeService`, multi-tenant branding |
+| NgRx state              | `vendix-frontend-state`        | Reducers, actions, selectors, effects |
+| Lazy routing            | `vendix-frontend-lazy-routing` | Lazy-loaded routes for sub-modules    |
 
 ### Business Context
 

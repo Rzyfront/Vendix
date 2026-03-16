@@ -1,9 +1,10 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable, of, throwError } from 'rxjs';
+import { Observable, of, throwError, Subject } from 'rxjs';
 import { catchError, map, timeout, delay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
+import { PosCashRegisterService } from './pos-cash-register.service';
 import { CartState } from '../models/cart.model';
 import {
   PaymentMethod,
@@ -26,6 +27,38 @@ export type {
 })
 export class PosPaymentService {
   private readonly apiUrl = `${environment.apiUrl}/store/payments/pos`;
+
+  /**
+   * Emitted when a transactional action requires an active cash register session.
+   * The POS component listens to this to show the session-open modal.
+   */
+  private readonly _sessionRequired = new Subject<void>();
+  readonly sessionRequired$ = this._sessionRequired.asObservable();
+
+  /** Whether require_session_for_sales is active (set from store settings) */
+  private _requireSessionForSales = false;
+
+  setRequireSessionForSales(value: boolean): void {
+    this._requireSessionForSales = value;
+  }
+
+  /**
+   * Validates cash register session for transactional operations.
+   * Returns an error Observable if session is required but missing.
+   * Returns null if validation passes.
+   */
+  private validateCashRegisterSession(): Observable<never> | null {
+    if (!this.cashRegisterService.isEnabled) return null;
+    if (!this._requireSessionForSales) return null;
+    if (this.cashRegisterService.hasActiveSession()) return null;
+
+    // Emit event so POS component can show the open-session modal
+    this._sessionRequired.next();
+    return throwError(
+      () => new Error('Debes abrir una caja registradora para procesar ventas.'),
+    );
+  }
+
   private readonly PAYMENT_METHODS: PaymentMethod[] = [
     {
       id: 'cash',
@@ -68,7 +101,17 @@ export class PosPaymentService {
   constructor(
     private http: HttpClient,
     private storeContextService: StoreContextService,
+    private cashRegisterService: PosCashRegisterService,
   ) {}
+
+  /**
+   * Get register_id from centralized service.
+   * Uses PosCashRegisterService which handles both feature-enabled (DB) and
+   * feature-disabled (localStorage) modes transparently.
+   */
+  private getRegisterId(): string | null {
+    return this.cashRegisterService.getRegisterId();
+  }
 
   getPaymentMethods(): Observable<PaymentMethod[]> {
     // Use the context-aware endpoint that relies on the user's token scope
@@ -137,6 +180,9 @@ export class PosPaymentService {
    * Process payment for immediate sale
    */
   processPayment(request: PaymentRequest): Observable<PaymentResponse> {
+    const sessionError = this.validateCashRegisterSession();
+    if (sessionError) return sessionError;
+
     const user_id = this.storeContextService.getUserId();
     if (!user_id) {
       return throwError(
@@ -144,16 +190,7 @@ export class PosPaymentService {
       );
     }
 
-    const register_id = localStorage.getItem('pos_register_id');
-    if (!register_id) {
-      // Ideally this should be strictly required, but for now we might fallback to a session ID if not configured,
-      // BUT user said "nothing hardcoded". So we error if not configured.
-      // However, to avoid breaking the app if no register config exists, we might need a prompt.
-      // The prompt said "si algun dato falta... notificarse". So throwing error satisfies this.
-      return throwError(
-        () => new Error('Caja no configurada (Register ID missing).'),
-      );
-    }
+    const register_id = this.getRegisterId();
 
     // For payment-only, we might not always have a customer if it's a direct charge (e.g. paying a debt).
     // But the request has customerEmail. If we don't have a structured customer, we fail?
@@ -219,17 +256,17 @@ export class PosPaymentService {
   processSaleWithPayment(
     cartState: CartState,
     paymentRequest: PaymentRequest,
-    createdBy: string, // This arg was passed but ignored in favor of hardcoded 'current_user'. Now we use StoreContextService internally or this arg if proven reliable.
+    createdBy: string,
   ): Observable<any> {
+    const sessionError = this.validateCashRegisterSession();
+    if (sessionError) return sessionError;
+
     const user_id = this.storeContextService.getUserId();
     if (!user_id) {
       return throwError(() => new Error('Usuario no identificado.'));
     }
 
-    const register_id = localStorage.getItem('pos_register_id');
-    if (!register_id) {
-      return throwError(() => new Error('Caja no configurada.'));
-    }
+    const register_id = this.getRegisterId();
 
     // Check if anonymous sale is allowed
     const isAnonymousSale = paymentRequest.isAnonymousSale === true;
@@ -343,15 +380,15 @@ export class PosPaymentService {
     paymentRequest: PaymentRequest | null,
     createdBy: string,
   ): Observable<any> {
+    const sessionError = this.validateCashRegisterSession();
+    if (sessionError) return sessionError;
+
     const user_id = this.storeContextService.getUserId();
     if (!user_id) {
       return throwError(() => new Error('Usuario no identificado.'));
     }
 
-    const register_id = localStorage.getItem('pos_register_id');
-    if (!register_id) {
-      return throwError(() => new Error('Caja no configurada.'));
-    }
+    const register_id = this.getRegisterId();
 
     if (!cartState.customer) {
       return throwError(
@@ -466,15 +503,15 @@ export class PosPaymentService {
    * Process credit sale (no immediate payment)
    */
   processCreditSale(cartState: CartState, createdBy: string): Observable<any> {
+    const sessionError = this.validateCashRegisterSession();
+    if (sessionError) return sessionError;
+
     const user_id = this.storeContextService.getUserId();
     if (!user_id) {
       return throwError(() => new Error('Usuario no identificado.'));
     }
 
-    const register_id = localStorage.getItem('pos_register_id');
-    if (!register_id) {
-      return throwError(() => new Error('Caja no configurada.'));
-    }
+    const register_id = this.getRegisterId();
 
     if (!cartState.customer) {
       return throwError(() => new Error('Debe seleccionar un cliente.'));
@@ -547,26 +584,14 @@ export class PosPaymentService {
    * Save draft order
    */
   saveDraft(cartState: CartState, createdBy: string): Observable<any> {
+    // Drafts are NOT transactional — no cash register session required.
     const user_id = this.storeContextService.getUserId();
     if (!user_id) {
       return throwError(() => new Error('Usuario no identificado.'));
     }
 
-    const register_id = localStorage.getItem('pos_register_id');
-    // Draft might not need register strictly, but let's be consistent or lax.
-    // User said "nada del pos puede ser hardcodeado".
-    // If register missing, we can fail or skip it? Usually drafts are register-agnostic?
-    // I'll fail if missing to be safe per instructions.
-    if (!register_id) {
-      return throwError(() => new Error('Caja no configurada.'));
-    }
+    const register_id = this.getRegisterId(); // Optional for drafts
 
-    // Drafts *might* not have a customer yet?
-    // "si algun dato falta... notificarse".
-    // If saving draft without customer is valid (e.g. anonymous draft), we can allow null.
-    // But "customer_id" 1 was hardcoded. If we remove hardcoding, we must either pass null or require it.
-    // I'll check if backend allows null customer. If I pass null, does it work?
-    // If not, I'll error.
     if (!cartState.customer) {
       return throwError(
         () =>
@@ -599,7 +624,7 @@ export class PosPaymentService {
       discount_amount: Number(cartState.summary.discountAmount.toFixed(2)),
       total_amount: Number(cartState.summary.total.toFixed(2)),
       requires_payment: false,
-      register_id: register_id,
+      ...(register_id ? { register_id } : {}),
       seller_user_id: user_id,
       internal_notes: cartState.notes || '',
       update_inventory: false,

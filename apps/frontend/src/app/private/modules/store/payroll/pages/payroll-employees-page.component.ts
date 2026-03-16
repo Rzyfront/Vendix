@@ -18,6 +18,7 @@ import { PayrollStatsComponent } from '../components/payroll-stats/payroll-stats
 import { EmployeeListComponent } from '../components/employees/employee-list/employee-list.component';
 import { EmployeeCreateComponent } from '../components/employees/employee-create/employee-create.component';
 import { EmployeeDetailComponent } from '../components/employees/employee-detail/employee-detail.component';
+import { EmployeeBulkUploadModalComponent } from '../components/employees/bulk-upload-modal/employee-bulk-upload-modal.component';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
 @Component({
@@ -29,6 +30,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
     EmployeeListComponent,
     EmployeeCreateComponent,
     EmployeeDetailComponent,
+    EmployeeBulkUploadModalComponent,
   ],
   template: `
     <div class="w-full">
@@ -43,6 +45,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         (edit)="editEmployee($event)"
         (detail)="viewEmployee($event)"
         (refresh)="refreshEmployees()"
+        (bulkUpload)="openBulkUploadModal()"
       ></app-employee-list>
 
       <vendix-employee-create
@@ -53,6 +56,11 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         [(isOpen)]="isEmployeeDetailModalOpen"
         [employee]="selectedEmployee"
       ></vendix-employee-detail>
+
+      <app-employee-bulk-upload-modal
+        [(isOpen)]="isEmployeeBulkUploadModalOpen"
+        (uploadComplete)="onBulkUploadComplete()"
+      ></app-employee-bulk-upload-modal>
     </div>
   `,
 })
@@ -66,6 +74,7 @@ export class PayrollEmployeesPageComponent implements OnInit, OnDestroy {
 
   isEmployeeCreateModalOpen = false;
   isEmployeeDetailModalOpen = false;
+  isEmployeeBulkUploadModalOpen = false;
   selectedEmployee: Employee | null = null;
 
   ngOnInit(): void {
@@ -91,6 +100,14 @@ export class PayrollEmployeesPageComponent implements OnInit, OnDestroy {
   viewEmployee(employee: Employee): void {
     this.selectedEmployee = employee;
     this.isEmployeeDetailModalOpen = true;
+  }
+
+  openBulkUploadModal(): void {
+    this.isEmployeeBulkUploadModalOpen = true;
+  }
+
+  onBulkUploadComplete(): void {
+    this.refreshEmployees();
   }
 
   refreshEmployees(): void {

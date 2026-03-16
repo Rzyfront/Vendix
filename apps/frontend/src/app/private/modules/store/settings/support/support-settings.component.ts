@@ -68,8 +68,11 @@ import { FilterValues } from '../../../../../shared/components/options-dropdown/
         [tickets]="tickets"
         [loading]="loading"
         [totalItems]="totalItems"
+        [page]="page"
+        [limit]="limit"
         (search)="onSearch($event)"
         (filter)="onFilter($event)"
+        (pageChange)="onPageChange($event)"
         (create)="openCreateModal()"
         (viewDetail)="openTicketDetail($event)"
       ></app-ticket-list>
@@ -185,6 +188,11 @@ export class SupportSettingsComponent implements OnInit, OnDestroy {
   onFilter(filterValues: FilterValues) {
     this.filters = filterValues;
     this.page = 1;
+    this.loadTickets();
+  }
+
+  onPageChange(page: number) {
+    this.page = page;
     this.loadTickets();
   }
 

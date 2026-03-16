@@ -637,6 +637,12 @@ export class BreadcrumbService {
       icon: 'warehouse',
     },
     {
+      path: '/admin/inventory/dashboard',
+      title: 'Panel de Inventario',
+      parent: 'Inventario',
+      icon: 'home',
+    },
+    {
       path: '/admin/inventory/pop',
       title: 'Punto de Compra',
       parent: 'Inventario',
@@ -653,6 +659,18 @@ export class BreadcrumbService {
       title: 'Ajustes de Stock',
       parent: 'Inventario',
       icon: 'refresh-cw',
+    },
+    {
+      path: '/admin/inventory/transfers',
+      title: 'Transferencias',
+      parent: 'Inventario',
+      icon: 'refresh-ccw',
+    },
+    {
+      path: '/admin/inventory/movements',
+      title: 'Movimientos',
+      parent: 'Inventario',
+      icon: 'activity',
     },
     {
       path: '/admin/inventory/locations',
@@ -795,6 +813,326 @@ export class BreadcrumbService {
       icon: 'wallet',
     },
 
+    // Invoicing
+    {
+      path: '/admin/invoicing',
+      title: 'Facturación',
+      parent: 'Tienda',
+      icon: 'file-text',
+    },
+    {
+      path: '/admin/invoicing/dian-config',
+      title: 'Configuración DIAN',
+      parent: 'Facturación',
+      icon: 'settings',
+    },
+
+    // Accounting
+    {
+      path: '/admin/accounting',
+      title: 'Contabilidad',
+      parent: 'Tienda',
+      icon: 'book-open',
+    },
+    {
+      path: '/admin/accounting/journal-entries',
+      title: 'Asientos Contables',
+      parent: 'Contabilidad',
+      icon: 'list',
+    },
+    {
+      path: '/admin/accounting/fiscal-periods',
+      title: 'Periodos Fiscales',
+      parent: 'Contabilidad',
+      icon: 'calendar',
+    },
+    {
+      path: '/admin/accounting/chart-of-accounts',
+      title: 'Plan de Cuentas',
+      parent: 'Contabilidad',
+      icon: 'sitemap',
+    },
+    {
+      path: '/admin/accounting/reports',
+      title: 'Reportes',
+      parent: 'Contabilidad',
+      icon: 'file-text',
+    },
+    {
+      path: '/admin/accounting/account-mappings',
+      title: 'Mapeo de Cuentas',
+      parent: 'Contabilidad',
+      icon: 'link',
+    },
+    {
+      path: '/admin/accounting/reports/trial-balance',
+      title: 'Balance de Comprobación',
+      parent: 'Reportes',
+      icon: 'file-text',
+    },
+    {
+      path: '/admin/accounting/reports/balance-sheet',
+      title: 'Balance General',
+      parent: 'Reportes',
+      icon: 'file-text',
+    },
+    {
+      path: '/admin/accounting/reports/income-statement',
+      title: 'Estado de Resultados',
+      parent: 'Reportes',
+      icon: 'file-text',
+    },
+    {
+      path: '/admin/accounting/reports/general-ledger',
+      title: 'Libro Mayor',
+      parent: 'Reportes',
+      icon: 'file-text',
+    },
+
+    // Payroll
+    {
+      path: '/admin/payroll',
+      title: 'Nómina',
+      parent: 'Tienda',
+      icon: 'banknote',
+    },
+    {
+      path: '/admin/payroll/employees',
+      title: 'Empleados',
+      parent: 'Nómina',
+      icon: 'users',
+    },
+    {
+      path: '/admin/payroll/runs',
+      title: 'Liquidaciones',
+      parent: 'Nómina',
+      icon: 'credit-card',
+    },
+    {
+      path: '/admin/payroll/settings',
+      title: 'Configuración Nómina',
+      parent: 'Nómina',
+      icon: 'settings',
+    },
+
+    // Help
+    {
+      path: '/admin/help',
+      title: 'Ayuda',
+      parent: 'Tienda',
+      icon: 'help-circle',
+    },
+    {
+      path: '/admin/help/support',
+      title: 'Soporte',
+      parent: 'Ayuda',
+      icon: 'headset',
+    },
+    {
+      path: '/admin/help/support/:id',
+      title: 'Ticket de Soporte',
+      parent: 'Soporte',
+      icon: 'ticket',
+    },
+    {
+      path: '/admin/help/center',
+      title: 'Centro de Ayuda',
+      parent: 'Ayuda',
+      icon: 'book',
+    },
+    {
+      path: '/admin/help/center/:slug',
+      title: 'Artículo de Ayuda',
+      parent: 'Centro de Ayuda',
+      icon: 'file-text',
+    },
+
+    // Additional Inventory submodules
+    {
+      path: '/admin/inventory/transfers',
+      title: 'Transferencias',
+      parent: 'Inventario',
+      icon: 'refresh-ccw',
+    },
+    {
+      path: '/admin/inventory/movimientos',
+      title: 'Movimientos',
+      parent: 'Inventario',
+      icon: 'activity',
+    },
+
+    // Additional Orders submodules
+    {
+      path: '/admin/orders/quotations',
+      title: 'Cotizaciones',
+      parent: 'Órdenes',
+      icon: 'file-text',
+    },
+    {
+      path: '/admin/orders/quotations/:id',
+      title: 'Detalles de Cotización',
+      parent: 'Cotizaciones',
+      icon: 'eye',
+    },
+
+    // Additional Analytics submodules
+    {
+      path: '/admin/analytics/overview',
+      title: 'Resumen',
+      parent: 'Analíticas',
+      icon: 'home',
+    },
+    {
+      path: '/admin/analytics/inventory/overview',
+      title: 'Inventario',
+      parent: 'Analíticas',
+      icon: 'warehouse',
+    },
+    {
+      path: '/admin/analytics/products/performance',
+      title: 'Productos',
+      parent: 'Analíticas',
+      icon: 'package',
+    },
+    {
+      path: '/admin/analytics/customers/summary',
+      title: 'Clientes',
+      parent: 'Analíticas',
+      icon: 'users',
+    },
+    {
+      path: '/admin/analytics/financial/profit-loss',
+      title: 'Ganancias y Pérdidas',
+      parent: 'Financiero',
+      icon: 'dollar-sign',
+    },
+    {
+      path: '/admin/analytics/financial/tax-summary',
+      title: 'Resumen de Impuestos',
+      parent: 'Financiero',
+      icon: 'credit-card',
+    },
+    {
+      path: '/admin/analytics/financial/refunds',
+      title: 'Reembolsos',
+      parent: 'Financiero',
+      icon: 'rotate-ccw',
+    },
+    {
+      path: '/admin/analytics/sales/by-product',
+      title: 'Ventas por Producto',
+      parent: 'Ventas',
+      icon: 'package',
+    },
+    {
+      path: '/admin/analytics/sales/by-category',
+      title: 'Ventas por Categoría',
+      parent: 'Ventas',
+      icon: 'folder',
+    },
+    {
+      path: '/admin/analytics/sales/trends',
+      title: 'Tendencias de Ventas',
+      parent: 'Ventas',
+      icon: 'trending-up',
+    },
+    {
+      path: '/admin/analytics/sales/by-customer',
+      title: 'Ventas por Cliente',
+      parent: 'Ventas',
+      icon: 'users',
+    },
+    {
+      path: '/admin/analytics/sales/by-payment',
+      title: 'Ventas por Pago',
+      parent: 'Ventas',
+      icon: 'credit-card',
+    },
+    {
+      path: '/admin/analytics/inventory/stock-levels',
+      title: 'Niveles de Stock',
+      parent: 'Inventario',
+      icon: 'layers',
+    },
+    {
+      path: '/admin/analytics/inventory/low-stock',
+      title: 'Stock Bajo',
+      parent: 'Inventario',
+      icon: 'alert-triangle',
+    },
+    {
+      path: '/admin/analytics/inventory/movements',
+      title: 'Movimientos de Inventario',
+      parent: 'Inventario',
+      icon: 'activity',
+    },
+    {
+      path: '/admin/analytics/inventory/valuation',
+      title: 'Valoración de Inventario',
+      parent: 'Inventario',
+      icon: 'dollar-sign',
+    },
+    {
+      path: '/admin/analytics/inventory/movement-analysis',
+      title: 'Análisis de Movimientos',
+      parent: 'Inventario',
+      icon: 'bar-chart',
+    },
+    {
+      path: '/admin/analytics/products/top-sellers',
+      title: 'Top Ventas',
+      parent: 'Productos',
+      icon: 'star',
+    },
+    {
+      path: '/admin/analytics/products/profitability',
+      title: 'Rentabilidad',
+      parent: 'Productos',
+      icon: 'trending-up',
+    },
+    {
+      path: '/admin/analytics/purchases/summary',
+      title: 'Resumen de Compras',
+      parent: 'Compras',
+      icon: 'shopping-cart',
+    },
+    {
+      path: '/admin/analytics/purchases/by-supplier',
+      title: 'Compras por Proveedor',
+      parent: 'Compras',
+      icon: 'truck',
+    },
+    {
+      path: '/admin/analytics/customers/acquisition',
+      title: 'Adquisición de Clientes',
+      parent: 'Clientes',
+      icon: 'user-plus',
+    },
+    {
+      path: '/admin/analytics/customers/abandoned-carts',
+      title: 'Carritos Abandonados',
+      parent: 'Clientes',
+      icon: 'shopping-cart',
+    },
+    {
+      path: '/admin/analytics/reviews/summary',
+      title: 'Resumen de Reseñas',
+      parent: 'Reseñas',
+      icon: 'star',
+    },
+    {
+      path: '/admin/analytics/expenses/summary',
+      title: 'Resumen de Gastos',
+      parent: 'Gastos',
+      icon: 'wallet',
+    },
+    {
+      path: '/admin/analytics/expenses/by-category',
+      title: 'Gastos por Categoría',
+      parent: 'Gastos',
+      icon: 'folder',
+    },
+
     // Settings
     {
       path: '/admin/settings',
@@ -807,6 +1145,18 @@ export class BreadcrumbService {
       title: 'General',
       parent: 'Configuración',
       icon: 'sliders',
+    },
+    {
+      path: '/admin/settings/users',
+      title: 'Usuarios',
+      parent: 'Configuración',
+      icon: 'users',
+    },
+    {
+      path: '/admin/settings/roles',
+      title: 'Roles',
+      parent: 'Configuración',
+      icon: 'shield',
     },
     {
       path: '/admin/settings/payments',
@@ -837,6 +1187,12 @@ export class BreadcrumbService {
       title: 'Envíos',
       parent: 'Configuración',
       icon: 'truck',
+    },
+    {
+      path: '/admin/settings/legal-documents',
+      title: 'Documentos Legales',
+      parent: 'Configuración',
+      icon: 'file-text',
     },
   ];
 

@@ -55,6 +55,14 @@ export class PosSettingsForm implements OnInit, OnChanges {
         protocol: new FormControl('generic'),
       }),
     }),
+    cash_register: new FormGroup({
+      enabled: new FormControl(false),
+      require_session_for_sales: new FormControl(false),
+      allow_multiple_sessions_per_user: new FormControl(false),
+      auto_create_default_register: new FormControl(true),
+      require_closing_count: new FormControl(true),
+      track_non_cash_payments: new FormControl(true),
+    }),
   });
 
   daysOfWeek = [
@@ -128,6 +136,31 @@ export class PosSettingsForm implements OnInit, OnChanges {
 
   get protocolControl(): FormControl<string> {
     return this.form.get('scale.device.protocol') as FormControl<string>;
+  }
+
+  // Cash Register getters
+  get cashRegisterEnabledControl(): FormControl<boolean> {
+    return this.form.get('cash_register.enabled') as FormControl<boolean>;
+  }
+
+  get requireSessionForSalesControl(): FormControl<boolean> {
+    return this.form.get('cash_register.require_session_for_sales') as FormControl<boolean>;
+  }
+
+  get allowMultipleSessionsControl(): FormControl<boolean> {
+    return this.form.get('cash_register.allow_multiple_sessions_per_user') as FormControl<boolean>;
+  }
+
+  get autoCreateDefaultRegisterControl(): FormControl<boolean> {
+    return this.form.get('cash_register.auto_create_default_register') as FormControl<boolean>;
+  }
+
+  get requireClosingCountControl(): FormControl<boolean> {
+    return this.form.get('cash_register.require_closing_count') as FormControl<boolean>;
+  }
+
+  get trackNonCashPaymentsControl(): FormControl<boolean> {
+    return this.form.get('cash_register.track_non_cash_payments') as FormControl<boolean>;
   }
 
   get isWebSerialSupported(): boolean {

@@ -13,6 +13,7 @@ import { InventoryBatchesService } from './batches/inventory-batches.service';
 import { InventorySerialNumbersService } from './serial-numbers/inventory-serial-numbers.service';
 import { InventoryTransactionsService } from './transactions/inventory-transactions.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { CostingService } from './shared/services/costing.service';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
     InventoryValidationService,
     InventoryIntegrationService,
     StockLevelManager,
+    CostingService,
     InventoryBatchesService,
     InventorySerialNumbersService,
     InventoryTransactionsService,
@@ -41,6 +43,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
     InventoryValidationService,
     InventoryIntegrationService,
     StockLevelManager,
+    CostingService,
     InventoryBatchesService,
     InventorySerialNumbersService,
     InventoryTransactionsService,

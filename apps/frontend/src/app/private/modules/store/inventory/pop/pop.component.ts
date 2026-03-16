@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription, take } from 'rxjs';
 
-import { PopCartService, PopCartSummary, PopCartState, PopCartItem } from './services/pop-cart.service';
+import { PopCartService, PopCartSummary, PopCartState, PopCartItem, PopProduct } from './services/pop-cart.service';
 import {
   cartToPurchaseOrderRequest,
   CreatePurchaseOrderRequest,
@@ -18,6 +18,9 @@ import { DialogService } from '../../../../../shared/components/dialog/dialog.se
 import { PurchaseOrdersService } from '../services';
 import { ProductsService } from '../../products/services/products.service';
 
+// Auth
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+
 // POP Components
 import { PopProductSelectionComponent } from './components/pop-product-selection.component';
 import { PopCartComponent } from './components/pop-cart.component';
@@ -28,6 +31,7 @@ import { PopLotModalComponent } from './components/pop-lot-modal.component';
 import { PopPreBulkModalComponent } from './components/pop-prebulk-modal.component';
 import { PopMobileFooterComponent } from './components/pop-mobile-footer.component';
 import { PopCartModalComponent } from './components/pop-cart-modal.component';
+import { PopProductConfigModalComponent, PopProductConfigResult } from './components/pop-product-config-modal.component';
 
 /**
  * POP (Point of Purchase) Main Component
@@ -48,6 +52,7 @@ import { PopCartModalComponent } from './components/pop-cart-modal.component';
     PopPreBulkModalComponent,
     PopMobileFooterComponent,
     PopCartModalComponent,
+    PopProductConfigModalComponent,
   ],
   template: `
     <div
@@ -66,10 +71,9 @@ import { PopCartModalComponent } from './components/pop-cart-modal.component';
 
         <!-- Main Content Grid -->
         <div class="flex-1 p-4 sm:p-6 min-h-0 overflow-hidden">
-          <!-- Desktop: Grid 3 columns -->
-          <div class="hidden lg:grid lg:grid-cols-3 gap-4 sm:gap-6 h-full">
-            <!-- Products Area (Left Side - 2 columns) -->
-            <div class="lg:col-span-2 h-full min-h-0">
+          <div class="h-full flex flex-col lg:grid lg:grid-cols-3 gap-4 sm:gap-6">
+            <!-- Products Area (single instance for both layouts) -->
+            <div class="lg:col-span-2 h-full min-h-0 flex-1 pb-32 lg:pb-0 overflow-y-auto lg:overflow-hidden">
               <app-pop-product-selection
                 class="h-full block"
                 (productAddedToCart)="onProductAdded($event)"
@@ -79,25 +83,16 @@ import { PopCartModalComponent } from './components/pop-cart-modal.component';
             </div>
 
             <!-- Cart Area (Right Side - 1 column) - Hidden on mobile -->
-            <div class="h-full min-h-0">
+            <div class="hidden lg:block h-full min-h-0">
               <app-pop-cart
                 class="h-full block"
                 (saveDraft)="onSaveAsDraft()"
                 (submitOrder)="onSubmitOrder()"
                 (createAndReceive)="onCreateAndReceive()"
                 (requestLotConfig)="openLotModal($event)"
+                (requestItemConfig)="openItemConfigModal($event)"
               ></app-pop-cart>
             </div>
-          </div>
-
-          <!-- Mobile: Only products with bottom padding for footer -->
-          <div class="lg:hidden h-full pb-32 overflow-y-auto">
-            <app-pop-product-selection
-              class="h-full block"
-              (productAddedToCart)="onProductAdded($event)"
-              (requestManualAdd)="onManualAddRequested()"
-              (bulkDataLoaded)="onBulkDataReceived($event)"
-            ></app-pop-product-selection>
           </div>
         </div>
       </div>
@@ -155,6 +150,17 @@ import { PopCartModalComponent } from './components/pop-cart-modal.component';
       (save)="onLotSave($event)"
       (skip)="onLotSkip()"
     ></app-pop-lot-modal>
+
+    <app-pop-product-config-modal
+      [isOpen]="showConfigModal"
+      [product]="configModalProduct"
+      [initialVariant]="editingCartItemVariant"
+      [initialLotInfo]="editingCartItemLotInfo"
+      [initialPricingType]="editingCartItemPricingType"
+      [isEditing]="!!editingCartItemId"
+      (confirmed)="onConfigConfirmed($event)"
+      (closed)="showConfigModal = false; configModalProduct = null; editingCartItemId = null"
+    ></app-pop-product-config-modal>
   `,
   styles: [
     `
@@ -175,6 +181,26 @@ export class PopComponent implements OnInit, OnDestroy {
   // Lot modal
   currentLotInfo?: any;
   currentLotItemId?: string;
+
+  // Config modal (for products with variants or batch tracking)
+  showConfigModal = false;
+  configModalProduct: PopProduct | null = null;
+  editingCartItemId: string | null = null; // When editing an existing cart item
+
+  get editingCartItemVariant(): any {
+    if (!this.editingCartItemId) return null;
+    return this.popCartService.getItemById(this.editingCartItemId)?.variant || null;
+  }
+
+  get editingCartItemLotInfo(): any {
+    if (!this.editingCartItemId) return null;
+    return this.popCartService.getItemById(this.editingCartItemId)?.lot_info || null;
+  }
+
+  get editingCartItemPricingType(): 'unit' | 'weight' {
+    if (!this.editingCartItemId) return 'unit';
+    return this.popCartService.getItemById(this.editingCartItemId)?.product?.pricing_type || 'unit';
+  }
 
   // Route params
   orderId?: number;
@@ -201,6 +227,7 @@ export class PopComponent implements OnInit, OnDestroy {
     private router: Router,
     private toastService: ToastService,
     private dialogService: DialogService,
+    private authFacade: AuthFacade,
   ) { }
 
   ngOnInit(): void {
@@ -247,18 +274,129 @@ export class PopComponent implements OnInit, OnDestroy {
     this.productsService.getProductById(productId).subscribe({
       next: (product: any) => {
         if (product) {
-          const popProduct = {
+          const popProduct: PopProduct = {
             ...product,
             cost: Number(product.cost_price || product.price || 0),
           };
-          this.popCartService.addItem(popProduct, 1);
-          this.toastService.success(`${product.name} agregado automáticamente`);
+
+          // If product has variants or requires batch tracking, open config modal
+          if (popProduct.product_variants?.length || popProduct.requires_batch_tracking) {
+            this.configModalProduct = popProduct;
+            this.showConfigModal = true;
+          } else {
+            this.popCartService.addItem(popProduct, 1);
+            this.toastService.success(`${product.name} agregado automáticamente`);
+          }
         }
       },
       error: (err: any) => {
         console.error('Error auto-adding product:', err);
       },
     });
+  }
+
+  onConfigConfirmed(result: PopProductConfigResult): void {
+    if (!this.configModalProduct) return;
+
+    if (this.editingCartItemId) {
+      // Editing existing cart item — single update call with variant + lot + pricing_type
+      this.popCartService.updateCartItem({
+        itemId: this.editingCartItemId,
+        unit_cost: result.unit_cost,
+        lot_info: result.lot_info,
+        variant: result.variant,
+        pricing_type: result.pricing_type,
+      }).subscribe({
+        next: () => {
+          this.toastService.success('Configuración actualizada');
+        },
+      });
+    } else if (result.variants?.length) {
+      // Adding multiple variants — one cart item per variant
+      const product: PopProduct = {
+        ...this.configModalProduct,
+        pricing_type: result.pricing_type || this.configModalProduct.pricing_type,
+      };
+
+      result.variants.forEach(variant => {
+        this.popCartService.addToCart({
+          product,
+          variant,
+          quantity: 1,
+          unit_cost: variant.cost_price ? Number(variant.cost_price) : result.unit_cost,
+          lot_info: result.lot_info,
+        }).subscribe();
+      });
+
+      const count = result.variants.length;
+      this.toastService.success(
+        count === 1
+          ? `${this.configModalProduct.name} agregado al carrito`
+          : `${count} variantes de ${this.configModalProduct.name} agregadas al carrito`
+      );
+    } else {
+      // Adding a single item without variants
+      const product: PopProduct = {
+        ...this.configModalProduct,
+        pricing_type: result.pricing_type || this.configModalProduct.pricing_type,
+      };
+
+      this.popCartService.addToCart({
+        product,
+        quantity: result.quantity,
+        unit_cost: result.unit_cost,
+        lot_info: result.lot_info,
+      }).subscribe({
+        next: () => {
+          this.toastService.success(`${this.configModalProduct?.name} agregado al carrito`);
+        },
+        error: (err) => {
+          console.error('Error adding configured product:', err);
+          this.toastService.error('Error al agregar producto');
+        },
+      });
+    }
+
+    // Always clean up modal state
+    this.showConfigModal = false;
+    this.configModalProduct = null;
+    this.editingCartItemId = null;
+  }
+
+  /**
+   * Open config modal to edit an existing cart item's variant/lot/unit settings.
+   * Re-fetches the product from the backend to get full variant data.
+   */
+  openItemConfigModal(item: PopCartItem): void {
+    this.editingCartItemId = item.id;
+
+    // If product has id > 0, fetch fresh data to get variants
+    if (item.product.id > 0) {
+      this.productsService.getProductById(item.product.id).subscribe({
+        next: (product: any) => {
+          if (product) {
+            this.configModalProduct = {
+              ...product,
+              cost: Number(product.cost_price || product.price || 0),
+              cost_price: Number(product.cost_price || 0),
+              pricing_type: product.pricing_type || item.product.pricing_type || 'unit',
+              product_variants: product.product_variants || [],
+            };
+          } else {
+            this.configModalProduct = { ...item.product };
+          }
+          this.showConfigModal = true;
+        },
+        error: () => {
+          this.configModalProduct = { ...item.product };
+          this.showConfigModal = true;
+        },
+      });
+    } else {
+      // Prebulk product
+      this.configModalProduct = { ...item.product };
+      this.showConfigModal = true;
+    }
   }
 
   ngOnDestroy(): void {
@@ -565,7 +703,7 @@ export class PopComponent implements OnInit, OnDestroy {
     }
 
     this.isProcessingOrder = true;
-    const userId = 0;
+    const userId = this.authFacade.getUserId() || 0;
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
     request.status = 'approved';
 
@@ -636,7 +774,7 @@ export class PopComponent implements OnInit, OnDestroy {
       return;
     }
     const draftState = { ...state, status: 'draft' as const };
-    const userId = 0; // TODO: Get from AuthService
+    const userId = this.authFacade.getUserId() || 0;
 
     const request = cartToPurchaseOrderRequest(draftState, userId, undefined);
 
@@ -672,7 +810,7 @@ export class PopComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const userId = 0; // TODO: Get from AuthService
+    const userId = this.authFacade.getUserId() || 0;
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
 
     request.status = 'approved';
@@ -711,7 +849,7 @@ export class PopComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const userId = 0; // TODO: Get from AuthService
+    const userId = this.authFacade.getUserId() || 0;
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
     request.status = 'approved';
 

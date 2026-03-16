@@ -139,6 +139,28 @@ jobs:
             -e ADDITIONAL_CORS_ORIGINS="\$ADDITIONAL_CORS_ORIGINS" \\
             $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
+          echo "⏳ Waiting for container to start and run migrations (40s)..."
+          sleep 40
+
+          echo "🔍 Checking if container is running..."
+          if sudo docker ps --filter "name=vendix-backend" --filter "status=running" -q | grep -q .; then
+            echo "✅ Container is running"
+          else
+            echo "❌ Container is NOT running — checking logs:"
+            sudo docker logs vendix-backend --tail 50
+            exit 1
+          fi
+
+          echo "🌱 Running production seeds in isolated container..."
+          sudo docker run --rm \
+            --memory=512m \
+            --network=host \
+            --env-file /opt/vendix/.env \
+            -e DATABASE_URL="\$DATABASE_URL" \
+            $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            sh -c "npx --yes tsx prisma/seed-production.ts"
+          echo "✅ Seeds completed!"
+
           echo "🧹 Cleaning up old images..."
           sudo docker image prune -f
 

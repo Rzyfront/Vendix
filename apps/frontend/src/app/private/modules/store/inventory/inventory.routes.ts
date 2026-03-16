@@ -42,6 +42,13 @@ export const INVENTORY_ROUTES: Routes = [
                     ),
             },
             {
+                path: 'transfers',
+                loadComponent: () =>
+                    import('./transfers/transfers.component').then(
+                        (m) => m.TransfersComponent
+                    ),
+            },
+            {
                 path: 'movements',
                 loadComponent: () =>
                     import('./movements/movements.component').then(

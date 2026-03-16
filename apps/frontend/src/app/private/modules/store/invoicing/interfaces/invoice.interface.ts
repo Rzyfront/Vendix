@@ -210,12 +210,17 @@ export interface ApiResponse<T> {
 
 // ── DIAN Configuration ────────────────────────────────────
 
+export type DianNitType = 'NIT' | 'CC' | 'CE' | 'TI' | 'PP' | 'NIT_EXTRANJERIA';
+
 export interface DianConfig {
   id: number;
   organization_id: number;
   store_id: number;
+  name: string;
   nit: string;
+  nit_type: DianNitType;
   nit_dv: string | null;
+  is_default: boolean;
   software_id: string;
   software_pin_encrypted: string; // Always '****' from API
   certificate_s3_key: string | null;

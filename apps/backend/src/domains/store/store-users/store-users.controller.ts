@@ -16,6 +16,8 @@ import {
   CreateStoreUserDto,
   UpdateStoreUserDto,
   ResetPasswordStoreUserDto,
+  UpdateUserRolesDto,
+  UpdateUserPanelUIDto,
 } from './dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -91,6 +93,24 @@ export class StoreUsersController {
   async managementReactivate(@Param('id', ParseIntPipe) id: number) {
     const result = await this.storeUserManagementService.reactivate(id);
     return this.responseService.success(result, 'User reactivated successfully');
+  }
+
+  @Patch('management/:id/roles')
+  async managementUpdateRoles(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateUserRolesDto,
+  ) {
+    const result = await this.storeUserManagementService.updateRoles(id, dto);
+    return this.responseService.success(result, 'Roles updated successfully');
+  }
+
+  @Patch('management/:id/panel-ui')
+  async managementUpdatePanelUI(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateUserPanelUIDto,
+  ) {
+    const result = await this.storeUserManagementService.updatePanelUI(id, dto);
+    return this.responseService.success(result, 'Panel UI updated successfully');
   }
 
   @Post('management/:id/reset-password')

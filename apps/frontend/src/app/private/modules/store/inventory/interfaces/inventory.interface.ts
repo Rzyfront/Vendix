@@ -125,6 +125,10 @@ export interface PurchaseOrderItem {
   tax_rate?: number;
   expected_delivery_date?: string;
   notes?: string;
+  // Batch/lot tracking fields
+  batch_number?: string;
+  manufacturing_date?: string;
+  expiration_date?: string;
   // Populated fields
   product?: {
     id: number;
@@ -135,6 +139,14 @@ export interface PurchaseOrderItem {
     id: number;
     name: string;
     sku?: string;
+  };
+  product_variants?: {
+    id: number;
+    name?: string;
+    sku: string;
+    cost_price?: number;
+    stock_quantity?: number;
+    attributes?: Record<string, any>;
   };
 }
 
@@ -160,6 +172,9 @@ export interface PurchaseOrder {
   approved_by_user_id?: number;
   created_at?: string;
   updated_at?: string;
+  // Payment fields
+  payment_status?: PurchaseOrderPaymentStatus;
+  payment_due_date?: string;
   // Populated fields
   supplier?: Supplier;
   suppliers?: Supplier;
@@ -301,6 +316,39 @@ export interface CreateAdjustmentDto {
   description?: string;
   created_by_user_id?: number;
   approved_by_user_id?: number;
+}
+
+export interface AdjustableProduct {
+  id: number;
+  name: string;
+  sku: string | null;
+  stock_at_location: {
+    quantity_on_hand: number;
+    quantity_reserved: number;
+    quantity_available: number;
+  };
+}
+
+export interface AdjustmentItem {
+  product_id: number;
+  product_name: string;
+  sku?: string;
+  stock_on_hand: number;
+  type: AdjustmentType;
+  quantity_after: number;
+  reason_code: string;
+  description: string;
+}
+
+export interface BatchCreateAdjustmentsRequest {
+  location_id: number;
+  items: {
+    product_id: number;
+    type: AdjustmentType;
+    quantity_after: number;
+    reason_code?: string;
+    description?: string;
+  }[];
 }
 
 export interface AdjustmentQueryDto {
@@ -466,6 +514,64 @@ export interface InventoryStats {
   pending_orders: number;
   incoming_stock: number;
 }
+
+// ============================================================
+// PURCHASE ORDER RECEPTION INTERFACES
+// ============================================================
+
+export interface PurchaseOrderReception {
+  id: number;
+  purchase_order_id: number;
+  received_by_user_id: number | null;
+  notes: string | null;
+  received_at: string;
+  received_by?: { id: number; user_name: string; first_name: string; last_name: string };
+  items: PurchaseOrderReceptionItem[];
+}
+
+export interface PurchaseOrderReceptionItem {
+  id: number;
+  reception_id: number;
+  purchase_order_item_id: number;
+  quantity_received: number;
+  purchase_order_item?: PurchaseOrderItem;
+}
+
+export interface PurchaseOrderAttachment {
+  id: number;
+  purchase_order_id: number;
+  file_url: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  supplier_invoice_number: string | null;
+  supplier_invoice_date: string | null;
+  supplier_invoice_amount: number | null;
+  notes: string | null;
+  uploaded_by?: { id: number; user_name: string; first_name: string; last_name: string };
+  download_url?: string;
+  created_at: string;
+}
+
+export interface PurchaseOrderPayment {
+  id: number;
+  purchase_order_id: number;
+  amount: number;
+  payment_date: string;
+  payment_method: string;
+  reference: string | null;
+  notes: string | null;
+  created_by?: { id: number; user_name: string; first_name: string; last_name: string };
+  created_at: string;
+}
+
+export interface PurchaseOrderTimelineEntry {
+  type: 'audit' | 'reception' | 'payment';
+  date: string;
+  data: Record<string, unknown>;
+}
+
+export type PurchaseOrderPaymentStatus = 'unpaid' | 'partial' | 'paid';
 
 // ============================================================
 // API RESPONSE WRAPPERS

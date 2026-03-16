@@ -90,7 +90,7 @@ interface EntryStats {
 
       <!-- Unified Container: Search Header + Data -->
       <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-                  md:border md:border-border md:min-h-[400px]">
+                  md:border md:border-border">
 
         <!-- Search Header -->
         <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
@@ -130,22 +130,22 @@ interface EntryStats {
             emptyIcon="file-text"
             (rowClick)="onRowClick($event)"
           ></app-responsive-data-view>
+
+          <!-- Pagination -->
+          @if (meta$ | async; as meta) {
+            @if (meta && meta.totalPages > 1) {
+              <div class="mt-4 border-t border-border pt-4">
+                <app-pagination
+                  [currentPage]="(page$ | async) || 1"
+                  [totalPages]="meta.totalPages"
+                  [total]="meta.total"
+                  (pageChange)="onPageChange($event)"
+                ></app-pagination>
+              </div>
+            }
+          }
         </div>
       </div>
-
-      <!-- Pagination -->
-      @if (meta$ | async; as meta) {
-        @if (meta && meta.totalPages > 1) {
-          <div class="mt-4 flex justify-center">
-            <app-pagination
-              [currentPage]="(page$ | async) || 1"
-              [totalPages]="meta.totalPages"
-              [total]="meta.total"
-              (pageChange)="onPageChange($event)"
-            ></app-pagination>
-          </div>
-        }
-      }
 
       <!-- Create Modal -->
       <vendix-journal-entry-create
@@ -221,13 +221,9 @@ export class JournalEntriesComponent implements OnInit {
     { key: 'total_credit', label: 'Crédito', sortable: true, align: 'right', priority: 1,
       transform: (val: any) => val ? `$${Number(val).toFixed(2)}` : '$0.00' },
     { key: 'status', label: 'Estado', align: 'center', priority: 1,
+      badge: true,
       badgeConfig: {
         type: 'status',
-        colorMap: {
-          draft: 'warn',
-          posted: 'success',
-          voided: 'danger',
-        },
       },
       transform: (val: any) => this.getStatusLabel(val),
     },

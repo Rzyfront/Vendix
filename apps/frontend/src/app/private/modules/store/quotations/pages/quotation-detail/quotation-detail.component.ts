@@ -153,18 +153,19 @@ const STATUS_BADGE_COLORS: Record<QuotationStatus, StickyHeaderBadgeColor> = {
             <!-- Converted Order -->
             @if (quotation()!.converted_order) {
               <app-card shadow="sm" [responsivePadding]="true">
-                <div class="bg-purple-50 dark:bg-purple-900/10 rounded-xl border border-purple-200 dark:border-purple-800 p-3 sm:p-4">
-                  <h3 class="text-xs font-bold text-purple-800 uppercase tracking-wider mb-3 flex items-center gap-2">
-                    <app-icon name="check-circle" size="14" class="text-purple-600"></app-icon>
+                <div class="rounded-xl p-3 sm:p-4" style="background: var(--color-accent-light); border: 1px solid rgba(var(--color-primary-rgb), 0.2);">
+                  <h3 class="text-xs font-bold uppercase tracking-wider mb-3 flex items-center gap-2" style="color: var(--color-secondary);">
+                    <app-icon name="check-circle" size="14" style="color: var(--color-primary);"></app-icon>
                     Orden Generada
                   </h3>
                   <dl class="space-y-2 text-sm">
                     <div class="flex justify-between items-center">
-                      <dt class="text-purple-600">Número</dt>
+                      <dt class="text-[var(--color-text-secondary)]">Número</dt>
                       <dd>
                         <a
                           [routerLink]="['/admin/orders', quotation()!.converted_order!.id]"
-                          class="text-[var(--color-primary)] hover:underline font-medium"
+                          class="hover:underline font-medium"
+                          style="color: var(--color-primary);"
                           aria-label="Ver orden {{ quotation()!.converted_order!.order_number }}">
                           {{ quotation()!.converted_order!.order_number }}
                           <app-icon name="arrow-right" [size]="14" class="inline-block ml-1"></app-icon>
@@ -172,11 +173,11 @@ const STATUS_BADGE_COLORS: Record<QuotationStatus, StickyHeaderBadgeColor> = {
                       </dd>
                     </div>
                     <div class="flex justify-between">
-                      <dt class="text-purple-600">Estado</dt>
+                      <dt class="text-[var(--color-text-secondary)]">Estado</dt>
                       <dd class="font-medium">{{ quotation()!.converted_order!.state }}</dd>
                     </div>
                     <div class="flex justify-between">
-                      <dt class="text-purple-600">Total</dt>
+                      <dt class="text-[var(--color-text-secondary)]">Total</dt>
                       <dd class="font-bold font-mono">{{ quotation()!.converted_order!.grand_total || 0 | currency }}</dd>
                     </div>
                   </dl>
@@ -380,8 +381,8 @@ export class QuotationDetailComponent implements OnInit {
         id: 'convert',
         label: 'Convertir a Orden',
         variant: 'primary' as const,
-        icon: 'check',
-        visible: q.status === 'accepted',
+        icon: 'shopping-cart',
+        visible: ['draft', 'sent', 'accepted'].includes(q.status),
         loading: currentAction === 'convert',
         disabled: currentAction !== null,
       },
@@ -605,7 +606,7 @@ export class QuotationDetailComponent implements OnInit {
   private async onConvert(): Promise<void> {
     const confirmed = await this.dialogService.confirm({
       title: 'Convertir a orden',
-      message: '¿Deseas convertir esta cotización en una orden de venta?',
+      message: '¿Deseas convertir esta cotización directamente en una orden de venta? La cotización quedará marcada como convertida.',
       confirmText: 'Convertir',
       cancelText: 'Cancelar',
       confirmVariant: 'primary',

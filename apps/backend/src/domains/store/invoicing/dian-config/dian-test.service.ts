@@ -1,14 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
-import { RequestContextService } from '../../../../common/context/request-context.service';
 import { EncryptionService } from '../../../../common/services/encryption.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { DianSoapClient } from '../providers/dian-direct/dian-soap.client';
 import { DianResponseParserService } from '../providers/dian-direct/dian-response-parser.service';
 
-/**
- * Service for testing DIAN connectivity and running test sets.
- */
 @Injectable()
 export class DianTestService {
   private readonly logger = new Logger(DianTestService.name);
@@ -20,48 +16,37 @@ export class DianTestService {
     private readonly response_parser: DianResponseParserService,
   ) {}
 
-  private getContext() {
-    const context = RequestContextService.getContext();
-    if (!context) {
-      throw new Error('No request context found');
-    }
-    return context;
-  }
-
-  /**
-   * Tests connectivity to DIAN web services.
-   * Sends a minimal GetStatus request to verify the endpoint is reachable.
-   */
-  async testConnection() {
-    const context = this.getContext();
-
+  private async getConfigById(config_id: number) {
     const config = await this.prisma.dian_configurations.findFirst({
-      where: { store_id: context.store_id },
+      where: { id: config_id },
     });
 
     if (!config) {
       throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
     }
 
+    return config;
+  }
+
+  /**
+   * Tests connectivity to DIAN web services for a specific configuration.
+   */
+  async testConnection(config_id: number) {
+    const config = await this.getConfigById(config_id);
     const environment = config.environment as 'test' | 'production';
 
     try {
-      // Send a GetStatus with a dummy tracking ID to test connectivity
       const response = await this.soap_client.getStatus(
         '00000000-0000-0000-0000-000000000000',
         environment,
       );
 
-      // If we get a SOAP response (even with an error), connectivity is OK
       const is_connected = response.raw_response.length > 0;
 
-      // Create audit log
       await this.createAuditLog(config.id, {
         action: 'test_connection',
         status: is_connected ? 'success' : 'error',
-        error_message: is_connected
-          ? null
-          : 'No response from DIAN',
+        error_message: is_connected ? null : 'No response from DIAN',
         duration_ms: response.duration_ms,
       });
 
@@ -90,18 +75,10 @@ export class DianTestService {
   }
 
   /**
-   * Runs the DIAN test set (set de pruebas) for enablement.
+   * Runs the DIAN test set for a specific configuration.
    */
-  async runTestSet() {
-    const context = this.getContext();
-
-    const config = await this.prisma.dian_configurations.findFirst({
-      where: { store_id: context.store_id },
-    });
-
-    if (!config) {
-      throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
-    }
+  async runTestSet(config_id: number) {
+    const config = await this.getConfigById(config_id);
 
     if (!config.test_set_id) {
       throw new VendixHttpException(
@@ -111,8 +88,6 @@ export class DianTestService {
     }
 
     // TODO: Implement full test set execution
-    // This requires generating multiple test invoices/credit notes
-    // and sending them via SendTestSetAsync
     return {
       success: false,
       message:
@@ -124,13 +99,11 @@ export class DianTestService {
   }
 
   /**
-   * Gets the test results for the current store's DIAN configuration.
+   * Gets the test results for a specific DIAN configuration.
    */
-  async getTestResults() {
-    const context = this.getContext();
-
+  async getTestResults(config_id: number) {
     const config = await this.prisma.dian_configurations.findFirst({
-      where: { store_id: context.store_id },
+      where: { id: config_id },
       select: {
         id: true,
         enablement_status: true,

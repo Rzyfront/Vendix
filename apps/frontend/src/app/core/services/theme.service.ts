@@ -32,7 +32,7 @@ export class ThemeService {
    * Aplica un tema basado en preferencia de usuario (default, aura, monocromo)
    * Usa el branding actual como base para calcular los colores.
    */
-  async applyUserTheme(theme: 'default' | 'aura' | 'monocromo' | string): Promise<void> {
+  async applyUserTheme(theme: 'default' | 'aura' | 'monocromo' | 'glass' | string): Promise<void> {
     this.activeUserTheme = theme;
     // SSR: skip DOM-heavy theme operations (getComputedStyle, body.style, etc.)
     if (!this.isBrowser) return;
@@ -55,6 +55,7 @@ export class ThemeService {
     // Limpiar estilos previos del body (gradientes, etc) que ya no se piden
     body.style.removeProperty('background-image');
     body.style.removeProperty('background-attachment');
+    body.style.removeProperty('background-color');
     this.resetThemeOverrides();
 
     // Restaurar base antes de aplicar overrides
@@ -113,6 +114,33 @@ export class ThemeService {
         };
         break;
 
+      case 'glass':
+        // Glass: Frosted glass / glassmorphism effect
+        // Make surfaces and backgrounds semi-transparent so animated blobs show through
+        const glassSurface = ColorUtils.mixColors(basePrimary, baseSurface, 0.92);
+        const glassBackground = ColorUtils.mixColors(basePrimary, baseBackground, 0.95);
+
+        overrides = {
+          '--color-surface': glassSurface,
+          '--color-background': glassBackground,
+          // Override the --background alias to transparent so inline styles on <main> don't block blur
+          '--background': 'rgba(255, 255, 255, 0.25)',
+        };
+
+        // Apply animated gradient background to body
+        const primaryRgb = this.hexToRgbString(basePrimary) || '126, 215, 165';
+        const secondaryRgb = this.hexToRgbString(this.currentBranding?.colors?.secondary || '#2F6F4E') || '47, 111, 78';
+
+        body.style.setProperty('background-image', `
+          radial-gradient(ellipse at 20% 50%, rgba(${primaryRgb}, 0.15) 0%, transparent 50%),
+          radial-gradient(ellipse at 80% 20%, rgba(${secondaryRgb}, 0.12) 0%, transparent 50%),
+          radial-gradient(ellipse at 50% 80%, rgba(${primaryRgb}, 0.10) 0%, transparent 50%),
+          radial-gradient(ellipse at 90% 70%, rgba(${secondaryRgb}, 0.08) 0%, transparent 40%)
+        `);
+        body.style.setProperty('background-attachment', 'fixed');
+        body.style.setProperty('background-color', glassBackground);
+        break;
+
       case 'default':
       default:
         // Default: Se queda con la configuración actual (restaurada arriba)
@@ -141,7 +169,8 @@ export class ThemeService {
       '--color-ring', // Legacy support
       '--color-primary-light', // Legacy support
       '--color-background', // New dynamic override
-      '--color-surface' // New dynamic override
+      '--color-surface', // New dynamic override
+      '--background', // Glass theme override
     ];
 
     variablesToRemove.forEach(varName => {

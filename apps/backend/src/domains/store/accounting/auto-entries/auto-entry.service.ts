@@ -143,6 +143,7 @@ export class AutoEntryService {
       'order.completed': 'auto_inventory',
       'refund.completed': 'auto_return',
       'purchase_order.received': 'auto_purchase',
+      'purchase_order.payment': 'auto_purchase',
       'inventory.adjusted': 'auto_inventory',
       'credit_sale.created': 'auto_invoice', // Uses auto_invoice type (revenue recognition without payment)
     };
@@ -288,6 +289,7 @@ export class AutoEntryService {
     amount: number;
     subtotal_amount?: number;
     tax_amount?: number;
+    discount_amount?: number;
     user_id?: number;
   }) {
     // Check if this payment's order has an associated invoice
@@ -326,22 +328,36 @@ export class AutoEntryService {
         ),
       ]);
     } else {
-      // No invoice (POS direct sale): Debit Cash/Bank, Credit Revenue + VAT
+      // No invoice (POS direct sale): Debit Cash/Bank + Discount, Credit Revenue + VAT
       const tax = Number(data.tax_amount || 0);
+      const discount = Number(data.discount_amount || 0);
       const subtotal = data.subtotal_amount != null
         ? Number(data.subtotal_amount)
-        : data.amount - tax; // fallback: derive subtotal from amount - tax
+        : data.amount + discount - tax; // fallback: derive subtotal from amount + discount - tax
 
       lines = [
         await this.resolveAccountLine(
           data.organization_id, cash_bank_key,
           `${payment_desc}${order_ref}`, data.amount, 0, data.store_id,
         ),
+      ];
+
+      // Discount line (debit contra-revenue account 4175)
+      if (discount > 0) {
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payment.received.sales_discount',
+            `Descuento en venta${order_ref}`, discount, 0, data.store_id,
+          ),
+        );
+      }
+
+      lines.push(
         await this.resolveAccountLine(
           data.organization_id, 'payment.received.revenue',
           `Venta directa${order_ref}`, 0, subtotal, data.store_id,
         ),
-      ];
+      );
 
       // Separate VAT line if tax > 0
       if (tax > 0) {
@@ -381,21 +397,36 @@ export class AutoEntryService {
     order_number?: string;
     subtotal_amount: number;
     tax_amount: number;
+    discount_amount?: number;
     total_amount: number;
     user_id?: number;
   }) {
     const order_ref = data.order_number ? ` - Orden ${data.order_number}` : '';
+    const discount = Number(data.discount_amount || 0);
 
     const lines: AutoEntryLine[] = [
       await this.resolveAccountLine(
         data.organization_id, 'credit_sale.created.accounts_receivable',
         `CxC venta a crédito${order_ref}`, data.total_amount, 0, data.store_id,
       ),
+    ];
+
+    // Discount line (debit contra-revenue account 4175)
+    if (discount > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id, 'credit_sale.created.sales_discount',
+          `Descuento venta a crédito${order_ref}`, discount, 0, data.store_id,
+        ),
+      );
+    }
+
+    lines.push(
       await this.resolveAccountLine(
         data.organization_id, 'credit_sale.created.revenue',
         `Ingreso venta a crédito${order_ref}`, 0, data.subtotal_amount, data.store_id,
       ),
-    ];
+    );
 
     if (data.tax_amount > 0) {
       lines.push(
@@ -485,7 +516,14 @@ export class AutoEntryService {
   }
 
   /**
-   * payroll.approved: Debit Payroll Expense + SS, Credit Salaries Payable + Health + Pension
+   * payroll.approved: Debit Payroll Expense + SS (split by cost center), Credit Salaries Payable + Health + Pension
+   *
+   * Cost center mapping:
+   *   administrative → 5105 (Gastos de Personal - Admin)
+   *   operational    → 7205 (Mano de Obra Directa - Costo)
+   *   sales          → 5205 (Gastos de Personal - Ventas)
+   *
+   * Liability accounts (credit side) are shared across all cost centers.
    */
   async onPayrollApproved(data: {
     payroll_run_id: number;
@@ -498,31 +536,99 @@ export class AutoEntryService {
     health_deduction: number;
     pension_deduction: number;
     user_id?: number;
+    cost_center_breakdown?: Record<string, { earnings: number; employer_costs: number }>;
   }) {
-    const lines: AutoEntryLine[] = await Promise.all([
-      this.resolveAccountLine(
-        data.organization_id, 'payroll.approved.payroll_expense',
-        'Payroll Expense', data.total_earnings, 0, data.store_id,
-      ),
-      this.resolveAccountLine(
-        data.organization_id, 'payroll.approved.social_security',
-        'Social Security Expense', data.total_employer_costs, 0, data.store_id,
-      ),
-      this.resolveAccountLine(
-        data.organization_id, 'payroll.approved.salaries_payable',
-        'Salaries Payable', 0, data.total_net_pay, data.store_id,
-      ),
-      this.resolveAccountLine(
-        data.organization_id, 'payroll.approved.health_payable',
-        'Health Payable', 0, data.health_deduction, data.store_id,
-      ),
-      this.resolveAccountLine(
-        data.organization_id, 'payroll.approved.pension_payable',
-        'Pension Payable', 0, data.pension_deduction, data.store_id,
-      ),
-    ]);
+    const lines: AutoEntryLine[] = [];
 
-    // Balance check: the remaining deductions go to a generic withholdings account
+    // === DEBIT LINES: Split by cost center ===
+    const cc_labels: Record<string, string> = {
+      administrative: 'Admin',
+      operational: 'Operativo',
+      sales: 'Ventas',
+    };
+
+    if (data.cost_center_breakdown && Object.keys(data.cost_center_breakdown).length > 0) {
+      const centers = Object.entries(data.cost_center_breakdown);
+
+      // Track running totals for rounding correction on the last center
+      let acc_earnings = 0;
+      let acc_employer_costs = 0;
+
+      for (let i = 0; i < centers.length; i++) {
+        const [cc, amounts] = centers[i];
+        const is_last = i === centers.length - 1;
+        const label = cc_labels[cc] || cc;
+
+        // For the last center, use remainder to avoid rounding mismatch
+        const earnings = is_last
+          ? data.total_earnings - acc_earnings
+          : amounts.earnings;
+        const employer_costs = is_last
+          ? data.total_employer_costs - acc_employer_costs
+          : amounts.employer_costs;
+
+        acc_earnings += earnings;
+        acc_employer_costs += employer_costs;
+
+        if (earnings > 0) {
+          lines.push(
+            await this.resolveAccountLine(
+              data.organization_id,
+              `payroll.approved.payroll_expense.${cc}`,
+              `Sueldos y Salarios - ${label}`,
+              earnings, 0, data.store_id,
+            ),
+          );
+        }
+
+        if (employer_costs > 0) {
+          lines.push(
+            await this.resolveAccountLine(
+              data.organization_id,
+              `payroll.approved.social_security.${cc}`,
+              `Aportes Patronales - ${label}`,
+              employer_costs, 0, data.store_id,
+            ),
+          );
+        }
+      }
+    } else {
+      // Backwards compatibility: no breakdown, use generic keys
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id, 'payroll.approved.payroll_expense',
+          'Payroll Expense', data.total_earnings, 0, data.store_id,
+        ),
+      );
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id, 'payroll.approved.social_security',
+          'Social Security Expense', data.total_employer_costs, 0, data.store_id,
+        ),
+      );
+    }
+
+    // === CREDIT LINES: Shared liabilities (no split needed) ===
+    lines.push(
+      await this.resolveAccountLine(
+        data.organization_id, 'payroll.approved.salaries_payable',
+        'Salarios por Pagar', 0, data.total_net_pay, data.store_id,
+      ),
+    );
+    lines.push(
+      await this.resolveAccountLine(
+        data.organization_id, 'payroll.approved.health_payable',
+        'EPS por Pagar', 0, data.health_deduction, data.store_id,
+      ),
+    );
+    lines.push(
+      await this.resolveAccountLine(
+        data.organization_id, 'payroll.approved.pension_payable',
+        'Pensión por Pagar', 0, data.pension_deduction, data.store_id,
+      ),
+    );
+
+    // Balance check: remaining deductions → withholdings
     const total_debit = data.total_earnings + data.total_employer_costs;
     const total_credit = data.total_net_pay + data.health_deduction + data.pension_deduction;
     const remaining = total_debit - total_credit;
@@ -531,7 +637,7 @@ export class AutoEntryService {
       lines.push(
         await this.resolveAccountLine(
           data.organization_id, 'payroll.approved.withholdings',
-          'Other Withholdings Payable', 0, remaining, data.store_id,
+          'Retenciones y Deducciones', 0, remaining, data.store_id,
         ),
       );
     }
@@ -542,7 +648,7 @@ export class AutoEntryService {
       organization_id: data.organization_id,
       store_id: data.store_id,
       entry_date: new Date(),
-      description: `Payroll approved #${data.payroll_run_id}`,
+      description: `Nómina aprobada #${data.payroll_run_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -703,6 +809,45 @@ export class AutoEntryService {
       store_id: data.store_id,
       entry_date: new Date(),
       description: `Purchase order received #${data.purchase_order_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * purchase_order.payment: Debit Accounts Payable, Credit Cash/Bank
+   */
+  async onPurchaseOrderPayment(data: {
+    purchase_order_id: number;
+    organization_id: number;
+    amount: number;
+    payment_method: string;
+    user_id?: number;
+  }) {
+    // Resolve cash/bank key based on payment method
+    const method = (data.payment_method || '').toLowerCase();
+    const is_cash = method.includes('cash') || method.includes('efectivo');
+    const cash_bank_key = is_cash
+      ? 'purchase_order.payment.cash_bank'
+      : 'purchase_order.payment.cash_bank';
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'purchase_order.payment.accounts_payable',
+        'Proveedores - Pago OC', data.amount, 0,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, cash_bank_key,
+        `Pago OC #${data.purchase_order_id}`, 0, data.amount,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'purchase_order.payment',
+      source_id: data.purchase_order_id,
+      organization_id: data.organization_id,
+      entry_date: new Date(),
+      description: `Pago orden de compra #${data.purchase_order_id}`,
       lines,
       user_id: data.user_id,
     });

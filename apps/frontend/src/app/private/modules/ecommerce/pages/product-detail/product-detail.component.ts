@@ -92,14 +92,48 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
               </div>
 
               <div class="price-line">
-                <span class="current-price">{{ displayPrice() | currency }}</span>
-                @if (p.is_on_sale || selectedVariant()?.price_override) {
+                @if (displayPriceLabel(); as label) {
+                  <span class="text-sm text-text-muted font-medium mr-1">{{ label }}</span>
+                }
+                <span class="current-price">{{ (displayPriceLabel() ? minVariantPrice() : displayPrice()) | currency }}</span>
+                @if (selectedVariant(); as sv) {
+                  @if (sv.is_on_sale || sv.price_override) {
+                    <span class="original-price" style="text-decoration: line-through; opacity: 0.6; margin-left: 10px;">{{ p.base_price | currency }}</span>
+                  }
+                } @else if (p.is_on_sale) {
                   <span class="original-price" style="text-decoration: line-through; opacity: 0.6; margin-left: 10px;">{{ p.base_price | currency }}</span>
                 }
               </div>
 
-              <!-- Options -->
-              @if (p.variants && p.variants.length > 0) {
+              <!-- Options: Attribute-based groups -->
+              @if (hasAttributeGroups()) {
+                <div class="options-group">
+                  @for (group of attributeGroups(); track group.name) {
+                    <div class="attr-group">
+                      <label class="attr-group-label">{{ group.name }}</label>
+                      <div class="variants-btns">
+                        @for (val of group.values; track val) {
+                          <app-button
+                            [variant]="selectedAttributes()[group.name] === val ? 'primary' : 'outline'"
+                            size="sm"
+                            customClasses="v-btn"
+                            [disabled]="!isOnDemand() && !getAvailableValues(group.name).includes(val)"
+                            (clicked)="selectAttributeValue(group.name, val)"
+                          >
+                            {{ val }}
+                            @if (getPriceDiffForValue(group.name, val); as diff) {
+                              <span class="text-[10px] ml-1 opacity-80">
+                                ({{ diff > 0 ? '+' : '' }}{{ diff | currency }})
+                              </span>
+                            }
+                          </app-button>
+                        }
+                      </div>
+                    </div>
+                  }
+                </div>
+              } @else if (p.variants && p.variants.length > 0) {
+                <!-- Fallback: flat variant buttons for products without attribute groups -->
                 <div class="options-group">
                   <div class="variants-btns">
                     @for (v of p.variants; track v.id) {
@@ -111,6 +145,11 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                         (clicked)="selectVariant(v)"
                       >
                         {{ v.name }}
+                        @if (v.final_price !== p.final_price) {
+                          <span class="text-[10px] ml-1 opacity-80">
+                            ({{ v.final_price > p.final_price ? '+' : '' }}{{ (v.final_price - p.final_price) | currency }})
+                          </span>
+                        }
                         @if (!isOnDemand() && v.stock_quantity === 0) {
                           <span class="text-[10px] opacity-60 ml-1">(Agotado)</span>
                         }
@@ -344,6 +383,9 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
       .original-price { font-size: 1.25rem; color: var(--color-text-muted); text-decoration: line-through; }
     }
 
+    .options-group { display: flex; flex-direction: column; gap: 0.75rem; }
+    .attr-group { display: flex; flex-direction: column; gap: 0.4rem; }
+    .attr-group-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.5px; }
     .variants-btns { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 
     .purchase-box {
@@ -462,12 +504,96 @@ export class ProductDetailComponent implements OnInit {
   isDescriptionExpanded = signal(false);
   quantity = signal(1);
 
+  // Attribute-based variant selection
+  selectedAttributes = signal<Record<string, string>>({});
+
+  /** Extract unique attribute groups from variants: [{name: 'Color', values: ['Rojo', 'Azul']}, ...] */
+  attributeGroups = computed(() => {
+    const p = this.product();
+    if (!p?.variants?.length) return [];
+    const groups: Record<string, Set<string>> = {};
+    for (const v of p.variants) {
+      if (v.attributes && typeof v.attributes === 'object') {
+        for (const [key, val] of Object.entries(v.attributes)) {
+          if (!groups[key]) groups[key] = new Set();
+          groups[key].add(String(val));
+        }
+      }
+    }
+    return Object.entries(groups).map(([name, valuesSet]) => ({
+      name,
+      values: Array.from(valuesSet),
+    }));
+  });
+
+  /** Whether the product uses attribute-based variant selection */
+  hasAttributeGroups = computed(() => this.attributeGroups().length > 0);
+
+  /** Variant that matches the current full attribute selection */
+  matchedVariant = computed((): ProductVariantDetail | null => {
+    const p = this.product();
+    const sel = this.selectedAttributes();
+    const groups = this.attributeGroups();
+    if (!p?.variants?.length || !groups.length) return null;
+    // Only match when all groups have a selection
+    if (Object.keys(sel).length < groups.length) return null;
+    return p.variants.find(v => {
+      if (!v.attributes || typeof v.attributes !== 'object') return false;
+      return groups.every(g => String(v.attributes[g.name]) === sel[g.name]);
+    }) || null;
+  });
+
+  /** Get available values for a group given current selections on other groups */
+  getAvailableValues(groupName: string): string[] {
+    const p = this.product();
+    if (!p?.variants?.length) return [];
+    const sel = this.selectedAttributes();
+    const otherSelections = Object.entries(sel).filter(([k]) => k !== groupName);
+    const matching = p.variants.filter(v => {
+      if (!v.attributes || typeof v.attributes !== 'object') return false;
+      return otherSelections.every(([k, val]) => String(v.attributes[k]) === val);
+    });
+    const available = new Set<string>();
+    for (const v of matching) {
+      if (v.attributes[groupName]) available.add(String(v.attributes[groupName]));
+    }
+    return Array.from(available);
+  }
+
+  /** Price difference badge for a variant value */
+  getPriceDiffForValue(groupName: string, value: string): number | null {
+    const p = this.product();
+    if (!p?.variants?.length) return null;
+    const sel = { ...this.selectedAttributes(), [groupName]: value };
+    const groups = this.attributeGroups();
+    // Only show price diff when selection would be complete
+    if (Object.keys(sel).length < groups.length) return null;
+    const variant = p.variants.find(v => {
+      if (!v.attributes || typeof v.attributes !== 'object') return false;
+      return groups.every(g => String(v.attributes[g.name]) === sel[g.name]);
+    });
+    if (!variant) return null;
+    const diff = variant.final_price - p.final_price;
+    return Math.abs(diff) > 0.01 ? diff : null;
+  }
+
   // Variant-aware computed signals
   selectedVariant = computed((): ProductVariantDetail | null => {
+    // Prefer attribute-based matching
+    const matched = this.matchedVariant();
+    if (matched) return matched;
+    // Fallback to direct ID selection (for variants without attributes)
     const p = this.product();
     const vid = this.selectedVariantId();
     if (!p || !vid || !p.variants?.length) return null;
     return p.variants.find(v => v.id === vid) || null;
+  });
+
+  /** Minimum price across all variants */
+  minVariantPrice = computed((): number => {
+    const p = this.product();
+    if (!p?.variants?.length) return p?.final_price || 0;
+    return Math.min(...p.variants.map(v => v.final_price));
   });
 
   displayPrice = computed((): number => {
@@ -477,11 +603,22 @@ export class ProductDetailComponent implements OnInit {
     return p?.final_price || 0;
   });
 
+  /** Show "Desde $X" when no variant is selected and prices differ */
+  displayPriceLabel = computed((): string | null => {
+    const variant = this.selectedVariant();
+    const p = this.product();
+    if (variant || !p?.variants?.length) return null;
+    const prices = p.variants.map(v => v.final_price);
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    if (max - min < 0.01) return null;
+    return 'Desde';
+  });
+
   displayStock = computed((): number => {
     const variant = this.selectedVariant();
     const p = this.product();
     if (variant) return variant.stock_quantity;
-    // If product has variants but none selected, sum all variant stock (defense in depth)
     if (p?.variants?.length) {
       return p.variants.reduce((sum, v) => sum + (v.stock_quantity || 0), 0);
     }
@@ -555,7 +692,18 @@ export class ProductDetailComponent implements OnInit {
           const product = response.data;
           this.product.set(product);
           this.activeImageUrl.set(product.image_url);
-          if (product.variants?.length) this.selectedVariantId.set(product.variants[0].id);
+          if (product.variants?.length) {
+            const firstVariant = product.variants[0];
+            this.selectedVariantId.set(firstVariant.id);
+            // Initialize attribute-based selection from first variant's attributes
+            if (firstVariant.attributes && typeof firstVariant.attributes === 'object') {
+              const attrs: Record<string, string> = {};
+              for (const [k, v] of Object.entries(firstVariant.attributes)) {
+                attrs[k] = String(v);
+              }
+              this.selectedAttributes.set(attrs);
+            }
+          }
           this.loadRecommendations(product);
         } else {
           this.hasError.set(true);
@@ -590,6 +738,32 @@ export class ProductDetailComponent implements OnInit {
     // Reset quantity if it exceeds variant stock (skip for on-demand products)
     if (!this.isOnDemand() && this.quantity() > variant.stock_quantity) {
       this.quantity.set(Math.max(1, variant.stock_quantity));
+    }
+  }
+
+  selectAttributeValue(groupName: string, value: string): void {
+    this.selectedAttributes.update(current => {
+      const next = { ...current };
+      // Toggle off if re-clicking the same value
+      if (next[groupName] === value) {
+        delete next[groupName];
+      } else {
+        next[groupName] = value;
+      }
+      return next;
+    });
+    // If the matched variant is resolved, update the selected variant ID and image
+    const matched = this.matchedVariant();
+    if (matched) {
+      this.selectedVariantId.set(matched.id);
+      if (matched.image_url) {
+        this.activeImageUrl.set(matched.image_url);
+      }
+      if (!this.isOnDemand() && this.quantity() > matched.stock_quantity) {
+        this.quantity.set(Math.max(1, matched.stock_quantity));
+      }
+    } else {
+      this.selectedVariantId.set(null);
     }
   }
 

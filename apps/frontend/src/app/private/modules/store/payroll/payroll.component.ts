@@ -28,6 +28,7 @@ import { PayrollRunListComponent } from './components/payroll-runs/payroll-run-l
 import { PayrollRunCreateComponent } from './components/payroll-runs/payroll-run-create/payroll-run-create.component';
 import { PayrollRunDetailComponent } from './components/payroll-runs/payroll-run-detail/payroll-run-detail.component';
 import { PayrollSettingsComponent } from './components/payroll-settings/payroll-settings.component';
+import { EmployeeBulkUploadModalComponent } from './components/employees/bulk-upload-modal/employee-bulk-upload-modal.component';
 import { ScrollableTabsComponent, ScrollableTab } from '../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 
@@ -44,6 +45,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
     PayrollRunCreateComponent,
     PayrollRunDetailComponent,
     PayrollSettingsComponent,
+    EmployeeBulkUploadModalComponent,
     ScrollableTabsComponent,
   ],
   template: `
@@ -72,6 +74,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
           (edit)="editEmployee($event)"
           (detail)="viewEmployee($event)"
           (refresh)="refreshEmployees()"
+          (bulkUpload)="openBulkUploadModal()"
         ></app-employee-list>
 
         <vendix-employee-create
@@ -82,6 +85,11 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
           [(isOpen)]="isEmployeeDetailModalOpen"
           [employee]="selectedEmployee"
         ></vendix-employee-detail>
+
+        <app-employee-bulk-upload-modal
+          [(isOpen)]="isEmployeeBulkUploadModalOpen"
+          (uploadComplete)="onBulkUploadComplete()"
+        ></app-employee-bulk-upload-modal>
       </ng-container>
 
       <!-- Payroll Runs Tab -->
@@ -131,6 +139,7 @@ export class PayrollComponent implements OnInit, OnDestroy {
   // Modal states
   isEmployeeCreateModalOpen = false;
   isEmployeeDetailModalOpen = false;
+  isEmployeeBulkUploadModalOpen = false;
   isPayrollRunCreateModalOpen = false;
   isPayrollRunDetailModalOpen = false;
 
@@ -179,6 +188,14 @@ export class PayrollComponent implements OnInit, OnDestroy {
   viewEmployee(employee: Employee): void {
     this.selectedEmployee = employee;
     this.isEmployeeDetailModalOpen = true;
+  }
+
+  openBulkUploadModal(): void {
+    this.isEmployeeBulkUploadModalOpen = true;
+  }
+
+  onBulkUploadComplete(): void {
+    this.refreshEmployees();
   }
 
   refreshEmployees(): void {

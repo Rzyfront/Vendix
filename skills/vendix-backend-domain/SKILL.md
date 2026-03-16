@@ -579,6 +579,68 @@ branding: {
 
 ---
 
+## ⚠️ CRITICAL: Shared Service Dependency Injection
+
+### Rule: NEVER duplicate providers — always import the owning module
+
+When a service belongs to a module that exports it, **always use `imports`** instead of registering the provider directly. Duplicating providers breaks when the service gains new dependencies.
+
+### The Problem (Real Incident)
+
+`StockLevelManager` is owned and exported by `InventoryModule`. When `PaymentsModule` registered it as a direct provider:
+
+```typescript
+// ❌ WRONG: Direct provider registration (anti-pattern)
+@Module({
+  providers: [
+    StockLevelManager,           // ← own instance, must resolve ALL dependencies manually
+    InventoryTransactionsService, // ← also needed because StockLevelManager depends on it
+  ],
+})
+export class PaymentsModule {}
+```
+
+When `CostingService` was added as a new dependency to `StockLevelManager`, NestJS could not resolve it in `PaymentsModule` → **crash loop in production**.
+
+### The Fix
+
+```typescript
+// ✅ CORRECT: Import the module that owns the service
+@Module({
+  imports: [
+    InventoryModule, // ← provides StockLevelManager + ALL its dependencies automatically
+  ],
+  // No need to list StockLevelManager or its deps in providers
+})
+export class PaymentsModule {}
+```
+
+### Key Rules
+
+1. **If a service is exported by a module, import that module** — never register the service as your own provider
+2. **Only register a provider directly** if:
+   - Your module IS the owner of the service (first definition)
+   - There is a confirmed circular dependency that requires `forwardRef()`
+3. **Before adding a dependency to a shared service**, search for all modules that provide it:
+   ```bash
+   grep -r "providers:.*ServiceName" --include="*.module.ts"
+   grep -r "import.*ServiceName" --include="*.module.ts"
+   ```
+4. **Any module that directly provides the service** (instead of importing its module) must also register the new dependency — or better, refactor to use imports
+
+### Shared Services in Vendix
+
+These services are exported by their modules and should be consumed via `imports`, not direct provider registration:
+
+| Service | Owning Module | Use via |
+|---------|---------------|---------|
+| `StockLevelManager` | `InventoryModule` | `imports: [InventoryModule]` |
+| `CostingService` | `InventoryModule` | `imports: [InventoryModule]` |
+| `InventoryTransactionsService` | `InventoryModule` | `imports: [InventoryModule]` |
+| `InventoryBatchesService` | `InventoryModule` | `imports: [InventoryModule]` |
+
+---
+
 ## Related Skills
 
 - `vendix-prisma-scopes` - Prisma scoping system and model registration
