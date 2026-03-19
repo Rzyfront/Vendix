@@ -6,6 +6,7 @@ import {
   OnChanges,
   SimpleChanges,
   inject,
+  ViewChild,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -27,6 +28,7 @@ import {
   AdjustableProduct,
   AdjustmentItem,
   BatchCreateAdjustmentsRequest,
+  PreselectedProduct,
 } from '../../interfaces';
 
 @Component({
@@ -62,7 +64,7 @@ import {
       ></app-steps-line>
 
       <!-- STEP 1: Location Selection -->
-      @if (currentStep === 1) {
+      @if (isLocationStep) {
         <div class="space-y-6">
           <div>
             <label class="block text-sm font-medium text-text-secondary mb-2">Ubicacion *</label>
@@ -80,11 +82,18 @@ import {
               <p class="text-lg font-bold text-primary">{{ getLocationName(selectedLocation) }}</p>
             </div>
           }
+
+          @if (isLoadingPreselectedStock) {
+            <div class="p-4 text-center">
+              <div class="inline-block w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
+              <p class="text-sm text-text-secondary">Consultando stock del producto...</p>
+            </div>
+          }
         </div>
       }
 
-      <!-- STEP 2: Products & Adjustments -->
-      @if (currentStep === 2) {
+      <!-- STEP 2: Products & Adjustments (only without preselection) -->
+      @if (isProductsStep) {
         <div class="space-y-4">
           <!-- Location Summary -->
           <div class="p-3 bg-surface-secondary rounded-xl border border-border flex items-center gap-3">
@@ -99,11 +108,11 @@ import {
           <div>
             <label class="block text-sm font-medium text-text-secondary mb-2">Buscar Producto</label>
             <app-inputsearch
+              #productSearch
               size="sm"
               placeholder="Buscar por nombre o SKU..."
               [debounceTime]="300"
-              [ngModel]="productSearchTerm"
-              (ngModelChange)="searchProducts($event)"
+              (searchChange)="searchProducts($event)"
             ></app-inputsearch>
           </div>
 
@@ -234,8 +243,8 @@ import {
         </div>
       }
 
-      <!-- STEP 3: Confirm -->
-      @if (currentStep === 3) {
+      <!-- STEP 3 (or 2 with preselection): Confirm -->
+      @if (isConfirmStep) {
         <div class="space-y-4">
           <!-- Location info -->
           <div class="p-4 bg-surface-secondary rounded-xl border border-border">
@@ -248,74 +257,153 @@ import {
             </div>
           </div>
 
-          <!-- Projection Table -->
-          <div>
-            <h4 class="text-sm font-medium text-text-secondary mb-2">
-              Proyeccion de Inventario ({{ adjustmentItems.length }})
-            </h4>
-            <div class="border border-border rounded-xl overflow-hidden">
-              <!-- Header -->
-              <div class="grid grid-cols-[1fr_80px_60px_60px_60px] gap-0 bg-surface-secondary text-xs font-medium text-text-secondary border-b border-border">
-                <div class="px-3 py-2">Producto</div>
-                <div class="px-2 py-2 text-center">Tipo</div>
-                <div class="px-2 py-2 text-center">Actual</div>
-                <div class="px-2 py-2 text-center">Nueva</div>
-                <div class="px-2 py-2 text-center">Cambio</div>
-              </div>
-              <!-- Body -->
-              @for (item of adjustmentItems; track item.product_id) {
-                <div class="grid grid-cols-[1fr_80px_60px_60px_60px] gap-0 border-b border-border last:border-b-0 items-center">
-                  <div class="px-3 py-2.5">
-                    <p class="text-sm font-medium text-text-primary truncate">{{ item.product_name }}</p>
+          <!-- Editable product card (only with preselection) -->
+          @if (hasPreselected) {
+            @for (item of adjustmentItems; track item.product_id; let i = $index) {
+              <div class="p-3 bg-surface rounded-xl border border-border space-y-3">
+                <!-- Product header -->
+                <div>
+                  <p class="text-sm font-medium text-text-primary">{{ item.product_name }}</p>
+                  <p class="text-xs text-text-secondary">
+                    Stock actual: {{ item.stock_on_hand }}
                     @if (item.sku) {
-                      <p class="text-xs text-text-secondary">{{ item.sku }}</p>
+                      <span class="mx-1">|</span> SKU: {{ item.sku }}
+                    }
+                  </p>
+                </div>
+
+                <!-- Adjustment Type Grid -->
+                <div>
+                  <p class="text-xs font-medium text-text-secondary mb-1.5">Tipo *</p>
+                  <div class="grid grid-cols-3 gap-1.5">
+                    @for (type of adjustmentTypes; track type.value) {
+                      <button
+                        type="button"
+                        (click)="updateItemType(i, type.value)"
+                        class="flex flex-col items-center p-2 rounded-lg border transition-colors text-center"
+                        [class]="item.type === type.value
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border bg-surface text-text-secondary hover:border-muted hover:bg-muted/10'"
+                      >
+                        <app-icon [name]="type.icon" [size]="14" class="mb-0.5"></app-icon>
+                        <span class="text-[10px] leading-tight">{{ type.label }}</span>
+                      </button>
                     }
                   </div>
-                  <div class="px-2 py-2.5 text-center">
-                    <span class="text-xs px-1.5 py-0.5 rounded bg-muted/20 text-text-secondary">
-                      {{ getTypeLabel(item.type) }}
-                    </span>
+                </div>
+
+                <!-- Quantity Input + Preview -->
+                <div class="flex items-center gap-3">
+                  <div class="flex-1">
+                    <label class="text-xs text-text-secondary">Nueva Cantidad *</label>
+                    <input
+                      type="number"
+                      [min]="0"
+                      [value]="item.quantity_after"
+                      (input)="updateItemQuantity(i, $event)"
+                      class="w-full px-3 py-1.5 text-sm border border-border rounded-lg bg-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                    />
                   </div>
-                  <div class="px-2 py-2.5 text-center text-sm text-text-secondary">
-                    {{ item.stock_on_hand }}
-                  </div>
-                  <div class="px-2 py-2.5 text-center text-sm font-bold text-text-primary">
-                    {{ item.quantity_after }}
-                  </div>
-                  <div class="px-2 py-2.5 text-center">
+                  <div class="flex items-center gap-1 pt-4">
+                    <span class="text-sm text-text-secondary">{{ item.stock_on_hand }}</span>
+                    <app-icon name="arrow-right" [size]="14" class="text-text-secondary"></app-icon>
                     <span
                       class="text-sm font-bold"
                       [class]="getQuantityChange(item) > 0 ? 'text-success' : getQuantityChange(item) < 0 ? 'text-error' : 'text-text-secondary'"
+                    >{{ item.quantity_after }}</span>
+                    <span
+                      class="text-xs ml-1"
+                      [class]="getQuantityChange(item) > 0 ? 'text-success' : getQuantityChange(item) < 0 ? 'text-error' : 'text-text-secondary'"
                     >
-                      {{ getQuantityChange(item) > 0 ? '+' : '' }}{{ getQuantityChange(item) }}
+                      ({{ getQuantityChange(item) > 0 ? '+' : '' }}{{ getQuantityChange(item) }})
                     </span>
                   </div>
                 </div>
-              }
-            </div>
-          </div>
 
-          <!-- Warning for zero changes -->
-          @if (hasZeroChange()) {
-            <div class="p-3 bg-warning/10 rounded-xl border border-warning/30 text-sm text-warning flex items-center gap-2">
-              <app-icon name="alert-triangle" [size]="16"></app-icon>
-              Algunos items tienen cambio = 0. No se aplicara ningun ajuste para esos productos.
-            </div>
+                <!-- Description -->
+                <div>
+                  <input
+                    type="text"
+                    [value]="item.description"
+                    (input)="updateItemDescription(i, $event)"
+                    placeholder="Nota adicional (opcional)..."
+                    class="w-full px-3 py-1.5 text-xs border border-border rounded-lg bg-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                  />
+                </div>
+              </div>
+            }
           }
 
-          <!-- Warning for missing types -->
-          @if (hasMissingType()) {
-            <div class="p-3 bg-error/10 rounded-xl border border-error/30 text-sm text-error flex items-center gap-2">
-              <app-icon name="alert-circle" [size]="16"></app-icon>
-              Algunos items no tienen tipo de ajuste seleccionado. Vuelve al paso anterior para completarlos.
+          <!-- Projection Table (only without preselection) -->
+          @if (!hasPreselected) {
+            <div>
+              <h4 class="text-sm font-medium text-text-secondary mb-2">
+                Proyeccion de Inventario ({{ adjustmentItems.length }})
+              </h4>
+              <div class="border border-border rounded-xl overflow-hidden">
+                <!-- Header -->
+                <div class="grid grid-cols-[1fr_80px_60px_60px_60px] gap-0 bg-surface-secondary text-xs font-medium text-text-secondary border-b border-border">
+                  <div class="px-3 py-2">Producto</div>
+                  <div class="px-2 py-2 text-center">Tipo</div>
+                  <div class="px-2 py-2 text-center">Actual</div>
+                  <div class="px-2 py-2 text-center">Nueva</div>
+                  <div class="px-2 py-2 text-center">Cambio</div>
+                </div>
+                <!-- Body -->
+                @for (item of adjustmentItems; track item.product_id) {
+                  <div class="grid grid-cols-[1fr_80px_60px_60px_60px] gap-0 border-b border-border last:border-b-0 items-center">
+                    <div class="px-3 py-2.5">
+                      <p class="text-sm font-medium text-text-primary truncate">{{ item.product_name }}</p>
+                      @if (item.sku) {
+                        <p class="text-xs text-text-secondary">{{ item.sku }}</p>
+                      }
+                    </div>
+                    <div class="px-2 py-2.5 text-center">
+                      <span class="text-xs px-1.5 py-0.5 rounded bg-muted/20 text-text-secondary">
+                        {{ getTypeLabel(item.type) }}
+                      </span>
+                    </div>
+                    <div class="px-2 py-2.5 text-center text-sm text-text-secondary">
+                      {{ item.stock_on_hand }}
+                    </div>
+                    <div class="px-2 py-2.5 text-center text-sm font-bold text-text-primary">
+                      {{ item.quantity_after }}
+                    </div>
+                    <div class="px-2 py-2.5 text-center">
+                      <span
+                        class="text-sm font-bold"
+                        [class]="getQuantityChange(item) > 0 ? 'text-success' : getQuantityChange(item) < 0 ? 'text-error' : 'text-text-secondary'"
+                      >
+                        {{ getQuantityChange(item) > 0 ? '+' : '' }}{{ getQuantityChange(item) }}
+                      </span>
+                    </div>
+                  </div>
+                }
+              </div>
+            </div>
+
+            <!-- Warning for zero changes -->
+            @if (hasZeroChange()) {
+              <div class="p-3 bg-warning/10 rounded-xl border border-warning/30 text-sm text-warning flex items-center gap-2">
+                <app-icon name="alert-triangle" [size]="16"></app-icon>
+                Algunos items tienen cambio = 0. No se aplicara ningun ajuste para esos productos.
+              </div>
+            }
+
+            <!-- Warning for missing types -->
+            @if (hasMissingType()) {
+              <div class="p-3 bg-error/10 rounded-xl border border-error/30 text-sm text-error flex items-center gap-2">
+                <app-icon name="alert-circle" [size]="16"></app-icon>
+                Algunos items no tienen tipo de ajuste seleccionado. Vuelve al paso anterior para completarlos.
+              </div>
+            }
+
+            <!-- Total -->
+            <div class="p-3 bg-primary/5 rounded-xl border border-primary/20 text-center">
+              <p class="text-sm text-text-secondary">Total de productos a ajustar</p>
+              <p class="text-2xl font-bold text-primary">{{ adjustmentItems.length }}</p>
             </div>
           }
-
-          <!-- Total -->
-          <div class="p-3 bg-primary/5 rounded-xl border border-primary/20 text-center">
-            <p class="text-sm text-text-secondary">Total de productos a ajustar</p>
-            <p class="text-2xl font-bold text-primary">{{ adjustmentItems.length }}</p>
-          </div>
 
           <!-- Confirmation checkbox -->
           <label class="flex items-start gap-3 p-3 bg-warning/5 rounded-xl border border-warning/20 cursor-pointer select-none">
@@ -357,7 +445,7 @@ import {
           >
             Cancelar
           </app-button>
-          @if (currentStep < 3) {
+          @if (!isConfirmStep) {
             <app-button
               variant="primary"
               type="button"
@@ -403,6 +491,7 @@ export class AdjustmentCreateModalComponent implements OnChanges {
   @Input() isOpen = false;
   @Input() isSubmitting = false;
   @Input() locations: SelectorOption[] = [];
+  @Input() preselectedProduct: PreselectedProduct | null = null;
 
   @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() cancel = new EventEmitter<void>();
@@ -420,12 +509,15 @@ export class AdjustmentCreateModalComponent implements OnChanges {
   selectedLocation: number | null = null;
 
   // Step 2
-  productSearchTerm = '';
+  @ViewChild('productSearch') productSearchRef?: InputsearchComponent;
   productSearchResults: AdjustableProduct[] = [];
   adjustmentItems: AdjustmentItem[] = [];
 
   // Step 3
   confirmCreate = false;
+
+  // Preselected product loading
+  isLoadingPreselectedStock = false;
 
   adjustmentTypes: { label: string; value: AdjustmentType; icon: string }[] = [
     { label: 'Dano', value: 'damage', icon: 'alert-triangle' },
@@ -436,9 +528,15 @@ export class AdjustmentCreateModalComponent implements OnChanges {
     { label: 'Correccion', value: 'manual_correction', icon: 'edit-3' },
   ];
 
+  get hasPreselected(): boolean { return !!this.preselectedProduct; }
+
+  get isLocationStep(): boolean { return this.currentStep === 1; }
+  get isProductsStep(): boolean { return !this.hasPreselected && this.currentStep === 2; }
+  get isConfirmStep(): boolean { return this.hasPreselected ? this.currentStep === 2 : this.currentStep === 3; }
+
   get modalTitle(): string {
-    if (this.currentStep === 1) return 'Seleccionar Ubicacion';
-    if (this.currentStep === 2) return 'Agregar Productos';
+    if (this.isLocationStep) return 'Seleccionar Ubicacion';
+    if (this.isProductsStep) return 'Agregar Productos';
     return 'Confirmar Ajustes';
   }
 
@@ -455,7 +553,6 @@ export class AdjustmentCreateModalComponent implements OnChanges {
   }
 
   searchProducts(term: string): void {
-    this.productSearchTerm = term;
     if (!term || term.length < 2 || !this.selectedLocation) {
       this.productSearchResults = [];
       return;
@@ -491,7 +588,7 @@ export class AdjustmentCreateModalComponent implements OnChanges {
       },
     ];
     this.productSearchResults = [];
-    this.productSearchTerm = '';
+    this.productSearchRef?.clearInput();
   }
 
   removeItem(index: number): void {
@@ -561,9 +658,9 @@ export class AdjustmentCreateModalComponent implements OnChanges {
 
   canAdvance(): boolean {
     if (this.currentStep === 1) {
-      return !!this.selectedLocation;
+      return !!this.selectedLocation && !this.isLoadingPreselectedStock;
     }
-    if (this.currentStep === 2) {
+    if (this.isProductsStep) {
       return this.adjustmentItems.length > 0 && !this.hasMissingType();
     }
     return true;
@@ -571,11 +668,73 @@ export class AdjustmentCreateModalComponent implements OnChanges {
 
   goToStep(step: number): void {
     if (step > this.currentStep && !this.canAdvance()) return;
+
+    // When preselected product and moving from location to next step
+    if (this.hasPreselected && this.currentStep === 1 && step === 2) {
+      this.loadPreselectedProductStock();
+      return;
+    }
+
     this.currentStep = step;
     this.steps = this.steps.map((s, i) => ({
       ...s,
       completed: i < step - 1,
     }));
+  }
+
+  private loadPreselectedProductStock(): void {
+    const product = this.preselectedProduct!;
+    this.isLoadingPreselectedStock = true;
+
+    this.inventoryService.searchAdjustableProducts(product.name, this.selectedLocation!).subscribe({
+      next: (response) => {
+        const products = response.data || [];
+        const match = products.find((p) => p.id === product.id);
+
+        if (match) {
+          this.adjustmentItems = [];
+          this.addProduct(match);
+        } else {
+          // Product has no stock at this location — add with 0
+          this.adjustmentItems = [{
+            product_id: product.id,
+            product_name: product.name,
+            sku: product.sku ?? undefined,
+            stock_on_hand: 0,
+            type: 'count_variance' as AdjustmentType,
+            quantity_after: 0,
+            reason_code: 'INV_COUNT',
+            description: '',
+          }];
+        }
+
+        this.isLoadingPreselectedStock = false;
+        this.currentStep = 2;
+        this.steps = this.steps.map((s, i) => ({
+          ...s,
+          completed: i < 1,
+        }));
+      },
+      error: () => {
+        this.isLoadingPreselectedStock = false;
+        // Fallback: add with 0 stock
+        this.adjustmentItems = [{
+          product_id: product.id,
+          product_name: product.name,
+          sku: product.sku ?? undefined,
+          stock_on_hand: 0,
+          type: 'count_variance' as AdjustmentType,
+          quantity_after: 0,
+          reason_code: 'INV_COUNT',
+          description: '',
+        }];
+        this.currentStep = 2;
+        this.steps = this.steps.map((s, i) => ({
+          ...s,
+          completed: i < 1,
+        }));
+      },
+    });
   }
 
   onCancel(): void {
@@ -613,15 +772,21 @@ export class AdjustmentCreateModalComponent implements OnChanges {
 
   private resetModal(): void {
     this.currentStep = 1;
-    this.steps = [
-      { label: 'UBICACION', completed: false },
-      { label: 'PRODUCTOS', completed: false },
-      { label: 'CONFIRMAR', completed: false },
-    ];
+    this.steps = this.hasPreselected
+      ? [
+          { label: 'UBICACION', completed: false },
+          { label: 'CONFIRMAR', completed: false },
+        ]
+      : [
+          { label: 'UBICACION', completed: false },
+          { label: 'PRODUCTOS', completed: false },
+          { label: 'CONFIRMAR', completed: false },
+        ];
     this.selectedLocation = null;
-    this.productSearchTerm = '';
     this.productSearchResults = [];
     this.adjustmentItems = [];
+    this.productSearchRef?.clearInput();
     this.confirmCreate = false;
+    this.isLoadingPreselectedStock = false;
   }
 }

@@ -84,7 +84,7 @@ export class StoresService {
   }
 
   async findAll(query: AdminStoreQueryDto) {
-    const { page = 1, limit = 10, search, organization_id, store_type } = query;
+    const { page = 1, limit = 10, search, organization_id, store_type, include_non_production } = query;
     const skip = (page - 1) * Number(limit);
 
     const where: Prisma.storesWhereInput = {};
@@ -102,6 +102,11 @@ export class StoresService {
 
     if (store_type) {
       where.store_type = store_type;
+    }
+
+    // Filter stores by organization mode (exclude demo/test by default)
+    if (!include_non_production) {
+      where.organizations = { mode: 'production' };
     }
 
     const [data, total] = await Promise.all([

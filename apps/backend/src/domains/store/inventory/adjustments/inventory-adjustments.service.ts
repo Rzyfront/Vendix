@@ -310,6 +310,62 @@ export class InventoryAdjustmentsService {
   }
 
   /**
+   * Crea múltiples ajustes de inventario en batch (como borrador, sin aprobar)
+   */
+  async batchCreateAdjustments(
+    locationId: number,
+    items: { product_id: number; product_variant_id?: number; batch_id?: number; type: string; quantity_after: number; reason_code?: string; description?: string }[],
+  ): Promise<InventoryAdjustment[]> {
+    const results: InventoryAdjustment[] = [];
+    for (const item of items) {
+      const adjustment = await this.createAdjustment({
+        organization_id: 0, // Resolved from context inside createAdjustment
+        created_by_user_id: 0, // Resolved from context inside createAdjustment
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id,
+        location_id: locationId,
+        batch_id: item.batch_id,
+        type: item.type as AdjustmentType,
+        quantity_after: item.quantity_after,
+        reason_code: item.reason_code,
+        description: item.description,
+      });
+      results.push(adjustment);
+    }
+    return results;
+  }
+
+  /**
+   * Crea múltiples ajustes y los aprueba inmediatamente
+   */
+  async batchCreateAndComplete(
+    locationId: number,
+    items: { product_id: number; product_variant_id?: number; batch_id?: number; type: string; quantity_after: number; reason_code?: string; description?: string }[],
+  ): Promise<InventoryAdjustment[]> {
+    const results: InventoryAdjustment[] = [];
+    const userIdRaw = RequestContextService.getUserId();
+    const userId = userIdRaw ? Number(userIdRaw) : null;
+
+    for (const item of items) {
+      const adjustment = await this.createAdjustment({
+        organization_id: 0, // Resolved from context inside createAdjustment
+        created_by_user_id: 0, // Resolved from context inside createAdjustment
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id,
+        location_id: locationId,
+        batch_id: item.batch_id,
+        type: item.type as AdjustmentType,
+        quantity_after: item.quantity_after,
+        reason_code: item.reason_code,
+        description: item.description,
+        approved_by_user_id: userId ?? undefined,
+      });
+      results.push(adjustment);
+    }
+    return results;
+  }
+
+  /**
    * Aprueba un ajuste de inventario
    */
   async approveAdjustment(
@@ -437,6 +493,44 @@ export class InventoryAdjustmentsService {
       type: item.adjustment_type,
       totalQuantity: Math.abs(item._sum.quantity_change || 0),
       adjustmentCount: item._count.id,
+    }));
+  }
+
+  /**
+   * Busca productos con stock en una ubicación para ajustes
+   */
+  async searchAdjustableProducts(
+    search: string,
+    locationId: number,
+    limit = 10,
+  ) {
+    const stockLevels = await this.prisma.stock_levels.findMany({
+      where: {
+        location_id: locationId,
+        products: {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { sku: { contains: search, mode: 'insensitive' } },
+          ],
+        },
+      },
+      include: {
+        products: {
+          select: { id: true, name: true, sku: true },
+        },
+      },
+      take: limit,
+    });
+
+    return stockLevels.map((sl) => ({
+      id: sl.products.id,
+      name: sl.products.name,
+      sku: sl.products.sku,
+      stock_at_location: {
+        quantity_on_hand: sl.quantity_on_hand,
+        quantity_reserved: sl.quantity_reserved,
+        quantity_available: sl.quantity_available,
+      },
     }));
   }
 

@@ -295,6 +295,7 @@ model organizations {
   created_at                    DateTime?                      @default(now()) @db.Timestamp(6)
   updated_at                    DateTime?                      @default(now()) @db.Timestamp(6)
   onboarding                    Boolean                        @default(false)
+  mode                          organization_mode_enum         @default(production)
   addresses                     addresses[]
   audit_logs                    audit_logs[]
   domain_settings               domain_settings[]
@@ -328,6 +329,7 @@ model organizations {
 
   @@index([onboarding])
   @@index([account_type])
+  @@index([mode])
 }
 
 model organization_settings {
@@ -1958,6 +1960,12 @@ enum organization_state_enum {
 enum organization_account_type_enum {
   SINGLE_STORE
   MULTI_STORE_ORG
+}
+
+enum organization_mode_enum {
+  production
+  demo
+  test
 }
 
 enum store_type_enum {

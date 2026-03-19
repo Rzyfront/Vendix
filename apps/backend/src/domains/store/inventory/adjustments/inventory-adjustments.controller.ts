@@ -22,6 +22,7 @@ import {
   CreateAdjustmentDto,
   AdjustmentQueryDto,
 } from './interfaces/inventory-adjustment.interface';
+import { BatchCreateAdjustmentsDto } from './dto/batch-create-adjustments.dto';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { RequirePermissions } from '../../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
@@ -78,6 +79,49 @@ export class InventoryAdjustmentsController {
   async getAdjustments(@Query() query: AdjustmentQueryDto) {
     const result = await this.adjustmentsService.getAdjustments(query);
     return this.responseService.success(result);
+  }
+
+  @Get('search-products')
+  @ApiOperation({ summary: 'Search products with stock at a location for adjustments' })
+  @ApiResponse({ status: 200, description: 'Products retrieved successfully' })
+  @RequirePermissions('store:inventory:adjustments:read')
+  async searchProducts(
+    @Query('search') search: string,
+    @Query('location_id') locationId: number,
+    @Query('limit') limit?: number,
+  ) {
+    const result = await this.adjustmentsService.searchAdjustableProducts(
+      search,
+      +locationId,
+      limit ? +limit : 10,
+    );
+    return this.responseService.success(result);
+  }
+
+  @Post('batch')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Batch create inventory adjustments (draft)' })
+  @ApiResponse({ status: 201, description: 'Adjustments created successfully' })
+  @RequirePermissions('store:inventory:adjustments:create')
+  async batchCreateAdjustments(@Body() dto: BatchCreateAdjustmentsDto) {
+    const result = await this.adjustmentsService.batchCreateAdjustments(
+      dto.location_id,
+      dto.items,
+    );
+    return this.responseService.success(result, 'Adjustments created successfully');
+  }
+
+  @Post('batch-complete')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Batch create and approve inventory adjustments' })
+  @ApiResponse({ status: 201, description: 'Adjustments created and approved successfully' })
+  @RequirePermissions('store:inventory:adjustments:create')
+  async batchCreateAndComplete(@Body() dto: BatchCreateAdjustmentsDto) {
+    const result = await this.adjustmentsService.batchCreateAndComplete(
+      dto.location_id,
+      dto.items,
+    );
+    return this.responseService.success(result, 'Adjustments created and applied successfully');
   }
 
   @Get(':id')

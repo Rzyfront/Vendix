@@ -437,6 +437,60 @@ export class StockTransfersService {
     });
   }
 
+  async searchTransferableProducts(
+    search: string,
+    fromLocationId: number,
+    toLocationId: number,
+    limit = 10,
+  ) {
+    const products = await this.prisma.products.findMany({
+      where: {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { sku: { contains: search, mode: 'insensitive' } },
+        ],
+        stock_levels: {
+          some: { location_id: fromLocationId },
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        stock_levels: {
+          where: {
+            location_id: { in: [fromLocationId, toLocationId] },
+          },
+          select: {
+            location_id: true,
+            quantity_on_hand: true,
+            quantity_reserved: true,
+            quantity_available: true,
+          },
+        },
+      },
+      take: limit,
+    });
+
+    const defaultStock = { quantity_on_hand: 0, quantity_reserved: 0, quantity_available: 0 };
+
+    return products.map((p) => {
+      const originStock = p.stock_levels.find((sl) => sl.location_id === fromLocationId);
+      const destStock = p.stock_levels.find((sl) => sl.location_id === toLocationId);
+      return {
+        id: p.id,
+        name: p.name,
+        sku: p.sku,
+        stock_at_origin: originStock
+          ? { quantity_on_hand: originStock.quantity_on_hand, quantity_reserved: originStock.quantity_reserved, quantity_available: originStock.quantity_available }
+          : defaultStock,
+        stock_at_destination: destStock
+          ? { quantity_on_hand: destStock.quantity_on_hand, quantity_reserved: destStock.quantity_reserved, quantity_available: destStock.quantity_available }
+          : defaultStock,
+      };
+    });
+  }
+
   remove(id: number) {
     return this.prisma.stock_transfers.delete({
       where: { id },

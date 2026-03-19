@@ -59,6 +59,8 @@ export class OrganizationsService {
       is_active,
       sort_by = 'created_at',
       sort_order = 'desc',
+      mode,
+      include_non_production,
     } = query;
     const skip = (page - 1) * Number(limit);
 
@@ -81,6 +83,13 @@ export class OrganizationsService {
       where.state = is_active
         ? OrganizationState.ACTIVE
         : OrganizationState.INACTIVE;
+    }
+
+    // Filter by organization mode
+    if (mode) {
+      where.mode = mode;
+    } else if (!include_non_production) {
+      where.mode = 'production';
     }
 
     const [data, total] = await Promise.all([
@@ -269,18 +278,25 @@ export class OrganizationsService {
   }
 
   async getDashboardStats() {
+    const productionFilter = { mode: 'production' as const };
+
     const [
       totalOrganizations,
       activeOrganizations,
       inactiveOrganizations,
       suspendedOrganizations,
+      demoOrganizations,
+      testOrganizations,
       recentOrganizations,
     ] = await Promise.all([
-      this.prisma.organizations.count(),
-      this.prisma.organizations.count({ where: { state: 'active' } }),
-      this.prisma.organizations.count({ where: { state: 'inactive' } }),
-      this.prisma.organizations.count({ where: { state: 'suspended' } }),
+      this.prisma.organizations.count({ where: productionFilter }),
+      this.prisma.organizations.count({ where: { state: 'active', ...productionFilter } }),
+      this.prisma.organizations.count({ where: { state: 'inactive', ...productionFilter } }),
+      this.prisma.organizations.count({ where: { state: 'suspended', ...productionFilter } }),
+      this.prisma.organizations.count({ where: { mode: 'demo' } }),
+      this.prisma.organizations.count({ where: { mode: 'test' } }),
       this.prisma.organizations.findMany({
+        where: productionFilter,
         take: 5,
         orderBy: { created_at: 'desc' },
         select: {
@@ -288,6 +304,7 @@ export class OrganizationsService {
           name: true,
           slug: true,
           created_at: true,
+          mode: true,
           _count: {
             select: {
               stores: true,
@@ -303,6 +320,8 @@ export class OrganizationsService {
       activeOrganizations,
       inactiveOrganizations,
       suspendedOrganizations,
+      demoOrganizations,
+      testOrganizations,
       recentOrganizations,
       organizationsByStatus: {
         active: activeOrganizations,

@@ -87,6 +87,8 @@ export class StoresService {
       params = params.set('is_active', query.is_active.toString());
     if (query?.organization_id)
       params = params.set('organization_id', query.organization_id.toString());
+    if (query?.include_non_production)
+      params = params.set('include_non_production', 'true');
 
     const url = `${this.apiUrl}/superadmin/stores`;
 

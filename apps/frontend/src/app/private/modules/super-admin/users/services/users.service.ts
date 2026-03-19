@@ -66,6 +66,8 @@ export class UsersService {
     if (query.state) params = params.set('state', query.state);
     if (query.organization_id)
       params = params.set('organization_id', query.organization_id.toString());
+    if (query.include_non_production)
+      params = params.set('include_non_production', 'true');
 
     return this.http
       .get<any>(`${this.apiUrl}/superadmin/users`, { params })

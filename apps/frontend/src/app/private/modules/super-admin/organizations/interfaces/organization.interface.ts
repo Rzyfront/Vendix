@@ -1,5 +1,7 @@
 import { Organization } from '../../../../../core/models/organization.model';
 
+export type OrganizationMode = 'production' | 'demo' | 'test';
+
 export interface OrganizationListItem {
   id: number;
   name: string;
@@ -7,6 +9,7 @@ export interface OrganizationListItem {
   email: string;
   status: Organization['status'];
   plan: Organization['plan'];
+  mode: OrganizationMode;
   createdAt: string;
   settings: {
     maxStores: number;

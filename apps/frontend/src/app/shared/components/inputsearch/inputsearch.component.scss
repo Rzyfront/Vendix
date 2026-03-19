@@ -398,3 +398,15 @@
     }
   }
 }
+
+// Prevent iOS Safari auto-zoom on input focus (requires font-size >= 16px)
+@supports (-webkit-touch-callout: none) {
+  .inputsearch-input {
+    font-size: max(1rem, var(--fs-base));
+  }
+
+  .inputsearch-input-sm,
+  .inputsearch-input-modern {
+    font-size: max(1rem, var(--fs-base));
+  }
+}

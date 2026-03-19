@@ -229,6 +229,38 @@ export class StockLevelManager {
   }
 
   /**
+   * Resolves the best location_id for a product when no explicit location is provided.
+   * Used by POS and e-commerce where items don't carry location context.
+   * Priority: location with highest available stock → first org location as fallback.
+   */
+  async getDefaultLocationForProduct(
+    product_id: number,
+    variant_id?: number,
+  ): Promise<number> {
+    const stockLevel = await this.prisma.stock_levels.findFirst({
+      where: {
+        product_id,
+        product_variant_id: variant_id || null,
+        quantity_available: { gt: 0 },
+      },
+      orderBy: { quantity_available: 'desc' },
+      select: { location_id: true },
+    });
+    if (stockLevel) return stockLevel.location_id;
+
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id) {
+      throw new VendixHttpException(ErrorCodes.INV_CONTEXT_001);
+    }
+    const location = await this.prisma.inventory_locations.findFirst({
+      where: { organization_id: context.organization_id },
+      orderBy: { id: 'asc' },
+    });
+    if (!location) throw new VendixHttpException(ErrorCodes.INV_LOC_001);
+    return location.id;
+  }
+
+  /**
    * Reserva stock para una orden
    */
   async reserveStock(
@@ -239,8 +271,10 @@ export class StockLevelManager {
     reserved_for_type: 'order' | 'transfer' | 'adjustment',
     reserved_for_id: number,
     user_id?: number,
+    validate_availability = true,
+    tx?: any,
   ): Promise<void> {
-    await this.prisma.$transaction(async (prisma) => {
+    const execute = async (prisma: any) => {
       // Validar contexto
       const context = RequestContextService.getContext();
       const organization_id =
@@ -254,8 +288,8 @@ export class StockLevelManager {
         location_id,
       );
 
-      // 2. Validar disponibilidad
-      if (stock_level.quantity_available < quantity) {
+      // 2. Validar disponibilidad (skip for POS/non-restrictive channels)
+      if (validate_availability && stock_level.quantity_available < quantity) {
         throw new ConflictException(
           'Insufficient stock available for reservation',
         );
@@ -278,15 +312,9 @@ export class StockLevelManager {
         },
       });
 
-      // 4. Actualizar stock level
+      // 4. Actualizar stock level (use id to avoid composite key null issues)
       await prisma.stock_levels.update({
-        where: {
-          product_id_product_variant_id_location_id: {
-            product_id: product_id,
-            product_variant_id: variant_id || null,
-            location_id: location_id,
-          },
-        },
+        where: { id: stock_level.id },
         data: {
           quantity_reserved: stock_level.quantity_reserved + quantity,
           quantity_available: stock_level.quantity_available - quantity,
@@ -297,11 +325,13 @@ export class StockLevelManager {
 
       // 5. Sincronizar con products.stock_quantity y product_variants.stock_quantity
       await this.syncProductStock(prisma, product_id, variant_id);
+    };
 
-      // 6. La reserva misma sirve como registro de auditoría
-      // No se crea transacción con quantity_change: 0 para evitar contaminar el historial
-      // El registro en stock_reservations es suficiente para trazabilidad
-    });
+    if (tx) {
+      await execute(tx);
+    } else {
+      await this.prisma.$transaction(async (prisma) => execute(prisma));
+    }
   }
 
   /**
@@ -313,8 +343,9 @@ export class StockLevelManager {
     location_id: number,
     reserved_for_type: 'order' | 'transfer' | 'adjustment',
     reserved_for_id: number,
+    tx?: any,
   ): Promise<void> {
-    await this.prisma.$transaction(async (prisma) => {
+    const execute = async (prisma: any) => {
       // 1. Obtener reservas activas
       const reservations = await prisma.stock_reservations.findMany({
         where: {
@@ -347,26 +378,18 @@ export class StockLevelManager {
         },
       });
 
-      // 3. Actualizar stock level
-      const stock_level = await prisma.stock_levels.findUnique({
+      // 3. Actualizar stock level (use findFirst for nullable variant_id in composite key)
+      const stock_level = await prisma.stock_levels.findFirst({
         where: {
-          product_id_product_variant_id_location_id: {
-            product_id: product_id,
-            product_variant_id: variant_id || null,
-            location_id: location_id,
-          },
+          product_id: product_id,
+          product_variant_id: variant_id || null,
+          location_id: location_id,
         },
       });
 
       if (stock_level) {
         await prisma.stock_levels.update({
-          where: {
-            product_id_product_variant_id_location_id: {
-              product_id: product_id,
-              product_variant_id: variant_id || null,
-              location_id: location_id,
-            },
-          },
+          where: { id: stock_level.id },
           data: {
             quantity_reserved: Math.max(
               0,
@@ -381,7 +404,13 @@ export class StockLevelManager {
         // 4. Sincronizar con products.stock_quantity y product_variants.stock_quantity
         await this.syncProductStock(prisma, product_id, variant_id);
       }
-    });
+    };
+
+    if (tx) {
+      await execute(tx);
+    } else {
+      await this.prisma.$transaction(async (prisma) => execute(prisma));
+    }
   }
 
   /**

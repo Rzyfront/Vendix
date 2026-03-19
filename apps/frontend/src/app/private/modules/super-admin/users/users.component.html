@@ -38,6 +38,12 @@
           </form>
         </div>
 
+        <!-- Filter Modo Org -->
+        <div class="w-full sm:w-48">
+          <app-selector [options]="orgModes" [formControl]="$any(filterForm.get('include_non_production'))" size="sm"
+            variant="outline"></app-selector>
+        </div>
+
         <!-- Actions -->
         <div class="flex gap-2 items-center sm:ml-auto">
           <app-button variant="outline" size="sm" (clicked)="refreshUsers()" [disabled]="isLoading" title="Actualizar">

@@ -9,6 +9,8 @@ import { ReturnOrdersModule } from './return-orders/return-orders.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { OrderFlowModule } from './order-flow/order-flow.module';
 import { SettingsModule } from '../settings/settings.module';
+import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { InventoryTransactionsService } from '../inventory/transactions/inventory-transactions.service';
 
 @Module({
   imports: [
@@ -22,7 +24,7 @@ import { SettingsModule } from '../settings/settings.module';
     SettingsModule,
   ],
   controllers: [OrdersController],
-  providers: [OrdersService],
+  providers: [OrdersService, StockLevelManager, InventoryTransactionsService],
   exports: [OrdersService, OrderFlowModule],
 })
 export class OrdersModule {}

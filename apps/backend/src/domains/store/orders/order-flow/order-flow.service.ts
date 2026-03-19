@@ -20,6 +20,7 @@ import {
 import { SettingsService } from '../../settings/settings.service';
 import { SessionsService } from '../../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../../cash-registers/movements/movements.service';
+import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 
 type OrderState = order_state_enum;
 
@@ -47,6 +48,7 @@ export class OrderFlowService {
     private readonly settingsService: SettingsService,
     private readonly sessionsService: SessionsService,
     private readonly movementsService: MovementsService,
+    private readonly stockLevelManager: StockLevelManager,
   ) {}
 
   private async getOrder(orderId: number) {
@@ -188,6 +190,55 @@ export class OrderFlowService {
         }
       } catch (error) {
         this.logger.error(`Failed to emit order.completed for order #${orderId}: ${error.message}`);
+      }
+
+      // Consume reserved stock: decrement quantity_on_hand + release reservation
+      // Note: POS direct delivery handles its own inventory via PaymentsService.updateInventoryFromOrder()
+      // and sets state to 'finished' directly (bypasses updateOrderState), so this block only runs
+      // for non-POS flows (e-commerce, admin, delivery confirmation, auto-finish).
+      try {
+        const orderWithItems = await this.prisma.orders.findUnique({
+          where: { id: orderId },
+          include: {
+            order_items: {
+              include: {
+                products: { select: { id: true, track_inventory: true } },
+                product_variants: { select: { id: true } },
+              },
+            },
+          },
+        });
+
+        for (const item of orderWithItems?.order_items || []) {
+          if (!item.products?.track_inventory) continue;
+
+          const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
+            item.product_id,
+            item.product_variant_id || undefined,
+          );
+
+          await this.stockLevelManager.updateStock({
+            product_id: item.product_id,
+            variant_id: item.product_variant_id || undefined,
+            location_id,
+            quantity_change: -item.quantity,
+            movement_type: 'sale',
+            reason: `Order ${previous_order?.order_number || orderId} completed`,
+            user_id: RequestContextService.getUserId(),
+            order_item_id: item.id,
+            create_movement: true,
+          });
+
+          await this.stockLevelManager.releaseReservation(
+            item.product_id,
+            item.product_variant_id || undefined,
+            location_id,
+            'order',
+            orderId,
+          );
+        }
+      } catch (error) {
+        this.logger.error(`Failed to update stock for finished order #${orderId}: ${error.message}`);
       }
     }
 
@@ -577,6 +628,38 @@ export class OrderFlowService {
           updated_at: new Date(),
         },
       });
+    }
+
+    // Release reserved stock
+    const orderWithItems = await this.prisma.orders.findUnique({
+      where: { id: orderId },
+      include: {
+        order_items: {
+          include: {
+            products: { select: { id: true, track_inventory: true } },
+            product_variants: { select: { id: true } },
+          },
+        },
+      },
+    });
+
+    for (const item of orderWithItems?.order_items || []) {
+      if (!item.products?.track_inventory) continue;
+      try {
+        const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
+          item.product_id,
+          item.product_variant_id || undefined,
+        );
+        await this.stockLevelManager.releaseReservation(
+          item.product_id,
+          item.product_variant_id || undefined,
+          location_id,
+          'order',
+          orderId,
+        );
+      } catch (error) {
+        this.logger.warn(`Failed to release stock for cancelled order #${orderId}, item ${item.id}: ${error.message}`);
+      }
     }
 
     this.validateTransition(order.state as OrderState, 'cancelled');

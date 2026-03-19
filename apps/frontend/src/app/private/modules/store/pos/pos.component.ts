@@ -292,6 +292,7 @@ import { PosSessionDetailModalComponent } from './components/pos-session-detail-
             <div class="flex-[2] min-h-0 min-w-0 overflow-hidden">
               <app-pos-product-selection
                 class="h-full block"
+                [refreshTrigger]="productRefreshCounter"
                 (productSelected)="onProductSelected($event)"
                 (productAddedToCart)="onProductAddedToCart($event)"
               ></app-pos-product-selection>
@@ -315,6 +316,7 @@ import { PosSessionDetailModalComponent } from './components/pos-session-detail-
           <div class="lg:hidden flex-1 min-h-0 pb-20">
             <app-pos-product-selection
               class="h-full block"
+              [refreshTrigger]="productRefreshCounter"
               (productSelected)="onProductSelected($event)"
               (productAddedToCart)="onProductAddedToCart($event)"
             ></app-pos-product-selection>
@@ -469,6 +471,7 @@ export class PosComponent implements OnInit, OnDestroy {
 
 
   showOrderConfirmation = false;
+  productRefreshCounter = 0;
   showCartModal = false;
 
   currentOrderId: string | null = null;
@@ -921,6 +924,7 @@ export class PosComponent implements OnInit, OnDestroy {
 
       this.toastService.success(successMessage);
       this.onClearCart();
+      this.productRefreshCounter++;
     }
   }
 
@@ -1075,6 +1079,7 @@ export class PosComponent implements OnInit, OnDestroy {
       this.showOrderConfirmation = true;
       this.toastService.success('Orden con envío creada correctamente');
       this.onClearCart();
+      this.productRefreshCounter++;
     }
   }
 

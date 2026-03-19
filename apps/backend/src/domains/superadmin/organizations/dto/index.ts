@@ -10,6 +10,7 @@ import {
   IsBoolean,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { organization_mode_enum } from '@prisma/client';
 
 export enum OrganizationState {
   ACTIVE = 'active',
@@ -116,6 +117,10 @@ export class UpdateOrganizationDto {
   @IsOptional()
   @IsEnum(OrganizationState)
   state?: OrganizationState;
+
+  @IsOptional()
+  @IsEnum(organization_mode_enum)
+  mode?: organization_mode_enum;
 }
 
 export class AdminOrganizationQueryDto {
@@ -148,6 +153,15 @@ export class AdminOrganizationQueryDto {
   @IsOptional()
   @IsEnum(['asc', 'desc'])
   sort_order?: 'asc' | 'desc' = 'desc';
+
+  @IsOptional()
+  @IsEnum(organization_mode_enum)
+  mode?: organization_mode_enum;
+
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  include_non_production?: boolean;
 }
 
 export class OrganizationsDashboardStatsDto {
@@ -155,6 +169,8 @@ export class OrganizationsDashboardStatsDto {
   active: number;
   inactive: number;
   suspended: number;
+  demo: number;
+  test: number;
 }
 
 export class OrganizationDashboardDto {

@@ -41,6 +41,22 @@ import { StatsComponent } from '../../../../../shared/components';
         iconBgColor="bg-red-100"
         iconColor="text-red-600"
       ></app-stats>
+
+      <app-stats
+        title="Demo"
+        [value]="stats.demo"
+        iconName="eye"
+        iconBgColor="bg-amber-100"
+        iconColor="text-amber-600"
+      ></app-stats>
+
+      <app-stats
+        title="Test"
+        [value]="stats.test"
+        iconName="flask-conical"
+        iconBgColor="bg-purple-100"
+        iconColor="text-purple-600"
+      ></app-stats>
     </div>
   `,
   styles: [
@@ -57,5 +73,7 @@ export class OrganizationStatsComponent {
     active: 0,
     inactive: 0,
     suspended: 0,
+    demo: 0,
+    test: 0,
   };
 }

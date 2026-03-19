@@ -1,6 +1,5 @@
 import { Component, input, output, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
 
 import {
   InputsearchComponent,
@@ -23,7 +22,6 @@ import { StockTransfer, TransferStatus } from '../interfaces';
   standalone: true,
   imports: [
     CommonModule,
-    FormsModule,
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
@@ -44,8 +42,8 @@ import { StockTransfer, TransferStatus } from '../interfaces';
 
             <div class="flex items-center gap-2 w-full md:w-auto">
               <app-inputsearch class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-                size="sm" placeholder="Buscar transferencia..." [debounceTime]="300" [ngModel]="searchTerm"
-                (ngModelChange)="onSearchChange($event)">
+                size="sm" placeholder="Buscar transferencia..." [debounceTime]="300"
+                (searchChange)="onSearchChange($event)">
               </app-inputsearch>
 
               <app-button variant="outline" size="sm"

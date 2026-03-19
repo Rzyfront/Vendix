@@ -102,6 +102,10 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
     { value: 'true', label: 'Activo' },
     { value: 'false', label: 'Inactivo' },
   ];
+  orgModes = [
+    { value: '', label: 'Solo Producción' },
+    { value: 'all', label: 'Todos los modos' },
+  ];
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -270,6 +274,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       search: [''],
       store_type: [''],
       is_active: [''],
+      include_non_production: [''],
     });
     this.initializeCreateForm();
   }
@@ -340,7 +345,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
 
   get hasFilters(): boolean {
     const filters = this.filterForm.value;
-    return !!(filters.search || filters.store_type || filters.is_active);
+    return !!(filters.search || filters.store_type || filters.is_active || filters.include_non_production);
   }
 
   openCreateStoreModal(): void {
@@ -433,6 +438,9 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       }),
       ...(this.selectedOrganization && {
         organization_id: parseInt(this.selectedOrganization),
+      }),
+      ...(filters.include_non_production === 'all' && {
+        include_non_production: true,
       }),
     };
 
@@ -531,6 +539,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       search: '',
       store_type: '',
       is_active: '',
+      include_non_production: '',
     });
     this.selectedOrganization = '';
   }

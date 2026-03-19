@@ -56,7 +56,7 @@ import { BrandQuickCreateComponent } from '../../components/brand-quick-create.c
 import { TaxQuickCreateComponent } from '../../components/tax-quick-create.component';
 import { AdjustmentCreateModalComponent } from '../../../inventory/operations/components/adjustment-create-modal.component';
 import { InventoryService } from '../../../inventory/services/inventory.service';
-import { BatchCreateAdjustmentsRequest } from '../../../inventory/interfaces';
+import { BatchCreateAdjustmentsRequest, PreselectedProduct } from '../../../inventory/interfaces';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
 
@@ -1529,6 +1529,11 @@ export class ProductCreatePageComponent implements OnInit {
     if (field.errors['required']) return 'Campo obligatorio';
     if (field.errors['min']) return `Valor mínimo: ${field.errors['min'].min}`;
     return 'Valor inválido';
+  }
+
+  get adjustmentPreselectedProduct(): PreselectedProduct | null {
+    if (!this.product) return null;
+    return { id: this.product.id, name: this.product.name, sku: this.product.sku ?? null };
   }
 
   // Adjustment Modal

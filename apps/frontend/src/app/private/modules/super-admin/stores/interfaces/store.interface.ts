@@ -183,6 +183,7 @@ export interface StoreQueryDto {
   store_type?: StoreType;
   is_active?: boolean;
   organization_id?: number;
+  include_non_production?: boolean;
 }
 
 export interface StoreDashboardDto {

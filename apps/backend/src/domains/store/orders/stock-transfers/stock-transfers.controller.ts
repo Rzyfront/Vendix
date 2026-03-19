@@ -58,6 +58,22 @@ export class StockTransfersController {
     return this.stockTransfersService.findByToLocation(+locationId, query);
   }
 
+  @Get('search-products')
+  async searchTransferableProducts(
+    @Query('search') search: string,
+    @Query('from_location_id') fromLocationId: string,
+    @Query('to_location_id') toLocationId: string,
+    @Query('limit') limit?: string,
+  ) {
+    const result = await this.stockTransfersService.searchTransferableProducts(
+      search,
+      +fromLocationId,
+      +toLocationId,
+      limit ? +limit : 10,
+    );
+    return { success: true, data: result };
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.stockTransfersService.findOne(+id);

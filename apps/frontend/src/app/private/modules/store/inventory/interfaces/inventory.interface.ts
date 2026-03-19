@@ -329,6 +329,12 @@ export interface AdjustableProduct {
   };
 }
 
+export interface PreselectedProduct {
+  id: number;
+  name: string;
+  sku: string | null;
+}
+
 export interface AdjustmentItem {
   product_id: number;
   product_name: string;

@@ -6,6 +6,7 @@ import {
   OnChanges,
   SimpleChanges,
   inject,
+  ViewChild,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -136,11 +137,11 @@ interface TransferItem {
           <div>
             <label class="block text-sm font-medium text-text-secondary mb-2">Buscar Producto</label>
             <app-inputsearch
+              #productSearch
               size="sm"
               placeholder="Buscar por nombre o SKU..."
               [debounceTime]="300"
-              (ngModelChange)="searchProducts($event)"
-              [ngModel]="productSearchTerm"
+              (searchChange)="searchProducts($event)"
             ></app-inputsearch>
           </div>
 
@@ -432,7 +433,7 @@ export class TransferCreateModalComponent implements OnChanges {
   notes = '';
 
   // Step 2
-  productSearchTerm = '';
+  @ViewChild('productSearch') productSearchRef?: InputsearchComponent;
   productSearchResults: TransferableProduct[] = [];
   confirmCreate = false;
   transferItems: TransferItem[] = [];
@@ -471,7 +472,6 @@ export class TransferCreateModalComponent implements OnChanges {
   }
 
   searchProducts(term: string): void {
-    this.productSearchTerm = term;
     if (!term || term.length < 2 || !this.selectedFromLocation || !this.selectedToLocation) {
       this.productSearchResults = [];
       return;
@@ -506,7 +506,7 @@ export class TransferCreateModalComponent implements OnChanges {
       },
     ];
     this.productSearchResults = [];
-    this.productSearchTerm = '';
+    this.productSearchRef?.clearInput();
   }
 
   removeItem(index: number): void {
@@ -606,9 +606,9 @@ export class TransferCreateModalComponent implements OnChanges {
     this.selectedToLocation = null;
     this.expectedDate = '';
     this.notes = '';
-    this.productSearchTerm = '';
     this.productSearchResults = [];
     this.transferItems = [];
     this.confirmCreate = false;
+    this.productSearchRef?.clearInput();
   }
 }
