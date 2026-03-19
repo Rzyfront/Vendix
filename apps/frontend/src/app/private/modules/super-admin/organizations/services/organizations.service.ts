@@ -29,6 +29,7 @@ export interface UpdateOrganizationDto {
   logo_url?: string;
   description?: string;
   state?: string;
+  mode?: 'production' | 'demo' | 'test';
 }
 
 export interface OrganizationQueryDto {
@@ -36,6 +37,8 @@ export interface OrganizationQueryDto {
   limit?: number;
   search?: string;
   state?: string;
+  mode?: 'production' | 'demo' | 'test';
+  include_non_production?: boolean;
 }
 
 export interface OrganizationDashboardDto {
@@ -98,6 +101,8 @@ export class OrganizationsService {
     if (query?.limit) params = params.set('limit', query.limit.toString());
     if (query?.search) params = params.set('search', query.search);
     if (query?.state) params = params.set('state', query.state);
+    if (query?.mode) params = params.set('mode', query.mode);
+    if (query?.include_non_production) params = params.set('include_non_production', 'true');
 
     return this.http.get<PaginatedResponse<Organization[]>>(
       `${this.apiUrl}/superadmin/organizations`,
@@ -186,6 +191,8 @@ export class OrganizationsService {
       activeOrganizations: number;
       inactiveOrganizations: number;
       suspendedOrganizations: number;
+      demoOrganizations: number;
+      testOrganizations: number;
       totalStores: number;
       totalUsers: number;
       recentOrganizations: any[];

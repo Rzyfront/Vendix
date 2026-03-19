@@ -1,4 +1,4 @@
-import { Injectable, ConflictException } from '@nestjs/common';
+import { Injectable, ConflictException, Logger } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import {
   CreateOrderDto,
@@ -19,15 +19,19 @@ import { resolveCostPrice } from './utils/resolve-cost-price';
 import { SettingsService } from '../settings/settings.service';
 import { ScheduleValidationService } from '../settings/schedule-validation.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     private prisma: StorePrismaService,
     private s3Service: S3Service,
     private eventEmitter: EventEmitter2,
     private settingsService: SettingsService,
     private scheduleValidationService: ScheduleValidationService,
+    private stockLevelManager: StockLevelManager,
   ) {}
 
   async create(createOrderDto: CreateOrderDto, creatingUser: any) {
@@ -120,6 +124,29 @@ export class OrdersService {
             },
           },
         });
+
+        // Reserve stock for each item with track_inventory
+        for (const item of order.order_items) {
+          if (!item.products?.track_inventory) continue;
+          try {
+            const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
+              item.product_id,
+              item.product_variant_id || undefined,
+            );
+            await this.stockLevelManager.reserveStock(
+              item.product_id,
+              item.product_variant_id || undefined,
+              location_id,
+              item.quantity,
+              'order',
+              order.id,
+              creatingUser?.id,
+              false, // POS: don't validate availability (non-restrictive UX)
+            );
+          } catch (error) {
+            this.logger.warn(`Stock reservation failed for product ${item.product_id}: ${error.message}`);
+          }
+        }
 
         this.eventEmitter.emit('order.created', {
           store_id: order.store_id,
@@ -401,6 +428,40 @@ export class OrdersService {
       dto.total_amount ?? subtotal + taxAmount - discountAmount;
 
     return this.prisma.$transaction(async (tx) => {
+      // Release old reservations before deleting items
+      const existingOrder = await tx.orders.findUnique({
+        where: { id },
+        include: {
+          order_items: {
+            include: {
+              products: { select: { id: true, track_inventory: true } },
+            },
+          },
+        },
+      });
+
+      for (const item of existingOrder?.order_items || []) {
+        if (!item.products?.track_inventory) continue;
+        try {
+          const location_id =
+            await this.stockLevelManager.getDefaultLocationForProduct(
+              item.product_id,
+              item.product_variant_id || undefined,
+            );
+          await this.stockLevelManager.releaseReservation(
+            item.product_id,
+            item.product_variant_id || undefined,
+            location_id,
+            'order',
+            id,
+          );
+        } catch (error) {
+          this.logger.warn(
+            `Failed to release reservation for product ${item.product_id}: ${error.message}`,
+          );
+        }
+      }
+
       // Delete existing items
       await tx.order_items.deleteMany({
         where: { order_id: id },
@@ -437,6 +498,43 @@ export class OrdersService {
           updated_at: new Date(),
         },
       });
+
+      // Reserve stock for new items
+      const updatedOrder = await tx.orders.findUnique({
+        where: { id },
+        include: {
+          order_items: {
+            include: {
+              products: { select: { id: true, track_inventory: true } },
+            },
+          },
+        },
+      });
+
+      for (const item of updatedOrder?.order_items || []) {
+        if (!item.products?.track_inventory) continue;
+        try {
+          const location_id =
+            await this.stockLevelManager.getDefaultLocationForProduct(
+              item.product_id,
+              item.product_variant_id || undefined,
+            );
+          await this.stockLevelManager.reserveStock(
+            item.product_id,
+            item.product_variant_id || undefined,
+            location_id,
+            item.quantity,
+            'order',
+            id,
+            undefined,
+            false, // Don't validate availability (non-restrictive UX)
+          );
+        } catch (error) {
+          this.logger.warn(
+            `Failed to reserve stock for product ${item.product_id}: ${error.message}`,
+          );
+        }
+      }
 
       // Return updated order with all includes
       return tx.orders.findFirst({

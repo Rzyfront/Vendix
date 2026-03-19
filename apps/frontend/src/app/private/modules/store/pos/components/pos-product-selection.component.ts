@@ -4,6 +4,7 @@ import {
   OnDestroy,
   NO_ERRORS_SCHEMA,
   Output,
+  Input,
   EventEmitter,
 } from '@angular/core';
 import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
@@ -444,6 +445,10 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   // Current filter values
   filterValues: FilterValues = {};
 
+  @Input() set refreshTrigger(value: number) {
+    if (value > 0) this.loadProducts();
+  }
+
   @Output() productSelected = new EventEmitter<any>();
   @Output() productAddedToCart = new EventEmitter<{
     product: any;
@@ -577,7 +582,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
       });
   }
 
-  private loadProducts(): void {
+  loadProducts(): void {
     this.loading = true;
     this.filterProducts();
   }

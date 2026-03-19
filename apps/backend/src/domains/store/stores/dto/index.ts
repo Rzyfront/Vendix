@@ -238,4 +238,9 @@ export class AdminStoreQueryDto {
   @Type(() => Number)
   @IsInt()
   organization_id?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  include_non_production?: boolean;
 }

@@ -23,6 +23,7 @@ import {
   InputsearchComponent,
   IconComponent,
   ButtonComponent,
+  SelectorComponent,
   DialogService,
   ToastService,
   ResponsiveDataViewComponent,
@@ -51,6 +52,7 @@ import {
     InputsearchComponent,
     IconComponent,
     ButtonComponent,
+    SelectorComponent,
     PaginationComponent,
   ],
   templateUrl: './users.component.html',
@@ -79,6 +81,7 @@ export class UsersComponent implements OnInit, OnDestroy {
     search: [''],
     state: [''],
     organization_id: [''],
+    include_non_production: [''],
   });
 
   // Table configuration
@@ -130,6 +133,12 @@ export class UsersComponent implements OnInit, OnDestroy {
     total: 0,
     totalPages: 0,
   };
+
+  // Org mode filter options
+  orgModes = [
+    { value: '', label: 'Solo Producción' },
+    { value: 'all', label: 'Todos los modos' },
+  ];
 
   // Filter states
   userStates = [
@@ -199,6 +208,7 @@ export class UsersComponent implements OnInit, OnDestroy {
       search: filters.search || undefined,
       state: filters.state || undefined,
       organization_id: filters.organization_id || undefined,
+      include_non_production: filters.include_non_production === 'all' ? true : undefined,
     };
 
     this.usersService

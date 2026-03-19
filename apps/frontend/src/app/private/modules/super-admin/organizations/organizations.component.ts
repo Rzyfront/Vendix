@@ -4,12 +4,13 @@ import { RouterModule } from '@angular/router';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { Subscription } from 'rxjs';
+import { FormControl } from '@angular/forms';
 
 import {
   OrganizationsService,
   CreateOrganizationDto,
 } from './services/organizations.service';
-import { OrganizationListItem } from './interfaces/organization.interface';
+import { OrganizationListItem, OrganizationMode } from './interfaces/organization.interface';
 import { Organization } from '../../../../core/models/organization.model';
 
 // Import new components
@@ -26,6 +27,7 @@ import {
   InputsearchComponent,
   IconComponent,
   ButtonComponent,
+  SelectorComponent,
   DialogService,
   ToastService,
   PaginationComponent,
@@ -52,6 +54,7 @@ import './organizations.component.css';
     OrganizationEditModalComponent,
     InputsearchComponent,
     IconComponent,
+    SelectorComponent,
     ResponsiveDataViewComponent,
     PaginationComponent,
     ButtonComponent,
@@ -85,6 +88,16 @@ import './organizations.component.css';
                 [debounceTime]="1000"
                 (searchChange)="onSearchChange($event)"
               ></app-inputsearch>
+
+              <!-- Mode Filter -->
+              <div class="w-full sm:w-44">
+                <app-selector
+                  [options]="modeOptions"
+                  [formControl]="modeControl"
+                  size="sm"
+                  variant="outline"
+                ></app-selector>
+              </div>
 
               <div class="flex gap-2 items-center">
                 <app-button
@@ -187,6 +200,16 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   isLoading = false;
   searchTerm = '';
   selectedStatus = '';
+  selectedMode = '';
+  modeControl = new FormControl('');
+
+  // Mode filter options
+  modeOptions = [
+    { value: '', label: 'Todos los modos' },
+    { value: 'production', label: 'Producción' },
+    { value: 'demo', label: 'Demo' },
+    { value: 'test', label: 'Test' },
+  ];
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -239,6 +262,25 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
       },
       transform: (value: string) => this.formatStatus(value),
     },
+    {
+      key: 'mode',
+      label: 'Modo',
+      sortable: true,
+      width: '100px',
+      align: 'center',
+      badge: true,
+      priority: 2,
+      badgeConfig: {
+        type: 'custom',
+        size: 'sm',
+        colorMap: {
+          production: '#22c55e',
+          demo: '#f59e0b',
+          test: '#8b5cf6',
+        },
+      },
+      transform: (value: string) => this.formatMode(value),
+    },
   ];
 
   tableActions: TableAction[] = [
@@ -274,6 +316,8 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     active: 0,
     inactive: 0,
     suspended: 0,
+    demo: 0,
+    test: 0,
   };
 
   pagination = {
@@ -307,6 +351,12 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.loadOrganizations();
     this.loadStats();
+
+    // Subscribe to mode filter changes
+    const modeSub = this.modeControl.valueChanges.subscribe((value) => {
+      this.onModeChange(value || '');
+    });
+    this.subscriptions.push(modeSub);
   }
 
   ngOnDestroy(): void {
@@ -410,6 +460,9 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
       limit: this.pagination.limit,
       ...(this.searchTerm && { search: this.searchTerm }),
       ...(this.selectedStatus && { state: this.selectedStatus as any }),
+      ...(this.selectedMode
+        ? { mode: this.selectedMode as OrganizationMode, include_non_production: true }
+        : {}),
     };
 
     const sub = this.organizationsService.getOrganizations(query).subscribe({
@@ -424,6 +477,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
             tax_id: org.tax_id || '',
             status: org.state || 'active',
             state: org.state || 'active',
+            mode: org.mode || 'production',
             plan: 'premium' as any, // Default plan since backend doesn't have this field
             createdAt: org.created_at || new Date().toISOString(),
             settings: {
@@ -456,6 +510,8 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
           this.stats.active = response.data.activeOrganizations;
           this.stats.inactive = response.data.inactiveOrganizations;
           this.stats.suspended = response.data.suspendedOrganizations;
+          this.stats.demo = response.data.demoOrganizations || 0;
+          this.stats.test = response.data.testOrganizations || 0;
         }
       },
       error: (error) => {
@@ -491,6 +547,12 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     this.loadOrganizations();
   }
 
+  onModeChange(value: string): void {
+    this.selectedMode = value;
+    this.pagination.page = 1;
+    this.loadOrganizations();
+  }
+
   onTableSort(sortEvent: {
     column: string;
     direction: 'asc' | 'desc' | null;
@@ -513,6 +575,15 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
       suspended: 'Suspendido',
     };
     return statusMap[status] || status;
+  }
+
+  formatMode(mode: string): string {
+    const modeMap: { [key: string]: string } = {
+      production: 'Producción',
+      demo: 'Demo',
+      test: 'Test',
+    };
+    return modeMap[mode] || mode;
   }
 
   formatDate(dateString: string): string {
@@ -587,13 +658,14 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     const updateData = {
       name: organizationData.name,
       slug: this.selectedOrganization.slug, // Keep existing slug
-      legal_name: organizationData.legalName,
-      tax_id: organizationData.taxId,
+      legal_name: organizationData.legal_name,
+      tax_id: organizationData.tax_id,
       email: organizationData.email,
       phone: organizationData.phone,
       website: organizationData.website,
       description: organizationData.description,
       state: organizationData.state,
+      mode: organizationData.mode,
     };
 
     const sub = this.organizationsService

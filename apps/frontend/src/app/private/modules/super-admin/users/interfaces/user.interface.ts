@@ -75,6 +75,7 @@ export interface UserQueryDto {
   search?: string;
   state?: UserState;
   organization_id?: number;
+  include_non_production?: boolean;
 }
 
 export interface UsersDashboardDto {

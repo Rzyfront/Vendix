@@ -27,10 +27,6 @@ export class OrganizationPrismaService extends BasePrismaService {
     'return_orders',
     'organization_payment_policies',
     'support_tickets',
-    'support_attachments',
-    'support_comments',
-    'support_status_history',
-    'support_notifications',
     'invoices',
     'invoice_resolutions',
     'chart_of_accounts',
@@ -234,7 +230,7 @@ export class OrganizationPrismaService extends BasePrismaService {
 
   // Support models
   get support_tickets() {
-    return this.baseClient.support_tickets;
+    return this.scoped_client.support_tickets;
   }
 
   get support_attachments() {

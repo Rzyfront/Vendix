@@ -128,22 +128,42 @@ import { OrganizationListItem } from '../interfaces/organization.interface';
             Organization Status
           </h3>
 
-          <div class="space-y-2">
-            <label
-              for="state"
-              class="block text-sm font-medium text-text-primary"
-            >
-              Status
-            </label>
-            <select
-              id="state"
-              formControlName="state"
-              class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
-            >
-              <option value="active">Active</option>
-              <option value="draft">Draft</option>
-              <option value="inactive">Inactive</option>
-            </select>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="space-y-2">
+              <label
+                for="state"
+                class="block text-sm font-medium text-text-primary"
+              >
+                Status
+              </label>
+              <select
+                id="state"
+                formControlName="state"
+                class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
+              >
+                <option value="active">Active</option>
+                <option value="draft">Draft</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+
+            <div class="space-y-2">
+              <label
+                for="mode"
+                class="block text-sm font-medium text-text-primary"
+              >
+                Modo
+              </label>
+              <select
+                id="mode"
+                formControlName="mode"
+                class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
+              >
+                <option value="production">Producción</option>
+                <option value="demo">Demo</option>
+                <option value="test">Test</option>
+              </select>
+            </div>
           </div>
         </div>
       </form>
@@ -194,6 +214,7 @@ export class OrganizationEditModalComponent implements OnChanges {
       legalName: [''],
       taxId: [''],
       state: ['active'],
+      mode: ['production'],
     });
   }
 
@@ -208,6 +229,7 @@ export class OrganizationEditModalComponent implements OnChanges {
         legalName: '',
         taxId: '',
         state: this.organization.status,
+        mode: this.organization.mode || 'production',
       });
     }
   }
@@ -232,6 +254,7 @@ export class OrganizationEditModalComponent implements OnChanges {
       legal_name: formData.legalName || undefined,
       tax_id: formData.taxId || undefined,
       state: formData.state,
+      mode: formData.mode,
     };
 
     this.submit.emit(organizationData);
@@ -252,6 +275,7 @@ export class OrganizationEditModalComponent implements OnChanges {
       legalName: '',
       taxId: '',
       state: 'active',
+      mode: 'production',
     });
   }
 }

@@ -80,7 +80,7 @@ export class UsersService {
   }
 
   async findAll(query: UserQueryDto) {
-    const { page = 1, limit = 10, search, state, organization_id } = query;
+    const { page = 1, limit = 10, search, state, organization_id, include_non_production } = query;
     const skip = (page - 1) * Number(limit);
 
     const where: any = {};
@@ -99,6 +99,11 @@ export class UsersService {
 
     if (organization_id) {
       where.organization_id = organization_id;
+    }
+
+    // Filter users by organization mode (exclude demo/test by default)
+    if (!include_non_production) {
+      where.organizations = { mode: 'production' };
     }
 
     const [users, total] = await Promise.all([

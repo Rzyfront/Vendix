@@ -10,9 +10,13 @@ import { payment_processing_mode_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../../store/settings/settings.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { StockLevelManager } from '../../store/inventory/shared/services/stock-level-manager.service';
+import { Logger } from '@nestjs/common';
 
 @Injectable()
 export class CheckoutService {
+  private readonly logger = new Logger(CheckoutService.name);
+
   constructor(
     private readonly prisma: EcommercePrismaService,
     private readonly store_prisma: StorePrismaService,
@@ -20,6 +24,7 @@ export class CheckoutService {
     private readonly taxes_service: TaxesService,
     private readonly eventEmitter: EventEmitter2,
     private readonly settingsService: SettingsService,
+    private readonly stockLevelManager: StockLevelManager,
   ) {}
 
   async getPaymentMethods(shippingMethodType?: string) {
@@ -359,21 +364,23 @@ export class CheckoutService {
 
     for (const item of cart.cart_items) {
       if (!item.product.track_inventory) continue;
-
-      if (item.product_variant_id) {
-        await this.prisma.product_variants.update({
-          where: { id: item.product_variant_id },
-          data: {
-            stock_quantity: { decrement: item.quantity },
-          },
-        });
-      } else {
-        await this.prisma.products.update({
-          where: { id: item.product_id },
-          data: {
-            stock_quantity: { decrement: item.quantity },
-          },
-        });
+      try {
+        const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
+          item.product_id,
+          item.product_variant_id || undefined,
+        );
+        await this.stockLevelManager.reserveStock(
+          item.product_id,
+          item.product_variant_id || undefined,
+          location_id,
+          item.quantity,
+          'order',
+          order.id,
+          undefined,
+          false, // Already validated stock above
+        );
+      } catch (error) {
+        this.logger.warn(`Stock reservation failed for product ${item.product_id}: ${error.message}`);
       }
     }
 
@@ -658,21 +665,23 @@ export class CheckoutService {
 
     for (const item of cart_items) {
       if (!item.product.track_inventory) continue;
-
-      if (item.product_variant_id) {
-        await this.prisma.product_variants.update({
-          where: { id: item.product_variant_id },
-          data: {
-            stock_quantity: { decrement: item.quantity },
-          },
-        });
-      } else {
-        await this.prisma.products.update({
-          where: { id: item.product_id },
-          data: {
-            stock_quantity: { decrement: item.quantity },
-          },
-        });
+      try {
+        const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
+          item.product_id,
+          item.product_variant_id || undefined,
+        );
+        await this.stockLevelManager.reserveStock(
+          item.product_id,
+          item.product_variant_id || undefined,
+          location_id,
+          item.quantity,
+          'order',
+          order.id,
+          undefined,
+          false, // Already validated stock above
+        );
+      } catch (error) {
+        this.logger.warn(`Stock reservation failed for product ${item.product_id}: ${error.message}`);
       }
     }
 

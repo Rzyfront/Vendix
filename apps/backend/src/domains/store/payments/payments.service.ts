@@ -420,7 +420,35 @@ export class PaymentsService {
           user,
         );
 
-        // 1.5. Apply promotions if provided
+        // 1.5. Reserve stock for each item with track_inventory
+        for (const item of order.order_items) {
+          const product = await tx.products.findUnique({
+            where: { id: item.product_id },
+            select: { track_inventory: true },
+          });
+          if (!product?.track_inventory) continue;
+          try {
+            const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
+              item.product_id,
+              item.product_variant_id || undefined,
+            );
+            await this.stockLevelManager.reserveStock(
+              item.product_id,
+              item.product_variant_id || undefined,
+              location_id,
+              item.quantity,
+              'order',
+              order.id,
+              user?.id,
+              false, // POS: don't validate availability (non-restrictive UX)
+              tx,
+            );
+          } catch (error) {
+            this.logger.warn(`Stock reservation failed for product ${item.product_id}: ${error.message}`);
+          }
+        }
+
+        // 1.6. Apply promotions if provided
         if (createPosPaymentDto.promotion_ids?.length) {
           for (const promoId of createPosPaymentDto.promotion_ids) {
             try {
@@ -471,8 +499,14 @@ export class PaymentsService {
           );
         }
 
-        // 3. Update inventory if required
-        if (createPosPaymentDto.update_inventory) {
+        // 3. Update inventory only when product is physically delivered
+        // Direct delivery with payment = finished = product left our hands
+        // Any other flow (home_delivery, credit sale) = keep reservation until delivery/cancellation
+        const isDirectDeliveryFinished =
+          createPosPaymentDto.requires_payment &&
+          order.delivery_type !== 'home_delivery';
+
+        if (createPosPaymentDto.update_inventory && isDirectDeliveryFinished) {
           await this.updateInventoryFromOrder(tx, order);
         }
 
@@ -903,6 +937,16 @@ export class PaymentsService {
           validate_availability: true, // Enforce stock limits
         },
         tx, // Pass the transaction client
+      );
+
+      // Release the reservation (mark as consumed)
+      await this.stockLevelManager.releaseReservation(
+        item.product_id,
+        item.product_variant_id,
+        defaultLocation.id,
+        'order',
+        order.id,
+        tx,
       );
     }
   }
