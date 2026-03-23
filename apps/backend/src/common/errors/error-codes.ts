@@ -345,6 +345,16 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Categoría o marca inválida',
   },
+  PROD_SVC_001: {
+    code: 'PROD_SVC_001',
+    httpStatus: 400,
+    devMessage: 'Los servicios no pueden tener atributos físicos (peso, dimensiones, inventario)',
+  },
+  PROD_SVC_002: {
+    code: 'PROD_SVC_002',
+    httpStatus: 400,
+    devMessage: 'No se puede cambiar el tipo de un producto existente',
+  },
 
   // Orders
   ORD_FIND_001: {
@@ -418,6 +428,16 @@ export const ErrorCodes = {
     code: 'INV_ADJ_001',
     httpStatus: 404,
     devMessage: 'Adjustment not found',
+  },
+  INV_BULK_001: {
+    code: 'INV_BULK_001',
+    httpStatus: 400,
+    devMessage: 'Empty file or no valid data',
+  },
+  INV_BULK_002: {
+    code: 'INV_BULK_002',
+    httpStatus: 400,
+    devMessage: 'Bulk upload batch size exceeded (max 1000)',
   },
 
   // Customers
@@ -853,6 +873,327 @@ export const ErrorCodes = {
     code: 'CPN_VALIDATE_001',
     httpStatus: 400,
     devMessage: 'Coupon validation failed',
+  },
+
+  // ===== LAYAWAY (Plan Separé) =====
+  LAY_FIND_001: {
+    code: 'LAY_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Layaway plan not found',
+  },
+  LAY_STATE_001: {
+    code: 'LAY_STATE_001',
+    httpStatus: 409,
+    devMessage: 'Invalid layaway plan state transition',
+  },
+  LAY_PAYMENT_001: {
+    code: 'LAY_PAYMENT_001',
+    httpStatus: 400,
+    devMessage: 'Payment amount exceeds remaining balance',
+  },
+  LAY_INSTALLMENT_001: {
+    code: 'LAY_INSTALLMENT_001',
+    httpStatus: 400,
+    devMessage: 'Installment amounts do not match remaining balance',
+  },
+  LAY_INSTALLMENT_002: {
+    code: 'LAY_INSTALLMENT_002',
+    httpStatus: 409,
+    devMessage: 'Installment already paid',
+  },
+
+  // ===== EMPLOYEE ADVANCES =====
+  ADV_FIND_001: {
+    code: 'ADV_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Advance not found',
+  },
+  ADV_STATUS_001: {
+    code: 'ADV_STATUS_001',
+    httpStatus: 400,
+    devMessage: 'Invalid advance status transition',
+  },
+  ADV_VALIDATE_001: {
+    code: 'ADV_VALIDATE_001',
+    httpStatus: 400,
+    devMessage: 'Employee not found or not active',
+  },
+  ADV_PAYMENT_001: {
+    code: 'ADV_PAYMENT_001',
+    httpStatus: 400,
+    devMessage: 'Payment amount exceeds pending balance',
+  },
+
+  // ===== BANK RECONCILIATION =====
+  BANK_ACCOUNT_NOT_FOUND: {
+    code: 'BANK_ACCOUNT_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Bank account not found',
+  },
+  BANK_ACCOUNT_DUPLICATE: {
+    code: 'BANK_ACCOUNT_DUPLICATE',
+    httpStatus: 409,
+    devMessage: 'A bank account with this account number already exists',
+  },
+  BANK_RECONCILIATION_NOT_FOUND: {
+    code: 'BANK_RECONCILIATION_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Bank reconciliation not found',
+  },
+  BANK_RECONCILIATION_ALREADY_COMPLETED: {
+    code: 'BANK_RECONCILIATION_ALREADY_COMPLETED',
+    httpStatus: 409,
+    devMessage: 'This reconciliation has already been completed',
+  },
+  BANK_RECONCILIATION_DIFFERENCE_NOT_ZERO: {
+    code: 'BANK_RECONCILIATION_DIFFERENCE_NOT_ZERO',
+    httpStatus: 400,
+    devMessage: 'Cannot complete reconciliation: difference is not zero',
+  },
+  BANK_TRANSACTION_NOT_FOUND: {
+    code: 'BANK_TRANSACTION_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Bank transaction not found',
+  },
+  BANK_TRANSACTION_ALREADY_RECONCILED: {
+    code: 'BANK_TRANSACTION_ALREADY_RECONCILED',
+    httpStatus: 409,
+    devMessage: 'This bank transaction is already reconciled',
+  },
+  STATEMENT_PARSE_ERROR: {
+    code: 'STATEMENT_PARSE_ERROR',
+    httpStatus: 400,
+    devMessage: 'Error parsing bank statement file',
+  },
+  INVALID_COLUMN_MAPPING: {
+    code: 'INVALID_COLUMN_MAPPING',
+    httpStatus: 400,
+    devMessage: 'Invalid column mapping configuration',
+  },
+  UNSUPPORTED_STATEMENT_FORMAT: {
+    code: 'UNSUPPORTED_STATEMENT_FORMAT',
+    httpStatus: 400,
+    devMessage: 'Unsupported bank statement format',
+  },
+
+  // ===== FIXED ASSETS =====
+  FIXED_ASSET_NOT_FOUND: {
+    code: 'FIXED_ASSET_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Fixed asset not found',
+  },
+  FIXED_ASSET_CATEGORY_NOT_FOUND: {
+    code: 'FIXED_ASSET_CATEGORY_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Fixed asset category not found',
+  },
+  FIXED_ASSET_ALREADY_DISPOSED: {
+    code: 'FIXED_ASSET_ALREADY_DISPOSED',
+    httpStatus: 409,
+    devMessage: 'This asset has already been disposed',
+  },
+  FIXED_ASSET_FULLY_DEPRECIATED: {
+    code: 'FIXED_ASSET_FULLY_DEPRECIATED',
+    httpStatus: 409,
+    devMessage: 'This asset is already fully depreciated',
+  },
+  DEPRECIATION_ALREADY_EXISTS: {
+    code: 'DEPRECIATION_ALREADY_EXISTS',
+    httpStatus: 409,
+    devMessage: 'Depreciation entry already exists for this period',
+  },
+  DEPRECIATION_NO_OPEN_PERIOD: {
+    code: 'DEPRECIATION_NO_OPEN_PERIOD',
+    httpStatus: 400,
+    devMessage: 'No open fiscal period found for depreciation date',
+  },
+
+  // ===== BUDGETS =====
+  BUDGET_NOT_FOUND: {
+    code: 'BUDGET_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Budget not found',
+  },
+  BUDGET_ALREADY_ACTIVE: {
+    code: 'BUDGET_ALREADY_ACTIVE',
+    httpStatus: 409,
+    devMessage: 'An active budget already exists for this period and store',
+  },
+  BUDGET_NOT_DRAFT: {
+    code: 'BUDGET_NOT_DRAFT',
+    httpStatus: 400,
+    devMessage: 'Only draft budgets can be modified',
+  },
+  BUDGET_CANNOT_APPROVE: {
+    code: 'BUDGET_CANNOT_APPROVE',
+    httpStatus: 400,
+    devMessage: 'Only draft budgets can be approved',
+  },
+  BUDGET_CANNOT_ACTIVATE: {
+    code: 'BUDGET_CANNOT_ACTIVATE',
+    httpStatus: 400,
+    devMessage: 'Only approved budgets can be activated',
+  },
+  BUDGET_CANNOT_CLOSE: {
+    code: 'BUDGET_CANNOT_CLOSE',
+    httpStatus: 400,
+    devMessage: 'Only active budgets can be closed',
+  },
+
+  // ===== CONSOLIDATION =====
+  CONSOLIDATION_SESSION_NOT_FOUND: {
+    code: 'CONSOLIDATION_SESSION_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Consolidation session not found',
+  },
+  CONSOLIDATION_NOT_MULTI_STORE: {
+    code: 'CONSOLIDATION_NOT_MULTI_STORE',
+    httpStatus: 400,
+    devMessage: 'Consolidation is only available for multi-store organizations',
+  },
+  CONSOLIDATION_SESSION_NOT_DRAFT: {
+    code: 'CONSOLIDATION_SESSION_NOT_DRAFT',
+    httpStatus: 400,
+    devMessage: 'Only draft sessions can be started',
+  },
+  CONSOLIDATION_SESSION_ALREADY_COMPLETED: {
+    code: 'CONSOLIDATION_SESSION_ALREADY_COMPLETED',
+    httpStatus: 409,
+    devMessage: 'This consolidation session has already been completed',
+  },
+  INTERCOMPANY_TRANSACTION_NOT_FOUND: {
+    code: 'INTERCOMPANY_TRANSACTION_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Intercompany transaction not found',
+  },
+  CONSOLIDATION_ADJUSTMENTS_NOT_BALANCED: {
+    code: 'CONSOLIDATION_ADJUSTMENTS_NOT_BALANCED',
+    httpStatus: 400,
+    devMessage: 'Consolidation adjustments are not balanced (debit ≠ credit)',
+  },
+
+  // Payroll Settlements
+  SETTLEMENT_FIND_001: {
+    code: 'SETTLEMENT_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Settlement not found',
+  },
+  SETTLEMENT_STATUS_001: {
+    code: 'SETTLEMENT_STATUS_001',
+    httpStatus: 400,
+    devMessage: 'Invalid settlement status transition',
+  },
+  SETTLEMENT_CALC_001: {
+    code: 'SETTLEMENT_CALC_001',
+    httpStatus: 400,
+    devMessage: 'Cannot calculate settlement: employee not active',
+  },
+  SETTLEMENT_CALC_002: {
+    code: 'SETTLEMENT_CALC_002',
+    httpStatus: 409,
+    devMessage: 'Active settlement already exists for this employee',
+  },
+  SETTLEMENT_VALIDATE_001: {
+    code: 'SETTLEMENT_VALIDATE_001',
+    httpStatus: 400,
+    devMessage: 'Employee is already terminated',
+  },
+  // ===== HABEAS DATA =====
+  HABEAS_EXPORT_RATE_LIMIT: {
+    code: 'HABEAS_EXPORT_RATE_LIMIT',
+    httpStatus: 429,
+    devMessage: 'Data export rate limit exceeded (1 per 24h)',
+  },
+  HABEAS_ANON_SELF: {
+    code: 'HABEAS_ANON_SELF',
+    httpStatus: 400,
+    devMessage: 'Cannot anonymize own account',
+  },
+  HABEAS_ANON_ALREADY: {
+    code: 'HABEAS_ANON_ALREADY',
+    httpStatus: 409,
+    devMessage: 'User already anonymized',
+  },
+  HABEAS_EXPORT_PROCESSING: {
+    code: 'HABEAS_EXPORT_PROCESSING',
+    httpStatus: 409,
+    devMessage: 'Data export already in progress',
+  },
+  HABEAS_ANON_REQUEST_NOT_FOUND: {
+    code: 'HABEAS_ANON_REQUEST_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Anonymization request not found',
+  },
+  HABEAS_CONSENT_INVALID: {
+    code: 'HABEAS_CONSENT_INVALID',
+    httpStatus: 422,
+    devMessage: 'Invalid consent type',
+  },
+
+  // ICA Municipal Tax
+  ICA_RATE_NOT_FOUND: {
+    code: 'ICA_RATE_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'ICA rate not found for the specified municipality',
+  },
+  ICA_STORE_NO_ADDRESS: {
+    code: 'ICA_STORE_NO_ADDRESS',
+    httpStatus: 422,
+    devMessage: 'Store has no primary address with municipality code',
+  },
+  ICA_INVALID_PERIOD: {
+    code: 'ICA_INVALID_PERIOD',
+    httpStatus: 422,
+    devMessage: 'Invalid period format. Use YYYY-QN or YYYY-MM',
+  },
+
+  // Withholding Tax (Retención en la Fuente)
+  WHT_CONCEPT_NOT_FOUND: {
+    code: 'WHT_CONCEPT_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Withholding concept not found',
+  },
+  WHT_UVT_NOT_FOUND: {
+    code: 'WHT_UVT_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'UVT value not found for the specified year',
+  },
+  WHT_CONCEPT_DUPLICATE: {
+    code: 'WHT_CONCEPT_DUPLICATE',
+    httpStatus: 409,
+    devMessage: 'Withholding concept code already exists',
+  },
+  WHT_CALCULATION_ERROR: {
+    code: 'WHT_CALCULATION_ERROR',
+    httpStatus: 422,
+    devMessage: 'Error calculating withholding tax',
+  },
+
+  // Exogenous Reports
+  EXO_REPORT_NOT_FOUND: {
+    code: 'EXO_REPORT_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Exogenous report not found',
+  },
+  EXO_INVALID_FORMAT: {
+    code: 'EXO_INVALID_FORMAT',
+    httpStatus: 422,
+    devMessage: 'Invalid exogenous format code',
+  },
+  EXO_GENERATION_FAILED: {
+    code: 'EXO_GENERATION_FAILED',
+    httpStatus: 500,
+    devMessage: 'Failed to generate exogenous report',
+  },
+  EXO_VALIDATION_ERRORS: {
+    code: 'EXO_VALIDATION_ERRORS',
+    httpStatus: 422,
+    devMessage: 'Data completeness validation found errors',
+  },
+  EXO_DOWNLOAD_FAILED: {
+    code: 'EXO_DOWNLOAD_FAILED',
+    httpStatus: 500,
+    devMessage: 'Failed to generate or download exogenous report file',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

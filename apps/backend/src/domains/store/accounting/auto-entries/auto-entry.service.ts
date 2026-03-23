@@ -146,6 +146,13 @@ export class AutoEntryService {
       'purchase_order.payment': 'auto_purchase',
       'inventory.adjusted': 'auto_inventory',
       'credit_sale.created': 'auto_invoice', // Uses auto_invoice type (revenue recognition without payment)
+      'installment_payment': 'auto_installment_payment',
+      'layaway.payment': 'auto_payment',
+      'layaway.completed': 'auto_payment',
+      'depreciation.monthly': 'auto_depreciation',
+      'disposal.fixed_asset': 'auto_depreciation',
+      'withholding.applied': 'auto_expense',
+      'settlement.paid': 'auto_payroll',
     };
     const entry_type = entry_type_map[source_type] || 'manual';
 
@@ -899,6 +906,411 @@ export class AutoEntryService {
       store_id: data.store_id,
       entry_date: new Date(),
       description: `Inventory adjustment #${data.adjustment_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  // ===== CREDIT INSTALLMENT PAYMENTS =====
+
+  /**
+   * installment_payment.received: DR Caja/Banco → CR Cuentas por Cobrar
+   * Each installment payment reduces the customer's accounts receivable.
+   */
+  async onInstallmentPaymentReceived(data: {
+    credit_id: number;
+    installment_id: number;
+    payment_id: number;
+    amount: number;
+    store_id: number;
+    organization_id: number;
+    store_payment_method_id?: number;
+    credit_number: string;
+    installment_number: number;
+    customer_id: number;
+    order_id: number;
+    user_id?: number;
+  }) {
+    // Resolve payment method to determine cash vs bank
+    let payment_method_name: string | undefined;
+    if (data.store_payment_method_id) {
+      const spm = await this.prisma.store_payment_methods.findUnique({
+        where: { id: data.store_payment_method_id },
+        include: { system_payment_method: { select: { name: true } } },
+      });
+      payment_method_name = spm?.system_payment_method?.name;
+    }
+
+    const cash_bank_key = this.resolveCashBankKey(payment_method_name);
+    const cuota_ref = `Cuota #${data.installment_number} - Crédito ${data.credit_number}`;
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, cash_bank_key,
+        `Abono ${cuota_ref}`, data.amount, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'installment_payment.received.accounts_receivable',
+        `Recaudo CxC ${cuota_ref}`, 0, data.amount, data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'installment_payment',
+      source_id: data.payment_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Abono cuota #${data.installment_number} - Crédito ${data.credit_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  // ===== LAYAWAY (PLAN SEPARÉ) =====
+
+  /**
+   * layaway.payment: DR Caja/Banco → CR Anticipos de Clientes (2805)
+   * El pago entra como anticipo, NO como ingreso.
+   */
+  async onLayawayPaymentReceived(data: {
+    payment_id: number;
+    plan_number: string;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    payment_method?: string;
+    user_id?: number;
+  }) {
+    const is_cash = !data.payment_method ||
+      data.payment_method.toLowerCase().includes('cash') ||
+      data.payment_method.toLowerCase().includes('efectivo');
+    const cash_bank_key = is_cash ? 'layaway.payment.cash' : 'layaway.payment.bank';
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, cash_bank_key,
+        `Pago separé ${data.plan_number}`, data.amount, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'layaway.payment.customer_advance',
+        `Anticipo separé ${data.plan_number}`, 0, data.amount, data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'layaway.payment',
+      source_id: data.payment_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Pago de plan separé ${data.plan_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * layaway.completed: DR Anticipos de Clientes → CR Ingresos por Ventas
+   * Al completar el pago total, los anticipos se reconocen como ingreso.
+   */
+  async onLayawayCompleted(data: {
+    plan_id: number;
+    plan_number: string;
+    organization_id: number;
+    store_id?: number;
+    total_amount: number;
+    user_id?: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'layaway.completed.customer_advance',
+        `Anticipo liquidado - separé ${data.plan_number}`, data.total_amount, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'layaway.completed.revenue',
+        `Ingreso por venta - separé ${data.plan_number}`, 0, data.total_amount, data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'layaway.completed',
+      source_id: data.plan_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Plan separé completado ${data.plan_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  // ===== FIXED ASSETS - DEPRECIATION =====
+
+  /**
+   * depreciation.posted: DR Gasto por Depreciación (5199) / CR Depreciación Acumulada (1592)
+   */
+  async onDepreciationPosted(data: {
+    asset_id: number;
+    asset_number: string;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    period_date: Date;
+    user_id?: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'depreciation.monthly.depreciation_expense',
+        `Gasto depreciación ${data.asset_number}`, data.amount, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'depreciation.monthly.accumulated_depreciation',
+        `Depreciación acumulada ${data.asset_number}`, 0, data.amount, data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'depreciation.monthly',
+      source_id: data.asset_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: data.period_date,
+      description: `Depreciación mensual - ${data.asset_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * disposal.fixed_asset: Removes asset from books and recognizes gain/loss.
+   *
+   * DR Depreciación Acumulada (1592) — reversa accumulated
+   * DR Caja (1105) — if disposal_amount > 0
+   * DR Pérdida (5310) — if loss
+   * CR Propiedad Planta y Equipo (1520) — original cost
+   * CR Utilidad (4245) — if gain
+   */
+  async onFixedAssetDisposed(data: {
+    asset_id: number;
+    asset_number: string;
+    organization_id: number;
+    store_id?: number;
+    acquisition_cost: number;
+    accumulated_depreciation: number;
+    disposal_amount: number;
+    book_value: number;
+    gain_loss: number;
+    user_id?: number;
+  }) {
+    const lines: AutoEntryLine[] = [];
+
+    // DR: Reverse accumulated depreciation
+    if (data.accumulated_depreciation > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id, 'disposal.fixed_asset.accumulated_depreciation',
+          `Dep. acumulada baja ${data.asset_number}`,
+          data.accumulated_depreciation, 0, data.store_id,
+        ),
+      );
+    }
+
+    // DR: Cash received from disposal
+    if (data.disposal_amount > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id, 'disposal.fixed_asset.cash',
+          `Venta activo ${data.asset_number}`,
+          data.disposal_amount, 0, data.store_id,
+        ),
+      );
+    }
+
+    // DR: Loss on disposal (if gain_loss < 0)
+    if (data.gain_loss < 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id, 'disposal.fixed_asset.loss',
+          `Pérdida baja ${data.asset_number}`,
+          Math.abs(data.gain_loss), 0, data.store_id,
+        ),
+      );
+    }
+
+    // CR: Remove asset cost
+    lines.push(
+      await this.resolveAccountLine(
+        data.organization_id, 'disposal.fixed_asset.asset_cost',
+        `Baja activo ${data.asset_number}`,
+        0, data.acquisition_cost, data.store_id,
+      ),
+    );
+
+    // CR: Gain on disposal (if gain_loss > 0)
+    if (data.gain_loss > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id, 'disposal.fixed_asset.gain',
+          `Utilidad venta ${data.asset_number}`,
+          0, data.gain_loss, data.store_id,
+        ),
+      );
+    }
+
+    return this.createAutoEntry({
+      source_type: 'disposal.fixed_asset',
+      source_id: data.asset_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Baja de activo fijo ${data.asset_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * withholding.applied: Debit Expense (base), Credit Withholding Payable + Accounts Payable (net)
+   * Retención en la Fuente applied to a purchase/invoice
+   */
+  async onWithholdingApplied(data: {
+    organization_id: number;
+    store_id?: number;
+    invoice_id: number;
+    base_amount: number;
+    withholding_amount: number;
+    net_amount: number;
+    concept_name: string;
+    supplier_name: string;
+    user_id?: number;
+  }) {
+    const lines: AutoEntryLine[] = [
+      // DR: Expense / Purchase (base amount)
+      await this.resolveAccountLine(
+        data.organization_id, 'withholding.applied.expense',
+        `Compra/Gasto - ${data.supplier_name}`,
+        data.base_amount, 0, data.store_id,
+      ),
+      // CR: Withholding payable (retention amount)
+      await this.resolveAccountLine(
+        data.organization_id, 'withholding.applied.withholding_payable',
+        `Retención ${data.concept_name} - ${data.supplier_name}`,
+        0, data.withholding_amount, data.store_id,
+      ),
+      // CR: Accounts Payable (net amount after retention)
+      await this.resolveAccountLine(
+        data.organization_id, 'withholding.applied.accounts_payable',
+        `Proveedor neto ${data.supplier_name}`,
+        0, data.net_amount, data.store_id,
+      ),
+    ];
+
+    return this.createAutoEntry({
+      source_type: 'withholding.applied',
+      source_id: data.invoice_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Retención ${data.concept_name} - ${data.supplier_name}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * settlement.paid: Debit Provisions (Cesantías, Intereses, Prima, Vacaciones, Salario Pendiente, Indemnización)
+   * Credit Health Payable, Pension Payable, Bank (net settlement)
+   *
+   * PUC colombiano:
+   * DB 2610 Cesantías por Pagar
+   * DB 2615 Intereses sobre Cesantías
+   * DB 2620 Prima de Servicios por Pagar
+   * DB 2625 Vacaciones por Pagar
+   * DB 5105 Gastos de Personal (salario pendiente + indemnización)
+   * CR 2370 Retenciones y Aportes de Nómina (salud + pensión)
+   * CR 1110 Bancos (neto)
+   */
+  async onSettlementPaid(data: {
+    settlement_id: number;
+    settlement_number: string;
+    organization_id: number;
+    store_id?: number;
+    employee_name: string;
+    severance: number;
+    severance_interest: number;
+    bonus: number;
+    vacation: number;
+    pending_salary: number;
+    indemnification: number;
+    health_deduction: number;
+    pension_deduction: number;
+    net_settlement: number;
+    user_id?: number;
+  }) {
+    const lines: AutoEntryLine[] = [];
+    const desc = (concept: string) => `${concept} - ${data.employee_name} (${data.settlement_number})`;
+
+    // DEBIT lines (provisions and expenses)
+    if (data.severance > 0) {
+      lines.push(await this.resolveAccountLine(
+        data.organization_id, 'settlement.paid.severance',
+        desc('Cesantías'), data.severance, 0, data.store_id,
+      ));
+    }
+    if (data.severance_interest > 0) {
+      lines.push(await this.resolveAccountLine(
+        data.organization_id, 'settlement.paid.severance_interest',
+        desc('Intereses Cesantías'), data.severance_interest, 0, data.store_id,
+      ));
+    }
+    if (data.bonus > 0) {
+      lines.push(await this.resolveAccountLine(
+        data.organization_id, 'settlement.paid.bonus',
+        desc('Prima Proporcional'), data.bonus, 0, data.store_id,
+      ));
+    }
+    if (data.vacation > 0) {
+      lines.push(await this.resolveAccountLine(
+        data.organization_id, 'settlement.paid.vacation',
+        desc('Vacaciones Proporcionales'), data.vacation, 0, data.store_id,
+      ));
+    }
+    if (data.pending_salary > 0) {
+      lines.push(await this.resolveAccountLine(
+        data.organization_id, 'settlement.paid.pending_salary',
+        desc('Salario Pendiente'), data.pending_salary, 0, data.store_id,
+      ));
+    }
+    if (data.indemnification > 0) {
+      lines.push(await this.resolveAccountLine(
+        data.organization_id, 'settlement.paid.indemnification',
+        desc('Indemnización'), data.indemnification, 0, data.store_id,
+      ));
+    }
+
+    // CREDIT lines (deductions + bank)
+    const total_social_deductions = data.health_deduction + data.pension_deduction;
+    if (total_social_deductions > 0) {
+      lines.push(await this.resolveAccountLine(
+        data.organization_id, 'settlement.paid.social_deductions',
+        desc('Retenciones Salud y Pensión'), 0, total_social_deductions, data.store_id,
+      ));
+    }
+    if (data.net_settlement > 0) {
+      lines.push(await this.resolveAccountLine(
+        data.organization_id, 'settlement.paid.bank',
+        desc('Pago Liquidación'), 0, data.net_settlement, data.store_id,
+      ));
+    }
+
+    return this.createAutoEntry({
+      source_type: 'settlement.paid',
+      source_id: data.settlement_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Liquidación pagada ${data.settlement_number} - ${data.employee_name}`,
       lines,
       user_id: data.user_id,
     });

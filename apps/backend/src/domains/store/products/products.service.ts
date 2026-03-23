@@ -15,6 +15,7 @@ import {
   CreateVariantWithStockDto,
   ProductImageDto,
   ProductState,
+  ProductType,
 } from './dto';
 import { Prisma } from '@prisma/client';
 import { generateSlug } from '@common/utils/slug.util';
@@ -116,8 +117,39 @@ export class ProductsService {
     });
   }
 
+  /**
+   * Validates and normalizes product data based on product_type.
+   * Services cannot have physical attributes (weight, inventory, serial numbers).
+   */
+  private validateByProductType(dto: Record<string, any>): void {
+    if (dto.product_type !== ProductType.SERVICE) return;
+
+    // Services cannot have physical attributes
+    if (dto.weight && dto.weight > 0) {
+      throw new VendixHttpException(ErrorCodes.PROD_SVC_001);
+    }
+    if (dto.requires_serial_numbers || dto.requires_batch_tracking) {
+      throw new VendixHttpException(ErrorCodes.PROD_SVC_001);
+    }
+
+    // Force inventory off for services
+    dto.track_inventory = false;
+    dto.weight = undefined;
+    dto.dimensions = undefined;
+    dto.stock_quantity = undefined;
+    dto.min_stock_level = undefined;
+    dto.max_stock_level = undefined;
+    dto.reorder_point = undefined;
+    dto.reorder_quantity = undefined;
+    dto.requires_serial_numbers = undefined;
+    dto.requires_batch_tracking = undefined;
+  }
+
   async create(createProductDto: CreateProductDto) {
     try {
+      // Validate service-specific constraints
+      this.validateByProductType(createProductDto);
+
       // Obtener store_id del DTO o del contexto del token
       // Obtener store_id del contexto
       const context = RequestContextService.getContext();
@@ -521,6 +553,7 @@ export class ProductsService {
       include_variants,
       category_id,
       track_inventory,
+      product_type,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -555,6 +588,7 @@ export class ProductsService {
         },
       }),
       ...(track_inventory !== undefined && { track_inventory }),
+      ...(product_type && { product_type }),
     };
 
     const [products, total] = await Promise.all([
@@ -1006,6 +1040,9 @@ export class ProductsService {
 
   async update(id: number, updateProductDto: UpdateProductDto) {
     try {
+      // Validate service-specific constraints
+      this.validateByProductType(updateProductDto);
+
       // Verificar que el producto existe y no está archivado
       const existingProduct = await this.prisma.products.findFirst({
         where: {

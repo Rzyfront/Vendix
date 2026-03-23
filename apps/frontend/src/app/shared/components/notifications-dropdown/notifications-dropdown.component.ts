@@ -130,6 +130,17 @@ export class NotificationsDropdownComponent {
         return d?.customer_id ? `/admin/customers/${d.customer_id}` : '/admin/customers/all';
       case 'low_stock':
         return d?.product_id ? `/admin/products/${d.product_id}` : '/admin/products';
+      case 'layaway_payment_received':
+      case 'layaway_payment_reminder':
+      case 'layaway_overdue':
+      case 'layaway_completed':
+      case 'layaway_cancelled':
+        return d?.plan_id ? `/admin/orders/layaway/${d.plan_id}` : '/admin/orders/layaway';
+      case 'installment_reminder':
+      case 'installment_overdue':
+      case 'installment_paid':
+      case 'credit_completed':
+        return d?.credit_id ? `/admin/orders/credits/${d.credit_id}` : '/admin/orders/credits';
       default:
         return null;
     }
@@ -142,6 +153,15 @@ export class NotificationsDropdownComponent {
       low_stock: 'alert-triangle',
       new_customer: 'user-plus',
       payment_received: 'credit-card',
+      layaway_payment_received: 'credit-card',
+      layaway_payment_reminder: 'clock',
+      layaway_overdue: 'alert-triangle',
+      layaway_completed: 'check-circle',
+      layaway_cancelled: 'x-circle',
+      installment_reminder: 'clock',
+      installment_overdue: 'alert-triangle',
+      installment_paid: 'check-circle',
+      credit_completed: 'trophy',
     };
     return map[type] ?? 'bell';
   }

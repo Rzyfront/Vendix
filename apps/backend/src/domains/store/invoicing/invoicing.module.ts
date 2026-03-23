@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ResponseModule } from '../../../common/responses/response.module';
+import { S3Module } from '../../../common/services/s3.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { InvoiceProviderModule } from './providers/invoice-provider.module';
 import { DianDirectModule } from './providers/dian-direct/dian-direct.module';
@@ -13,18 +14,21 @@ import { ResolutionsService } from './resolutions/resolutions.service';
 import { InvoiceNumberGenerator } from './utils/invoice-number-generator';
 import { DianConfigService } from './dian-config/dian-config.service';
 import { DianTestService } from './dian-config/dian-test.service';
+import { InvoicePdfService } from './services/invoice-pdf.service';
+import { InvoiceRetryQueueService } from './services/invoice-retry-queue.service';
 
 @Module({
   imports: [
     ResponseModule,
     PrismaModule,
+    S3Module,
     InvoiceProviderModule,
     DianDirectModule,
   ],
   controllers: [
-    InvoicingController,
-    ResolutionsController,
     DianConfigController,
+    ResolutionsController,
+    InvoicingController,
   ],
   providers: [
     InvoicingService,
@@ -34,7 +38,9 @@ import { DianTestService } from './dian-config/dian-test.service';
     InvoiceNumberGenerator,
     DianConfigService,
     DianTestService,
+    InvoicePdfService,
+    InvoiceRetryQueueService,
   ],
-  exports: [InvoicingService, InvoiceFlowService],
+  exports: [InvoicingService, InvoiceFlowService, InvoicePdfService, InvoiceRetryQueueService],
 })
 export class InvoicingModule {}

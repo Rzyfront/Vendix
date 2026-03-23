@@ -116,4 +116,43 @@ export class OrderDetailComponent implements OnInit {
     };
     return icons[method] || 'credit-card';
   }
+
+  /** Whether the order contains only service items */
+  get hasOnlyServices(): boolean {
+    if (!this.order) return false;
+    return this.order.items.every(item => item.product_type === 'service');
+  }
+
+  /** Whether the order contains at least one service item */
+  get hasServiceItems(): boolean {
+    if (!this.order) return false;
+    return this.order.items.some(item => item.product_type === 'service');
+  }
+
+  /** Whether the order contains at least one physical item */
+  get hasPhysicalItems(): boolean {
+    if (!this.order) return false;
+    return this.order.items.some(item => item.product_type !== 'service');
+  }
+
+  /** Returns the appropriate post-purchase message */
+  get postPurchaseMessage(): string {
+    if (this.hasOnlyServices) {
+      return 'Recibirás instrucciones para tu servicio por correo electrónico.';
+    }
+    if (this.hasServiceItems && this.hasPhysicalItems) {
+      return 'Los productos serán enviados y recibirás instrucciones para los servicios.';
+    }
+    return 'Te notificaremos cuando esté en camino.';
+  }
+
+  /** Returns the item type label for badge display */
+  getItemTypeLabel(item: any): string {
+    return item.product_type === 'service' ? 'Servicio' : 'Producto';
+  }
+
+  /** Returns true if item is a service */
+  isServiceItem(item: any): boolean {
+    return item.product_type === 'service';
+  }
 }

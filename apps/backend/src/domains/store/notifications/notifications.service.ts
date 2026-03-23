@@ -179,6 +179,11 @@ export class NotificationsService {
       'low_stock',
       'new_customer',
       'payment_received',
+      'layaway_payment_received',
+      'layaway_payment_reminder',
+      'layaway_overdue',
+      'layaway_completed',
+      'layaway_cancelled',
     ];
 
     const existing = await this.subscriptionsModel.findMany({

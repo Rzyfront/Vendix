@@ -9,8 +9,8 @@
         <app-setting-toggle [formControl]="anonymousSalesAsDefaultControl" label="Anónimas por Defecto"
           description="Tipo de venta predeterminado" [disabled]="!allowAnonymousSalesControl.value"
           (changed)="onFieldChange()"></app-setting-toggle>
-        <app-setting-toggle [formControl]="offlineModeEnabledControl" label="Modo Offline"
-          description="Operar sin internet" (changed)="onFieldChange()"></app-setting-toggle>
+        <app-setting-toggle [formControl]="showOnscreenKeypadControl" label="Teclado Táctil"
+          description="Mostrar teclado numérico en pantalla" (changed)="onFieldChange()"></app-setting-toggle>
         <app-setting-toggle [formControl]="requireCashDrawerOpenControl" label="Apertura de Caja"
           description="Monto inicial requerido" (changed)="onFieldChange()"></app-setting-toggle>
       </div>

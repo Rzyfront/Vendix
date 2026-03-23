@@ -59,6 +59,7 @@ export interface OrderDetail extends Order {
         unit_price: number;
         total_price: number;
         image_url: string | null;
+        product_type?: 'physical' | 'service';
     }[];
     payments: {
         id: number;

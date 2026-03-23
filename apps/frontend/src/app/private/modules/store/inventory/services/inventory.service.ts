@@ -322,6 +322,68 @@ export class InventoryService {
   }
 
   // ============================================================
+  // BULK ADJUSTMENTS
+  // ============================================================
+
+  downloadAdjustmentTemplate(location_id?: number): Observable<Blob> {
+    let params = new HttpParams();
+    if (location_id) params = params.set('location_id', location_id.toString());
+
+    return this.http
+      .get(`${this.base_url}/adjustments/bulk/template/download`, {
+        params,
+        responseType: 'blob',
+      })
+      .pipe(catchError(this.handleError));
+  }
+
+  uploadBulkAdjustments(
+    file: File,
+    location_id: number,
+    adjustment_type: string = 'count_variance',
+    description?: string,
+  ): Observable<ApiResponse<any>> {
+    const form_data = new FormData();
+    form_data.append('file', file);
+    form_data.append('location_id', location_id.toString());
+    form_data.append('adjustment_type', adjustment_type);
+    if (description) form_data.append('description', description);
+
+    return this.http
+      .post<ApiResponse<any>>(
+        `${this.base_url}/adjustments/bulk/upload`,
+        form_data,
+      )
+      .pipe(catchError(this.handleError));
+  }
+
+  // ============================================================
+  // RESERVATIONS
+  // ============================================================
+
+  releaseReservationsByProduct(
+    product_id: number,
+    product_variant_id?: number,
+  ): Observable<ApiResponse<{ released_count: number; total_quantity: number }>> {
+    const body: any = { product_id };
+    if (product_variant_id) body.product_variant_id = product_variant_id;
+
+    return this.http
+      .post<
+        ApiResponse<{ released_count: number; total_quantity: number }>
+      >(`${this.base_url}/adjustments/reservations/release-by-product`, body)
+      .pipe(catchError(this.handleError));
+  }
+
+  releaseAllReservations(): Observable<ApiResponse<{ released_count: number; total_quantity: number }>> {
+    return this.http
+      .post<
+        ApiResponse<{ released_count: number; total_quantity: number }>
+      >(`${this.base_url}/adjustments/reservations/release-all`, {})
+      .pipe(catchError(this.handleError));
+  }
+
+  // ============================================================
   // Utilities
   // ============================================================
 

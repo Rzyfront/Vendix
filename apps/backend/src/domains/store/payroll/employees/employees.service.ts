@@ -262,7 +262,7 @@ export class EmployeesService {
     return employee;
   }
 
-  async terminate(id: number) {
+  async terminate(id: number, termination_reason?: string) {
     const employee = await this.findOne(id);
 
     if (employee.status === 'terminated') {
@@ -277,6 +277,7 @@ export class EmployeesService {
       data: {
         status: 'terminated',
         termination_date: new Date(),
+        ...(termination_reason && { termination_reason: termination_reason as any }),
       },
       include: EMPLOYEE_INCLUDE,
     });

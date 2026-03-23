@@ -210,9 +210,14 @@
               </div>
 
               <div class="flex-1 min-w-0">
-                <h3 class="text-sm font-semibold text-gray-900 truncate">
-                  {{ item.product_name }}
-                </h3>
+                <div class="flex items-center gap-2">
+                  <h3 class="text-sm font-semibold text-gray-900 truncate">
+                    {{ item.product_name }}
+                  </h3>
+                  <span *ngIf="item.item_type === 'service'" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide bg-purple-100 text-purple-700">
+                    Servicio
+                  </span>
+                </div>
                 <p class="text-xs font-mono text-gray-400 mt-1">
                   SKU: {{ item.variant_sku || "N/A" }}
                 </p>
@@ -434,9 +439,16 @@
             class="bg-gray-50 rounded-xl p-3 md:p-4 flex items-center justify-between border border-gray-100"
           >
             <span class="text-xs font-bold text-gray-500 uppercase"
-              >Estado de Pago</span
+              >Forma de Pago</span
             >
             <span
+              *ngIf="isCreditOrder"
+              class="px-2.5 py-1 bg-blue-500 text-white text-[10px] font-black uppercase rounded-lg tracking-wider"
+            >
+              Crédito
+            </span>
+            <span
+              *ngIf="!isCreditOrder"
               class="px-2.5 py-1 bg-green-500 text-white text-[10px] font-black uppercase rounded-lg tracking-wider"
             >
               {{
@@ -528,6 +540,108 @@
                 >
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Credit Section -->
+        <div
+          *ngIf="isCreditOrder && credit"
+          class="bg-white rounded-2xl shadow-sm border border-gray-100 p-3 md:p-5"
+        >
+          <h3
+            class="text-xs font-bold text-gray-900 uppercase tracking-widest mb-4 flex items-center gap-2"
+          >
+            <svg
+              class="w-4 h-4 text-gray-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+              ></path>
+            </svg>
+            Crédito Asociado
+          </h3>
+
+          <!-- Credit Badge -->
+          <div class="flex items-center gap-2 mb-3">
+            <span class="text-sm font-bold text-gray-900">{{ credit.credit_number }}</span>
+            <span
+              class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"
+              [ngClass]="{
+                'bg-blue-100 text-blue-700': credit.state === 'active',
+                'bg-emerald-100 text-emerald-700': credit.state === 'paid',
+                'bg-red-100 text-red-700': credit.state === 'overdue' || credit.state === 'defaulted',
+                'bg-gray-100 text-gray-700': credit.state === 'pending' || credit.state === 'cancelled'
+              }"
+            >
+              {{ credit.state === 'active' ? 'Activo' : credit.state === 'paid' ? 'Pagado' : credit.state === 'overdue' ? 'Vencido' : credit.state === 'pending' ? 'Pendiente' : credit.state }}
+            </span>
+          </div>
+
+          <!-- Credit Summary -->
+          <div class="space-y-2 text-sm">
+            <div class="flex justify-between">
+              <span class="text-gray-500">Total</span>
+              <span class="font-semibold text-gray-900">{{ credit.total_amount | currency }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-500">Pagado</span>
+              <span class="font-semibold text-emerald-600">{{ credit.total_paid | currency }} ({{ creditProgressPercentage }}%)</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-500">Pendiente</span>
+              <span class="font-semibold text-red-600">{{ credit.remaining_balance | currency }}</span>
+            </div>
+          </div>
+
+          <!-- Progress Bar -->
+          <div class="mt-3">
+            <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
+              <div
+                class="h-full bg-blue-500 rounded-full transition-all duration-500"
+                [style.width.%]="creditProgressPercentage"
+              ></div>
+            </div>
+          </div>
+
+          <!-- Next Installment -->
+          <div *ngIf="nextInstallment" class="mt-3 bg-blue-50 rounded-xl p-3 border border-blue-100">
+            <div class="flex justify-between items-center text-sm">
+              <span class="text-blue-700 font-medium">Próxima cuota (#{{ nextInstallment.installment_number }})</span>
+              <span class="font-bold text-blue-900">{{ nextInstallment.installment_value | currency }}</span>
+            </div>
+            <div class="text-xs text-blue-600 mt-1">
+              Vence: {{ formatDate(nextInstallment.due_date) }}
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="mt-3 space-y-2">
+            <button
+              (click)="viewCreditDetail()"
+              class="w-full bg-gray-900 text-white font-bold py-2.5 rounded-xl hover:bg-black transition-colors flex items-center justify-center gap-2 text-xs shadow-sm"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+              </svg>
+              Ver Crédito Completo
+            </button>
+            <button
+              *ngIf="nextInstallment"
+              (click)="viewCreditDetail()"
+              class="w-full bg-blue-600 text-white font-bold py-2.5 rounded-xl hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-xs shadow-sm"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              Ir a registrar pago
+            </button>
           </div>
         </div>
       </div>

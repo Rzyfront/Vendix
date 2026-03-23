@@ -33,6 +33,125 @@ export class DianConfigService {
   }
 
   /**
+   * Gets a dashboard with aggregated DIAN metrics from audit_logs.
+   * Returns stats cards + last 20 submissions + certificate indicator.
+   */
+  async getDashboard() {
+    const context = this.getContext();
+
+    // Get all configs for this store
+    const configs = await this.prisma.dian_configurations.findMany({
+      where: { store_id: context.store_id },
+      select: {
+        id: true,
+        name: true,
+        certificate_expiry: true,
+        enablement_status: true,
+        environment: true,
+      },
+    });
+
+    const config_ids = configs.map((c) => c.id);
+
+    if (config_ids.length === 0) {
+      return {
+        stats: {
+          total_sent: 0,
+          total_success: 0,
+          total_errors: 0,
+          success_rate: 0,
+        },
+        recent_submissions: [],
+        certificate_status: null,
+        configs_summary: [],
+      };
+    }
+
+    const where_clause = { dian_configuration_id: { in: config_ids } };
+
+    // Aggregate stats from audit logs
+    const [total_sent, total_success, total_errors] = await Promise.all([
+      this.prisma.dian_audit_logs.count({ where: where_clause }),
+      this.prisma.dian_audit_logs.count({
+        where: { ...where_clause, status: 'success' },
+      }),
+      this.prisma.dian_audit_logs.count({
+        where: { ...where_clause, status: 'error' },
+      }),
+    ]);
+
+    const success_rate =
+      total_sent > 0 ? Math.round((total_success / total_sent) * 100) : 0;
+
+    // Last 20 submissions
+    const recent_submissions = await this.prisma.dian_audit_logs.findMany({
+      where: where_clause,
+      orderBy: { created_at: 'desc' },
+      take: 20,
+      select: {
+        id: true,
+        action: true,
+        document_type: true,
+        document_number: true,
+        status: true,
+        error_message: true,
+        cufe: true,
+        duration_ms: true,
+        created_at: true,
+        dian_configuration_id: true,
+      },
+    });
+
+    // Certificate status — find the nearest expiry
+    const default_config = configs.find((c) => c.certificate_expiry) || null;
+    let certificate_status: {
+      expires: Date | null;
+      days_remaining: number | null;
+      status: 'valid' | 'expiring_soon' | 'expired' | 'not_configured';
+    } | null = null;
+
+    if (default_config?.certificate_expiry) {
+      const now = new Date();
+      const expiry = new Date(default_config.certificate_expiry);
+      const diff_ms = expiry.getTime() - now.getTime();
+      const days_remaining = Math.ceil(diff_ms / (1000 * 60 * 60 * 24));
+
+      let status: 'valid' | 'expiring_soon' | 'expired' = 'valid';
+      if (days_remaining <= 0) status = 'expired';
+      else if (days_remaining <= 30) status = 'expiring_soon';
+
+      certificate_status = {
+        expires: expiry,
+        days_remaining,
+        status,
+      };
+    } else {
+      certificate_status = {
+        expires: null,
+        days_remaining: null,
+        status: 'not_configured',
+      };
+    }
+
+    return {
+      stats: {
+        total_sent,
+        total_success,
+        total_errors,
+        success_rate,
+      },
+      recent_submissions,
+      certificate_status,
+      configs_summary: configs.map((c) => ({
+        id: c.id,
+        name: c.name,
+        environment: c.environment,
+        enablement_status: c.enablement_status,
+      })),
+    };
+  }
+
+  /**
    * Gets all DIAN configurations for the current store.
    * Ordered by: default first, then by creation date.
    */

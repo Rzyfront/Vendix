@@ -27,6 +27,7 @@ import { SettingsService } from '../settings/settings.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
+import { CreditsService } from '../credits/credits.service';
 
 @Injectable()
 export class PaymentsService {
@@ -42,6 +43,7 @@ export class PaymentsService {
     private readonly promotionEngine: PromotionEngineService,
     private readonly sessionsService: SessionsService,
     private readonly movementsService: MovementsService,
+    private readonly creditsService: CreditsService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -421,6 +423,13 @@ export class PaymentsService {
         );
 
         // 1.5. Reserve stock for each item with track_inventory
+        // Resolve default location inside tx to avoid scoping mismatch with getDefaultLocationForProduct()
+        const defaultLocation = await tx.inventory_locations.findFirst({
+          where: { store_id: order.store_id, is_active: true },
+          orderBy: { id: 'asc' },
+          select: { id: true },
+        });
+
         for (const item of order.order_items) {
           const product = await tx.products.findUnique({
             where: { id: item.product_id },
@@ -428,10 +437,23 @@ export class PaymentsService {
           });
           if (!product?.track_inventory) continue;
           try {
-            const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
-              item.product_id,
-              item.product_variant_id || undefined,
-            );
+            // Use stock_level with highest available for this product, falling back to store default location
+            const stockLevel = await tx.stock_levels.findFirst({
+              where: {
+                product_id: item.product_id,
+                product_variant_id: item.product_variant_id || null,
+                quantity_available: { gt: 0 },
+              },
+              orderBy: { quantity_available: 'desc' },
+              select: { location_id: true },
+            });
+            const location_id = stockLevel?.location_id || defaultLocation?.id;
+
+            if (!location_id) {
+              this.logger.warn(`No location found for stock reservation of product ${item.product_id} in order #${order.id}`);
+              continue;
+            }
+
             await this.stockLevelManager.reserveStock(
               item.product_id,
               item.product_variant_id || undefined,
@@ -444,7 +466,7 @@ export class PaymentsService {
               tx,
             );
           } catch (error) {
-            this.logger.warn(`Stock reservation failed for product ${item.product_id}: ${error.message}`);
+            this.logger.warn(`Stock reservation failed for product ${item.product_id} in order #${order.id}: ${error.message}`);
           }
         }
 
@@ -632,6 +654,19 @@ export class PaymentsService {
         ).catch((err) => {
           this.logger.error(`Failed to record cash register movement: ${err.message}`, err.stack);
         });
+
+        // Create credit with installments if installment_terms provided
+        if (createPosPaymentDto.installment_terms && createPosPaymentDto.customer_id && result.order?.id) {
+          try {
+            await this.creditsService.createCreditFromPos(
+              result.order.id,
+              createPosPaymentDto.customer_id,
+              createPosPaymentDto.installment_terms,
+            );
+          } catch (err) {
+            this.logger.error(`Failed to create credit from POS: ${err.message}`, err.stack);
+          }
+        }
       }
 
       return result;
@@ -731,6 +766,7 @@ export class PaymentsService {
           internal_notes: dto.internal_notes,
           // Shipping fields (for delivery orders)
           delivery_type: dto.delivery_type || 'direct_delivery',
+          payment_form: dto.payment_form || (dto.requires_payment ? '1' : '2'),
           shipping_cost: dto.shipping_cost || 0,
           shipping_address_snapshot: dto.shipping_address_snapshot || undefined,
           order_items: {
@@ -919,9 +955,9 @@ export class PaymentsService {
       // Skip stock update for products that don't track inventory
       const product = await tx.products.findUnique({
         where: { id: item.product_id },
-        select: { track_inventory: true },
+        select: { track_inventory: true, product_type: true },
       });
-      if (!product?.track_inventory) continue;
+      if (!product?.track_inventory || product.product_type === 'service') continue;
 
       await this.stockLevelManager.updateStock(
         {

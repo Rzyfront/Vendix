@@ -46,6 +46,11 @@
 
         <!-- Actions -->
         <div class="flex gap-2 items-center sm:ml-auto">
+          <app-button variant="outline" size="sm" (clicked)="syncPanelUI()" [disabled]="isLoading" title="Sincronizar módulos visibles de usuarios admin">
+            <app-icon name="shield-check" [size]="16" slot="icon"></app-icon>
+            <span class="hidden sm:inline ml-1">Sync Panel UI</span>
+          </app-button>
+
           <app-button variant="outline" size="sm" (clicked)="refreshUsers()" [disabled]="isLoading" title="Actualizar">
             <app-icon name="refresh-cw" [size]="16" slot="icon"></app-icon>
           </app-button>

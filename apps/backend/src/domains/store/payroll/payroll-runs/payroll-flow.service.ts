@@ -9,6 +9,7 @@ import {
   PAYROLL_PROVIDER,
   PayrollProviderAdapter,
 } from '../providers/payroll-provider.interface';
+import { DianPayrollProvider } from '../providers/dian-payroll/dian-payroll.provider';
 
 type PayrollStatus =
   | 'draft'
@@ -75,6 +76,7 @@ export class PayrollFlowService {
     private readonly event_emitter: EventEmitter2,
     @Inject(PAYROLL_PROVIDER)
     private readonly payroll_provider: PayrollProviderAdapter,
+    private readonly dian_payroll_provider: DianPayrollProvider,
   ) {}
 
   private getContext() {
@@ -311,5 +313,218 @@ export class PayrollFlowService {
 
   getValidTransitions(current_status: string): PayrollStatus[] {
     return VALID_TRANSITIONS[current_status as PayrollStatus] || [];
+  }
+
+  /**
+   * Send payroll to DIAN using the DianPayrollProvider directly.
+   * Only allowed when payroll run is in 'approved' or 'paid' status.
+   * Processes each item individually — failures do not abort the batch.
+   */
+  async sendToDian(id: number) {
+    const run = await this.getPayrollRun(id);
+
+    // Only allow sending to DIAN from approved or paid status
+    if (!['approved', 'paid'].includes(run.status)) {
+      throw new VendixHttpException(
+        ErrorCodes.PAYROLL_STATUS_001,
+        `Cannot send to DIAN from '${run.status}' status. Payroll run must be 'approved' or 'paid'.`,
+      );
+    }
+
+    const payroll_items = (run as any).payroll_items || [];
+
+    if (payroll_items.length === 0) {
+      throw new VendixHttpException(
+        ErrorCodes.PAYROLL_STATUS_001,
+        'No payroll items found for this run. Calculate payroll first.',
+      );
+    }
+
+    // Map payroll items to provider format
+    const items = payroll_items.map((item: any) => ({
+      employee_id: item.employee.id,
+      employee_code: item.employee.employee_code,
+      document_type: item.employee.document_type,
+      document_number: item.employee.document_number,
+      first_name: item.employee.first_name,
+      last_name: item.employee.last_name,
+      base_salary: Number(item.base_salary),
+      worked_days: item.worked_days,
+      earnings: item.earnings,
+      deductions: item.deductions,
+      employer_costs: item.employer_costs,
+      net_pay: Number(item.net_pay),
+    }));
+
+    // Send to DIAN via the real provider (handles per-item errors internally)
+    const provider_response = await this.dian_payroll_provider.sendPayroll({
+      payroll_run_id: id,
+      payroll_number: run.payroll_number,
+      period_start: run.period_start,
+      period_end: run.period_end,
+      items,
+    });
+
+    // Extract per-item results from raw_response
+    const item_results = (provider_response.raw_response?.results || []) as Array<{
+      employee_document: string;
+      success: boolean;
+      cune?: string;
+      message?: string;
+    }>;
+
+    const sent_count = item_results.filter((r) => r.success).length;
+    const failed_count = item_results.filter((r) => !r.success).length;
+
+    // If the run was approved and all items were sent successfully, transition to 'sent'
+    const new_status: PayrollStatus =
+      run.status === 'approved' && provider_response.success ? 'sent' : (run.status as PayrollStatus);
+
+    const updated = await this.prisma.payroll_runs.update({
+      where: { id },
+      data: {
+        status: new_status,
+        send_status: provider_response.success ? 'sent_ok' : 'sent_partial',
+        provider_response: provider_response.raw_response as any,
+        cune: provider_response.cune || null,
+        xml_document: provider_response.xml_document || null,
+        sent_at: sent_count > 0 ? new Date() : null,
+      },
+      include: PAYROLL_RUN_DETAIL_INCLUDE,
+    });
+
+    this.logger.log(
+      `Payroll run #${id} sent to DIAN: ${sent_count} sent, ${failed_count} failed`,
+    );
+
+    return {
+      payroll_run: updated,
+      dian_summary: {
+        total_items: item_results.length,
+        sent: sent_count,
+        failed: failed_count,
+        all_success: provider_response.success,
+        message: provider_response.message,
+        item_results,
+      },
+    };
+  }
+
+  /**
+   * Send a DSPNE Nota de Ajuste (tipo 103) for a specific payroll item.
+   * References the CUNE of the original document that was accepted by DIAN.
+   */
+  async sendAdjustment(
+    payroll_run_id: number,
+    payroll_item_id: number,
+    predecessor: {
+      cune: string;
+      document_number: string;
+      generation_date: string;
+      adjustment_type: '1' | '2';
+    },
+  ) {
+    const run = await this.getPayrollRun(payroll_run_id);
+
+    // Adjustment notes can only be sent for runs already sent/accepted/paid
+    if (!['sent', 'accepted', 'paid'].includes(run.status)) {
+      throw new VendixHttpException(
+        ErrorCodes.PAYROLL_STATUS_001,
+        `Cannot send adjustment note from '${run.status}' status. Payroll run must be 'sent', 'accepted', or 'paid'.`,
+      );
+    }
+
+    const payroll_items = (run as any).payroll_items || [];
+    const item = payroll_items.find((i: any) => i.id === payroll_item_id);
+
+    if (!item) {
+      throw new VendixHttpException(
+        ErrorCodes.PAYROLL_FIND_002,
+        `Payroll item #${payroll_item_id} not found in run #${payroll_run_id}`,
+      );
+    }
+
+    const mapped_item = {
+      employee_id: item.employee.id,
+      employee_code: item.employee.employee_code,
+      document_type: item.employee.document_type,
+      document_number: item.employee.document_number,
+      first_name: item.employee.first_name,
+      last_name: item.employee.last_name,
+      base_salary: Number(item.base_salary),
+      worked_days: item.worked_days,
+      earnings: item.earnings,
+      deductions: item.deductions,
+      employer_costs: item.employer_costs,
+      net_pay: Number(item.net_pay),
+    };
+
+    const result = await this.dian_payroll_provider.sendAdjustment(
+      mapped_item,
+      {
+        payroll_run_id,
+        payroll_number: run.payroll_number,
+        period_start: run.period_start,
+        period_end: run.period_end,
+      },
+      predecessor,
+    );
+
+    this.logger.log(
+      `Payroll adjustment for item #${payroll_item_id} in run #${payroll_run_id}: ${result.success ? 'OK' : 'FAILED'}`,
+    );
+
+    return {
+      payroll_run_id,
+      payroll_item_id,
+      adjustment_result: result,
+    };
+  }
+
+  /**
+   * Check the DIAN status for a previously sent payroll run.
+   * Uses the CUNE stored on the payroll run as the tracking ID.
+   */
+  async getDianStatus(id: number) {
+    const run = await this.prisma.payroll_runs.findFirst({
+      where: { id },
+      include: PAYROLL_RUN_INCLUDE,
+    });
+
+    if (!run) {
+      throw new VendixHttpException(ErrorCodes.PAYROLL_FIND_002);
+    }
+
+    if (!run.cune) {
+      throw new VendixHttpException(
+        ErrorCodes.PAYROLL_STATUS_001,
+        'This payroll run has not been sent to DIAN yet (no CUNE found).',
+      );
+    }
+
+    const status_response = await this.dian_payroll_provider.checkStatus(run.cune);
+
+    // If status changed to accepted, update the payroll run
+    if (status_response.status === 'accepted' && run.status === 'sent') {
+      await this.prisma.payroll_runs.update({
+        where: { id },
+        data: { status: 'accepted' },
+      });
+    }
+
+    // If status changed to rejected, update the payroll run
+    if (status_response.status === 'rejected' && run.status === 'sent') {
+      await this.prisma.payroll_runs.update({
+        where: { id },
+        data: { status: 'rejected' },
+      });
+    }
+
+    return {
+      payroll_run_id: id,
+      payroll_number: run.payroll_number,
+      current_status: run.status,
+      dian_status: status_response,
+    };
   }
 }

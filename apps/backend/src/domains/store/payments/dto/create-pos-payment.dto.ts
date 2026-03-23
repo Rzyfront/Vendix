@@ -5,7 +5,9 @@ import {
   IsBoolean,
   IsArray,
   IsDateString,
+  IsEnum,
   Min,
+  Max,
   MaxLength,
   ValidateNested,
   IsInt,
@@ -89,20 +91,32 @@ export class PosOrderItemDto {
   notes?: string;
 }
 
-export class PosCreditTermsDto {
-  @IsOptional()
+export class PosInstallmentTermsDto {
+  @IsInt()
+  @Min(1)
+  @Max(60)
+  num_installments: number;
+
+  @IsString()
+  @IsEnum(['weekly', 'biweekly', 'monthly'])
+  frequency: string;
+
   @IsDateString()
-  due_date?: string;
+  first_installment_date: string;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  payment_terms?: string;
+  @IsNumber()
+  @Min(0)
+  interest_rate?: number;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  notes?: string;
+  @IsNumber()
+  @Min(0)
+  initial_payment?: number;
+
+  @IsOptional()
+  @IsInt()
+  initial_payment_method_id?: number;
 }
 
 export class CreatePosPaymentDto {
@@ -212,11 +226,11 @@ export class CreatePosPaymentDto {
   @Type(() => Boolean)
   is_partial_payment?: boolean = false;
 
-  // Términos de crédito (para ventas a crédito)
+  // Términos de crédito (plan de cuotas para ventas a crédito)
   @IsOptional()
   @ValidateNested()
-  @Type(() => PosCreditTermsDto)
-  credit_terms?: PosCreditTermsDto;
+  @Type(() => PosInstallmentTermsDto)
+  installment_terms?: PosInstallmentTermsDto;
 
   // Direcciones (opcionales)
   @IsOptional()
@@ -286,6 +300,11 @@ export class CreatePosPaymentDto {
   @IsBoolean()
   @Type(() => Boolean)
   print_receipt?: boolean = false;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2)
+  payment_form?: string; // '1' = contado, '2' = crédito (DIAN)
 }
 
 // DTO para actualizar una orden existente con pago
@@ -316,11 +335,6 @@ export class UpdateOrderWithPaymentDto {
   @IsBoolean()
   @Type(() => Boolean)
   requires_payment?: boolean = true;
-
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => PosCreditTermsDto)
-  credit_terms?: PosCreditTermsDto;
 
   @IsOptional()
   @IsString()

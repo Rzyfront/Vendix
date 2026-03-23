@@ -51,6 +51,13 @@ export class ProductsBulkController {
     peso: 'weight',
     'disponible ecommerce': 'available_for_ecommerce',
     estado: 'state',
+    'codigo bodega': 'warehouse_code',
+    'código bodega': 'warehouse_code',
+    'nombre bodega': 'warehouse_name',
+    tipo: 'product_type',
+    type: 'product_type',
+    'tipo producto': 'product_type',
+    'product type': 'product_type',
   };
 
   constructor(

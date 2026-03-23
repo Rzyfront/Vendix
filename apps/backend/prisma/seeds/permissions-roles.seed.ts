@@ -467,6 +467,46 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
 
+    // Planes Separé (Layaway)
+    {
+      name: 'store:layaway:create',
+      description: 'Crear plan separé y registrar pagos',
+      path: '/api/store/layaway',
+      method: 'POST',
+    },
+    {
+      name: 'store:layaway:read',
+      description: 'Leer planes separé y estadísticas',
+      path: '/api/store/layaway',
+      method: 'GET',
+    },
+    {
+      name: 'store:layaway:update',
+      description: 'Modificar cuotas, cancelar o completar planes separé',
+      path: '/api/store/layaway/:id',
+      method: 'PATCH',
+    },
+
+    // Créditos
+    {
+      name: 'store:credits:create',
+      description: 'Crear créditos y registrar pagos de cuotas',
+      path: '/api/store/credits',
+      method: 'POST',
+    },
+    {
+      name: 'store:credits:read',
+      description: 'Leer créditos, estadísticas y reportes',
+      path: '/api/store/credits',
+      method: 'GET',
+    },
+    {
+      name: 'store:credits:update',
+      description: 'Perdonar cuotas y cancelar créditos',
+      path: '/api/store/credits/:id',
+      method: 'PATCH',
+    },
+
     // Categorías
     {
       name: 'store:categories:create',

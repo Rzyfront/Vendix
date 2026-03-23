@@ -8,10 +8,11 @@ import {
   StatusResponse,
 } from '../invoice-provider.interface';
 import { EncryptionService } from '../../../../../common/services/encryption.service';
+import { S3Service } from '../../../../../common/services/s3.service';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../../common/context/request-context.service';
 import { CufeCalculator } from '../../utils/cufe-calculator';
-import { DianSoapClient } from './dian-soap.client';
+import { DianSoapClient, WsSecurityCredentials } from './dian-soap.client';
 import { DianXmlSignerService } from './dian-xml-signer.service';
 import { DianResponseParserService } from './dian-response-parser.service';
 import { UblInvoiceBuilder } from './xml/ubl-invoice.builder';
@@ -43,6 +44,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly encryption: EncryptionService,
+    private readonly s3_service: S3Service,
     private readonly soap_client: DianSoapClient,
     private readonly xml_signer: DianXmlSignerService,
     private readonly response_parser: DianResponseParserService,
@@ -53,6 +55,9 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
   ): Promise<ProviderResponse> {
     const start_time = Date.now();
     const config = await this.loadConfig();
+
+    // Validate certificate is not expired before attempting to send
+    this.validateCertificateExpiry(config);
 
     try {
       // Build issuer data from org
@@ -73,6 +78,27 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           ),
       };
 
+      // Extract IVA and ICA amounts from taxes for CUFE calculation
+      const iva_taxes = invoice_data.taxes.filter((t) =>
+        t.tax_name.toUpperCase().includes('IVA') || t.tax_name.toUpperCase().includes('VAT'),
+      );
+      const ica_taxes = invoice_data.taxes.filter((t) =>
+        t.tax_name.toUpperCase().includes('ICA'),
+      );
+      const inc_taxes = invoice_data.taxes.filter((t) =>
+        t.tax_name.toUpperCase().includes('INC') || t.tax_name.toUpperCase().includes('CONSUMO'),
+      );
+
+      const iva_amount = iva_taxes.reduce(
+        (sum, t) => sum + parseFloat(t.tax_amount), 0,
+      ).toFixed(2);
+      const ica_amount = ica_taxes.reduce(
+        (sum, t) => sum + parseFloat(t.tax_amount), 0,
+      ).toFixed(2);
+      const inc_amount = inc_taxes.reduce(
+        (sum, t) => sum + parseFloat(t.tax_amount), 0,
+      ).toFixed(2);
+
       // Calculate CUFE
       const cufe = CufeCalculator.generate({
         invoice_number: invoice_data.invoice_number,
@@ -81,7 +107,9 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           new Date().toISOString().split('T')[1].split('.')[0] +
           '-05:00',
         total_before_tax: invoice_data.subtotal_amount,
-        tax_iva: invoice_data.tax_amount,
+        tax_iva: iva_amount,
+        tax_inc: inc_amount,
+        tax_ica: ica_amount,
         total_amount: invoice_data.total_amount,
         issuer_nit: config.nit,
         customer_nit:
@@ -110,11 +138,15 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         `${invoice_data.invoice_number}.xml`,
       );
 
+      // Load WS-Security credentials for SOAP envelope
+      const ws_credentials = await this.loadWsCredentials(config);
+
       // Send to DIAN
       const dian_response = await this.soap_client.sendBillSync(
         zip_base64,
         `${invoice_data.invoice_number}.zip`,
         config.environment,
+        ws_credentials,
       );
 
       // Parse ApplicationResponse
@@ -182,6 +214,9 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     const start_time = Date.now();
     const config = await this.loadConfig();
 
+    // Validate certificate is not expired before attempting to send
+    this.validateCertificateExpiry(config);
+
     try {
       const issuer = await this.loadIssuerData(config);
       const customer = this.buildCustomerData(credit_note_data);
@@ -197,6 +232,27 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           ),
       };
 
+      // Extract IVA and ICA amounts from taxes for CUDE calculation
+      const cn_iva_taxes = credit_note_data.taxes.filter((t) =>
+        t.tax_name.toUpperCase().includes('IVA') || t.tax_name.toUpperCase().includes('VAT'),
+      );
+      const cn_ica_taxes = credit_note_data.taxes.filter((t) =>
+        t.tax_name.toUpperCase().includes('ICA'),
+      );
+      const cn_inc_taxes = credit_note_data.taxes.filter((t) =>
+        t.tax_name.toUpperCase().includes('INC') || t.tax_name.toUpperCase().includes('CONSUMO'),
+      );
+
+      const cn_iva_amount = cn_iva_taxes.reduce(
+        (sum, t) => sum + parseFloat(t.tax_amount), 0,
+      ).toFixed(2);
+      const cn_ica_amount = cn_ica_taxes.reduce(
+        (sum, t) => sum + parseFloat(t.tax_amount), 0,
+      ).toFixed(2);
+      const cn_inc_amount = cn_inc_taxes.reduce(
+        (sum, t) => sum + parseFloat(t.tax_amount), 0,
+      ).toFixed(2);
+
       // For credit notes, generate CUDE (same algorithm as CUFE)
       const cude = CufeCalculator.generate({
         invoice_number: credit_note_data.invoice_number,
@@ -205,7 +261,9 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           new Date().toISOString().split('T')[1].split('.')[0] +
           '-05:00',
         total_before_tax: credit_note_data.subtotal_amount,
-        tax_iva: credit_note_data.tax_amount,
+        tax_iva: cn_iva_amount,
+        tax_inc: cn_inc_amount,
+        tax_ica: cn_ica_amount,
         total_amount: credit_note_data.total_amount,
         issuer_nit: config.nit,
         customer_nit:
@@ -232,10 +290,14 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         `${credit_note_data.invoice_number}.xml`,
       );
 
+      // Load WS-Security credentials for SOAP envelope
+      const ws_credentials = await this.loadWsCredentials(config);
+
       const dian_response = await this.soap_client.sendBillSync(
         zip_base64,
         `${credit_note_data.invoice_number}.zip`,
         config.environment,
+        ws_credentials,
       );
 
       const parsed = this.response_parser.parseApplicationResponse(
@@ -294,9 +356,13 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
   async checkStatus(tracking_id: string): Promise<StatusResponse> {
     const config = await this.loadConfig();
 
+    // Load WS-Security credentials for SOAP envelope
+    const ws_credentials = await this.loadWsCredentials(config);
+
     const dian_response = await this.soap_client.getStatus(
       tracking_id,
       config.environment,
+      ws_credentials,
     );
 
     const parsed = this.response_parser.parseApplicationResponse(
@@ -334,6 +400,47 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
   }
 
   // ─── Private Helpers ───────────────────────────────────────
+
+  /**
+   * Validates that the DIAN certificate has not expired.
+   * Throws a descriptive error if the certificate is expired.
+   */
+  private validateCertificateExpiry(config: DianConfigDecrypted): void {
+    if (!config.certificate_expiry) return;
+
+    const now = new Date();
+    if (config.certificate_expiry < now) {
+      const expired_date = config.certificate_expiry.toISOString().split('T')[0];
+      throw new Error(
+        `El certificado digital DIAN (NIT: ${config.nit}) expiró el ${expired_date}. ` +
+        `No es posible firmar ni enviar documentos electrónicos. ` +
+        `Por favor renueve el certificado en la configuración DIAN.`,
+      );
+    }
+  }
+
+  /**
+   * Extracts WS-Security credentials from the store's .p12 certificate.
+   * Returns undefined if no certificate is configured (SOAP client falls back to no WS-Security).
+   */
+  private async loadWsCredentials(
+    config: DianConfigDecrypted,
+  ): Promise<WsSecurityCredentials | undefined> {
+    if (!config.certificate_s3_key || !config.certificate_password) {
+      return undefined;
+    }
+    const p12_buffer = await this.s3_service.downloadImage(
+      config.certificate_s3_key,
+    );
+    const creds = this.xml_signer.extractCredentials(
+      p12_buffer,
+      config.certificate_password,
+    );
+    return {
+      private_key_pem: creds.private_key_pem,
+      certificate_der_base64: creds.certificate_der_base64,
+    };
+  }
 
   /**
    * Loads and decrypts the DIAN configuration for the current store.
@@ -452,12 +559,8 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       return xml;
     }
 
-    // TODO: Download .p12 from S3 using S3 service
-    // For now, throw an error if trying to sign without certificate
-    throw new Error(
-      'Certificate signing requires S3 integration (not yet implemented). ' +
-        'Configure DIAN in test mode to use unsigned documents.',
-    );
+    const p12_buffer = await this.s3_service.downloadImage(config.certificate_s3_key);
+    return this.xml_signer.sign(xml, p12_buffer, config.certificate_password);
   }
 
   /**

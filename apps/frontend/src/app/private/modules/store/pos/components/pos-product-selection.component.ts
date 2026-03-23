@@ -133,12 +133,13 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
           class="flex flex-col items-center justify-center h-64 text-center p-8"
         >
           <div
-            class="w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4"
+            class="w-20 h-20 rounded-2xl flex items-center justify-center mb-4"
+            style="background-color: var(--color-primary-light)"
           >
             <app-icon
-              name="package"
-              [size]="32"
-              class="text-text-secondary"
+              name="package-open"
+              [size]="36"
+              color="var(--color-primary)"
             ></app-icon>
           </div>
           <h3 class="text-lg font-semibold text-text-primary mb-2">

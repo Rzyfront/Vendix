@@ -3,6 +3,7 @@ import {
   EmailProvider,
   EmailResult,
   EmailConfig,
+  EmailAttachment,
 } from '../interfaces/email.interface';
 import {
   EmailTemplates,
@@ -66,6 +67,50 @@ export class ResendProvider implements EmailProvider {
       return {
         success: false,
         error: error.message || 'Failed to send email',
+      };
+    }
+  }
+
+  async sendEmailWithAttachments(
+    to: string,
+    subject: string,
+    html: string,
+    attachments: EmailAttachment[],
+    text?: string,
+  ): Promise<EmailResult> {
+    try {
+      const result = await this.resend.emails.send({
+        from: this.config.fromEmail,
+        to: [to],
+        subject,
+        html,
+        text,
+        attachments: attachments.map((a) => ({
+          filename: a.filename,
+          content: a.content,
+        })),
+      });
+
+      if (result.error) {
+        this.logger.error('Resend email error (with attachments):', result.error);
+        return {
+          success: false,
+          error: result.error.message || 'Failed to send email with attachments',
+        };
+      }
+
+      this.logger.log(
+        `Email with ${attachments.length} attachment(s) sent to ${to}, ID: ${result.data?.id}`,
+      );
+      return {
+        success: true,
+        messageId: result.data?.id,
+      };
+    } catch (error) {
+      this.logger.error('Resend send error (with attachments):', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to send email with attachments',
       };
     }
   }

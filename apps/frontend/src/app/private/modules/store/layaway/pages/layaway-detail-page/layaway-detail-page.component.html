@@ -1,0 +1,596 @@
+<div class="min-h-screen" style="background-color: var(--color-background)">
+  @if (loading()) {
+    <div class="flex justify-center items-center h-64">
+      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+    </div>
+  } @else if (plan()) {
+    <!-- Sticky Header -->
+    <app-sticky-header
+      [title]="'Plan ' + plan()!.plan_number"
+      [subtitle]="headerSubtitle()"
+      icon="shopping-cart"
+      [showBackButton]="true"
+      backRoute="/admin/orders/layaway"
+      [badgeText]="getStateLabel(plan()!.state)"
+      [badgeColor]="headerBadgeColor()"
+    />
+
+    <!-- Main Content -->
+    <div class="max-w-[1600px] mx-auto px-3 py-3 sm:px-4 sm:py-4 lg:px-6 lg:py-5 space-y-4 md:space-y-5">
+
+    <!-- Stats Cards -->
+    <div class="stats-container">
+      <app-stats title="Total" [value]="'$' + (plan()!.total_amount | number:'1.0-0')" smallText="Valor del plan" iconName="receipt" iconBgColor="bg-blue-100" iconColor="text-blue-500" />
+      <app-stats title="Pagado" [value]="'$' + (plan()!.paid_amount | number:'1.0-0')" [smallText]="getProgressPercentage() + '% completado'" iconName="check-circle" iconBgColor="bg-emerald-100" iconColor="text-emerald-500" />
+      <app-stats title="Pendiente" [value]="'$' + (plan()!.remaining_amount | number:'1.0-0')" smallText="Saldo restante" iconName="clock" iconBgColor="bg-amber-100" iconColor="text-amber-500" />
+      <app-stats title="Cuotas" [value]="plan()!.num_installments" [smallText]="getPaidInstallmentsText()" iconName="calendar" iconBgColor="bg-purple-100" iconColor="text-purple-500" />
+    </div>
+
+    <!-- Grid: Main + Sidebar -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 lg:gap-5">
+
+      <!-- Main Content -->
+      <div class="lg:col-span-8 space-y-4 md:space-y-6">
+
+        <!-- Productos Reservados -->
+        <app-card shadow="sm" [responsivePadding]="true">
+          <div slot="header" class="flex items-center gap-2 w-full">
+            <app-icon name="package" [size]="16" class="text-[var(--color-text-secondary)]" />
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">Productos Reservados</span>
+          </div>
+            <!-- Mobile cards -->
+            <div class="space-y-3 md:hidden">
+              @for (item of plan()!.layaway_items; track item.id) {
+                <div class="flex justify-between items-start p-3 bg-[var(--color-background)] rounded-xl">
+                  <div>
+                    <p class="text-sm font-semibold text-[var(--color-text-primary)]">{{ item.product_name }}</p>
+                    @if (item.variant_name) {
+                      <p class="text-xs text-[var(--color-text-secondary)]">{{ item.variant_name }}</p>
+                    }
+                    <p class="text-xs text-[var(--color-text-secondary)] mt-1">{{ item.quantity }} &times; ${{ item.unit_price | number:'1.2-2' }}</p>
+                  </div>
+                  <p class="text-sm font-bold text-[var(--color-text-primary)]">${{ item.subtotal | number:'1.2-2' }}</p>
+                </div>
+              }
+            </div>
+            <!-- Desktop table -->
+            <table class="hidden md:table w-full">
+              <thead>
+                <tr class="border-b border-[var(--color-border)]">
+                  <th class="text-left text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider py-3 px-2">Producto</th>
+                  <th class="text-left text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider py-3 px-2">SKU</th>
+                  <th class="text-center text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider py-3 px-2">Cant.</th>
+                  <th class="text-right text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider py-3 px-2">Precio</th>
+                  <th class="text-right text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider py-3 px-2">Subtotal</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (item of plan()!.layaway_items; track item.id) {
+                  <tr class="border-b border-[var(--color-border)]">
+                    <td class="py-3 px-2">
+                      <p class="text-sm font-medium text-[var(--color-text-primary)]">{{ item.product_name }}</p>
+                      @if (item.variant_name) {
+                        <p class="text-xs text-[var(--color-text-secondary)]">{{ item.variant_name }}</p>
+                      }
+                    </td>
+                    <td class="py-3 px-2 text-sm text-[var(--color-text-secondary)]">{{ item.sku || '—' }}</td>
+                    <td class="py-3 px-2 text-sm text-[var(--color-text-primary)] text-center">{{ item.quantity }}</td>
+                    <td class="py-3 px-2 text-sm text-[var(--color-text-primary)] text-right">${{ item.unit_price | number:'1.2-2' }}</td>
+                    <td class="py-3 px-2 text-sm font-semibold text-[var(--color-text-primary)] text-right">${{ item.subtotal | number:'1.2-2' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+        </app-card>
+
+        <!-- Cuotas -->
+        <app-card shadow="sm" [responsivePadding]="true">
+          <div slot="header" class="flex items-center justify-between w-full">
+            <div class="flex items-center gap-2">
+              <app-icon name="calendar" [size]="16" class="text-[var(--color-text-secondary)]" />
+              <span class="text-sm font-bold text-[var(--color-text-primary)]">Cuotas</span>
+            </div>
+            @if (canPerformActions()) {
+              <button type="button" (click)="openModifyModal()" class="text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors flex items-center gap-1 min-h-[44px]" aria-label="Modificar cuotas">
+                <app-icon name="edit" [size]="14" />
+                Modificar
+              </button>
+            }
+          </div>
+            <div class="space-y-2">
+              @for (inst of plan()!.layaway_installments; track inst.id) {
+                <div class="flex items-center gap-3 p-3 rounded-xl border transition-colors"
+                  [ngClass]="{
+                    'border-gray-100 bg-white': inst.state === 'pending',
+                    'border-emerald-100 bg-emerald-50/50': inst.state === 'paid',
+                    'border-red-100 bg-red-50/50': inst.state === 'overdue',
+                    'border-gray-100 bg-gray-50 opacity-60': inst.state === 'cancelled'
+                  }">
+                  <!-- Number circle -->
+                  <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                    [ngClass]="{
+                      'bg-blue-100 text-blue-600': inst.state === 'pending',
+                      'bg-emerald-100 text-emerald-600': inst.state === 'paid',
+                      'bg-red-100 text-red-600': inst.state === 'overdue',
+                      'bg-gray-200 text-gray-500': inst.state === 'cancelled'
+                    }">
+                    {{ inst.installment_number }}
+                  </div>
+                  <!-- Info -->
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-semibold text-gray-900">${{ inst.amount | number:'1.2-2' }}</p>
+                    <p class="text-xs text-gray-500">{{ inst.due_date | date:'dd MMM yyyy' }}</p>
+                  </div>
+                  <!-- Badge -->
+                  <span class="px-2 py-0.5 text-[10px] font-black uppercase tracking-wide rounded-md shrink-0"
+                    [ngClass]="{
+                      'bg-blue-500/20 text-blue-600': inst.state === 'pending',
+                      'bg-emerald-500/20 text-emerald-600': inst.state === 'paid',
+                      'bg-red-500/20 text-red-600': inst.state === 'overdue',
+                      'bg-gray-500/20 text-gray-400': inst.state === 'cancelled'
+                    }">
+                    {{ getInstallmentStateLabel(inst.state) }}
+                  </span>
+                  <!-- Pay button -->
+                  @if (inst.state === 'pending' || inst.state === 'overdue') {
+                    <button type="button" (click)="openPaymentModal(inst)"
+                      class="shrink-0 min-h-[44px] min-w-[44px] flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white text-xs font-bold rounded-xl hover:bg-blue-700 active:scale-95 transition-all"
+                      aria-label="Registrar pago para cuota {{ inst.installment_number }}">
+                      <app-icon name="dollar-sign" [size]="14" />
+                      <span class="hidden sm:inline">Pagar</span>
+                    </button>
+                  }
+                </div>
+              }
+            </div>
+        </app-card>
+
+        <!-- Historial de Pagos -->
+        @if (plan()!.layaway_payments?.length) {
+          <app-card shadow="sm" [responsivePadding]="true">
+            <div slot="header" class="flex items-center gap-2 w-full">
+              <app-icon name="history" [size]="16" class="text-[var(--color-text-secondary)]" />
+              <span class="text-sm font-bold text-[var(--color-text-primary)]">Historial de Pagos</span>
+            </div>
+              <div class="space-y-2">
+                @for (payment of plan()!.layaway_payments; track payment.id) {
+                  <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
+                    <div class="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+                      <app-icon name="check" [size]="14" class="text-emerald-600" />
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm font-bold text-gray-900">${{ payment.amount | number:'1.2-2' }}</p>
+                      <p class="text-xs text-gray-500">{{ payment.paid_at | date:'dd MMM yyyy, HH:mm' }}</p>
+                    </div>
+                    @if (payment.store_payment_methods) {
+                      <span class="text-xs text-gray-500 bg-white px-2 py-1 rounded-lg border border-gray-200 shrink-0">
+                        {{ payment.store_payment_methods!.display_name }}
+                      </span>
+                    }
+                  </div>
+                  @if (payment.notes) {
+                    <p class="text-xs text-gray-400 pl-14">{{ payment.notes }}</p>
+                  }
+                }
+              </div>
+          </app-card>
+        }
+      </div>
+
+      <!-- Sidebar -->
+      <div class="lg:col-span-4 space-y-4 md:space-y-6">
+
+        <!-- Estado y Acciones -->
+        <app-card shadow="sm" [responsivePadding]="true">
+          <div slot="header" class="flex items-center gap-2 w-full">
+            <app-icon name="settings" [size]="16" class="text-[var(--color-text-secondary)]" />
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">Estado del Plan</span>
+          </div>
+          <div class="space-y-4">
+            <div class="flex items-center justify-between">
+              <span class="text-sm text-[var(--color-text-secondary)]">Estado actual</span>
+              <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold border"
+                [ngClass]="{
+                  'bg-blue-50 text-blue-700 border-blue-200': getStateColor(plan()!.state) === 'blue',
+                  'bg-emerald-50 text-emerald-700 border-emerald-200': getStateColor(plan()!.state) === 'green',
+                  'bg-red-50 text-red-700 border-red-200': getStateColor(plan()!.state) === 'red',
+                  'bg-gray-50 text-gray-600 border-gray-200': getStateColor(plan()!.state) === 'gray'
+                }">
+                {{ getStateLabel(plan()!.state) }}
+              </span>
+            </div>
+
+            <div class="flex items-center justify-between">
+              <span class="text-sm text-[var(--color-text-secondary)]">Número</span>
+              <span class="text-sm font-bold text-[var(--color-text-primary)] font-mono">{{ plan()!.plan_number }}</span>
+            </div>
+
+            <div class="flex items-center justify-between">
+              <span class="text-sm text-[var(--color-text-secondary)]">Creado</span>
+              <span class="text-sm text-[var(--color-text-primary)]">{{ plan()!.created_at | date:'dd MMM yyyy' }}</span>
+            </div>
+
+            @if (canPerformActions()) {
+              <hr class="border-[var(--color-border)]" />
+              <div class="space-y-2">
+                @if (plan()!.remaining_amount <= 0) {
+                  <button type="button" (click)="openCompleteModal()"
+                    class="w-full min-h-[44px] flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white text-sm font-bold rounded-xl hover:bg-emerald-700 active:scale-[0.98] transition-all shadow-lg shadow-emerald-600/20">
+                    <app-icon name="check-circle" [size]="16" />
+                    Completar Plan
+                  </button>
+                }
+                <button type="button" (click)="openCancelModal()"
+                  class="w-full min-h-[44px] flex items-center justify-center gap-2 px-4 py-2.5 bg-white text-red-600 text-sm font-bold rounded-xl border border-red-200 hover:bg-red-50 active:scale-[0.98] transition-all">
+                  <app-icon name="x-circle" [size]="16" />
+                  Cancelar Plan
+                </button>
+              </div>
+            }
+
+            @if (plan()!.state === 'completed') {
+              <div class="bg-emerald-50 rounded-xl p-3 border border-emerald-100">
+                <p class="text-xs font-semibold text-emerald-700 flex items-center gap-1.5">
+                  <app-icon name="check-circle" [size]="14" />
+                  Plan completado el {{ plan()!.completed_at | date:'dd MMM yyyy' }}
+                </p>
+              </div>
+            }
+
+            @if (plan()!.state === 'cancelled') {
+              <div class="bg-red-50 rounded-xl p-3 border border-red-100">
+                <p class="text-xs font-semibold text-red-700 mb-1">Plan cancelado</p>
+                @if (plan()!.cancellation_reason) {
+                  <p class="text-xs text-red-600">{{ plan()!.cancellation_reason }}</p>
+                }
+              </div>
+            }
+          </div>
+        </app-card>
+
+        <!-- Cliente -->
+        @if (plan()!.customer) {
+          <app-card shadow="sm" [responsivePadding]="true">
+            <div slot="header" class="flex items-center gap-2 w-full">
+              <app-icon name="user" [size]="16" class="text-[var(--color-text-secondary)]" />
+              <span class="text-sm font-bold text-[var(--color-text-primary)]">Cliente</span>
+            </div>
+              <div class="flex items-center gap-3 mb-4">
+                <div class="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                  <span class="text-sm font-bold text-blue-600">{{ plan()!.customer!.first_name[0] }}{{ plan()!.customer!.last_name[0] }}</span>
+                </div>
+                <div>
+                  <p class="text-sm font-semibold text-[var(--color-text-primary)]">{{ plan()!.customer!.first_name }} {{ plan()!.customer!.last_name }}</p>
+                </div>
+              </div>
+              <div class="space-y-3">
+                @if (plan()!.customer!.email) {
+                  <div class="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
+                    <app-icon name="mail" [size]="14" class="text-[var(--color-text-secondary)] shrink-0" />
+                    <span class="truncate">{{ plan()!.customer!.email }}</span>
+                  </div>
+                }
+                @if (plan()!.customer!.phone) {
+                  <div class="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
+                    <app-icon name="phone" [size]="14" class="text-[var(--color-text-secondary)] shrink-0" />
+                    <span>{{ plan()!.customer!.phone }}</span>
+                  </div>
+                }
+              </div>
+          </app-card>
+        }
+
+        <!-- Resumen Financiero -->
+        <app-card shadow="sm" [responsivePadding]="true">
+          <div slot="header" class="flex items-center gap-2 w-full">
+            <app-icon name="receipt" [size]="16" class="text-[var(--color-text-secondary)]" />
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">Resumen</span>
+          </div>
+          <div class="space-y-3">
+            <div class="flex justify-between text-sm">
+              <span class="text-[var(--color-text-secondary)]">Total del plan</span>
+              <span class="font-semibold text-[var(--color-text-primary)]">${{ plan()!.total_amount | number:'1.2-2' }}</span>
+            </div>
+            @if (plan()!.down_payment_amount > 0) {
+              <div class="flex justify-between text-sm">
+                <span class="text-[var(--color-text-secondary)]">Abono inicial</span>
+                <span class="font-semibold text-[var(--color-text-primary)]">${{ plan()!.down_payment_amount | number:'1.2-2' }}</span>
+              </div>
+            }
+            <div class="flex justify-between text-sm">
+              <span class="text-[var(--color-text-secondary)]">Total pagado</span>
+              <span class="font-semibold text-emerald-600">${{ plan()!.paid_amount | number:'1.2-2' }}</span>
+            </div>
+            <div class="h-px bg-[var(--color-border)]"></div>
+            <div class="flex justify-between text-sm">
+              <span class="font-semibold text-[var(--color-text-primary)]">Saldo pendiente</span>
+              <span class="font-bold text-lg text-[var(--color-text-primary)]">${{ plan()!.remaining_amount | number:'1.2-2' }}</span>
+            </div>
+            <div class="mt-2">
+              <div class="flex justify-between text-xs text-[var(--color-text-secondary)] mb-1">
+                <span>Progreso</span>
+                <span class="font-semibold">{{ getProgressPercentage() }}%</span>
+              </div>
+              <div class="h-2 bg-[var(--color-background)] rounded-full overflow-hidden">
+                <div class="h-full bg-emerald-500 rounded-full transition-all duration-500" [style.width.%]="getProgressPercentage()"></div>
+              </div>
+            </div>
+          </div>
+        </app-card>
+
+        <!-- Notas -->
+        @if (plan()!.notes || plan()!.internal_notes) {
+          <app-card shadow="sm" [responsivePadding]="true">
+            <div slot="header" class="flex items-center gap-2 w-full">
+              <app-icon name="file-text" [size]="16" class="text-[var(--color-text-secondary)]" />
+              <span class="text-sm font-bold text-[var(--color-text-primary)]">Notas</span>
+            </div>
+            <div class="space-y-3">
+              @if (plan()!.notes) {
+                <p class="text-sm text-[var(--color-text-primary)]">{{ plan()!.notes }}</p>
+              }
+              @if (plan()!.internal_notes) {
+                <div class="bg-amber-50 border border-amber-100 rounded-xl p-3">
+                  <p class="text-xs font-semibold text-amber-700 uppercase tracking-wider mb-1">Notas internas</p>
+                  <p class="text-sm text-amber-900">{{ plan()!.internal_notes }}</p>
+                </div>
+              }
+            </div>
+          </app-card>
+        }
+      </div>
+    </div>
+
+    <!-- Payment Modal -->
+    <app-modal
+      [size]="'md'"
+      [title]="'Registrar Pago — Cuota #' + (selectedInstallment()?.installment_number || '')"
+      [isOpen]="showPaymentModal()"
+      (closed)="closePaymentModal()"
+    >
+      @if (selectedInstallment()) {
+        <div class="p-4 space-y-4">
+          <div class="bg-gray-50 rounded-xl p-4 space-y-2">
+            <div class="flex justify-between text-sm">
+              <span class="text-gray-500">Valor cuota</span>
+              <span class="font-semibold">${{ selectedInstallment()!.amount | number:'1.2-2' }}</span>
+            </div>
+            <div class="flex justify-between text-sm">
+              <span class="text-gray-500">Vencimiento</span>
+              <span class="font-semibold">{{ selectedInstallment()!.due_date | date:'dd/MM/yyyy' }}</span>
+            </div>
+            <div class="flex justify-between text-sm">
+              <span class="text-gray-500">Estado</span>
+              <span class="font-bold" [class]="selectedInstallment()!.state === 'overdue' ? 'text-red-600' : 'text-blue-600'">
+                {{ getInstallmentStateLabel(selectedInstallment()!.state) }}
+              </span>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">Monto a pagar</label>
+            <input
+              type="number"
+              [(ngModel)]="paymentAmount"
+              [min]="0.01"
+              [max]="selectedInstallment()!.amount"
+              step="0.01"
+              class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              placeholder="0.00"
+            />
+          </div>
+
+          @if (paymentMethods().length) {
+            <div>
+              <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">Método de pago</label>
+              <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                @for (method of paymentMethods(); track method.id) {
+                  <button
+                    type="button"
+                    (click)="paymentMethodId = method.id"
+                    class="px-3 py-2.5 rounded-xl border text-xs font-semibold transition-all"
+                    [ngClass]="{
+                      'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-200': paymentMethodId === method.id,
+                      'border-gray-200 bg-white text-gray-600 hover:border-gray-300': paymentMethodId !== method.id
+                    }"
+                  >
+                    {{ method.display_name }}
+                  </button>
+                }
+              </div>
+            </div>
+          }
+
+          <div>
+            <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">Referencia (opcional)</label>
+            <input
+              type="text"
+              [(ngModel)]="paymentReference"
+              class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              placeholder="Nro. de transacción, recibo, etc."
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">Notas (opcional)</label>
+            <textarea
+              [(ngModel)]="paymentNotes"
+              rows="2"
+              class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
+              placeholder="Observaciones del pago..."
+            ></textarea>
+          </div>
+        </div>
+      }
+
+      <div slot="footer" class="flex items-center justify-end gap-3 px-4 py-3 bg-gray-50 rounded-b-xl">
+        @if (selectedInstallment()) {
+          <button (click)="closePaymentModal()" class="px-4 py-2.5 text-sm font-semibold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+            Cancelar
+          </button>
+          <button
+            (click)="submitPayment()"
+            [disabled]="isProcessingPayment() || paymentAmount <= 0"
+            class="px-5 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            @if (isProcessingPayment()) {
+              <div class="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+            }
+            Registrar Pago
+          </button>
+        }
+      </div>
+    </app-modal>
+
+    <!-- Cancel Modal -->
+    <app-modal
+      [size]="'sm'"
+      [title]="'Cancelar Plan'"
+      [isOpen]="showCancelModal()"
+      (closed)="closeCancelModal()"
+    >
+      <div class="p-4 space-y-4">
+        <div class="bg-red-50 border border-red-200 rounded-xl p-3">
+          <p class="text-sm text-red-700 font-medium">Esta acción liberará el stock reservado de los productos del plan.</p>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">Razón de cancelación</label>
+          <textarea
+            [(ngModel)]="cancelReason"
+            rows="3"
+            class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none resize-none"
+            placeholder="Describe el motivo de la cancelación..."
+          ></textarea>
+        </div>
+      </div>
+
+      <div slot="footer" class="flex items-center justify-end gap-3 px-4 py-3 bg-gray-50 rounded-b-xl">
+        <button (click)="closeCancelModal()" class="px-4 py-2.5 text-sm font-semibold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+          Volver
+        </button>
+        <button
+          (click)="submitCancel()"
+          [disabled]="isProcessingCancel() || !cancelReason.trim()"
+          class="px-5 py-2.5 text-sm font-bold text-white bg-red-600 rounded-xl hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+        >
+          @if (isProcessingCancel()) {
+            <div class="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+          }
+          Confirmar Cancelación
+        </button>
+      </div>
+    </app-modal>
+
+    <!-- Complete Modal -->
+    <app-modal
+      [size]="'sm'"
+      [title]="'Completar Plan'"
+      [isOpen]="showCompleteModal()"
+      (closed)="closeCompleteModal()"
+    >
+      <div class="p-4 space-y-3">
+        <p class="text-sm text-gray-700">¿Marcar este plan como completado?</p>
+        <div class="bg-green-50 border border-green-200 rounded-xl p-3">
+          <p class="text-sm text-green-700 font-medium">Los productos reservados se marcarán como entregados al cliente.</p>
+        </div>
+      </div>
+
+      <div slot="footer" class="flex items-center justify-end gap-3 px-4 py-3 bg-gray-50 rounded-b-xl">
+        <button (click)="closeCompleteModal()" class="px-4 py-2.5 text-sm font-semibold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+          Cancelar
+        </button>
+        <button
+          (click)="submitComplete()"
+          [disabled]="isProcessingComplete()"
+          class="px-5 py-2.5 text-sm font-bold text-white bg-green-600 rounded-xl hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+        >
+          @if (isProcessingComplete()) {
+            <div class="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+          }
+          Confirmar
+        </button>
+      </div>
+    </app-modal>
+
+    <!-- Modify Installments Modal -->
+    <app-modal
+      [size]="'lg'"
+      [title]="'Modificar Cuotas'"
+      [isOpen]="showModifyModal()"
+      (closed)="closeModifyModal()"
+    >
+      <div class="p-4 space-y-4">
+        <div class="bg-blue-50 border border-blue-200 rounded-xl p-3">
+          <p class="text-sm text-blue-700 font-medium">
+            Saldo pendiente: <strong>${{ plan()!.remaining_amount | number:'1.2-2' }}</strong>
+            — El total de las cuotas debe igualar este valor.
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          @for (inst of modifiedInstallments; track $index) {
+            <div class="flex items-center gap-3 p-3 border border-gray-200 rounded-xl">
+              <span class="text-xs font-semibold text-gray-500 min-w-[60px]">Cuota {{ $index + 1 }}</span>
+              <input
+                type="number"
+                [(ngModel)]="inst.amount"
+                step="0.01"
+                min="0.01"
+                class="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                placeholder="Monto"
+              />
+              <input
+                type="date"
+                [(ngModel)]="inst.due_date"
+                class="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              />
+              <button
+                type="button"
+                (click)="removeInstallment($index)"
+                class="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+                [disabled]="modifiedInstallments.length <= 1"
+              >
+                <app-icon name="x" [size]="16" />
+              </button>
+            </div>
+          }
+        </div>
+
+        <button type="button" (click)="addInstallment()" class="flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors min-h-[44px]">
+          <app-icon name="plus" [size]="16" />
+          Agregar cuota
+        </button>
+
+        <div class="flex justify-between items-center p-3 bg-gray-50 rounded-xl text-sm">
+          <span class="text-gray-600">Total cuotas:</span>
+          <span class="font-bold" [ngClass]="{ 'text-green-600': isModifyTotalValid(), 'text-red-600': !isModifyTotalValid() }">
+            ${{ getModifyTotal() | number:'1.2-2' }}
+          </span>
+        </div>
+      </div>
+
+      <div slot="footer" class="flex items-center justify-end gap-3 px-4 py-3 bg-gray-50 rounded-b-xl">
+        <button (click)="closeModifyModal()" class="px-4 py-2.5 text-sm font-semibold text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+          Cancelar
+        </button>
+        <button
+          (click)="submitModify()"
+          [disabled]="isProcessingModify() || modifiedInstallments.length === 0"
+          class="px-5 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+        >
+          @if (isProcessingModify()) {
+            <div class="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+          }
+          Guardar Cambios
+        </button>
+      </div>
+    </app-modal>
+
+    </div>
+  } @else {
+    <div class="flex flex-col items-center justify-center h-64 text-gray-500">
+      <app-icon name="alert-triangle" [size]="48" class="text-gray-300 mb-3" />
+      <p class="text-sm font-medium">Plan no encontrado</p>
+    </div>
+  }
+</div>

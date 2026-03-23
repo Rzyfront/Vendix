@@ -22,6 +22,7 @@ export interface CartItem {
         image_url: string | null;
         final_price: number;
         weight?: number;
+        product_type?: 'physical' | 'service';
     };
     variant: {
         name: string;
@@ -140,6 +141,7 @@ export class CartService {
                                             sku: product.sku || '',
                                             image_url: product.image_url,
                                             weight: product.weight || 0,
+                                            product_type: product.product_type,
                                         },
                                         variant: localItem.product_variant_id
                                             ? {
@@ -397,6 +399,29 @@ export class CartService {
             return this.clearCart();
         }
         this.clearLocalCart();
+    }
+
+    // ========== CART TYPE HELPERS ==========
+
+    /** Returns true if the cart contains at least one physical product */
+    hasPhysicalItems(): boolean {
+        const cart = this.cart_subject.value;
+        if (!cart) return false;
+        return cart.items.some(item => item.product.product_type !== 'service');
+    }
+
+    /** Returns true if the cart contains only service items */
+    hasOnlyServices(): boolean {
+        const cart = this.cart_subject.value;
+        if (!cart || cart.items.length === 0) return false;
+        return cart.items.every(item => item.product.product_type === 'service');
+    }
+
+    /** Returns true if the cart contains at least one service item */
+    hasServiceItems(): boolean {
+        const cart = this.cart_subject.value;
+        if (!cart) return false;
+        return cart.items.some(item => item.product.product_type === 'service');
     }
 
     // ========== SHIPPING ==========

@@ -261,6 +261,12 @@
     gap: 0.125rem;
 }
 
+.item-name-row {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+}
+
 .item-name {
     font-size: var(--fs-sm);
     font-weight: var(--fw-medium);
@@ -268,6 +274,21 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.item-type-badge {
+    flex-shrink: 0;
+    padding: 0.1rem 0.4rem;
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    font-weight: var(--fw-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+
+    &--service {
+        background: rgba(139, 92, 246, 0.12);
+        color: rgb(109, 40, 217);
+    }
 }
 
 .item-variant {

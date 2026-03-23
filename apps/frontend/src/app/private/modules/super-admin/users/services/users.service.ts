@@ -272,6 +272,31 @@ export class UsersService {
   /**
    * Toggle 2FA para usuario
    */
+  // ─── Panel UI Sync ─────────────────────────────────────────
+  syncPanelUI(strategy: 'merge' | 'replace' = 'merge'): Observable<{ updated: number; skipped: number; errors: string[] }> {
+    return this.http
+      .post<any>(`${this.apiUrl}/superadmin/users/sync-panel-ui`, { strategy })
+      .pipe(
+        map((response) => response.data),
+        catchError((error) => {
+          console.error('Error syncing panel UI:', error);
+          return throwError(() => error);
+        }),
+      );
+  }
+
+  previewPanelUISync(): Observable<any> {
+    return this.http
+      .get<any>(`${this.apiUrl}/superadmin/users/panel-ui-preview`)
+      .pipe(
+        map((response) => response.data),
+        catchError((error) => {
+          console.error('Error previewing panel UI sync:', error);
+          return throwError(() => error);
+        }),
+      );
+  }
+
   toggleUser2FA(id: number, enabled: boolean): Observable<User> {
     return this.http
       .patch<any>(`${this.apiUrl}/superadmin/users/${id}/2fa`, { enabled })

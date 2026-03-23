@@ -240,6 +240,8 @@ export interface PosSettings {
   allow_refund_without_approval: boolean;
   scale?: ScaleSettings;
   cash_register?: CashRegisterSettings;
+  default_payment_form?: 'contado' | 'credito';
+  show_onscreen_keypad: boolean;
 }
 
 export interface ScaleSettings {

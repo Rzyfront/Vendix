@@ -94,26 +94,34 @@ export class OrdersService {
             updated_at: new Date(),
             order_items: {
               create: await Promise.all(
-                createOrderDto.items.map(async (item) => ({
-                  product_id: item.product_id,
-                  product_variant_id: item.product_variant_id,
-                  product_name: item.product_name,
-                  variant_sku: item.variant_sku,
-                  variant_attributes: item.variant_attributes,
-                  quantity: item.quantity,
-                  unit_price: item.unit_price,
-                  total_price: item.total_price,
-                  tax_rate: item.tax_rate,
-                  tax_amount_item: item.tax_amount_item,
-                  weight: item.weight,
-                  weight_unit: item.weight_unit,
-                  cost_price: await resolveCostPrice(
-                    this.prisma,
-                    item.product_id,
-                    item.product_variant_id,
-                  ),
-                  updated_at: new Date(),
-                })),
+                createOrderDto.items.map(async (item) => {
+                  // Resolve product type for snapshot
+                  const product = await this.prisma.products.findUnique({
+                    where: { id: item.product_id },
+                    select: { product_type: true },
+                  });
+                  return {
+                    product_id: item.product_id,
+                    product_variant_id: item.product_variant_id,
+                    product_name: item.product_name,
+                    variant_sku: item.variant_sku,
+                    variant_attributes: item.variant_attributes,
+                    quantity: item.quantity,
+                    unit_price: item.unit_price,
+                    total_price: item.total_price,
+                    tax_rate: item.tax_rate,
+                    tax_amount_item: item.tax_amount_item,
+                    weight: item.weight,
+                    weight_unit: item.weight_unit,
+                    item_type: product?.product_type || 'physical',
+                    cost_price: await resolveCostPrice(
+                      this.prisma,
+                      item.product_id,
+                      item.product_variant_id,
+                    ),
+                    updated_at: new Date(),
+                  };
+                }),
               ),
             },
           },
@@ -295,6 +303,13 @@ export class OrdersService {
             email: true,
             phone: true,
             avatar_url: true,
+          },
+        },
+        credits: {
+          include: {
+            installments: {
+              orderBy: { installment_number: 'asc' },
+            },
           },
         },
       },

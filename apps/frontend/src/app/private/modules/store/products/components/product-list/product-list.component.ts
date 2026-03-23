@@ -77,6 +77,7 @@ export class ProductListComponent implements OnChanges {
   selectedState = '';
   selectedCategory = '';
   selectedBrand = '';
+  selectedProductType = '';
 
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
@@ -104,6 +105,16 @@ export class ProductListComponent implements OnChanges {
       type: 'select',
       options: [],
       placeholder: 'Seleccionar marca',
+    },
+    {
+      key: 'product_type',
+      label: 'Tipo de Producto',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos los Tipos' },
+        { value: 'physical', label: 'Producto Físico' },
+        { value: 'service', label: 'Servicio' },
+      ],
     },
   ];
 
@@ -157,12 +168,30 @@ export class ProductListComponent implements OnChanges {
     },
     {
       key: 'pricing_type',
-      label: 'Tipo',
+      label: 'Precio',
       sortable: false,
       width: '80px',
       align: 'center',
       priority: 3,
       transform: (value: string) => value === 'weight' ? 'Peso' : 'Unidad',
+    },
+    {
+      key: 'product_type',
+      label: 'Tipo',
+      sortable: false,
+      width: '100px',
+      align: 'center',
+      priority: 2,
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        size: 'sm',
+        colorMap: {
+          physical: '#3b82f6',
+          service: '#8b5cf6',
+        },
+      },
+      transform: (value: string) => value === 'service' ? 'Servicio' : 'Producto',
     },
     {
       key: 'stock_quantity',
@@ -172,6 +201,7 @@ export class ProductListComponent implements OnChanges {
       align: 'center',
       priority: 1,
       transform: (value: number, item?: any) =>
+        item?.product_type === 'service' ? 'Servicio' :
         item?.track_inventory === false ? 'Disponible' : (value?.toString() || '0'),
     },
     {
@@ -241,6 +271,7 @@ export class ProductListComponent implements OnChanges {
         key: 'stock_quantity',
         label: 'Stock',
         transform: (val: any, item?: any) =>
+          item?.product_type === 'service' ? 'Servicio' :
           item?.track_inventory === false ? 'Disponible' : (val?.toString() || '0'),
       }
     ]
@@ -296,6 +327,7 @@ export class ProductListComponent implements OnChanges {
     this.selectedState = (values['state'] as string) || '';
     this.selectedCategory = (values['category_id'] as string) || '';
     this.selectedBrand = (values['brand_id'] as string) || '';
+    this.selectedProductType = (values['product_type'] as string) || '';
 
     // Build the ProductQueryDto
     const query: ProductQueryDto = {};
@@ -308,6 +340,9 @@ export class ProductListComponent implements OnChanges {
     if (this.selectedBrand) {
       query.brand_id = parseInt(this.selectedBrand, 10);
     }
+    if (this.selectedProductType) {
+      query.product_type = this.selectedProductType as 'physical' | 'service';
+    }
 
     this.filter.emit(query);
   }
@@ -317,6 +352,7 @@ export class ProductListComponent implements OnChanges {
     this.selectedState = '';
     this.selectedCategory = '';
     this.selectedBrand = '';
+    this.selectedProductType = '';
     this.filterValues = {};
     this.search.emit('');
     this.filter.emit({});
@@ -362,7 +398,8 @@ export class ProductListComponent implements OnChanges {
       this.searchTerm ||
       this.selectedState ||
       this.selectedCategory ||
-      this.selectedBrand
+      this.selectedBrand ||
+      this.selectedProductType
     );
   }
 }

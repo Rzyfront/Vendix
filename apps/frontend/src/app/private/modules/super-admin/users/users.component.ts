@@ -269,6 +269,33 @@ export class UsersComponent implements OnInit, OnDestroy {
     this.loadUserStats();
   }
 
+  syncPanelUI(): void {
+    this.dialogService
+      .confirm({
+        title: 'Sincronizar Panel UI',
+        message: '¿Sincronizar las configuraciones de módulos visibles para todos los usuarios admin/owner? Se agregarán los módulos nuevos sin eliminar personalizaciones existentes.',
+        confirmText: 'Sincronizar',
+        cancelText: 'Cancelar',
+      })
+      .then((confirmed: boolean) => {
+        if (!confirmed) return;
+        this.isLoading = true;
+        this.usersService.syncPanelUI('merge').subscribe({
+          next: (result) => {
+            this.isLoading = false;
+            this.toastService.success(
+              `Sincronización completada: ${result.updated} actualizados, ${result.skipped} sin cambios`,
+            );
+          },
+          error: (error) => {
+            this.isLoading = false;
+            console.error('Error syncing panel UI:', error);
+            this.toastService.error('Error al sincronizar Panel UI');
+          },
+        });
+      });
+  }
+
   createUser(): void {
     this.showCreateModal = true;
   }

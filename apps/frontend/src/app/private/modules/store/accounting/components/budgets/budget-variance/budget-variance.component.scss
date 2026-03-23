@@ -1,0 +1,24 @@
+:host {
+  display: block;
+  width: 100%;
+}
+
+table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+thead th.sticky,
+tbody td.sticky,
+tfoot td.sticky {
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: -6px;
+    bottom: 0;
+    width: 6px;
+    pointer-events: none;
+    background: linear-gradient(to right, rgba(0, 0, 0, 0.04), transparent);
+  }
+}

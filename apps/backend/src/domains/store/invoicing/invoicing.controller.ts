@@ -13,6 +13,7 @@ import {
 import { InvoicingService } from './invoicing.service';
 import { InvoiceFlowService } from './invoice-flow/invoice-flow.service';
 import { CreditNotesService } from './credit-notes/credit-notes.service';
+import { InvoicePdfService } from './services/invoice-pdf.service';
 import { ResponseService } from '../../../common/responses/response.service';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
@@ -26,6 +27,7 @@ export class InvoicingController {
     private readonly invoicing_service: InvoicingService,
     private readonly invoice_flow_service: InvoiceFlowService,
     private readonly credit_notes_service: CreditNotesService,
+    private readonly invoice_pdf_service: InvoicePdfService,
     private readonly response_service: ResponseService,
   ) {}
 
@@ -108,6 +110,20 @@ export class InvoicingController {
   }
 
   // --- Parameter Routes (MUST be last) ---
+
+  @Get(':id/pdf')
+  @Permissions('invoicing:read')
+  async getInvoicePdf(@Param('id') id: string) {
+    const url = await this.invoice_pdf_service.getPdf(+id);
+    return this.response_service.success({ url });
+  }
+
+  @Post(':id/pdf/regenerate')
+  @Permissions('invoicing:write')
+  async regenerateInvoicePdf(@Param('id') id: string) {
+    const result = await this.invoice_pdf_service.generatePdf(+id);
+    return this.response_service.success(result, 'Invoice PDF regenerated');
+  }
 
   @Get(':id')
   @Permissions('invoicing:read')

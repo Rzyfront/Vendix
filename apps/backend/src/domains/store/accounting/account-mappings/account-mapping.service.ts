@@ -48,6 +48,34 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<string, { code: string; descriptio
   // Phase 2: Sales discounts (POS coupons, manual discounts)
   'payment.received.sales_discount': { code: '4175', description: 'Descuentos en Ventas (POS)' },
   'credit_sale.created.sales_discount': { code: '4175', description: 'Descuentos en Ventas (Crédito)' },
+  // Layaway (Plan Separé)
+  'layaway.payment.cash': { code: '1105', description: 'Caja (pago cuota separé)' },
+  'layaway.payment.bank': { code: '1110', description: 'Banco (pago cuota separé)' },
+  'layaway.payment.customer_advance': { code: '2805', description: 'Anticipos de Clientes (separé)' },
+  'layaway.completed.customer_advance': { code: '2805', description: 'Anticipos de Clientes (separé completado)' },
+  'layaway.completed.revenue': { code: '4135', description: 'Ingresos por Ventas (separé completado)' },
+  // Fixed Assets - Depreciation
+  'depreciation.monthly.depreciation_expense': { code: '5199', description: 'Gasto por Depreciación' },
+  'depreciation.monthly.accumulated_depreciation': { code: '1592', description: 'Depreciación Acumulada' },
+  // Fixed Assets - Disposal
+  'disposal.fixed_asset.asset_cost': { code: '1520', description: 'Propiedad Planta y Equipo' },
+  'disposal.fixed_asset.accumulated_depreciation': { code: '1592', description: 'Depreciación Acumulada (baja)' },
+  'disposal.fixed_asset.loss': { code: '5310', description: 'Pérdida en Baja de Activos' },
+  'disposal.fixed_asset.gain': { code: '4245', description: 'Utilidad en Venta de Activos' },
+  'disposal.fixed_asset.cash': { code: '1105', description: 'Caja (venta activo)' },
+  // Withholding Tax (Retención en la Fuente)
+  'withholding.applied.expense': { code: '5195', description: 'Gasto / Compra (base retención)' },
+  'withholding.applied.withholding_payable': { code: '2365', description: 'Retención en la Fuente por Pagar' },
+  'withholding.applied.accounts_payable': { code: '2205', description: 'Proveedores (neto después de retención)' },
+  // Settlement (Liquidación por Terminación)
+  'settlement.paid.severance': { code: '2610', description: 'Cesantías Consolidadas' },
+  'settlement.paid.severance_interest': { code: '2615', description: 'Intereses sobre Cesantías' },
+  'settlement.paid.bonus': { code: '2620', description: 'Prima de Servicios por Pagar' },
+  'settlement.paid.vacation': { code: '2625', description: 'Vacaciones por Pagar' },
+  'settlement.paid.pending_salary': { code: '5105', description: 'Gastos de Personal (Salario Pendiente)' },
+  'settlement.paid.indemnification': { code: '5105', description: 'Gastos de Personal (Indemnización)' },
+  'settlement.paid.social_deductions': { code: '2370', description: 'Retenciones y Aportes de Nómina' },
+  'settlement.paid.bank': { code: '1110', description: 'Bancos (Pago Liquidación)' },
 };
 
 interface CacheEntry {

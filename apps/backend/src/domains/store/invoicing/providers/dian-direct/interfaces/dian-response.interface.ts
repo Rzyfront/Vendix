@@ -38,6 +38,8 @@ export interface DianSendBillResponse {
   raw_response: string;
   /** Request duration in ms */
   duration_ms: number;
+  /** Whether the response is a SOAP Fault (e.g., InvalidSecurity) */
+  is_soap_fault?: boolean;
 }
 
 /**

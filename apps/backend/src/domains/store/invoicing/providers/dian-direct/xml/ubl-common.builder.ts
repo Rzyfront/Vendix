@@ -51,10 +51,12 @@ export class UblCommonBuilder {
       .att('schemeAgencyName', 'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)')
       .txt(software_security.software_security_code);
 
-    // Placeholder for digital signature (will be filled by DianXmlSigner)
-    parent
-      .ele(UBL_NAMESPACES.EXT, 'UBLExtensions')
-      .up()
+    // Navigate back to UBLExtensions and add second UBLExtension (placeholder for digital signature)
+    // ext → DianExtensions → .up() ExtensionContent → .up() UBLExtension → .up() UBLExtensions
+    ext
+      .up() // → ExtensionContent
+      .up() // → UBLExtension (first)
+      .up() // → UBLExtensions
       .ele(UBL_NAMESPACES.EXT, 'UBLExtension')
       .ele(UBL_NAMESPACES.EXT, 'ExtensionContent');
   }
@@ -325,9 +327,15 @@ export class UblCommonBuilder {
         .txt(group_amount.toFixed(2));
 
       const tax_category = subtotal.ele(UBL_NAMESPACES.CAC, 'TaxCategory');
+
+      // ICA rates are stored in "per mil" (‰) — convert to percentage for UBL
+      const tax_percent =
+        code === DIAN_TAX_CODES.ICA
+          ? (parseFloat(group_taxes[0].tax_rate) / 10).toFixed(4)
+          : group_taxes[0].tax_rate;
       tax_category
         .ele(UBL_NAMESPACES.CBC, 'Percent')
-        .txt(group_taxes[0].tax_rate);
+        .txt(tax_percent);
 
       const scheme = tax_category.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
       scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(code);

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { InventoryAdjustmentsService } from './inventory-adjustments.service';
+import { InventoryAdjustmentsBulkService } from './inventory-adjustments-bulk.service';
 import { InventoryAdjustmentsController } from './inventory-adjustments.controller';
 import { InventoryTransactionsModule } from '../transactions/inventory-transactions.module';
 import { PrismaModule } from '../../../../prisma/prisma.module';
@@ -9,7 +10,7 @@ import { ResponseModule } from '@common/responses/response.module';
 
 @Module({
   controllers: [InventoryAdjustmentsController],
-  providers: [InventoryAdjustmentsService, StockLevelManager],
+  providers: [InventoryAdjustmentsService, InventoryAdjustmentsBulkService, StockLevelManager],
   imports: [
     InventoryTransactionsModule,
     PrismaModule,

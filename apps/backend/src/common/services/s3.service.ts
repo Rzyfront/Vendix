@@ -10,7 +10,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Upload } from '@aws-sdk/lib-storage';
 import * as sharp from 'sharp';
-import { extractS3KeyFromUrl } from '../helpers/s3-url.helper';
+import { extractS3KeyFromUrl, isS3Key } from '../helpers/s3-url.helper';
 
 @Injectable()
 export class S3Service {
@@ -245,6 +245,61 @@ export class S3Service {
             this.logger.error(`Error generating favicon: ${error.message}`);
             return null;
         }
+    }
+
+    /**
+     * Sanitizes markdown content for storage by replacing signed S3 URLs with S3 keys.
+     * Finds all markdown image patterns ![alt](url) and extracts the S3 key from each URL.
+     *
+     * @param content - Markdown content potentially containing signed S3 URLs
+     * @returns Content with signed URLs replaced by S3 keys
+     */
+    sanitizeMarkdownContent(content: string): string {
+        if (!content) {
+            return content;
+        }
+
+        const markdownImageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+
+        return content.replace(markdownImageRegex, (match, alt, url) => {
+            const key = extractS3KeyFromUrl(url);
+            return `![${alt}](${key || url})`;
+        });
+    }
+
+    /**
+     * Signs markdown content by replacing S3 keys with fresh presigned URLs.
+     * Finds all markdown image patterns ![alt](url) and signs each S3 key.
+     *
+     * @param content - Markdown content potentially containing S3 keys
+     * @returns Content with S3 keys replaced by fresh signed URLs
+     */
+    async signMarkdownContent(content: string): Promise<string> {
+        if (!content) {
+            return content;
+        }
+
+        const markdownImageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+        const matches = [...content.matchAll(markdownImageRegex)];
+
+        if (matches.length === 0) {
+            return content;
+        }
+
+        let result = content;
+
+        for (const match of matches) {
+            const [fullMatch, alt, url] = match;
+
+            if (isS3Key(url)) {
+                const signedUrl = await this.signUrl(url);
+                if (signedUrl) {
+                    result = result.replace(fullMatch, `![${alt}](${signedUrl})`);
+                }
+            }
+        }
+
+        return result;
     }
 
     /**

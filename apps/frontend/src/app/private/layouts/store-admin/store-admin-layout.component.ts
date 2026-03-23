@@ -183,6 +183,16 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           icon: 'circle',
           route: '/admin/orders/quotations',
         },
+        {
+          label: 'Plan Separe',
+          icon: 'circle',
+          route: '/admin/orders/layaway',
+        },
+        {
+          label: 'Ventas a Crédito',
+          icon: 'circle',
+          route: '/admin/orders/credits',
+        },
       ],
     },
     {
@@ -338,7 +348,27 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           icon: 'circle',
           route: '/admin/accounting/reports',
         },
+        {
+          label: 'Retenciones',
+          icon: 'circle',
+          route: '/admin/accounting/withholding-tax',
+        },
+        {
+          label: 'Info Exógena',
+          icon: 'circle',
+          route: '/admin/accounting/exogenous',
+        },
+        {
+          label: 'ICA Municipal',
+          icon: 'circle',
+          route: '/admin/taxes/ica',
+        },
       ],
+    },
+    {
+      label: 'Datos Personales',
+      icon: 'shield-check',
+      route: '/admin/habeas-data',
     },
     {
       label: 'Nómina',
@@ -350,9 +380,19 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           route: '/admin/payroll/employees',
         },
         {
-          label: 'Liquidaciones',
+          label: 'Períodos de Nómina',
           icon: 'circle',
           route: '/admin/payroll/runs',
+        },
+        {
+          label: 'Liquidaciones',
+          icon: 'circle',
+          route: '/admin/payroll/settlements',
+        },
+        {
+          label: 'Adelantos',
+          icon: 'circle',
+          route: '/admin/payroll/advances',
         },
         {
           label: 'Configuración Nómina',

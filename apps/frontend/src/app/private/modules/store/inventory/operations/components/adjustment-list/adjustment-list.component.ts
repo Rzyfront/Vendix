@@ -75,6 +75,7 @@ export class AdjustmentListComponent {
   // Dropdown actions
   dropdownActions: DropdownAction[] = [
     { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
+    { label: 'Carga Masiva', icon: 'upload', action: 'bulk' },
     { label: 'Nuevo Ajuste', icon: 'plus', action: 'create', variant: 'primary' },
   ];
 

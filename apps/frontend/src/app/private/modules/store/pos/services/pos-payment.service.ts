@@ -139,7 +139,8 @@ export class PosPaymentService {
               enabled: method.state === 'enabled',
               requiresReference: type !== 'cash',
               referenceLabel: this.getReferenceLabel(type),
-              // Preserve original metadata if needed
+              dian_code: method.system_payment_method?.dian_code || undefined,
+              // Preservar metadata original
               original: method,
             };
           });
@@ -310,6 +311,7 @@ export class PosPaymentService {
         parseFloat(cartState.summary.total.toString()).toFixed(2),
       ),
       requires_payment: true,
+      payment_form: '1', // DIAN: contado
       store_payment_method_id: parseInt(paymentRequest.paymentMethod.id),
       amount_received: Number(
         parseFloat(
@@ -379,6 +381,14 @@ export class PosPaymentService {
     },
     paymentRequest: PaymentRequest | null,
     createdBy: string,
+    creditConfig?: {
+      num_installments: number;
+      frequency: 'weekly' | 'biweekly' | 'monthly';
+      first_installment_date: string;
+      interest_rate: number;
+      initial_payment: number;
+      initial_payment_method_id?: number;
+    },
   ): Observable<any> {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
@@ -454,9 +464,22 @@ export class PosPaymentService {
       coupon_code: cartState.appliedCoupon?.code,
     };
 
-    if (paymentRequest) {
+    if (creditConfig) {
+      // Credit flow
+      sale_data['requires_payment'] = false;
+      sale_data['payment_form'] = '2'; // DIAN: crédito
+      sale_data['installment_terms'] = {
+        num_installments: creditConfig.num_installments,
+        frequency: creditConfig.frequency,
+        first_installment_date: creditConfig.first_installment_date,
+        interest_rate: creditConfig.interest_rate || 0,
+        initial_payment: creditConfig.initial_payment || 0,
+        initial_payment_method_id: creditConfig.initial_payment_method_id,
+      };
+    } else if (paymentRequest) {
       // "Pagar ahora" flow
       sale_data['requires_payment'] = true;
+      sale_data['payment_form'] = '1'; // DIAN: contado
       sale_data['store_payment_method_id'] = parseInt(
         paymentRequest.paymentMethod.id,
       );
@@ -469,6 +492,7 @@ export class PosPaymentService {
     } else {
       // "Contra entrega" flow
       sale_data['requires_payment'] = false;
+      sale_data['payment_form'] = '1'; // Contra entrega sigue siendo contado
     }
 
     return this.http.post<any>(this.apiUrl, sale_data).pipe(
@@ -550,9 +574,6 @@ export class PosPaymentService {
         parseFloat(cartState.summary.total.toString()).toFixed(2),
       ),
       requires_payment: false,
-      credit_terms: {
-        payment_terms: 'Pendiente de pago',
-      },
       register_id: register_id,
       seller_user_id: user_id,
       internal_notes: cartState.notes || '',
@@ -581,7 +602,105 @@ export class PosPaymentService {
   }
 
   /**
-   * Save draft order
+   * Procesar venta a crédito con términos de cuotas (desde modal de pago POS)
+   */
+  processCreditSaleWithTerms(
+    cartState: CartState,
+    creditConfig: {
+      num_installments: number;
+      frequency: 'weekly' | 'biweekly' | 'monthly';
+      first_installment_date: string;
+      interest_rate: number;
+      initial_payment: number;
+      initial_payment_method_id?: number;
+    },
+    createdBy: string,
+  ): Observable<any> {
+    const sessionError = this.validateCashRegisterSession();
+    if (sessionError) return sessionError;
+
+    const user_id = this.storeContextService.getUserId();
+    if (!user_id) {
+      return throwError(() => new Error('Usuario no identificado.'));
+    }
+
+    const register_id = this.getRegisterId();
+
+    if (!cartState.customer) {
+      return throwError(() => new Error('Debe seleccionar un cliente para ventas a crédito.'));
+    }
+
+    const credit_data: any = {
+      customer_id: cartState.customer.id,
+      customer_name: `${cartState.customer.first_name} ${cartState.customer.last_name}`,
+      customer_email: cartState.customer.email,
+      customer_phone: cartState.customer.phone,
+      store_id: this.getStoreId(),
+      items: cartState.items.map((item) => ({
+        product_id: parseInt(item.product.id),
+        product_name: item.product.name,
+        product_sku: item.product.sku,
+        quantity: item.quantity,
+        unit_price: Number(parseFloat(item.unitPrice.toString()).toFixed(2)),
+        total_price: Number(parseFloat(item.totalPrice.toString()).toFixed(2)),
+        cost: item.product.cost
+          ? parseFloat(item.product.cost.toString())
+          : undefined,
+        product_variant_id: item.variant_id || null,
+        variant_sku: item.variant_sku || null,
+        variant_attributes: item.variant_attributes || null,
+      })),
+      subtotal: Number(
+        parseFloat(cartState.summary.subtotal.toString()).toFixed(2),
+      ),
+      tax_amount: Number(
+        parseFloat(cartState.summary.taxAmount.toString()).toFixed(2),
+      ),
+      discount_amount: Number(
+        parseFloat(cartState.summary.discountAmount.toString()).toFixed(2),
+      ),
+      total_amount: Number(
+        parseFloat(cartState.summary.total.toString()).toFixed(2),
+      ),
+      requires_payment: false,
+      payment_form: '2', // DIAN: crédito
+      register_id: register_id,
+      seller_user_id: user_id,
+      internal_notes: cartState.notes || '',
+      update_inventory: true,
+      coupon_id: cartState.appliedCoupon?.id,
+      coupon_code: cartState.appliedCoupon?.code,
+      installment_terms: {
+        num_installments: creditConfig.num_installments,
+        frequency: creditConfig.frequency,
+        first_installment_date: creditConfig.first_installment_date,
+        interest_rate: creditConfig.interest_rate || 0,
+        initial_payment: creditConfig.initial_payment || 0,
+        initial_payment_method_id: creditConfig.initial_payment_method_id,
+      },
+    };
+
+    return this.http.post<any>(this.apiUrl, credit_data).pipe(
+      map((response) => {
+        const data = response.data || response;
+        if (data.success) {
+          return {
+            success: true,
+            order: data.order,
+            message: data.message,
+          };
+        } else {
+          throw new Error(
+            data.message || 'Error al procesar la venta a crédito',
+          );
+        }
+      }),
+      catchError((error) => throwError(() => error)),
+    );
+  }
+
+  /**
+   * Guardar borrador de orden
    */
   saveDraft(cartState: CartState, createdBy: string): Observable<any> {
     // Drafts are NOT transactional — no cash register session required.

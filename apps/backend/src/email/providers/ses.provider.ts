@@ -3,6 +3,7 @@ import {
     EmailProvider,
     EmailResult,
     EmailConfig,
+    EmailAttachment,
 } from '../interfaces/email.interface';
 import {
     EmailTemplates,
@@ -70,6 +71,43 @@ export class SesProvider implements EmailProvider {
             return {
                 success: false,
                 error: error.message || 'Failed to send email',
+            };
+        }
+    }
+
+    async sendEmailWithAttachments(
+        to: string,
+        subject: string,
+        html: string,
+        attachments: EmailAttachment[],
+        text?: string,
+    ): Promise<EmailResult> {
+        try {
+            const info = await this.transporter.sendMail({
+                from: `"${this.config.fromName}" <${this.config.fromEmail}>`,
+                to,
+                subject,
+                html,
+                text,
+                attachments: attachments.map((a) => ({
+                    filename: a.filename,
+                    content: a.content,
+                    contentType: a.contentType,
+                })),
+            });
+
+            this.logger.log(
+                `Email with ${attachments.length} attachment(s) sent to ${to}, MessageId: ${info.messageId}`,
+            );
+            return {
+                success: true,
+                messageId: info.messageId,
+            };
+        } catch (error) {
+            this.logger.error('SES send error (with attachments):', error);
+            return {
+                success: false,
+                error: error.message || 'Failed to send email with attachments',
             };
         }
     }

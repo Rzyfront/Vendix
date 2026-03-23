@@ -72,7 +72,7 @@ import { PosApiService } from '../services/pos-api.service';
             </div>
 
             <!-- Promotions & Coupons (hidden in quotation mode) -->
-            @if (!isQuotationMode) {
+            @if (!isQuotationMode && !isLayawayMode) {
               <!-- Promotions Applied -->
               <ng-container *ngIf="getPromotionDiscounts().length > 0">
                 <div class="pt-1.5 border-t border-border/30">
@@ -166,6 +166,17 @@ import { PosApiService } from '../services/pos-api.service';
               >
                 <app-icon name="file-text" [size]="18"></app-icon>
                 <span>Crear Cotización</span>
+              </button>
+            } @else if (isLayawayMode) {
+              <!-- Layaway mode: only layaway button -->
+              <button
+                type="button"
+                class="cart-btn checkout-btn"
+                (click)="layaway.emit()"
+                [disabled]="(isEmpty$ | async) ?? false"
+              >
+                <app-icon name="calendar" [size]="18"></app-icon>
+                <span>Crear Plan Separé</span>
               </button>
             } @else {
               <!-- Normal POS buttons -->
@@ -446,10 +457,12 @@ export class PosCartComponent implements OnInit, OnDestroy {
 
   @Input() isEditMode = false;
   @Input() isQuotationMode = false;
+  @Input() isLayawayMode = false;
   @Output() saveDraft = new EventEmitter<void>();
   @Output() shipping = new EventEmitter<void>();
   @Output() checkout = new EventEmitter<void>();
   @Output() quote = new EventEmitter<void>();
+  @Output() layaway = new EventEmitter<void>();
 
   constructor(
     private cartService: PosCartService,

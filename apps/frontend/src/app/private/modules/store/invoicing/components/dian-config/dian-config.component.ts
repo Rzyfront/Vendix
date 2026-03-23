@@ -1,6 +1,6 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+import { FormBuilder, FormGroup, Validators, ReactiveFormsModule, FormsModule } from '@angular/forms';
 import { InvoicingService } from '../../services/invoicing.service';
 import { DianConfig, DianNitType, DianTestResult, DianAuditLog } from '../../interfaces/invoice.interface';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -17,6 +17,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
   imports: [
     CommonModule,
     ReactiveFormsModule,
+    FormsModule,
     ButtonComponent,
     InputComponent,
     IconComponent,
@@ -38,15 +39,152 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
             <p class="text-sm text-text-secondary">Administre sus configuraciones de facturacion electronica</p>
           </div>
         </div>
-        <app-button
-          *ngIf="viewMode === 'detail'"
-          variant="outline"
-          size="sm"
-          (clicked)="backToList()"
-        >
-          <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
-          Volver al listado
-        </app-button>
+        <div class="flex items-center gap-2">
+          <app-button
+            *ngIf="viewMode === 'list'"
+            [variant]="showDashboard ? 'outline' : 'ghost'"
+            size="sm"
+            (clicked)="toggleDashboard()"
+          >
+            <app-icon slot="icon" name="bar-chart-2" [size]="14"></app-icon>
+            {{ showDashboard ? 'Configuraciones' : 'Dashboard' }}
+          </app-button>
+          <app-button
+            *ngIf="viewMode === 'detail'"
+            variant="outline"
+            size="sm"
+            (clicked)="backToList()"
+          >
+            <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
+            Volver al listado
+          </app-button>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <!-- DASHBOARD VIEW                                         -->
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <div *ngIf="!loading && viewMode === 'list' && showDashboard" class="space-y-4">
+
+        <div *ngIf="loadingDashboard" class="flex justify-center py-12">
+          <app-spinner size="lg"></app-spinner>
+        </div>
+
+        <div *ngIf="!loadingDashboard && dashboardData" class="space-y-4">
+
+          <!-- Stats Cards -->
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div class="border border-border rounded-xl p-4 bg-white">
+              <div class="text-xs text-text-secondary mb-1">Total Enviados</div>
+              <div class="text-2xl font-bold text-text-primary">{{ dashboardData.stats.total_sent }}</div>
+            </div>
+            <div class="border border-border rounded-xl p-4 bg-white">
+              <div class="text-xs text-text-secondary mb-1">Exitosos</div>
+              <div class="text-2xl font-bold text-green-600">{{ dashboardData.stats.total_success }}</div>
+            </div>
+            <div class="border border-border rounded-xl p-4 bg-white">
+              <div class="text-xs text-text-secondary mb-1">Errores</div>
+              <div class="text-2xl font-bold text-red-600">{{ dashboardData.stats.total_errors }}</div>
+            </div>
+            <div class="border border-border rounded-xl p-4 bg-white">
+              <div class="text-xs text-text-secondary mb-1">Tasa de Exito</div>
+              <div class="text-2xl font-bold text-text-primary">{{ dashboardData.stats.success_rate }}%</div>
+              <div class="mt-2 h-2 bg-gray-100 rounded-full overflow-hidden">
+                <div
+                  class="h-full rounded-full transition-all duration-500"
+                  [ngClass]="{
+                    'bg-green-500': dashboardData.stats.success_rate >= 90,
+                    'bg-yellow-500': dashboardData.stats.success_rate >= 70 && dashboardData.stats.success_rate < 90,
+                    'bg-red-500': dashboardData.stats.success_rate < 70
+                  }"
+                  [style.width.%]="dashboardData.stats.success_rate"
+                ></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Certificate Indicator -->
+          <div *ngIf="dashboardData.certificate_status" class="border border-border rounded-xl p-4 bg-white">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <app-icon name="shield" [size]="18"
+                  [ngClass]="{
+                    'text-green-600': dashboardData.certificate_status.status === 'valid',
+                    'text-yellow-600': dashboardData.certificate_status.status === 'expiring_soon',
+                    'text-red-600': dashboardData.certificate_status.status === 'expired',
+                    'text-gray-400': dashboardData.certificate_status.status === 'not_configured'
+                  }"
+                ></app-icon>
+                <span class="text-sm font-medium text-text-primary">Certificado Digital</span>
+              </div>
+              <span class="px-2 py-0.5 text-xs rounded-full font-medium"
+                [ngClass]="{
+                  'bg-green-100 text-green-700': dashboardData.certificate_status.status === 'valid',
+                  'bg-yellow-100 text-yellow-700': dashboardData.certificate_status.status === 'expiring_soon',
+                  'bg-red-100 text-red-700': dashboardData.certificate_status.status === 'expired',
+                  'bg-gray-100 text-gray-600': dashboardData.certificate_status.status === 'not_configured'
+                }"
+              >
+                {{ getCertStatusLabel(dashboardData.certificate_status.status) }}
+              </span>
+            </div>
+            <div *ngIf="dashboardData.certificate_status.expires" class="mt-2 text-xs text-text-secondary">
+              Expira: {{ dashboardData.certificate_status.expires | date:'dd/MM/yyyy' }}
+              <span *ngIf="dashboardData.certificate_status.days_remaining !== null">
+                ({{ dashboardData.certificate_status.days_remaining }} dias restantes)
+              </span>
+            </div>
+          </div>
+
+          <!-- Recent Submissions Table -->
+          <div class="border border-border rounded-xl p-4 bg-white">
+            <h3 class="text-sm font-semibold text-text-primary mb-3">Ultimos 20 Envios</h3>
+            <div class="overflow-x-auto">
+              <table *ngIf="dashboardData.recent_submissions.length > 0" class="w-full text-sm">
+                <thead>
+                  <tr class="border-b border-border">
+                    <th class="text-left py-2 px-3 text-text-secondary font-medium">Accion</th>
+                    <th class="text-left py-2 px-3 text-text-secondary font-medium hidden md:table-cell">Documento</th>
+                    <th class="text-center py-2 px-3 text-text-secondary font-medium">Estado</th>
+                    <th class="text-right py-2 px-3 text-text-secondary font-medium hidden md:table-cell">Duracion</th>
+                    <th class="text-right py-2 px-3 text-text-secondary font-medium">Fecha</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr *ngFor="let log of dashboardData.recent_submissions" class="border-b border-border/50 hover:bg-gray-50">
+                    <td class="py-2 px-3">
+                      <div class="text-text-primary">{{ log.action }}</div>
+                      <div *ngIf="log.error_message" class="text-xs text-red-500 mt-0.5 max-w-[200px] truncate">{{ log.error_message }}</div>
+                    </td>
+                    <td class="py-2 px-3 hidden md:table-cell">
+                      <span *ngIf="log.document_number" class="text-text-primary">{{ log.document_type }} {{ log.document_number }}</span>
+                      <span *ngIf="!log.document_number" class="text-text-secondary">-</span>
+                    </td>
+                    <td class="py-2 px-3 text-center">
+                      <span class="px-1.5 py-0.5 text-xs rounded-full"
+                        [ngClass]="{
+                          'bg-green-100 text-green-700': log.status === 'success',
+                          'bg-red-100 text-red-700': log.status === 'error',
+                          'bg-gray-100 text-gray-600': log.status !== 'success' && log.status !== 'error'
+                        }"
+                      >{{ log.status }}</span>
+                    </td>
+                    <td class="py-2 px-3 text-right hidden md:table-cell text-text-secondary">
+                      {{ log.duration_ms ? log.duration_ms + 'ms' : '-' }}
+                    </td>
+                    <td class="py-2 px-3 text-right text-text-secondary text-xs">
+                      {{ log.created_at | date:'dd/MM/yy HH:mm' }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <div *ngIf="dashboardData.recent_submissions.length === 0" class="py-8 text-center">
+                <app-icon name="bar-chart-2" [size]="32" class="text-gray-400 mx-auto mb-2"></app-icon>
+                <p class="text-text-secondary text-sm">No hay envios registrados</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Loading State -->
@@ -57,7 +195,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
       <!-- ═══════════════════════════════════════════════════════ -->
       <!-- LIST VIEW                                              -->
       <!-- ═══════════════════════════════════════════════════════ -->
-      <div *ngIf="!loading && viewMode === 'list'" class="space-y-4">
+      <div *ngIf="!loading && viewMode === 'list' && !showDashboard" class="space-y-4">
 
         <!-- Add Button -->
         <div class="flex justify-end">
@@ -105,6 +243,16 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 
               <!-- Right: Actions -->
               <div class="flex items-center gap-1 shrink-0">
+                <app-button
+                  *ngIf="getNextStep(cfg) < 4"
+                  variant="outline"
+                  size="sm"
+                  (clicked)="continueConfig(cfg)"
+                  title="Continuar configuracion"
+                >
+                  <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
+                  Continuar
+                </app-button>
                 <app-button
                   *ngIf="!cfg.is_default"
                   variant="ghost"
@@ -404,10 +552,10 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                 <app-button
                   variant="primary"
                   (clicked)="saveEnvironment()"
-                  [disabled]="selectedEnvironment === selectedConfig.environment || savingEnvironment"
+                  [disabled]="savingEnvironment"
                   [loading]="savingEnvironment"
                 >
-                  Guardar Ambiente
+                  {{ selectedEnvironment === selectedConfig.environment ? 'Continuar' : 'Guardar Ambiente' }}
                 </app-button>
               </div>
             </div>
@@ -431,6 +579,19 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
             </div>
 
             <div *ngIf="selectedConfig" class="space-y-4">
+              <div class="space-y-3 mb-4">
+                <label class="text-sm font-medium text-text-primary">Resolucion para el set de pruebas</label>
+                <select
+                  class="w-full px-3 py-2 border border-border rounded-lg text-sm bg-white focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                  [(ngModel)]="selectedResolutionId"
+                >
+                  <option [ngValue]="null" disabled>Seleccione una resolucion</option>
+                  <option *ngFor="let res of resolutions" [ngValue]="res.id">
+                    {{ res.prefix }} — Resolucion {{ res.resolution_number }} ({{ res.range_from }} - {{ res.range_to }})
+                  </option>
+                </select>
+              </div>
+
               <div class="flex items-center gap-3">
                 <app-button
                   variant="outline"
@@ -445,7 +606,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                 <app-button
                   variant="primary"
                   (clicked)="runTestSet()"
-                  [disabled]="runningTestSet"
+                  [disabled]="runningTestSet || !selectedResolutionId"
                   [loading]="runningTestSet"
                 >
                   <app-icon slot="icon" name="play" [size]="14"></app-icon>
@@ -475,6 +636,60 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                   <div>Tiempo de respuesta: {{ testResult.response_time_ms }}ms</div>
                   <div *ngIf="testResult.dian_status">Estado DIAN: {{ testResult.dian_status }}</div>
                 </div>
+              </div>
+
+              <div *ngIf="testSetResult" class="p-4 rounded-lg border"
+                [ngClass]="{
+                  'bg-green-50 border-green-200': testSetResult.success,
+                  'bg-blue-50 border-blue-200': !testSetResult.success
+                }"
+              >
+                <div class="flex items-center gap-2 mb-3">
+                  <app-icon
+                    [name]="testSetResult.success ? 'check-circle' : 'info'"
+                    [size]="18"
+                    [class]="testSetResult.success ? 'text-green-600' : 'text-blue-600'"
+                  ></app-icon>
+                  <span class="text-sm font-medium" [class]="testSetResult.success ? 'text-green-700' : 'text-blue-700'">
+                    {{ testSetResult.message }}
+                  </span>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                  <div class="p-2 bg-white rounded border border-border text-center">
+                    <div class="text-text-secondary">Total</div>
+                    <div class="text-lg font-semibold text-text-primary">{{ testSetResult.total_documents }}</div>
+                  </div>
+                  <div class="p-2 bg-white rounded border border-border text-center">
+                    <div class="text-text-secondary">Facturas</div>
+                    <div class="text-lg font-semibold text-text-primary">{{ testSetResult.invoices_count }}</div>
+                  </div>
+                  <div class="p-2 bg-white rounded border border-border text-center">
+                    <div class="text-text-secondary">Notas Debito</div>
+                    <div class="text-lg font-semibold text-text-primary">{{ testSetResult.debit_notes_count }}</div>
+                  </div>
+                  <div class="p-2 bg-white rounded border border-border text-center">
+                    <div class="text-text-secondary">Notas Credito</div>
+                    <div class="text-lg font-semibold text-text-primary">{{ testSetResult.credit_notes_count }}</div>
+                  </div>
+                </div>
+                <div *ngIf="testSetResult.tracking_id && testSetResult.tracking_id !== 's:Sender'" class="mt-3 text-xs text-text-secondary">
+                  Tracking ID: <span class="font-mono">{{ testSetResult.tracking_id }}</span>
+                </div>
+                <div *ngIf="testSetResult.dian_status === 's:Sender'" class="mt-3 p-2 rounded bg-amber-50 border border-amber-200 text-xs text-amber-700">
+                  <strong>Nota:</strong> Los 50 documentos se generaron y firmaron correctamente. La DIAN requiere WS-Security en el envelope SOAP para procesar el set. Esta funcionalidad esta en desarrollo.
+                </div>
+              </div>
+
+              <!-- Navigation buttons -->
+              <div class="flex items-center justify-between pt-4 border-t border-border">
+                <app-button variant="outline" size="sm" (clicked)="activeStep = 2">
+                  <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
+                  Anterior
+                </app-button>
+                <app-button variant="primary" size="sm" (clicked)="activeStep = 4">
+                  Registros
+                  <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
+                </app-button>
               </div>
             </div>
           </div>
@@ -588,6 +803,11 @@ export class DianConfigComponent implements OnInit {
   activeStep = 0;
   deletingId: number | null = null;
 
+  // Dashboard
+  showDashboard = false;
+  loadingDashboard = false;
+  dashboardData: any = null;
+
   // NIT types for selector
   nitTypeOptions: SelectorOption[] = [
     { value: 'NIT', label: 'NIT' },
@@ -615,6 +835,9 @@ export class DianConfigComponent implements OnInit {
   testingConnection = false;
   runningTestSet = false;
   testResult: DianTestResult | null = null;
+  resolutions: any[] = [];
+  selectedResolutionId: number | null = null;
+  testSetResult: any = null;
 
   // Step 5: Audit Logs
   auditLogs: DianAuditLog[] = [];
@@ -647,6 +870,7 @@ export class DianConfigComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadConfigs();
+    this.loadResolutions();
   }
 
   // ── Data Loading ──────────────────────────────────────────
@@ -665,6 +889,39 @@ export class DianConfigComponent implements OnInit {
     });
   }
 
+  // ── Dashboard ─────────────────────────────────────────────
+
+  toggleDashboard(): void {
+    this.showDashboard = !this.showDashboard;
+    if (this.showDashboard && !this.dashboardData) {
+      this.loadDashboard();
+    }
+  }
+
+  loadDashboard(): void {
+    this.loadingDashboard = true;
+    this.invoicingService.getDianDashboard().subscribe({
+      next: (response: any) => {
+        this.dashboardData = response?.data || null;
+        this.loadingDashboard = false;
+      },
+      error: () => {
+        this.dashboardData = null;
+        this.loadingDashboard = false;
+      },
+    });
+  }
+
+  getCertStatusLabel(status: string): string {
+    const labels: Record<string, string> = {
+      valid: 'Vigente',
+      expiring_soon: 'Proximo a vencer',
+      expired: 'Vencido',
+      not_configured: 'No configurado',
+    };
+    return labels[status] || status;
+  }
+
   // ── View Navigation ───────────────────────────────────────
 
   startNewConfig(): void {
@@ -679,8 +936,31 @@ export class DianConfigComponent implements OnInit {
     this.patchCredentialsForm();
     this.selectedEnvironment = cfg.environment;
     this.testResult = null;
+    this.testSetResult = null;
     this.activeStep = 0;
     this.viewMode = 'detail';
+  }
+
+  continueConfig(cfg: DianConfig): void {
+    this.selectedConfig = cfg;
+    this.patchCredentialsForm();
+    this.selectedEnvironment = cfg.environment;
+    this.testResult = null;
+    this.testSetResult = null;
+    this.activeStep = this.getNextStep(cfg);
+    this.viewMode = 'detail';
+  }
+
+  getNextStep(cfg: DianConfig): number {
+    // Step 0: Credentials — always done if config exists
+    // Step 1: Certificate — done if certificate_s3_key exists
+    if (!cfg.certificate_s3_key) return 1;
+    // Step 2: Environment — done if enablement_status moved past not_started
+    if (cfg.enablement_status === 'not_started') return 2;
+    // Step 3: Test — done if enablement_status is enabled
+    if (cfg.enablement_status !== 'enabled') return 3;
+    // All done — go to audit logs
+    return 4;
   }
 
   backToList(): void {
@@ -729,6 +1009,8 @@ export class DianConfigComponent implements OnInit {
     this.selectedFile = null;
     this.selectedEnvironment = 'test';
     this.testResult = null;
+    this.testSetResult = null;
+    this.selectedResolutionId = null;
     this.auditLogs = [];
   }
 
@@ -874,6 +1156,12 @@ export class DianConfigComponent implements OnInit {
   saveEnvironment(): void {
     if (!this.selectedConfig) return;
 
+    // If environment hasn't changed, just advance to next step
+    if (this.selectedEnvironment === this.selectedConfig.environment) {
+      this.activeStep = 3;
+      return;
+    }
+
     this.savingEnvironment = true;
     this.invoicingService.updateDianConfig(this.selectedConfig.id, { environment: this.selectedEnvironment }).subscribe({
       next: (response: any) => {
@@ -890,6 +1178,17 @@ export class DianConfigComponent implements OnInit {
   }
 
   // ── Step 4: Test Connection ───────────────────────────────
+
+  loadResolutions(): void {
+    this.invoicingService.getResolutions().subscribe({
+      next: (response: any) => {
+        this.resolutions = response?.data || [];
+      },
+      error: () => {
+        this.resolutions = [];
+      },
+    });
+  }
 
   testConnection(): void {
     if (!this.selectedConfig) return;
@@ -918,16 +1217,23 @@ export class DianConfigComponent implements OnInit {
   }
 
   runTestSet(): void {
-    if (!this.selectedConfig) return;
+    if (!this.selectedConfig || !this.selectedResolutionId) return;
     this.runningTestSet = true;
-    this.invoicingService.runDianTestSet(this.selectedConfig.id).subscribe({
+    this.testSetResult = null;
+    this.invoicingService.runDianTestSet(this.selectedConfig.id, this.selectedResolutionId).subscribe({
       next: (response: any) => {
-        this.testResult = response.data || response;
+        this.testSetResult = response.data || response;
         this.runningTestSet = false;
-        if (this.testResult?.success) {
-          this.toast.success('Set de pruebas completado exitosamente');
-        } else {
-          this.toast.error('El set de pruebas tuvo errores');
+        if (this.testSetResult.success) {
+          this.toast.success('Set de pruebas enviado exitosamente');
+          // Reload config to reflect updated enablement_status
+          if (this.selectedConfig) {
+            this.invoicingService.getDianConfigById(this.selectedConfig.id).subscribe({
+              next: (cfgResponse: any) => {
+                this.selectedConfig = cfgResponse.data || cfgResponse;
+              },
+            });
+          }
         }
       },
       error: (err: any) => {

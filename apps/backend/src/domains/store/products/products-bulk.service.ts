@@ -43,6 +43,9 @@ export class ProductsBulkService {
     'En Oferta': 'is_on_sale',
     'Precio Oferta': 'sale_price',
     Peso: 'weight',
+    'Codigo Bodega': 'warehouse_code',
+    'Nombre Bodega': 'warehouse_name',
+    Tipo: 'product_type',
   };
 
   constructor(
@@ -65,30 +68,34 @@ export class ProductsBulkService {
       headers = [
         'Nombre',
         'SKU',
+        'Tipo',
         'Precio Venta',
         'Precio Compra',
         'Cantidad Inicial',
       ];
       exampleData = [
-        { Nombre: 'Camiseta Básica Blanca', SKU: 'CAM-BAS-BLA-001', 'Precio Venta': 15000, 'Precio Compra': 8000, 'Cantidad Inicial': 50 },
-        { Nombre: 'Pantalón Jean Clásico', SKU: 'PAN-JEA-CLA-032', 'Precio Venta': 45000, 'Precio Compra': 22000, 'Cantidad Inicial': 30 },
-        { Nombre: 'Audífonos Bluetooth Sport', SKU: 'AUD-BLU-SPO-007', 'Precio Venta': 89000, 'Precio Compra': 42000, 'Cantidad Inicial': 15 },
-        { Nombre: 'Protector Solar FPS 50', SKU: 'PRO-SOL-FPS-050', 'Precio Venta': 32000, 'Precio Compra': 18000, 'Cantidad Inicial': 80 },
-        { Nombre: 'Silla Ergonómica Oficina', SKU: 'SIL-ERG-OFI-100', 'Precio Venta': 250000, 'Precio Compra': 145000, 'Cantidad Inicial': 5 },
-        { Nombre: 'Café Orgánico 500g', SKU: 'CAF-ORG-500-012', 'Precio Venta': 28000, 'Precio Compra': 15000, 'Cantidad Inicial': 120 },
-        { Nombre: 'Balón Fútbol Profesional', SKU: 'BAL-FUT-PRO-005', 'Precio Venta': 75000, 'Precio Compra': 38000, 'Cantidad Inicial': 25 },
-        { Nombre: 'Mochila Escolar 40L', SKU: 'MOC-ESC-40L-018', 'Precio Venta': 55000, 'Precio Compra': 27000, 'Cantidad Inicial': 40 },
-        { Nombre: 'Lámpara LED Escritorio', SKU: 'LAM-LED-ESC-003', 'Precio Venta': 42000, 'Precio Compra': 19000, 'Cantidad Inicial': 0 },
-        { Nombre: 'Toalla Microfibra XL', SKU: 'TOA-MIC-XL-025', 'Precio Venta': 18000, 'Precio Compra': 7500, 'Cantidad Inicial': 200 },
+        { Nombre: 'Camiseta Básica Blanca', SKU: 'CAM-BAS-BLA-001', Tipo: 'Producto', 'Precio Venta': 15000, 'Precio Compra': 8000, 'Cantidad Inicial': 50 },
+        { Nombre: 'Pantalón Jean Clásico', SKU: 'PAN-JEA-CLA-032', Tipo: 'Producto', 'Precio Venta': 45000, 'Precio Compra': 22000, 'Cantidad Inicial': 30 },
+        { Nombre: 'Asesoría Contable', SKU: 'SVC-ASE-CON-001', Tipo: 'Servicio', 'Precio Venta': 80000, 'Precio Compra': 30000, 'Cantidad Inicial': 0 },
+        { Nombre: 'Protector Solar FPS 50', SKU: 'PRO-SOL-FPS-050', Tipo: 'Producto', 'Precio Venta': 32000, 'Precio Compra': 18000, 'Cantidad Inicial': 80 },
+        { Nombre: 'Instalación Técnica', SKU: 'SVC-INS-TEC-001', Tipo: 'Servicio', 'Precio Venta': 120000, 'Precio Compra': 50000, 'Cantidad Inicial': 0 },
+        { Nombre: 'Café Orgánico 500g', SKU: 'CAF-ORG-500-012', Tipo: 'Producto', 'Precio Venta': 28000, 'Precio Compra': 15000, 'Cantidad Inicial': 120 },
+        { Nombre: 'Balón Fútbol Profesional', SKU: 'BAL-FUT-PRO-005', Tipo: 'Producto', 'Precio Venta': 75000, 'Precio Compra': 38000, 'Cantidad Inicial': 25 },
+        { Nombre: 'Mochila Escolar 40L', SKU: 'MOC-ESC-40L-018', Tipo: 'Producto', 'Precio Venta': 55000, 'Precio Compra': 27000, 'Cantidad Inicial': 40 },
+        { Nombre: 'Lámpara LED Escritorio', SKU: 'LAM-LED-ESC-003', Tipo: 'Producto', 'Precio Venta': 42000, 'Precio Compra': 19000, 'Cantidad Inicial': 0 },
+        { Nombre: 'Toalla Microfibra XL', SKU: 'TOA-MIC-XL-025', Tipo: 'Producto', 'Precio Venta': 18000, 'Precio Compra': 7500, 'Cantidad Inicial': 200 },
       ];
     } else {
       headers = [
         'Nombre',
         'SKU',
+        'Tipo',
         'Precio Venta',
         'Precio Compra',
         'Margen',
         'Cantidad Inicial',
+        'Codigo Bodega',
+        'Nombre Bodega',
         'Descripción',
         'Marca',
         'Categorías',
@@ -99,16 +106,16 @@ export class ProductsBulkService {
         'Precio Oferta',
       ];
       exampleData = [
-        { Nombre: 'Zapatillas Running Pro', SKU: 'ZAP-RUN-PRO-42', 'Precio Venta': 85000, 'Precio Compra': 45000, Margen: 45, 'Cantidad Inicial': 20, Descripción: 'Zapatillas ideales para correr largas distancias.', Marca: 'Nike', Categorías: 'Deportes, Calzado, Running', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.8, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Smartphone Galaxy A54', SKU: 'SMR-GAL-A54-128', 'Precio Venta': 1200000, 'Precio Compra': 750000, Margen: 60, 'Cantidad Inicial': 10, Descripción: 'Smartphone Samsung con pantalla AMOLED y 128GB.', Marca: 'Samsung', Categorías: 'Tecnología, Celulares', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.2, 'En Oferta': 'Si', 'Precio Oferta': 1050000 },
-        { Nombre: 'Leche Entera 1L', SKU: 'LEC-ENT-1L-COL', 'Precio Venta': 5200, 'Precio Compra': 3800, Margen: 37, 'Cantidad Inicial': 200, Descripción: 'Leche entera pasteurizada de origen colombiano.', Marca: 'Colanta', Categorías: 'Alimentos, Lácteos', Estado: 'activo', 'Disponible Ecommerce': 'No', Peso: 1.05, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Camiseta Dry-Fit Running', SKU: 'CAM-DRY-RUN-M01', 'Precio Venta': 65000, 'Precio Compra': 32000, Margen: 50, 'Cantidad Inicial': 35, Descripción: 'Camiseta deportiva transpirable para hombre.', Marca: 'Adidas', Categorías: 'Deportes, Ropa Deportiva', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.15, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Escritorio Plegable Madera', SKU: 'ESC-PLE-MAD-120', 'Precio Venta': 180000, 'Precio Compra': 95000, Margen: 47, 'Cantidad Inicial': 8, Descripción: 'Escritorio plegable de madera 120x60cm para home office.', Marca: 'Muebles Express', Categorías: 'Hogar, Muebles, Oficina', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 15, 'En Oferta': 'Si', 'Precio Oferta': 155000 },
-        { Nombre: 'Aceite de Oliva Extra Virgen 500ml', SKU: 'ACE-OLI-EXV-500', 'Precio Venta': 38000, 'Precio Compra': 24000, Margen: 58, 'Cantidad Inicial': 60, Descripción: 'Aceite de oliva importado, primera prensada en frío.', Marca: 'Olivetto', Categorías: 'Alimentos, Aceites', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.55, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Teclado Mecánico RGB', SKU: 'TEC-MEC-RGB-K70', 'Precio Venta': 320000, 'Precio Compra': 180000, Margen: 78, 'Cantidad Inicial': 12, Descripción: 'Teclado mecánico con switches Cherry MX e iluminación RGB.', Marca: 'Corsair', Categorías: 'Tecnología, Periféricos, Gaming', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 1.2, 'En Oferta': 'Si', 'Precio Oferta': 280000 },
-        { Nombre: 'Bloqueador Solar Facial SPF 60', SKU: 'BLO-SOL-FAC-060', 'Precio Venta': 48000, 'Precio Compra': 28000, Margen: 71, 'Cantidad Inicial': 45, Descripción: 'Protector solar facial oil-free con SPF 60.', Marca: 'La Roche-Posay', Categorías: 'Belleza, Cuidado Personal', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.1, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Cuerda de Saltar Profesional', SKU: 'CUE-SAL-PRO-300', 'Precio Venta': 22000, 'Precio Compra': 9000, Margen: 59, 'Cantidad Inicial': 0, Descripción: 'Cuerda de saltar con rodamientos y mangos antideslizantes.', Marca: 'Everlast', Categorías: 'Deportes, Fitness', Estado: 'inactivo', 'Disponible Ecommerce': 'No', Peso: 0.3, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Set Ollas Antiadherentes x5', SKU: 'SET-OLL-ANT-5PC', 'Precio Venta': 145000, 'Precio Compra': 72000, Margen: 50, 'Cantidad Inicial': 18, Descripción: 'Juego de 5 ollas con recubrimiento antiadherente cerámico.', Marca: 'T-fal', Categorías: 'Hogar, Cocina', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 4.5, 'En Oferta': 'Si', 'Precio Oferta': 125000 },
+        { Nombre: 'Zapatillas Running Pro', SKU: 'ZAP-RUN-PRO-42', Tipo: 'Producto', 'Precio Venta': 85000, 'Precio Compra': 45000, Margen: 45, 'Cantidad Inicial': 20, 'Codigo Bodega': 'BOD-001', 'Nombre Bodega': '', Descripción: 'Zapatillas ideales para correr largas distancias.', Marca: 'Nike', Categorías: 'Deportes, Calzado, Running', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.8, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Asesoría Tributaria', SKU: 'SVC-ASE-TRI-001', Tipo: 'Servicio', 'Precio Venta': 150000, 'Precio Compra': 60000, Margen: 60, 'Cantidad Inicial': 0, 'Codigo Bodega': '', 'Nombre Bodega': '', Descripción: 'Asesoría tributaria profesional por sesión.', Marca: '', Categorías: 'Servicios, Contabilidad', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Leche Entera 1L', SKU: 'LEC-ENT-1L-COL', Tipo: 'Producto', 'Precio Venta': 5200, 'Precio Compra': 3800, Margen: 37, 'Cantidad Inicial': 200, 'Codigo Bodega': 'BOD-001', 'Nombre Bodega': '', Descripción: 'Leche entera pasteurizada de origen colombiano.', Marca: 'Colanta', Categorías: 'Alimentos, Lácteos', Estado: 'activo', 'Disponible Ecommerce': 'No', Peso: 1.05, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Camiseta Dry-Fit Running', SKU: 'CAM-DRY-RUN-M01', Tipo: 'Producto', 'Precio Venta': 65000, 'Precio Compra': 32000, Margen: 50, 'Cantidad Inicial': 35, 'Codigo Bodega': '', 'Nombre Bodega': '', Descripción: 'Camiseta deportiva transpirable para hombre.', Marca: 'Adidas', Categorías: 'Deportes, Ropa Deportiva', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.15, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Escritorio Plegable Madera', SKU: 'ESC-PLE-MAD-120', Tipo: 'Producto', 'Precio Venta': 180000, 'Precio Compra': 95000, Margen: 47, 'Cantidad Inicial': 8, 'Codigo Bodega': 'BOD-002', 'Nombre Bodega': '', Descripción: 'Escritorio plegable de madera 120x60cm para home office.', Marca: 'Muebles Express', Categorías: 'Hogar, Muebles, Oficina', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 15, 'En Oferta': 'Si', 'Precio Oferta': 155000 },
+        { Nombre: 'Aceite de Oliva Extra Virgen 500ml', SKU: 'ACE-OLI-EXV-500', Tipo: 'Producto', 'Precio Venta': 38000, 'Precio Compra': 24000, Margen: 58, 'Cantidad Inicial': 60, 'Codigo Bodega': '', 'Nombre Bodega': 'Bodega Principal', Descripción: 'Aceite de oliva importado, primera prensada en frío.', Marca: 'Olivetto', Categorías: 'Alimentos, Aceites', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.55, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Teclado Mecánico RGB', SKU: 'TEC-MEC-RGB-K70', Tipo: 'Producto', 'Precio Venta': 320000, 'Precio Compra': 180000, Margen: 78, 'Cantidad Inicial': 12, 'Codigo Bodega': '', 'Nombre Bodega': '', Descripción: 'Teclado mecánico con switches Cherry MX e iluminación RGB.', Marca: 'Corsair', Categorías: 'Tecnología, Periféricos, Gaming', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 1.2, 'En Oferta': 'Si', 'Precio Oferta': 280000 },
+        { Nombre: 'Bloqueador Solar Facial SPF 60', SKU: 'BLO-SOL-FAC-060', Tipo: 'Producto', 'Precio Venta': 48000, 'Precio Compra': 28000, Margen: 71, 'Cantidad Inicial': 45, 'Codigo Bodega': 'BOD-001', 'Nombre Bodega': '', Descripción: 'Protector solar facial oil-free con SPF 60.', Marca: 'La Roche-Posay', Categorías: 'Belleza, Cuidado Personal', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.1, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Cuerda de Saltar Profesional', SKU: 'CUE-SAL-PRO-300', Tipo: 'Producto', 'Precio Venta': 22000, 'Precio Compra': 9000, Margen: 59, 'Cantidad Inicial': 0, 'Codigo Bodega': '', 'Nombre Bodega': '', Descripción: 'Cuerda de saltar con rodamientos y mangos antideslizantes.', Marca: 'Everlast', Categorías: 'Deportes, Fitness', Estado: 'inactivo', 'Disponible Ecommerce': 'No', Peso: 0.3, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Set Ollas Antiadherentes x5', SKU: 'SET-OLL-ANT-5PC', Tipo: 'Producto', 'Precio Venta': 145000, 'Precio Compra': 72000, Margen: 50, 'Cantidad Inicial': 18, 'Codigo Bodega': '', 'Nombre Bodega': 'Bodega Secundaria', Descripción: 'Juego de 5 ollas con recubrimiento antiadherente cerámico.', Marca: 'T-fal', Categorías: 'Hogar, Cocina', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 4.5, 'En Oferta': 'Si', 'Precio Oferta': 125000 },
       ];
     }
 
@@ -151,10 +158,20 @@ export class ProductsBulkService {
     let successful = 0;
     let failed = 0;
 
+    // Cache de bodegas para evitar N+1 queries
+    const locationCache = new Map<string, any>();
+
     for (const productData of products) {
       try {
         // Pre-procesar: Crear marcas y categorías si son strings
         await this.preprocessProductData(productData, storeId);
+
+        // Resolver bodega si se especificó
+        const resolvedLocation = await this.resolveWarehouse(
+          productData.warehouse_code,
+          productData.warehouse_name,
+          locationCache,
+        );
 
         // Validar datos
         await this.validateProductData(productData, storeId);
@@ -170,42 +187,7 @@ export class ProductsBulkService {
 
         let resultProduct;
 
-        // Wrap operations in a transaction for data integrity
         await this.prisma.$transaction(async (tx) => {
-          // Note: using 'this.prisma' inside transaction usually requires passing 'tx'
-          // but our services might not be transaction-aware by default.
-          // For now, we will use 'tx' for direct calls and manage service calls carefully.
-          // Since we can't easily pass 'tx' to this.productsService.create/update without refactoring them,
-          // we will do a best-effort approach or basic operations here if possible?
-          // ACTUALLY: deeply refactoring productsService to accept TX is out of scope for "fixing bulk upload" safely.
-          // However, to ensure integrity as requested "Adjust pass the full load that no data is lost",
-          // we should AT LEAST ensure that if variants/stock fail, we don't leave a partial product.
-          // Given the constraints, we will rely on the fact that if this block throws, the transaction rolls back.
-          // BUT - inner service calls using `this.prisma` (the global one) WON'T be part of `tx`.
-          // To fix this properly without breaking changes to ProductsService:
-          // We will catch errors and if manual rollback is needed we might need to delete.
-          // BETTER: For this specific task, we will try to do it sequentially and if creation fails, it fails.
-          // If variants fail, we should delete the product?
-          // Since the user explicitly asked "Adjust for complete load that no data is lost",
-          // truly atomic acts require 'tx'.
-
-          // Let's implement a localized transaction approach:
-          // We will move the logic *into* the transaction callback, but we need the services to support it.
-          // If they don't, we can't use $transaction effectively for cross-service calls.
-
-          // ALTERNATIVE: Use a try-catch block that manually cleans up if a subsequent step fails.
-          // This is "poor man's transaction" but safer without refactoring the whole app.
-
-          // Wait, the user said "Adjust that no data is lost when saving to db".
-          // Let's look at `productsService`. It likely uses `prisma.products`.
-
-          // Let's stick to the current flow but add robust error handling and manual cleanup if possible.
-          // OR: Since `productsService.create`/`update` are distinct, let's keep them.
-
-          // However, for `processProductVariants` which loop, if one fails, we have a partial product.
-
-          // Let's change the loop to be more robust.
-
           if (existingProduct) {
             // Actualizar producto existente
             const updateProductDto = this.mapToUpdateProductDto(productData);
@@ -213,6 +195,24 @@ export class ProductsBulkService {
               existingProduct.id,
               updateProductDto,
             );
+
+            // Asignar stock a bodega si hay cantidad y bodega resuelta
+            const isPhysical = (productData.product_type || 'physical') !== 'service';
+            const stockQty = productData.stock_quantity || 0;
+            if (isPhysical && stockQty > 0) {
+              const targetLocation =
+                resolvedLocation ||
+                (await this.locationsService.getDefaultLocation(storeId));
+              if (targetLocation) {
+                await this.stockLevelManager.updateStock({
+                  product_id: existingProduct.id,
+                  location_id: targetLocation.id,
+                  quantity_change: stockQty,
+                  movement_type: 'adjustment',
+                  reason: 'Carga masiva - actualización de stock',
+                });
+              }
+            }
 
             results.push({
               product: resultProduct,
@@ -225,7 +225,6 @@ export class ProductsBulkService {
               productData,
               storeId,
             );
-            // We'll wrap creation + sub-steps in a try/catch to delete if subsequent steps fail
             let createdId = null;
             try {
               resultProduct =
@@ -240,22 +239,39 @@ export class ProductsBulkService {
                 );
               }
 
+              // Asignar stock inicial a bodega
+              const isPhysical = (productData.product_type || 'physical') !== 'service';
+              const stockQty = productData.stock_quantity || 0;
+              if (isPhysical && stockQty > 0) {
+                const targetLocation =
+                  resolvedLocation ||
+                  (await this.locationsService.getDefaultLocation(storeId));
+                if (targetLocation) {
+                  await this.stockLevelManager.updateStock({
+                    product_id: createdId!,
+                    location_id: targetLocation.id,
+                    quantity_change: stockQty,
+                    movement_type: 'initial',
+                    reason: 'Carga masiva - stock inicial',
+                  });
+                }
+              }
+
               results.push({
                 product: resultProduct,
                 status: 'success',
                 message: 'Producto creado exitosamente',
               });
             } catch (createErr) {
-              // Compensation logic: if we created the product but failed later (e.g. variants), delete it
               if (createdId) {
                 await this.prisma.products
                   .delete({ where: { id: createdId } })
                   .catch((e) => console.error('Cleanup failed', e));
               }
-              throw createErr; // Re-throw to be caught by outer loop
+              throw createErr;
             }
           }
-        }); // End fake transaction scope (just scoping variables mainly)
+        });
 
         successful++;
       } catch (error) {
@@ -360,6 +376,19 @@ export class ProductsBulkService {
       product.available_for_ecommerce = normalizeBool(
         product.available_for_ecommerce,
       );
+    }
+
+    // Normalizar Tipo de Producto
+    if (product.product_type && typeof product.product_type === 'string') {
+      const t = product.product_type.toLowerCase().trim();
+      if (t === 'servicio' || t === 'service') {
+        product.product_type = 'service';
+        // Force service defaults
+        product.stock_quantity = 0;
+        product.weight = undefined;
+      } else {
+        product.product_type = 'physical';
+      }
     }
 
     // Normalizar Estado
@@ -547,6 +576,8 @@ export class ProductsBulkService {
       sale_price: product['sale_price'],
       state: product.state,
       available_for_ecommerce: product.available_for_ecommerce,
+      product_type: product.product_type || 'physical',
+      track_inventory: product.product_type === 'service' ? false : undefined,
     };
   }
 
@@ -576,6 +607,60 @@ export class ProductsBulkService {
     for (const variantData of variants) {
       await this.productsService.createVariant(productId, variantData);
     }
+  }
+
+  /**
+   * Resuelve la bodega destino: prioridad código > nombre.
+   * Usa cache para evitar N+1 queries por batch.
+   * Retorna null si no se especificó bodega (usa default).
+   */
+  private async resolveWarehouse(
+    warehouseCode: string | undefined,
+    warehouseName: string | undefined,
+    cache: Map<string, any>,
+  ): Promise<any | null> {
+    const code = warehouseCode?.toString().trim();
+    const name = warehouseName?.toString().trim();
+
+    if (!code && !name) return null;
+
+    const cacheKey = code ? `code:${code.toLowerCase()}` : `name:${name!.toLowerCase()}`;
+
+    if (cache.has(cacheKey)) {
+      return cache.get(cacheKey);
+    }
+
+    let location: any = null;
+
+    if (code) {
+      location = await this.locationsService.findByCode(code);
+    }
+
+    if (!location && name) {
+      location = await this.locationsService.findByName(name);
+    }
+
+    if (!location) {
+      const context = RequestContextService.getContext()!;
+      location = await this.prisma.inventory_locations.create({
+        data: {
+          name: name || code!,
+          code: code || generateSlug(name!),
+          type: 'warehouse',
+          is_active: true,
+          store_id: context.store_id!,
+          organization_id: context.organization_id!,
+        },
+      });
+
+      // Cache with both keys if applicable
+      if (code) cache.set(`code:${code.toLowerCase()}`, location);
+      if (name) cache.set(`name:${name.toLowerCase()}`, location);
+      return location;
+    }
+
+    cache.set(cacheKey, location);
+    return location;
   }
 
   private async processInitialStock(

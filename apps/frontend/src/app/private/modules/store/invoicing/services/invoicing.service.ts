@@ -166,6 +166,10 @@ export class InvoicingService {
 
   // ── DIAN Config ─────────────────────────────────────────
 
+  getDianDashboard(): Observable<any> {
+    return this.http.get(this.getApiUrl('dian-config/dashboard'));
+  }
+
   getDianConfigs(): Observable<any> {
     return this.http.get(this.getApiUrl('dian-config'));
   }
@@ -202,8 +206,8 @@ export class InvoicingService {
     return this.http.post(this.getApiUrl(`dian-config/${config_id}/test-connection`), {});
   }
 
-  runDianTestSet(config_id: number): Observable<any> {
-    return this.http.post(this.getApiUrl(`dian-config/${config_id}/run-test-set`), {});
+  runDianTestSet(config_id: number, resolution_id: number): Observable<any> {
+    return this.http.post(this.getApiUrl(`dian-config/${config_id}/run-test-set`), { resolution_id });
   }
 
   getDianTestResults(config_id: number): Observable<any> {

@@ -15,6 +15,7 @@ import { environment } from '../../../../../../environments/environment';
 
 import { AdjustmentDetailModalComponent } from './components/adjustment-detail-modal.component';
 import { AdjustmentCreateModalComponent } from './components/adjustment-create-modal.component';
+import { BulkAdjustmentModalComponent } from './components/bulk-adjustment-modal.component';
 import { AdjustmentListComponent } from './components/adjustment-list';
 
 import { InventoryService } from '../services';
@@ -32,6 +33,7 @@ import {
     StatsComponent,
     AdjustmentDetailModalComponent,
     AdjustmentCreateModalComponent,
+    BulkAdjustmentModalComponent,
     AdjustmentListComponent,
   ],
   template: `
@@ -99,6 +101,14 @@ import {
         (saveAndComplete)="onCreateAndComplete($event)"
       ></app-adjustment-create-modal>
 
+      <!-- Bulk Adjustment Modal -->
+      <app-bulk-adjustment-modal
+        [isOpen]="showBulkModal()"
+        [locations]="locationOptions()"
+        (isOpenChange)="showBulkModal.set($event)"
+        (completed)="refresh()"
+      ></app-bulk-adjustment-modal>
+
       <!-- Detail Modal -->
       <app-adjustment-detail-modal
         [isOpen]="is_detail_modal_open"
@@ -139,6 +149,7 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
 
   // Signals
   showCreateModal = signal(false);
+  showBulkModal = signal(false);
   isSubmitting = signal(false);
   locationOptions = signal<SelectorOption[]>([]);
 
@@ -278,6 +289,9 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
       case 'create':
         this.showCreateModal.set(true);
         break;
+      case 'bulk':
+        this.showBulkModal.set(true);
+        break;
       case 'refresh':
         this.loadAdjustments();
         break;
@@ -391,7 +405,7 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
       });
   }
 
-  private refresh(): void {
+  refresh(): void {
     this.inventoryService.invalidateCache();
     this.loadAdjustments();
   }

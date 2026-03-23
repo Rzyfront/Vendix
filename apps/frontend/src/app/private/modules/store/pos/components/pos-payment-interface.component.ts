@@ -16,6 +16,7 @@ import {
   FormControl,
   Validators,
   ReactiveFormsModule,
+  FormsModule,
 } from '@angular/forms';
 import { CommonModule } from '@angular/common';
 import { Subject, takeUntil, debounceTime } from 'rxjs';
@@ -49,6 +50,7 @@ interface PaymentState {
   isProcessing: boolean;
   change: number;
   isAnonymousSale: boolean;
+  paymentForm: 'contado' | 'credito';
 }
 
 @Component({
@@ -57,6 +59,7 @@ interface PaymentState {
   imports: [
     CommonModule,
     ReactiveFormsModule,
+    FormsModule,
     ModalComponent,
     InputComponent,
     IconComponent,
@@ -111,8 +114,6 @@ interface PaymentState {
         display: flex;
         flex-direction: column;
         gap: 12px;
-        max-height: 120px;
-        overflow-y: auto;
         margin-bottom: 12px;
       }
 
@@ -896,6 +897,257 @@ interface PaymentState {
         }
       }
 
+      /* Credit Configuration */
+      .credit-config {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .credit-warning {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px;
+        background: rgba(var(--color-warning-rgb), 0.1);
+        border: 1px solid rgba(var(--color-warning-rgb), 0.3);
+        border-radius: 10px;
+        font-size: 13px;
+        color: var(--color-warning);
+        font-weight: 500;
+      }
+
+      .credit-field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .credit-field label {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        color: var(--color-text-muted);
+      }
+
+      .credit-field input,
+      .credit-field select {
+        padding: 10px 12px;
+        border: 2px solid var(--color-border);
+        border-radius: 10px;
+        background: var(--color-background);
+        font-size: 14px;
+        color: var(--color-text-primary);
+        outline: none;
+        transition: border-color 0.2s;
+      }
+
+      .credit-field input:focus,
+      .credit-field select:focus {
+        border-color: var(--color-primary);
+      }
+
+      .credit-field .hint {
+        font-size: 11px;
+        color: var(--color-text-muted);
+      }
+
+      .frequency-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+      }
+
+      .frequency-btn {
+        padding: 10px 8px;
+        border: 2px solid var(--color-border);
+        border-radius: 10px;
+        background: var(--color-surface);
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--color-text-primary);
+        cursor: pointer;
+        transition: all 0.2s;
+        text-align: center;
+      }
+
+      .frequency-btn:hover {
+        border-color: var(--color-primary);
+      }
+
+      .frequency-btn.selected {
+        border-color: var(--color-primary);
+        background: rgba(var(--color-primary-rgb), 0.05);
+        color: var(--color-primary);
+      }
+
+      .credit-balance {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: rgba(var(--color-muted-rgb, 128, 128, 128), 0.15);
+        border-radius: 12px;
+        padding: 12px 16px;
+      }
+
+      .credit-balance span:first-child {
+        font-size: 13px;
+        color: var(--color-text-secondary);
+        font-weight: 500;
+      }
+
+      .credit-balance span:last-child {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--color-text-primary);
+      }
+
+      .installments-preview {
+        max-height: 192px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .installment-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 12px;
+        border-radius: 8px;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+      }
+
+      .installment-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .installment-number {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: rgba(var(--color-primary-rgb), 0.1);
+        color: var(--color-primary);
+        font-size: 11px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .installment-date {
+        font-size: 12px;
+        color: var(--color-text-secondary);
+      }
+
+      .installment-amount {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--color-text-primary);
+      }
+
+      .payment-methods-grid.mini {
+        grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+        gap: 8px;
+      }
+
+      .payment-method-btn.mini {
+        padding: 10px 8px;
+      }
+
+      .payment-method-btn.mini .method-name {
+        font-size: 10px;
+        margin-top: 4px;
+      }
+
+      /* Tab Headers */
+      .tab-headers {
+        display: flex;
+        gap: 4px;
+        background: var(--color-background);
+        border-radius: 10px;
+        padding: 4px;
+        margin-bottom: 16px;
+      }
+
+      .tab-btn {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 10px 12px;
+        border: none;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--color-text-muted);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+        transition: all 0.2s;
+      }
+
+      .tab-btn:hover {
+        color: var(--color-text-primary);
+      }
+
+      .tab-btn.active {
+        background: var(--color-surface);
+        color: var(--color-primary);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      }
+
+      /* Collapsible sub-sections */
+      .collapsible-subsection {
+        margin-top: 12px;
+        border-top: 1px solid var(--color-border);
+        padding-top: 12px;
+      }
+
+      .collapsible-subsection:first-of-type {
+        margin-top: 0;
+        border-top: none;
+        padding-top: 0;
+      }
+
+      .subsection-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+        padding: 4px 0;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .subsection-header:hover {
+        opacity: 0.8;
+      }
+
+      .collapsed-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 8px;
+        background: rgba(var(--color-primary-rgb), 0.08);
+        color: var(--color-primary);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .subsection-body {
+        margin-top: 12px;
+      }
+
+      .tab-content {
+        margin-top: 8px;
+      }
+
       /* Desktop: 3-column horizontal layout */
       @media (min-width: 1024px) {
         .payment-content {
@@ -915,7 +1167,6 @@ interface PaymentState {
 
         .product-list {
           max-height: none;
-          flex: 1;
         }
 
         .search-results {
@@ -971,6 +1222,7 @@ export class PosPaymentInterfaceComponent
     isProcessing: false,
     change: 0,
     isAnonymousSale: false,
+    paymentForm: 'contado',
   };
 
   // Store settings
@@ -979,7 +1231,11 @@ export class PosPaymentInterfaceComponent
   anonymousSalesAsDefault = false;
   requireCashDrawerOpen = false;
   enableScheduleValidation = false;
+  showOnscreenKeypad = true;
+  paymentFormCollapsed = false;
+  paymentMethodCollapsed = false;
   businessHours: Record<string, { open: string; close: string }> = {};
+  defaultPaymentForm: 'contado' | 'credito' = 'contado';
 
   // Currency symbol (computed signal from CurrencyFormatService)
   currencySymbol: any;
@@ -998,6 +1254,23 @@ export class PosPaymentInterfaceComponent
   customerSearchQuery = '';
   isSearchingCustomer = false;
   showCreateCustomerForm = false;
+
+  // Credit configuration state
+  creditNumInstallments = 3;
+  creditFrequency: 'weekly' | 'biweekly' | 'monthly' = 'monthly';
+  creditFirstDate = '';
+  creditInterestRate = 0;
+  creditInitialPayment = 0;
+  creditInitialPaymentMethod: PaymentMethod | null = null;
+  creditRemainingBalance = 0;
+  creditInstallmentsPreview: { amount: number; due_date: string }[] = [];
+
+  frequencyOptions = [
+    { value: 'weekly' as const, label: 'Semanal' },
+    { value: 'biweekly' as const, label: 'Quincenal' },
+    { value: 'monthly' as const, label: 'Mensual' },
+  ];
+
   customerForm: FormGroup;
 
   // quickCashAmounts = [10, 20, 50, 100]; // Removed as per new requirement
@@ -1071,6 +1344,7 @@ export class PosPaymentInterfaceComponent
     this.loadStoreSettings();
     // Asegurar que la moneda esté cargada para la interfaz de pago
     this.currencyService.loadCurrency();
+    this.setDefaultCreditFirstDate();
   }
 
   ngOnDestroy(): void {
@@ -1208,7 +1482,14 @@ export class PosPaymentInterfaceComponent
           this.enableScheduleValidation =
             settings.pos.enable_schedule_validation || false;
           this.businessHours = settings.pos.business_hours || {};
+          if (settings.pos.default_payment_form) {
+            this.defaultPaymentForm = settings.pos.default_payment_form;
+            if (!this.settingsLoaded) {
+              this.paymentState.paymentForm = this.defaultPaymentForm;
+            }
+          }
           this.settingsLoaded = true;
+          this.showOnscreenKeypad = settings.pos.show_onscreen_keypad !== false;
 
           // If anonymous sales are not allowed, always disable the toggle
           if (!this.allowAnonymousSales) {
@@ -1228,14 +1509,29 @@ export class PosPaymentInterfaceComponent
       });
   }
 
+  private setDefaultCreditFirstDate(): void {
+    const date = new Date();
+    date.setDate(date.getDate() + 30);
+    this.creditFirstDate = date.toISOString().split('T')[0];
+  }
+
   selectPaymentMethod(method: PaymentMethod): void {
     this.paymentState.selectedMethod = method;
+    this.paymentMethodCollapsed = true;
     this.paymentForm.reset();
     this.paymentState.change = 0;
 
     if (method.type === 'cash') {
       this.cashReceivedControl.setValue(this.cartState?.summary?.total || 0);
     }
+  }
+
+  togglePaymentFormCollapsed(): void {
+    this.paymentFormCollapsed = !this.paymentFormCollapsed;
+  }
+
+  togglePaymentMethodCollapsed(): void {
+    this.paymentMethodCollapsed = !this.paymentMethodCollapsed;
   }
 
   getPaymentMethodClasses(method: PaymentMethod): string {
@@ -1305,11 +1601,18 @@ export class PosPaymentInterfaceComponent
   }
 
   canProcessPayment(): boolean {
-    if (!this.paymentState.selectedMethod || this.paymentState.isProcessing) {
-      return false;
+    if (this.paymentState.isProcessing) return false;
+
+    // Modo crédito: requiere cliente y cuotas válidas
+    if (this.paymentState.paymentForm === 'credito') {
+      return !!this.cartState?.customer
+        && this.creditNumInstallments > 0
+        && this.creditRemainingBalance > 0;
     }
 
-    // Check customer requirement (unless anonymous sale is allowed and selected)
+    // Modo contado: lógica actual
+    if (!this.paymentState.selectedMethod) return false;
+
     if (!this.paymentState.isAnonymousSale && !this.cartState?.customer) {
       return false;
     }
@@ -1328,15 +1631,17 @@ export class PosPaymentInterfaceComponent
   }
 
   processPayment(): void {
-    if (
-      !this.canProcessPayment() ||
-      !this.cartState ||
-      !this.paymentState.selectedMethod
-    ) {
+    if (!this.canProcessPayment() || !this.cartState) return;
+
+    // Flujo crédito
+    if (this.paymentState.paymentForm === 'credito') {
+      this.processCreditSaleWithTerms();
       return;
     }
 
-    // Check customer requirement (unless anonymous sale is allowed and selected)
+    // Flujo contado (lógica existente)
+    if (!this.paymentState.selectedMethod) return;
+
     if (!this.paymentState.isAnonymousSale && !this.cartState.customer) {
       this.toastService.info('Seleccione un cliente para continuar');
       this.requestCustomer.emit();
@@ -1346,7 +1651,6 @@ export class PosPaymentInterfaceComponent
 
     let register_id = localStorage.getItem('pos_register_id');
 
-    // Auto-configure default register if not required
     if (!register_id && !this.requireCashDrawerOpen) {
       register_id = 'DEFAULT-POS';
       localStorage.setItem('pos_register_id', register_id);
@@ -1359,16 +1663,10 @@ export class PosPaymentInterfaceComponent
       return;
     }
 
-    // Check business hours if validation is enabled
     if (!this.isWithinBusinessHours()) {
       const dayNames = [
-        'Domingo',
-        'Lunes',
-        'Martes',
-        'Miércoles',
-        'Jueves',
-        'Viernes',
-        'Sábado',
+        'Domingo', 'Lunes', 'Martes', 'Miércoles',
+        'Jueves', 'Viernes', 'Sábado',
       ];
       const today = dayNames[new Date().getDay()];
       this.toastService.show({
@@ -1423,6 +1721,85 @@ export class PosPaymentInterfaceComponent
             title: 'Error',
             description:
               error.message || 'Error de conexión al procesar el pago',
+          });
+        },
+      });
+  }
+
+  private processCreditSaleWithTerms(): void {
+    if (!this.cartState || !this.cartState.customer) {
+      this.toastService.info('Seleccione un cliente para continuar');
+      return;
+    }
+
+    let register_id = localStorage.getItem('pos_register_id');
+    if (!register_id && !this.requireCashDrawerOpen) {
+      register_id = 'DEFAULT-POS';
+      localStorage.setItem('pos_register_id', register_id);
+    }
+
+    if (!register_id) {
+      this.toastService.info('Configure la caja para continuar');
+      this.requestRegisterConfig.emit();
+      this.onModalClosed();
+      return;
+    }
+
+    if (!this.isWithinBusinessHours()) {
+      const dayNames = [
+        'Domingo', 'Lunes', 'Martes', 'Miércoles',
+        'Jueves', 'Viernes', 'Sábado',
+      ];
+      const today = dayNames[new Date().getDay()];
+      this.toastService.show({
+        variant: 'error',
+        title: 'Fuera del horario de atención',
+        description: `El POS está cerrado. Hoy ${today} no se permite realizar ventas fuera del horario configurado.`,
+      });
+      return;
+    }
+
+    this.paymentState.isProcessing = true;
+
+    const creditConfig = {
+      num_installments: this.creditNumInstallments,
+      frequency: this.creditFrequency,
+      first_installment_date: this.creditFirstDate,
+      interest_rate: this.creditInterestRate,
+      initial_payment: this.creditInitialPayment,
+      initial_payment_method_id: this.creditInitialPaymentMethod
+        ? parseInt(this.creditInitialPaymentMethod.id)
+        : undefined,
+    };
+
+    this.paymentService
+      .processCreditSaleWithTerms(this.cartState, creditConfig, 'current_user')
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response) => {
+          this.paymentState.isProcessing = false;
+          if (response.success) {
+            this.paymentCompleted.emit({
+              success: true,
+              order: response.order,
+              message: response.message,
+              isCreditSale: true,
+            });
+            this.onModalClosed();
+          } else {
+            this.toastService.show({
+              variant: 'error',
+              title: 'Error',
+              description: response.message || 'Error al procesar la venta a crédito',
+            });
+          }
+        },
+        error: (error) => {
+          this.paymentState.isProcessing = false;
+          this.toastService.show({
+            variant: 'error',
+            title: 'Error',
+            description: error.message || 'Error al procesar la venta a crédito',
           });
         },
       });
@@ -1561,7 +1938,8 @@ export class PosPaymentInterfaceComponent
       reference: '',
       isProcessing: false,
       change: 0,
-      isAnonymousSale: false, // Will be synced when modal opens
+      isAnonymousSale: false,
+      paymentForm: this.defaultPaymentForm,
     };
     this.paymentForm.reset();
     this.customerForm.reset();
@@ -1569,6 +1947,16 @@ export class PosPaymentInterfaceComponent
     this.customerSearchResults = [];
     this.customerSearchQuery = '';
     this.showCreateCustomerForm = false;
+    this.paymentFormCollapsed = false;
+    this.paymentMethodCollapsed = false;
+    // Reset credit state
+    this.creditNumInstallments = 3;
+    this.creditFrequency = 'monthly';
+    this.creditInterestRate = 0;
+    this.creditInitialPayment = 0;
+    this.creditInitialPaymentMethod = null;
+    this.setDefaultCreditFirstDate();
+    this.updateCreditCalculations();
     this.closed.emit();
   }
 
@@ -1585,6 +1973,72 @@ export class PosPaymentInterfaceComponent
         this.showCustomerSelector = true;
       }
     }
+  }
+
+  setPaymentForm(form: 'contado' | 'credito'): void {
+    this.paymentState.paymentForm = form;
+    this.paymentFormCollapsed = true;
+    this.paymentMethodCollapsed = false;
+    if (form === 'credito') {
+      // Crédito requiere cliente — deshabilitar venta anónima
+      this.paymentState.isAnonymousSale = false;
+      if (!this.cartState?.customer) {
+        this.showCustomerSelector = true;
+      }
+      this.updateCreditCalculations();
+    }
+  }
+
+  private getCreditRemainingBalance(): number {
+    const total = this.cartState?.summary?.total || 0;
+    return Math.max(0, total - (this.creditInitialPayment || 0));
+  }
+
+  private getCreditInstallmentsPreview(): { amount: number; due_date: string }[] {
+    const total = this.getCreditRemainingBalance();
+    const n = this.creditNumInstallments;
+    if (n <= 0 || total <= 0) return [];
+
+    const baseAmount = Math.round((total / n) * 100) / 100;
+    const freqDays: Record<string, number> = { weekly: 7, biweekly: 14, monthly: 30 };
+    const startDate = this.creditFirstDate ? new Date(this.creditFirstDate + 'T12:00:00') : new Date();
+
+    return Array.from({ length: n }, (_, i) => {
+      const due = new Date(startDate);
+      due.setDate(due.getDate() + freqDays[this.creditFrequency] * i);
+      return {
+        amount: i === n - 1 ? Math.round((total - baseAmount * (n - 1)) * 100) / 100 : baseAmount,
+        due_date: due.toISOString().split('T')[0],
+      };
+    });
+  }
+
+  selectCreditInitialPaymentMethod(method: PaymentMethod): void {
+    this.creditInitialPaymentMethod = method;
+  }
+
+  updateCreditCalculations(): void {
+    const total = this.cartState?.summary?.total || 0;
+    this.creditRemainingBalance = Math.max(0, total - (this.creditInitialPayment || 0));
+
+    const n = this.creditNumInstallments;
+    if (n <= 0 || this.creditRemainingBalance <= 0) {
+      this.creditInstallmentsPreview = [];
+      return;
+    }
+
+    const baseAmount = Math.round((this.creditRemainingBalance / n) * 100) / 100;
+    const freqDays: Record<string, number> = { weekly: 7, biweekly: 14, monthly: 30 };
+    const startDate = this.creditFirstDate ? new Date(this.creditFirstDate + 'T12:00:00') : new Date();
+
+    this.creditInstallmentsPreview = Array.from({ length: n }, (_, i) => {
+      const due = new Date(startDate);
+      due.setDate(due.getDate() + freqDays[this.creditFrequency] * i);
+      return {
+        amount: i === n - 1 ? Math.round((this.creditRemainingBalance - baseAmount * (n - 1)) * 100) / 100 : baseAmount,
+        due_date: due.toISOString().split('T')[0],
+      };
+    });
   }
 
   // Customer Management Methods

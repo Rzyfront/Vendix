@@ -31,6 +31,24 @@ export enum PricingType {
   WEIGHT = 'weight',
 }
 
+export enum ProductType {
+  PHYSICAL = 'physical',
+  SERVICE = 'service',
+}
+
+export enum ServiceModality {
+  IN_PERSON = 'in_person',
+  VIRTUAL = 'virtual',
+  HYBRID = 'hybrid',
+}
+
+export enum ServicePricingType {
+  PER_HOUR = 'per_hour',
+  PER_SESSION = 'per_session',
+  PACKAGE = 'package',
+  SUBSCRIPTION = 'subscription',
+}
+
 // DTO para especificar stock por ubicación
 export class StockByLocationDto {
   @IsInt()
@@ -284,6 +302,39 @@ export class CreateProductDto {
   pricing_type?: PricingType = PricingType.UNIT;
 
   @IsOptional()
+  @IsEnum(ProductType)
+  product_type?: ProductType = ProductType.PHYSICAL;
+
+  // Service-specific fields
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1, { message: 'La duración del servicio debe ser al menos 1 minuto' })
+  service_duration_minutes?: number;
+
+  @IsOptional()
+  @IsEnum(ServiceModality)
+  service_modality?: ServiceModality;
+
+  @IsOptional()
+  @IsEnum(ServicePricingType)
+  service_pricing_type?: ServicePricingType;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  requires_booking?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_recurring?: boolean;
+
+  @IsOptional()
+  @IsString()
+  service_instructions?: string;
+
+  @IsOptional()
   @IsArray()
   @IsInt({ each: true })
   category_ids?: number[];
@@ -417,6 +468,39 @@ export class UpdateProductDto {
   pricing_type?: PricingType;
 
   @IsOptional()
+  @IsEnum(ProductType)
+  product_type?: ProductType;
+
+  // Service-specific fields
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1, { message: 'La duración del servicio debe ser al menos 1 minuto' })
+  service_duration_minutes?: number;
+
+  @IsOptional()
+  @IsEnum(ServiceModality)
+  service_modality?: ServiceModality;
+
+  @IsOptional()
+  @IsEnum(ServicePricingType)
+  service_pricing_type?: ServicePricingType;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  requires_booking?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_recurring?: boolean;
+
+  @IsOptional()
+  @IsString()
+  service_instructions?: string;
+
+  @IsOptional()
   @IsArray()
   @IsInt({ each: true })
   category_ids?: number[];
@@ -512,6 +596,10 @@ export class ProductQueryDto {
   @IsBoolean()
   @Type(() => Boolean)
   track_inventory?: boolean;
+
+  @IsOptional()
+  @IsEnum(ProductType)
+  product_type?: ProductType;
 }
 
 // Product Variants DTOs
@@ -774,6 +862,39 @@ export class UpdateProductWithVariantsDto {
   pricing_type?: PricingType;
 
   @IsOptional()
+  @IsEnum(ProductType)
+  product_type?: ProductType;
+
+  // Service-specific fields
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1, { message: 'La duración del servicio debe ser al menos 1 minuto' })
+  service_duration_minutes?: number;
+
+  @IsOptional()
+  @IsEnum(ServiceModality)
+  service_modality?: ServiceModality;
+
+  @IsOptional()
+  @IsEnum(ServicePricingType)
+  service_pricing_type?: ServicePricingType;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  requires_booking?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_recurring?: boolean;
+
+  @IsOptional()
+  @IsString()
+  service_instructions?: string;
+
+  @IsOptional()
   @IsArray()
   @IsInt({ each: true })
   category_ids?: number[];
@@ -955,10 +1076,22 @@ export class BulkProductItemDto {
   variants?: CreateProductVariantDto[];
 
   @IsOptional()
+  @IsString()
+  warehouse_code?: string;
+
+  @IsOptional()
+  @IsString()
+  warehouse_name?: string;
+
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => StockByLocationDto)
   stock_by_location?: StockByLocationDto[];
+
+  @IsOptional()
+  @IsString()
+  product_type?: string;
 }
 
 export class BulkProductUploadDto {

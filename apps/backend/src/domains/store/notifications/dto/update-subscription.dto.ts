@@ -6,6 +6,11 @@ const NOTIFICATION_TYPES = [
   'low_stock',
   'new_customer',
   'payment_received',
+  'layaway_payment_received',
+  'layaway_payment_reminder',
+  'layaway_overdue',
+  'layaway_completed',
+  'layaway_cancelled',
 ] as const;
 
 export class UpdateSubscriptionDto {

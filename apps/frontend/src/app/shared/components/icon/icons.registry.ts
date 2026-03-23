@@ -137,6 +137,7 @@ import {
   Instagram,
   // POP icons
   PackageCheck,
+  PackageOpen,
   PackagePlus,
   FilePlus,
   // Analytics icons
@@ -369,6 +370,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // POP icons
   'package-check': PackageCheck,
+  'package-open': PackageOpen,
   'package-plus': PackagePlus,
   'file-plus': FilePlus,
 

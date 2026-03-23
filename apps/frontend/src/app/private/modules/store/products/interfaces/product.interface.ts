@@ -9,6 +9,24 @@ export enum PricingType {
   WEIGHT = 'weight',
 }
 
+export enum ProductType {
+  PHYSICAL = 'physical',
+  SERVICE = 'service',
+}
+
+export enum ServiceModality {
+  IN_PERSON = 'in_person',
+  VIRTUAL = 'virtual',
+  HYBRID = 'hybrid',
+}
+
+export enum ServicePricingType {
+  PER_HOUR = 'per_hour',
+  PER_SESSION = 'per_session',
+  PACKAGE = 'package',
+  SUBSCRIPTION = 'subscription',
+}
+
 export interface Product {
   id: number;
   store_id: number;
@@ -34,6 +52,13 @@ export interface Product {
   };
   state: ProductState;
   pricing_type?: 'unit' | 'weight';
+  product_type?: 'physical' | 'service';
+  service_duration_minutes?: number;
+  service_modality?: 'in_person' | 'virtual' | 'hybrid';
+  service_pricing_type?: 'per_hour' | 'per_session' | 'package' | 'subscription';
+  requires_booking?: boolean;
+  is_recurring?: boolean;
+  service_instructions?: string;
   final_price: number;
   created_at: Date;
   updated_at: Date;
@@ -183,6 +208,13 @@ export interface CreateProductDto {
   };
   state?: ProductState;
   pricing_type?: 'unit' | 'weight';
+  product_type?: 'physical' | 'service';
+  service_duration_minutes?: number;
+  service_modality?: 'in_person' | 'virtual' | 'hybrid';
+  service_pricing_type?: 'per_hour' | 'per_session' | 'package' | 'subscription';
+  requires_booking?: boolean;
+  is_recurring?: boolean;
+  service_instructions?: string;
   brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];
@@ -251,6 +283,7 @@ export interface ProductQueryDto {
   pos_optimized?: boolean;
   barcode?: string;
   include_stock?: boolean;
+  product_type?: 'physical' | 'service';
 }
 
 // Respuestas paginadas

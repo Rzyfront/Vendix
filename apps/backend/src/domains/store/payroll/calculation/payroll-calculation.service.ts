@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { PayrollRules } from './interfaces/payroll-rules.interface';
+import { AdvancesService } from '../advances/advances.service';
 
 interface EmployeeCalculationInput {
   id: number;
@@ -20,6 +21,7 @@ interface DeductionsBreakdown {
   health: number;
   pension: number;
   retention: number;
+  advance_deduction: number;
   total: number;
 }
 
@@ -50,7 +52,10 @@ export interface PayrollItemCalculation {
 export class PayrollCalculationService {
   private readonly logger = new Logger(PayrollCalculationService.name);
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly advances_service: AdvancesService,
+  ) {}
 
   /**
    * Calculate payroll for all active employees within the given context.
@@ -77,7 +82,17 @@ export class PayrollCalculationService {
     const worked_days = this.calculateWorkedDays(period_start, period_end);
     const calculations: PayrollItemCalculation[] = [];
 
+    // Pre-fetch advance deductions for all employees
+    const advance_deductions_map = new Map<number, number>();
     for (const employee of employees) {
+      const deduction = await this.advances_service.calculateDeductionForPayroll(employee.id);
+      if (deduction > 0) {
+        advance_deductions_map.set(employee.id, deduction);
+      }
+    }
+
+    for (const employee of employees) {
+      const advance_deduction = advance_deductions_map.get(employee.id) || 0;
       const calc = this.calculateEmployeePayroll(
         {
           id: employee.id,
@@ -86,6 +101,7 @@ export class PayrollCalculationService {
         },
         worked_days,
         rules,
+        advance_deduction,
       );
       calculations.push(calc);
     }
@@ -134,6 +150,25 @@ export class PayrollCalculationService {
       });
     });
 
+    // Apply advance deductions to employee advances (outside main tx to use AdvancesService)
+    for (const calc of calculations) {
+      const advance_deduction = calc.deductions.advance_deduction;
+      if (advance_deduction > 0) {
+        // Find the payroll item that was just created
+        const payroll_item = await this.prisma.payroll_items.findFirst({
+          where: { payroll_run_id, employee_id: calc.employee_id },
+          select: { id: true },
+        });
+        if (payroll_item) {
+          await this.advances_service.applyPayrollDeduction(
+            calc.employee_id,
+            payroll_item.id,
+            advance_deduction,
+          );
+        }
+      }
+    }
+
     this.logger.log(
       `Calculated payroll run #${payroll_run_id}: ${calculations.length} employees, ` +
         `net_pay total: ${calculations.reduce((s, c) => s + c.net_pay, 0)}`,
@@ -149,6 +184,7 @@ export class PayrollCalculationService {
     employee: EmployeeCalculationInput,
     worked_days: number,
     rules: PayrollRules,
+    advance_deduction: number = 0,
   ): PayrollItemCalculation {
     const salary = Number(employee.base_salary);
     const proportion = worked_days / rules.days_per_month;
@@ -171,7 +207,7 @@ export class PayrollCalculationService {
       salary >= rules.minimum_wage * rules.retention_exempt_threshold
         ? this.round(proportional_salary * 0.01) // Simplified 1% for high earners
         : 0;
-    const total_deductions = this.round(health_deduction + pension_deduction + retention);
+    const total_deductions = this.round(health_deduction + pension_deduction + retention + advance_deduction);
 
     // Employer costs
     const arl_rate = rules.arl_rates[employee.arl_risk_level || 1] || rules.arl_rates[1];
@@ -200,6 +236,7 @@ export class PayrollCalculationService {
         health: health_deduction,
         pension: pension_deduction,
         retention,
+        advance_deduction,
         total: total_deductions,
       },
       employer_costs: {

@@ -84,6 +84,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PROD_DUP_001: 'Ya existe un producto con estas caracteristicas.',
   PROD_IMAGE_001: 'Imagen no encontrada.',
   PROD_CAT_001: 'Categoria o marca invalida.',
+  PROD_SVC_001: 'Los servicios no pueden tener peso, dimensiones ni inventario fisico.',
+  PROD_SVC_002: 'No se puede cambiar el tipo de un producto existente.',
 
   // Orders
   ORD_FIND_001: 'Orden no encontrada.',
@@ -102,6 +104,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   INV_STOCK_001: 'Stock insuficiente.',
   INV_LOC_001: 'Ubicacion no encontrada.',
   INV_ADJ_001: 'Ajuste no encontrado.',
+  INV_BULK_001: 'El archivo esta vacio o no contiene datos validos.',
+  INV_BULK_002: 'Se excedio el limite maximo de 1000 items por carga.',
 
   // Customers
   CUST_FIND_001: 'Cliente no encontrado.',
@@ -164,6 +168,38 @@ export const ERROR_MESSAGES: Record<string, string> = {
   AI_APP_002: 'Ya existe una aplicacion con esa clave.',
   AI_APP_003: 'La aplicacion de IA esta deshabilitada.',
   AI_APP_004: 'Se excedio el limite de solicitudes de esta aplicacion.',
+
+  // Layaway (Plan Separe)
+  LAY_FIND_001: 'El plan separe no fue encontrado.',
+  LAY_STATE_001: 'No se puede realizar esta accion en el estado actual del plan.',
+  LAY_PAYMENT_001: 'El monto del pago excede el saldo pendiente.',
+  LAY_INSTALLMENT_001: 'La suma de las cuotas no coincide con el saldo pendiente.',
+  LAY_INSTALLMENT_002: 'La cuota seleccionada ya fue pagada.',
+
+  // Withholding Tax (Retención en la Fuente)
+  WHT_CONCEPT_NOT_FOUND: 'No se encontro el concepto de retencion.',
+  WHT_UVT_NOT_FOUND: 'No se encontro el valor UVT para el año especificado.',
+  WHT_CONCEPT_DUPLICATE: 'Ya existe un concepto con ese codigo.',
+  WHT_CALCULATION_ERROR: 'Error al calcular la retencion.',
+
+  // Exogenous Reports (Informacion Exogena)
+  EXO_REPORT_NOT_FOUND: 'No se encontro el reporte exogeno.',
+  EXO_INVALID_FORMAT: 'Codigo de formato exogeno invalido.',
+  EXO_GENERATION_FAILED: 'Error al generar el reporte exogeno.',
+  EXO_VALIDATION_ERRORS: 'Se encontraron errores de completitud en los datos.',
+
+  // Habeas Data (Proteccion de Datos)
+  HABEAS_EXPORT_RATE_LIMIT: 'Solo se permite una exportacion de datos cada 24 horas.',
+  HABEAS_ANON_SELF: 'No puede anonimizar su propia cuenta.',
+  HABEAS_ANON_ALREADY: 'El usuario ya fue anonimizado.',
+  HABEAS_EXPORT_PROCESSING: 'Ya hay una exportacion en proceso.',
+  HABEAS_ANON_REQUEST_NOT_FOUND: 'No se encontro la solicitud de anonimizacion.',
+  HABEAS_CONSENT_INVALID: 'Tipo de consentimiento invalido.',
+
+  // ICA Municipal Tax
+  ICA_RATE_NOT_FOUND: 'No se encontro tarifa ICA para el municipio.',
+  ICA_STORE_NO_ADDRESS: 'La tienda no tiene direccion con codigo de municipio.',
+  ICA_INVALID_PERIOD: 'Formato de periodo invalido. Use AAAA-TN o AAAA-MM.',
 };
 
 export const DEFAULT_ERROR_MESSAGE = 'Ocurrio un error. Intente de nuevo.';

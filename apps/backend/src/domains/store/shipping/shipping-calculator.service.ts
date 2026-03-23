@@ -16,6 +16,7 @@ export interface CartItemDTO {
   quantity: number;
   weight?: number; // Total weight for this line item (unit_weight * quantity)
   price: number; // Total price for this line item
+  product_type?: string; // 'physical' | 'service'
 }
 
 export interface ShippingOption {
@@ -224,12 +225,14 @@ export class ShippingCalculatorService {
   private getCartTotals(items: CartItemDTO[]) {
     return items.reduce(
       (acc, item) => {
+        const isPhysical = !item.product_type || item.product_type === 'physical';
         return {
-          totalWeight: acc.totalWeight + (item.weight || 0),
+          totalWeight: acc.totalWeight + (isPhysical ? (item.weight || 0) : 0),
           totalPrice: acc.totalPrice + item.price,
+          hasPhysicalItems: acc.hasPhysicalItems || isPhysical,
         };
       },
-      { totalWeight: 0, totalPrice: 0 },
+      { totalWeight: 0, totalPrice: 0, hasPhysicalItems: false },
     );
   }
 

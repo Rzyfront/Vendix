@@ -36,7 +36,7 @@ export class PosSettingsForm implements OnInit, OnChanges {
     anonymous_sales_as_default: new FormControl(false),
     business_hours: new FormControl(this.getDefaultBusinessHours()),
     enable_schedule_validation: new FormControl(false),
-    offline_mode_enabled: new FormControl(false),
+    show_onscreen_keypad: new FormControl(true),
     require_cash_drawer_open: new FormControl(false),
     auto_print_receipt: new FormControl(true),
     allow_price_edit: new FormControl(true),
@@ -84,8 +84,8 @@ export class PosSettingsForm implements OnInit, OnChanges {
     return this.form.get('anonymous_sales_as_default') as FormControl<boolean>;
   }
 
-  get offlineModeEnabledControl(): FormControl<boolean> {
-    return this.form.get('offline_mode_enabled') as FormControl<boolean>;
+  get showOnscreenKeypadControl(): FormControl<boolean> {
+    return this.form.get('show_onscreen_keypad') as FormControl<boolean>;
   }
 
   get requireCashDrawerOpenControl(): FormControl<boolean> {

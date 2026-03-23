@@ -3,6 +3,7 @@ import {
   EmailProvider,
   EmailResult,
   EmailConfig,
+  EmailAttachment,
 } from '../interfaces/email.interface';
 import {
   EmailTemplates,
@@ -28,6 +29,24 @@ export class ConsoleProvider implements EmailProvider {
     text?: string,
   ): Promise<EmailResult> {
     this.logger.log(`📧 Email to: ${to} | Subject: ${subject}`);
+
+    return {
+      success: true,
+      messageId: `console-${Date.now()}-${Math.random().toString(36)}`,
+    };
+  }
+
+  async sendEmailWithAttachments(
+    to: string,
+    subject: string,
+    html: string,
+    attachments: EmailAttachment[],
+    text?: string,
+  ): Promise<EmailResult> {
+    const attachmentNames = attachments.map((a) => a.filename).join(', ');
+    this.logger.log(
+      `📧 Email to: ${to} | Subject: ${subject} | Attachments: [${attachmentNames}]`,
+    );
 
     return {
       success: true,
