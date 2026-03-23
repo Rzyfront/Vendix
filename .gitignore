@@ -1,3 +1,7 @@
+# Core dumps
+core
+*.core
+
 # Node
 node_modules/
 dist/

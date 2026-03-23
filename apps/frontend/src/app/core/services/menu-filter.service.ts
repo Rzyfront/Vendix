@@ -56,6 +56,8 @@ export class MenuFilterService {
     'Ordenes de Venta': 'orders_sales',
     'Ordenes de Compra': 'orders_purchase_orders',
     Cotizaciones: 'orders_quotations',
+    'Plan Separe': 'orders_layaway',
+    'Créditos': 'orders_credits',
 
     // STORE_ADMIN - Inventario (padre + submódulos)
     Inventario: 'inventory',
@@ -98,8 +100,16 @@ export class MenuFilterService {
     Reportes: 'accounting_reports',
     Nómina: 'payroll',
     Empleados: 'payroll_employees',
-    Liquidaciones: 'payroll_runs',
+    'Períodos de Nómina': 'payroll_runs',
     'Configuración Nómina': 'payroll_settings',
+    'Liquidaciones': 'payroll_settlements',
+    'Adelantos': 'payroll_advances',
+
+    // Legal / Tax modules
+    Retenciones: 'accounting_withholding_tax',
+    'Info Exógena': 'accounting_exogenous',
+    'Datos Personales': 'settings_habeas_data',
+    'ICA Municipal': 'taxes_ica',
 
     // Configuración (compartido por ORG_ADMIN y STORE_ADMIN)
     // El padre "Configuración" y sus sub-items:

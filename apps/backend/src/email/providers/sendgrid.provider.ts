@@ -3,6 +3,7 @@ import {
   EmailProvider,
   EmailResult,
   EmailConfig,
+  EmailAttachment,
 } from '../interfaces/email.interface';
 import {
   EmailTemplates,
@@ -61,6 +62,49 @@ export class SendGridProvider implements EmailProvider {
       return {
         success: false,
         error: error.message || 'Failed to send email via SendGrid',
+      };
+    }
+  }
+
+  async sendEmailWithAttachments(
+    to: string,
+    subject: string,
+    html: string,
+    attachments: EmailAttachment[],
+    text?: string,
+  ): Promise<EmailResult> {
+    try {
+      const msg = {
+        to,
+        from: {
+          email: this.config.fromEmail,
+          name: this.config.fromName,
+        },
+        subject,
+        html,
+        text: text || '',
+        attachments: attachments.map((a) => ({
+          filename: a.filename,
+          content: a.content.toString('base64'),
+          type: a.contentType,
+          disposition: 'attachment' as const,
+        })),
+      };
+
+      const result = await this.sgMail.send(msg);
+
+      this.logger.log(
+        `Email with ${attachments.length} attachment(s) sent to ${to} via SendGrid`,
+      );
+      return {
+        success: true,
+        messageId: result[0]?.headers?.['x-message-id'],
+      };
+    } catch (error) {
+      this.logger.error('SendGrid send error (with attachments):', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to send email with attachments via SendGrid',
       };
     }
   }

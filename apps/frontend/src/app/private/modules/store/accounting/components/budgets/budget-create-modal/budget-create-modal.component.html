@@ -1,0 +1,62 @@
+<app-modal
+  [isOpen]="isOpen"
+  (isOpenChange)="isOpenChange.emit($event)"
+  (cancel)="onClose()"
+  title="Nuevo Presupuesto"
+  size="md"
+>
+  <!-- Body -->
+  <div class="p-4 space-y-4">
+    <form [formGroup]="form">
+      <app-input
+        label="Nombre"
+        formControlName="name"
+        [control]="form.get('name')"
+        [required]="true"
+        placeholder="Ej: Presupuesto 2026"
+      ></app-input>
+
+      <app-selector
+        label="Periodo Fiscal"
+        formControlName="fiscal_period_id"
+        [options]="fiscal_periods"
+        placeholder="Seleccionar periodo"
+        [required]="true"
+      ></app-selector>
+
+      <app-textarea
+        label="Descripcion"
+        formControlName="description"
+        [rows]="3"
+        placeholder="Descripcion del presupuesto (opcional)"
+      ></app-textarea>
+
+      <app-input
+        label="Umbral de Varianza (%)"
+        formControlName="variance_threshold"
+        type="number"
+        [control]="form.get('variance_threshold')"
+        placeholder="10"
+      ></app-input>
+    </form>
+  </div>
+
+  <!-- Footer -->
+  <div slot="footer">
+    <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+      <app-button
+        variant="outline"
+        (clicked)="onClose()">
+        Cancelar
+      </app-button>
+
+      <app-button
+        variant="primary"
+        (clicked)="onSubmit()"
+        [disabled]="form.invalid || is_submitting"
+        [loading]="is_submitting">
+        Crear y Editar
+      </app-button>
+    </div>
+  </div>
+</app-modal>

@@ -8,6 +8,10 @@ import { couponReducer } from '../../private/modules/store/marketing/coupons/sta
 import { CouponEffects } from '../../private/modules/store/marketing/coupons/state/effects/coupon.effects';
 import { storeUsersReducer } from '../../private/modules/store/settings/users/state/reducers/store-users.reducer';
 import { StoreUsersEffects } from '../../private/modules/store/settings/users/state/effects/store-users.effects';
+import { layawayReducer } from '../../private/modules/store/layaway/state/reducers/layaway.reducer';
+import { LayawayEffects } from '../../private/modules/store/layaway/state/effects/layaway.effects';
+import { creditsReducer } from '../../private/modules/store/credits/state/reducers/credits.reducer';
+import { CreditsEffects } from '../../private/modules/store/credits/state/effects/credits.effects';
 
 export const storeAdminRoutes: Routes = [
   {
@@ -195,6 +199,50 @@ export const storeAdminRoutes: Routes = [
               import('../../private/modules/store/quotations/pages/quotation-detail/quotation-detail.component').then(
                 (c) => c.QuotationDetailComponent,
               ),
+          },
+          {
+            path: 'layaway',
+            loadComponent: () =>
+              import('../../private/modules/store/layaway/layaway.component').then(
+                (c) => c.LayawayComponent,
+              ),
+            providers: [
+              provideState('layaway', layawayReducer),
+              provideEffects(LayawayEffects),
+            ],
+          },
+          {
+            path: 'layaway/:id',
+            loadComponent: () =>
+              import('../../private/modules/store/layaway/pages/layaway-detail-page/layaway-detail-page.component').then(
+                (c) => c.LayawayDetailPageComponent,
+              ),
+            providers: [
+              provideState('layaway', layawayReducer),
+              provideEffects(LayawayEffects),
+            ],
+          },
+          {
+            path: 'credits',
+            loadComponent: () =>
+              import('../../private/modules/store/credits/credits.component').then(
+                (c) => c.CreditsComponent,
+              ),
+            providers: [
+              provideState('credits', creditsReducer),
+              provideEffects(CreditsEffects),
+            ],
+          },
+          {
+            path: 'credits/:id',
+            loadComponent: () =>
+              import('../../private/modules/store/credits/pages/credits-detail-page/credits-detail-page.component').then(
+                (c) => c.CreditsDetailPageComponent,
+              ),
+            providers: [
+              provideState('credits', creditsReducer),
+              provideEffects(CreditsEffects),
+            ],
           },
           {
             path: ':id',
@@ -449,6 +497,35 @@ export const storeAdminRoutes: Routes = [
         loadChildren: () =>
           import('../../private/modules/store/payroll/payroll.routes').then(
             (m) => m.payrollRoutes,
+          ),
+      },
+      // Legal / Tax Routes
+      {
+        path: 'accounting/withholding-tax',
+        loadChildren: () =>
+          import('../../private/modules/store/withholding-tax/withholding-tax.routes').then(
+            (m) => m.withholdingTaxRoutes,
+          ),
+      },
+      {
+        path: 'accounting/exogenous',
+        loadChildren: () =>
+          import('../../private/modules/store/exogenous/exogenous.routes').then(
+            (m) => m.exogenousRoutes,
+          ),
+      },
+      {
+        path: 'habeas-data',
+        loadChildren: () =>
+          import('../../private/modules/store/habeas-data/habeas-data.routes').then(
+            (m) => m.habeasDataRoutes,
+          ),
+      },
+      {
+        path: 'taxes/ica',
+        loadChildren: () =>
+          import('../../private/modules/store/taxes/ica/ica.routes').then(
+            (m) => m.icaRoutes,
           ),
       },
     ],

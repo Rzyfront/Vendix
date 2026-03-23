@@ -8,6 +8,13 @@ export interface EmailProvider {
     html: string,
     text?: string,
   ): Promise<EmailResult>;
+  sendEmailWithAttachments(
+    to: string,
+    subject: string,
+    html: string,
+    attachments: EmailAttachment[],
+    text?: string,
+  ): Promise<EmailResult>;
   sendVerificationEmail(
     to: string,
     token: string,
@@ -53,6 +60,12 @@ export interface EmailConfig {
       pass: string;
     };
   };
+}
+
+export interface EmailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType: string;
 }
 
 export interface EmailTemplate {

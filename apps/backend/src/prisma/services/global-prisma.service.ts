@@ -339,4 +339,80 @@ export class GlobalPrismaService extends BasePrismaService {
   get help_articles() {
     return this.baseClient.help_articles;
   }
+
+  // Layaway models
+  get layaway_plans() {
+    return this.baseClient.layaway_plans;
+  }
+
+  get layaway_installments() {
+    return this.baseClient.layaway_installments;
+  }
+
+  get layaway_payments() {
+    return this.baseClient.layaway_payments;
+  }
+
+  // Credits models
+  get credits() {
+    return this.baseClient.credits;
+  }
+
+  get credit_installments() {
+    return this.baseClient.credit_installments;
+  }
+
+  get credit_installment_payments() {
+    return this.baseClient.credit_installment_payments;
+  }
+
+  // Habeas Data models
+  get user_consents() {
+    return this.baseClient.user_consents;
+  }
+
+  get data_export_requests() {
+    return this.baseClient.data_export_requests;
+  }
+
+  get anonymization_requests() {
+    return this.baseClient.anonymization_requests;
+  }
+
+  // Fixed Assets models
+  get fixed_asset_categories() {
+    return this.baseClient.fixed_asset_categories;
+  }
+
+  get fixed_assets() {
+    return this.baseClient.fixed_assets;
+  }
+
+  get depreciation_entries() {
+    return this.baseClient.depreciation_entries;
+  }
+
+  // Invoicing models
+  get invoices() {
+    return this.baseClient.invoices;
+  }
+
+  get invoice_items() {
+    return this.baseClient.invoice_items;
+  }
+
+  // ICA Municipal Rates (global - no scoping)
+  get ica_municipal_rates() {
+    return this.baseClient.ica_municipal_rates;
+  }
+
+  // Invoice retry queue
+  get invoice_retry_queue() {
+    return this.baseClient.invoice_retry_queue;
+  }
+
+  // DIAN configurations
+  get dian_configurations() {
+    return this.baseClient.dian_configurations;
+  }
 }

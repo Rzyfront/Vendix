@@ -17,6 +17,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { DianConfigService } from './dian-config.service';
 import { DianTestService } from './dian-test.service';
 import { ResponseService } from '../../../../common/responses/response.service';
+import { S3Service } from '../../../../common/services/s3.service';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { CreateDianConfigDto } from './dto/create-dian-config.dto';
 import { UpdateDianConfigDto } from './dto/update-dian-config.dto';
@@ -30,7 +31,15 @@ export class DianConfigController {
     private readonly dian_test_service: DianTestService,
     private readonly xml_signer: DianXmlSignerService,
     private readonly response_service: ResponseService,
+    private readonly s3_service: S3Service,
   ) {}
+
+  @Get('dashboard')
+  @Permissions('invoicing:read')
+  async getDashboard() {
+    const result = await this.dian_config_service.getDashboard();
+    return this.response_service.success(result);
+  }
 
   @Get()
   @Permissions('invoicing:read')
@@ -141,9 +150,8 @@ export class DianConfigController {
       );
     }
 
-    // TODO: Upload to S3 using S3 service
-    // For now, store a placeholder path
     const s3_key = `dian/certificates/${config_id}/certificate.p12`;
+    await this.s3_service.uploadFile(file.buffer, s3_key, 'application/x-pkcs12');
 
     const result = await this.dian_config_service.updateCertificate(
       parseInt(config_id, 10),
@@ -173,8 +181,11 @@ export class DianConfigController {
   @Post(':id/run-test-set')
   @Permissions('invoicing:write')
   @HttpCode(HttpStatus.OK)
-  async runTestSet(@Param('id', ParseIntPipe) id: number) {
-    const result = await this.dian_test_service.runTestSet(id);
+  async runTestSet(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('resolution_id', ParseIntPipe) resolution_id: number,
+  ) {
+    const result = await this.dian_test_service.runTestSet(id, resolution_id);
     return this.response_service.success(result);
   }
 

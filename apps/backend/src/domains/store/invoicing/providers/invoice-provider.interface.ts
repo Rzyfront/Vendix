@@ -52,6 +52,7 @@ export interface ProviderInvoiceData {
   customer_document_type?: string;
   customer_regime?: string;
   payment_means?: string;
+  payment_form?: string; // DIAN: '1' = contado, '2' = crédito
   payment_method?: string;
   order_reference?: string;
 }

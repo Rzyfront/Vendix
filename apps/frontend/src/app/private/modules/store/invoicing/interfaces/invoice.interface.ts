@@ -240,6 +240,11 @@ export interface DianTestResult {
   response_time_ms: number;
   message: string;
   dian_status?: string;
+  tracking_id?: string;
+  total_documents?: number;
+  invoices_count?: number;
+  debit_notes_count?: number;
+  credit_notes_count?: number;
 }
 
 export interface DianAuditLog {

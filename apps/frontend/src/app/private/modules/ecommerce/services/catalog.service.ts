@@ -19,6 +19,10 @@ export interface EcommerceProduct {
   image_url: string | null;
   weight?: number | null;
   pricing_type?: 'unit' | 'weight';
+  product_type?: 'physical' | 'service';
+  service_duration_minutes?: number | null;
+  service_modality?: 'in_person' | 'virtual' | 'hybrid' | null;
+  requires_booking?: boolean;
   brand: { id: number; name: string } | null;
   categories: { id: number; name: string; slug: string }[];
   variant_count?: number;
@@ -78,6 +82,7 @@ export interface CatalogQuery {
   limit?: number;
   created_after?: string;
   has_discount?: boolean;
+  product_type?: 'physical' | 'service';
 }
 
 export interface PaginatedResponse<T> {
@@ -132,6 +137,8 @@ export class CatalogService {
       params = params.set('created_after', query.created_after);
     if (query.has_discount !== undefined)
       params = params.set('has_discount', query.has_discount.toString());
+    if (query.product_type)
+      params = params.set('product_type', query.product_type);
 
     return this.http.get<PaginatedResponse<EcommerceProduct>>(this.api_url, {
       headers: this.getHeaders(),

@@ -353,4 +353,259 @@ export class AccountingEventsListener {
       );
     }
   }
+
+  // ===== LAYAWAY (PLAN SEPARÉ) =====
+
+  @OnEvent('layaway.payment_received')
+  async handleLayawayPaymentReceived(event: {
+    store_id: number;
+    plan_id: number;
+    plan_number: string;
+    payment_id: number;
+    amount: number;
+    customer_id: number;
+    payment_method?: string;
+    organization_id?: number;
+  }) {
+    try {
+      const organization_id = event.organization_id || await this.resolveOrgId(event.store_id);
+      await this.auto_entry_service.onLayawayPaymentReceived({
+        payment_id: event.payment_id,
+        plan_number: event.plan_number,
+        organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        payment_method: event.payment_method,
+      });
+      this.logger.log(`Auto-entry created for layaway.payment_received - plan ${event.plan_number}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for layaway.payment_received - plan ${event.plan_number}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  @OnEvent('layaway.completed')
+  async handleLayawayCompleted(event: {
+    store_id: number;
+    plan_id: number;
+    plan_number: string;
+    customer_id: number;
+    total_amount: any;
+    organization_id?: number;
+  }) {
+    try {
+      const organization_id = event.organization_id || await this.resolveOrgId(event.store_id);
+      await this.auto_entry_service.onLayawayCompleted({
+        plan_id: event.plan_id,
+        plan_number: event.plan_number,
+        organization_id,
+        store_id: event.store_id,
+        total_amount: Number(event.total_amount),
+      });
+      this.logger.log(`Auto-entry created for layaway.completed - plan ${event.plan_number}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for layaway.completed - plan ${event.plan_number}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  // ===== CREDIT INSTALLMENT PAYMENTS =====
+
+  @OnEvent('installment_payment.received')
+  async handleInstallmentPaymentReceived(event: {
+    credit_id: number;
+    installment_id: number;
+    payment_id: number;
+    amount: number;
+    store_id: number;
+    store_payment_method_id?: number;
+    credit_number: string;
+    installment_number: number;
+    customer_id: number;
+    order_id: number;
+    organization_id?: number;
+  }) {
+    try {
+      const organization_id = event.organization_id || await this.resolveOrgId(event.store_id);
+      await this.auto_entry_service.onInstallmentPaymentReceived({
+        credit_id: event.credit_id,
+        installment_id: event.installment_id,
+        payment_id: event.payment_id,
+        amount: Number(event.amount),
+        store_id: event.store_id,
+        organization_id,
+        store_payment_method_id: event.store_payment_method_id,
+        credit_number: event.credit_number,
+        installment_number: event.installment_number,
+        customer_id: event.customer_id,
+        order_id: event.order_id,
+      });
+      this.logger.log(`Auto-entry created for installment_payment.received - Credit ${event.credit_number} cuota #${event.installment_number}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for installment_payment.received - Credit ${event.credit_number}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  // ===== PAYROLL SETTLEMENTS =====
+
+  @OnEvent('settlement.paid')
+  async handleSettlementPaid(event: {
+    settlement_id: number;
+    settlement_number: string;
+    organization_id: number;
+    store_id?: number;
+    employee_name: string;
+    severance: number;
+    severance_interest: number;
+    bonus: number;
+    vacation: number;
+    pending_salary: number;
+    indemnification: number;
+    health_deduction: number;
+    pension_deduction: number;
+    net_settlement: number;
+    user_id?: number;
+  }) {
+    try {
+      await this.auto_entry_service.onSettlementPaid({
+        settlement_id: event.settlement_id,
+        settlement_number: event.settlement_number,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        employee_name: event.employee_name,
+        severance: Number(event.severance),
+        severance_interest: Number(event.severance_interest),
+        bonus: Number(event.bonus),
+        vacation: Number(event.vacation),
+        pending_salary: Number(event.pending_salary),
+        indemnification: Number(event.indemnification),
+        health_deduction: Number(event.health_deduction),
+        pension_deduction: Number(event.pension_deduction),
+        net_settlement: Number(event.net_settlement),
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for settlement.paid ${event.settlement_number}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for settlement.paid ${event.settlement_number}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  // ===== FIXED ASSETS - DEPRECIATION =====
+
+  @OnEvent('depreciation.posted')
+  async handleDepreciationPosted(event: {
+    asset_id: number;
+    asset_number: string;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    period_date: Date;
+    user_id?: number;
+  }) {
+    try {
+      await this.auto_entry_service.onDepreciationPosted({
+        asset_id: event.asset_id,
+        asset_number: event.asset_number,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        period_date: new Date(event.period_date),
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for depreciation.posted - asset ${event.asset_number}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for depreciation.posted - asset ${event.asset_number}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  @OnEvent('disposal.fixed_asset')
+  async handleFixedAssetDisposed(event: {
+    asset_id: number;
+    asset_number: string;
+    organization_id: number;
+    store_id?: number;
+    acquisition_cost: number;
+    accumulated_depreciation: number;
+    disposal_amount: number;
+    book_value: number;
+    gain_loss: number;
+    user_id?: number;
+  }) {
+    try {
+      await this.auto_entry_service.onFixedAssetDisposed({
+        asset_id: event.asset_id,
+        asset_number: event.asset_number,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        acquisition_cost: Number(event.acquisition_cost),
+        accumulated_depreciation: Number(event.accumulated_depreciation),
+        disposal_amount: Number(event.disposal_amount),
+        book_value: Number(event.book_value),
+        gain_loss: Number(event.gain_loss),
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for disposal.fixed_asset - asset ${event.asset_number}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for disposal.fixed_asset - asset ${event.asset_number}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  // ===== WITHHOLDING TAX (Retención en la Fuente) =====
+
+  @OnEvent('withholding.applied')
+  async handleWithholdingApplied(event: {
+    organization_id: number;
+    store_id?: number;
+    invoice_id: number;
+    base_amount: number;
+    withholding_amount: number;
+    net_amount: number;
+    concept_name: string;
+    supplier_name: string;
+    user_id?: number;
+  }) {
+    try {
+      await this.auto_entry_service.onWithholdingApplied({
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        invoice_id: event.invoice_id,
+        base_amount: Number(event.base_amount),
+        withholding_amount: Number(event.withholding_amount),
+        net_amount: Number(event.net_amount),
+        concept_name: event.concept_name,
+        supplier_name: event.supplier_name,
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for withholding.applied - invoice #${event.invoice_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create withholding auto-entry: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  private async resolveOrgId(store_id: number): Promise<number> {
+    const store = await this.auto_entry_service['prisma'].stores.findUnique({
+      where: { id: store_id },
+      select: { organization_id: true },
+    });
+    return store?.organization_id || 0;
+  }
 }

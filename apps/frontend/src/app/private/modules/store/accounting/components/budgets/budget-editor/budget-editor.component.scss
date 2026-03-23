@@ -1,0 +1,33 @@
+:host {
+  display: block;
+  width: 100%;
+}
+
+/* Ensure the sticky first column has a clean shadow on scroll */
+table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+thead th.sticky,
+tbody td.sticky,
+tfoot td.sticky {
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: -6px;
+    bottom: 0;
+    width: 6px;
+    pointer-events: none;
+    background: linear-gradient(to right, rgba(0, 0, 0, 0.04), transparent);
+  }
+}
+
+/* Mobile input improvements */
+@media (max-width: 768px) {
+  input[type='number'] {
+    font-size: 14px;
+    padding: 6px 4px;
+  }
+}

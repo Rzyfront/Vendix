@@ -535,6 +535,26 @@ export class InventoryAdjustmentsService {
   }
 
   /**
+   * Libera todas las reservas activas de un producto
+   */
+  async releaseReservationsByProduct(
+    product_id: number,
+    product_variant_id?: number,
+  ): Promise<{ released_count: number; total_quantity: number }> {
+    return this.stockLevelManager.releaseAllReservationsForProduct(
+      product_id,
+      product_variant_id,
+    );
+  }
+
+  /**
+   * Libera TODAS las reservas activas de la organización
+   */
+  async releaseAllReservations(): Promise<{ released_count: number; total_quantity: number }> {
+    return this.stockLevelManager.releaseAllActiveReservations();
+  }
+
+  /**
    * Elimina un ajuste (solo si no está aprobado)
    */
   async deleteAdjustment(id: number): Promise<void> {

@@ -63,6 +63,37 @@ const MAPPING_LABELS: Record<string, string> = {
   'credit_sale.created.vat_payable': 'IVA por Pagar (Venta a Credito)',
   'payment.received.sales_discount': 'Descuentos en Ventas (POS)',
   'credit_sale.created.sales_discount': 'Descuentos en Ventas (Credito)',
+  // Purchase Order Payments
+  'purchase_order.payment.accounts_payable': 'Proveedores (Pago OC)',
+  'purchase_order.payment.cash_bank': 'Banco (Pago OC)',
+  // Layaway (Plan Separe)
+  'layaway.payment.cash': 'Caja (Cuota Separe)',
+  'layaway.payment.bank': 'Banco (Cuota Separe)',
+  'layaway.payment.customer_advance': 'Anticipos de Clientes (Separe)',
+  'layaway.completed.customer_advance': 'Anticipos de Clientes (Separe Completado)',
+  'layaway.completed.revenue': 'Ingresos por Ventas (Separe Completado)',
+  // Fixed Assets - Depreciation
+  'depreciation.monthly.depreciation_expense': 'Gasto por Depreciacion',
+  'depreciation.monthly.accumulated_depreciation': 'Depreciacion Acumulada',
+  // Fixed Assets - Disposal
+  'disposal.fixed_asset.asset_cost': 'Propiedad Planta y Equipo',
+  'disposal.fixed_asset.accumulated_depreciation': 'Depreciacion Acumulada (Baja)',
+  'disposal.fixed_asset.loss': 'Perdida en Baja de Activos',
+  'disposal.fixed_asset.gain': 'Utilidad en Venta de Activos',
+  'disposal.fixed_asset.cash': 'Caja (Venta Activo)',
+  // Withholding Tax (Retencion en la Fuente)
+  'withholding.applied.expense': 'Gasto / Compra (Base Retencion)',
+  'withholding.applied.withholding_payable': 'Retencion en la Fuente por Pagar',
+  'withholding.applied.accounts_payable': 'Proveedores (Neto tras Retencion)',
+  // Settlement (Liquidacion por Terminacion)
+  'settlement.paid.severance': 'Cesantias Consolidadas',
+  'settlement.paid.severance_interest': 'Intereses sobre Cesantias',
+  'settlement.paid.bonus': 'Prima de Servicios por Pagar',
+  'settlement.paid.vacation': 'Vacaciones por Pagar',
+  'settlement.paid.pending_salary': 'Gastos de Personal (Salario Pendiente)',
+  'settlement.paid.indemnification': 'Gastos de Personal (Indemnizacion)',
+  'settlement.paid.social_deductions': 'Retenciones y Aportes de Nomina',
+  'settlement.paid.bank': 'Bancos (Pago Liquidacion)',
 };
 
 const GROUP_DEFINITIONS: Array<{ key: string; label: string; icon: string; prefixes: string[] }> = [
@@ -71,7 +102,11 @@ const GROUP_DEFINITIONS: Array<{ key: string; label: string; icon: string; prefi
   { key: 'expenses', label: 'Gastos', icon: 'trending-down', prefixes: ['expense.approved.', 'expense.paid.'] },
   { key: 'payroll', label: 'Nomina', icon: 'users', prefixes: ['payroll.approved.', 'payroll.paid.'] },
   { key: 'credit_sales', label: 'Ventas a Credito', icon: 'file-plus', prefixes: ['credit_sale.created.'] },
-  { key: 'inventory', label: 'Inventario', icon: 'package', prefixes: ['order.completed.', 'refund.completed.', 'purchase_order.received.', 'inventory.adjusted.'] },
+  { key: 'inventory', label: 'Inventario', icon: 'package', prefixes: ['order.completed.', 'refund.completed.', 'purchase_order.received.', 'purchase_order.payment.', 'inventory.adjusted.'] },
+  { key: 'layaway', label: 'Plan Separe', icon: 'clock', prefixes: ['layaway.payment.', 'layaway.completed.'] },
+  { key: 'fixed_assets', label: 'Activos Fijos', icon: 'hard-drive', prefixes: ['depreciation.monthly.', 'disposal.fixed_asset.'] },
+  { key: 'withholding', label: 'Retencion en la Fuente', icon: 'percent', prefixes: ['withholding.applied.'] },
+  { key: 'settlements', label: 'Liquidaciones', icon: 'user-minus', prefixes: ['settlement.paid.'] },
 ];
 
 @Component({

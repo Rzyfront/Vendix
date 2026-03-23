@@ -61,7 +61,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
       </div>
 
       <!-- Stats: Sticky on mobile, static on desktop (hidden on settings tab) -->
-      <div *ngIf="activeTab !== 'settings'" class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div *ngIf="activeTab === 'employees' || activeTab === 'payroll-runs'" class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <vendix-payroll-stats [view]="activeTab"></vendix-payroll-stats>
       </div>
 
@@ -132,9 +132,11 @@ export class PayrollComponent implements OnInit, OnDestroy {
   tabs: ScrollableTab[] = [
     { id: 'employees', label: 'Empleados', icon: 'users' },
     { id: 'payroll-runs', label: 'Nóminas', icon: 'file-text' },
+    { id: 'settlements', label: 'Liquidaciones', icon: 'file-minus' },
+    { id: 'advances', label: 'Adelantos', icon: 'hand-coins' },
     { id: 'settings', label: 'Configuración', icon: 'settings' },
   ];
-  activeTab: 'employees' | 'payroll-runs' | 'settings' = 'employees';
+  activeTab: 'employees' | 'payroll-runs' | 'settlements' | 'advances' | 'settings' = 'employees';
 
   // Modal states
   isEmployeeCreateModalOpen = false;

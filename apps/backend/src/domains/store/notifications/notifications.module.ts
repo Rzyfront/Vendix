@@ -6,9 +6,11 @@ import { NotificationsPushService } from './notifications-push.service';
 import { NotificationsEventsListener } from './notifications-events.listener';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
+import { EmailModule } from '../../../email/email.module';
+import { S3Module } from '../../../common/services/s3.module';
 
 @Module({
-  imports: [ResponseModule, PrismaModule],
+  imports: [ResponseModule, PrismaModule, EmailModule, S3Module],
   controllers: [NotificationsController],
   providers: [
     NotificationsService,

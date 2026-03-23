@@ -268,11 +268,12 @@ export class StockLevelManager {
     variant_id: number | undefined,
     location_id: number,
     quantity: number,
-    reserved_for_type: 'order' | 'transfer' | 'adjustment',
+    reserved_for_type: 'order' | 'transfer' | 'adjustment' | 'layaway',
     reserved_for_id: number,
     user_id?: number,
     validate_availability = true,
     tx?: any,
+    expires_at?: Date | null,
   ): Promise<void> {
     const execute = async (prisma: any) => {
       // Validar contexto
@@ -307,7 +308,7 @@ export class StockLevelManager {
           reserved_for_id: reserved_for_id,
           status: 'active',
           user_id: user_id,
-          expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 días
+          expires_at: expires_at !== undefined ? expires_at : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // null = no expira (layaway), undefined = default 7 días
           created_at: new Date(),
         },
       });
@@ -341,7 +342,7 @@ export class StockLevelManager {
     product_id: number,
     variant_id: number | undefined,
     location_id: number,
-    reserved_for_type: 'order' | 'transfer' | 'adjustment',
+    reserved_for_type: 'order' | 'transfer' | 'adjustment' | 'layaway',
     reserved_for_id: number,
     tx?: any,
   ): Promise<void> {
@@ -411,6 +412,264 @@ export class StockLevelManager {
     } else {
       await this.prisma.$transaction(async (prisma) => execute(prisma));
     }
+  }
+
+  /**
+   * Libera reservas por referencia (order/transfer/adjustment ID).
+   * No requiere location_id — busca directamente en stock_reservations.
+   */
+  async releaseReservationsByReference(
+    reserved_for_type: 'order' | 'transfer' | 'adjustment' | 'layaway',
+    reserved_for_id: number,
+    status: 'consumed' | 'cancelled' = 'consumed',
+    tx?: any,
+  ): Promise<void> {
+    const execute = async (prisma: any) => {
+      // 1. Buscar todas las reservas activas para esta referencia
+      const reservations = await prisma.stock_reservations.findMany({
+        where: {
+          reserved_for_type,
+          reserved_for_id,
+          status: 'active',
+        },
+      });
+
+      if (reservations.length === 0) return;
+
+      // 2. Agrupar por (product_id, product_variant_id, location_id) para batch updates
+      const groups = new Map<
+        string,
+        { product_id: number; product_variant_id: number | null; location_id: number; total_quantity: number }
+      >();
+
+      for (const r of reservations) {
+        const key = `${r.product_id}-${r.product_variant_id ?? 'null'}-${r.location_id}`;
+        const existing = groups.get(key);
+        if (existing) {
+          existing.total_quantity += r.quantity;
+        } else {
+          groups.set(key, {
+            product_id: r.product_id,
+            product_variant_id: r.product_variant_id,
+            location_id: r.location_id,
+            total_quantity: r.quantity,
+          });
+        }
+      }
+
+      // 3. Marcar reservas con el status correspondiente
+      await prisma.stock_reservations.updateMany({
+        where: {
+          id: { in: reservations.map((r) => r.id) },
+        },
+        data: {
+          status,
+          updated_at: new Date(),
+        },
+      });
+
+      // 4. Actualizar stock_levels por grupo y sincronizar producto
+      const syncedProducts = new Set<string>();
+
+      for (const group of groups.values()) {
+        const stock_level = await prisma.stock_levels.findFirst({
+          where: {
+            product_id: group.product_id,
+            product_variant_id: group.product_variant_id,
+            location_id: group.location_id,
+          },
+        });
+
+        if (stock_level) {
+          await prisma.stock_levels.update({
+            where: { id: stock_level.id },
+            data: {
+              quantity_reserved: Math.max(0, stock_level.quantity_reserved - group.total_quantity),
+              quantity_available: stock_level.quantity_available + group.total_quantity,
+              last_updated: new Date(),
+              updated_at: new Date(),
+            },
+          });
+        }
+
+        const productKey = `${group.product_id}-${group.product_variant_id ?? 'null'}`;
+        if (!syncedProducts.has(productKey)) {
+          syncedProducts.add(productKey);
+          await this.syncProductStock(prisma, group.product_id, group.product_variant_id ?? undefined);
+        }
+      }
+    };
+
+    if (tx) {
+      await execute(tx);
+    } else {
+      await this.prisma.$transaction(async (prisma) => execute(prisma));
+    }
+  }
+
+  /**
+   * Libera TODAS las reservas activas de un producto (herramienta administrativa).
+   */
+  async releaseAllReservationsForProduct(
+    product_id: number,
+    product_variant_id?: number,
+    tx?: any,
+  ): Promise<{ released_count: number; total_quantity: number }> {
+    const execute = async (prisma: any) => {
+      const where: any = {
+        product_id,
+        status: 'active',
+      };
+      if (product_variant_id !== undefined) {
+        where.product_variant_id = product_variant_id;
+      }
+
+      const reservations = await prisma.stock_reservations.findMany({ where });
+
+      if (reservations.length === 0) {
+        return { released_count: 0, total_quantity: 0 };
+      }
+
+      // Agrupar por location para batch update
+      const groups = new Map<
+        string,
+        { location_id: number; product_variant_id: number | null; total_quantity: number }
+      >();
+
+      let total_quantity = 0;
+      for (const r of reservations) {
+        total_quantity += r.quantity;
+        const key = `${r.product_variant_id ?? 'null'}-${r.location_id}`;
+        const existing = groups.get(key);
+        if (existing) {
+          existing.total_quantity += r.quantity;
+        } else {
+          groups.set(key, {
+            location_id: r.location_id,
+            product_variant_id: r.product_variant_id,
+            total_quantity: r.quantity,
+          });
+        }
+      }
+
+      await prisma.stock_reservations.updateMany({
+        where: { id: { in: reservations.map((r) => r.id) } },
+        data: { status: 'cancelled', updated_at: new Date() },
+      });
+
+      for (const group of groups.values()) {
+        const stock_level = await prisma.stock_levels.findFirst({
+          where: {
+            product_id,
+            product_variant_id: group.product_variant_id,
+            location_id: group.location_id,
+          },
+        });
+
+        if (stock_level) {
+          await prisma.stock_levels.update({
+            where: { id: stock_level.id },
+            data: {
+              quantity_reserved: Math.max(0, stock_level.quantity_reserved - group.total_quantity),
+              quantity_available: stock_level.quantity_available + group.total_quantity,
+              last_updated: new Date(),
+              updated_at: new Date(),
+            },
+          });
+        }
+      }
+
+      await this.syncProductStock(prisma, product_id, product_variant_id);
+
+      return { released_count: reservations.length, total_quantity };
+    };
+
+    if (tx) {
+      return execute(tx);
+    }
+    return this.prisma.$transaction(async (prisma) => execute(prisma));
+  }
+
+  /**
+   * Libera TODAS las reservas activas de la organización (emergencia administrativa).
+   */
+  async releaseAllActiveReservations(
+    tx?: any,
+  ): Promise<{ released_count: number; total_quantity: number }> {
+    const execute = async (prisma: any) => {
+      const reservations = await prisma.stock_reservations.findMany({
+        where: { status: 'active' },
+      });
+
+      if (reservations.length === 0) {
+        return { released_count: 0, total_quantity: 0 };
+      }
+
+      // Agrupar por (product_id, product_variant_id, location_id)
+      const groups = new Map<
+        string,
+        { product_id: number; product_variant_id: number | null; location_id: number; total_quantity: number }
+      >();
+
+      let total_quantity = 0;
+      for (const r of reservations) {
+        total_quantity += r.quantity;
+        const key = `${r.product_id}-${r.product_variant_id ?? 'null'}-${r.location_id}`;
+        const existing = groups.get(key);
+        if (existing) {
+          existing.total_quantity += r.quantity;
+        } else {
+          groups.set(key, {
+            product_id: r.product_id,
+            product_variant_id: r.product_variant_id,
+            location_id: r.location_id,
+            total_quantity: r.quantity,
+          });
+        }
+      }
+
+      await prisma.stock_reservations.updateMany({
+        where: { id: { in: reservations.map((r) => r.id) } },
+        data: { status: 'cancelled', updated_at: new Date() },
+      });
+
+      const syncedProducts = new Set<string>();
+
+      for (const group of groups.values()) {
+        const stock_level = await prisma.stock_levels.findFirst({
+          where: {
+            product_id: group.product_id,
+            product_variant_id: group.product_variant_id,
+            location_id: group.location_id,
+          },
+        });
+
+        if (stock_level) {
+          await prisma.stock_levels.update({
+            where: { id: stock_level.id },
+            data: {
+              quantity_reserved: Math.max(0, stock_level.quantity_reserved - group.total_quantity),
+              quantity_available: stock_level.quantity_available + group.total_quantity,
+              last_updated: new Date(),
+              updated_at: new Date(),
+            },
+          });
+        }
+
+        const productKey = `${group.product_id}-${group.product_variant_id ?? 'null'}`;
+        if (!syncedProducts.has(productKey)) {
+          syncedProducts.add(productKey);
+          await this.syncProductStock(prisma, group.product_id, group.product_variant_id ?? undefined);
+        }
+      }
+
+      return { released_count: reservations.length, total_quantity };
+    };
+
+    if (tx) {
+      return execute(tx);
+    }
+    return this.prisma.$transaction(async (prisma) => execute(prisma));
   }
 
   /**

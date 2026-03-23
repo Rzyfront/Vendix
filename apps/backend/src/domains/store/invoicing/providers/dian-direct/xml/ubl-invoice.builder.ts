@@ -126,7 +126,7 @@ export class UblInvoiceBuilder {
     const payment_means = doc.ele(UBL_NAMESPACES.CAC, 'PaymentMeans');
     payment_means
       .ele(UBL_NAMESPACES.CBC, 'ID')
-      .txt('1');
+      .txt(invoice_data.payment_form || '1');
     payment_means
       .ele(UBL_NAMESPACES.CBC, 'PaymentMeansCode')
       .txt(invoice_data.payment_means || '10'); // Default: cash

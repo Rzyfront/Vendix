@@ -21,7 +21,10 @@ import {
 } from '@angular/forms';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
+import { Router } from '@angular/router';
 import { Subject, takeUntil, debounceTime } from 'rxjs';
+import { Store } from '@ngrx/store';
+import * as fromAuth from '../../../../../../core/store/auth';
 import { environment } from '../../../../../../../environments/environment';
 
 import {
@@ -107,8 +110,6 @@ import { PaymentRequest } from '../../models/payment.model';
         display: flex;
         flex-direction: column;
         gap: 12px;
-        max-height: 120px;
-        overflow-y: auto;
         margin-bottom: 12px;
       }
 
@@ -222,6 +223,49 @@ import { PaymentRequest } from '../../models/payment.model';
 
       .tab-content { min-height: 200px; }
 
+      /* Collapsible sub-sections */
+      .collapsible-subsection {
+        margin-top: 12px;
+        border-top: 1px solid var(--color-border);
+        padding-top: 12px;
+      }
+
+      .collapsible-subsection:first-of-type {
+        margin-top: 0;
+        border-top: none;
+        padding-top: 0;
+      }
+
+      .subsection-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+        padding: 4px 0;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .subsection-header:hover {
+        opacity: 0.8;
+      }
+
+      .collapsed-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 8px;
+        background: rgba(var(--color-primary-rgb), 0.08);
+        color: var(--color-primary);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .subsection-body {
+        margin-top: 12px;
+      }
+
       /* Methods Grid */
       .payment-methods-grid {
         display: grid;
@@ -264,6 +308,10 @@ import { PaymentRequest } from '../../models/payment.model';
       }
 
       .no-methods {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
         text-align: center;
         padding: 24px;
         color: var(--color-text-muted);
@@ -773,7 +821,7 @@ import { PaymentRequest } from '../../models/payment.model';
           height: 100%;
         }
 
-        .product-list { max-height: none; flex: 1; }
+        .product-list { max-height: none; }
         .search-results { max-height: 200px; }
       }
 
@@ -824,6 +872,14 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
   // Tab state
   activeTab: 'shipping' | 'payment' = 'shipping';
 
+  // Collapsible sub-section state
+  paymentFormCollapsed = false;
+  paymentModeCollapsed = false;
+  paymentMethodCollapsed = false;
+
+  // Onscreen keypad visibility
+  showOnscreenKeypad = true;
+
   // Shipping state
   shippingMethods: PosShippingMethod[] = [];
   selectedShippingMethod: PosShippingMethod | null = null;
@@ -838,6 +894,23 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
   selectedPaymentMethod: PaymentMethod | null = null;
   cashReceived = 0;
   cashChange = 0;
+
+  // Credit (Forma de Pago)
+  shippingPaymentForm: 'contado' | 'credito' = 'contado';
+  creditNumInstallments = 3;
+  creditFrequency: 'weekly' | 'biweekly' | 'monthly' = 'monthly';
+  creditFirstDate = '';
+  creditInterestRate = 0;
+  creditInitialPayment = 0;
+  creditInitialPaymentMethod: PaymentMethod | null = null;
+  creditRemainingBalance = 0;
+  creditInstallmentsPreview: { amount: number; due_date: string }[] = [];
+  frequencyOptions = [
+    { value: 'weekly' as const, label: 'Semanal' },
+    { value: 'biweekly' as const, label: 'Quincenal' },
+    { value: 'monthly' as const, label: 'Mensual' },
+  ];
+  defaultPaymentForm: 'contado' | 'credito' = 'contado';
 
   // Customer state
   showCustomerSelector = false;
@@ -941,6 +1014,8 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
     private cdr: ChangeDetectorRef,
     private currencyService: CurrencyFormatService,
     private countryService: CountryService,
+    private store: Store,
+    private router: Router,
   ) {
     this.addressForm = this.fb.group({
       address_line1: ['', Validators.required],
@@ -967,6 +1042,8 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
     this.setupFormListeners();
     this.currencyService.loadCurrency();
     this.loadDepartments();
+    this.loadStoreSettings();
+    this.setDefaultCreditFirstDate();
   }
 
   ngOnDestroy(): void {
@@ -985,6 +1062,9 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
 
   private resetState(): void {
     this.activeTab = 'shipping';
+    this.paymentFormCollapsed = false;
+    this.paymentModeCollapsed = false;
+    this.paymentMethodCollapsed = false;
     this.selectedShippingMethod = null;
     this.shippingCost = 0;
     this.calculatedShippingCost = null;
@@ -1003,6 +1083,15 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
     this.selectedCityId = null;
     this.validationWarningSection = null;
     this.validationWarningMessage = '';
+    this.shippingPaymentForm = this.defaultPaymentForm;
+    this.creditNumInstallments = 3;
+    this.creditFrequency = 'monthly';
+    this.creditInterestRate = 0;
+    this.creditInitialPayment = 0;
+    this.creditInitialPaymentMethod = null;
+    this.creditRemainingBalance = 0;
+    this.creditInstallmentsPreview = [];
+    this.setDefaultCreditFirstDate();
     if (this.validationWarningTimeout) {
       clearTimeout(this.validationWarningTimeout);
     }
@@ -1183,6 +1272,8 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
 
   setPaymentMode(mode: PosShippingPaymentMode): void {
     this.paymentMode = mode;
+    this.paymentModeCollapsed = true;
+    this.paymentMethodCollapsed = false;
     if (mode === 'on_delivery') {
       this.selectedPaymentMethod = null;
     }
@@ -1190,11 +1281,16 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
 
   selectPaymentMethod(method: PaymentMethod): void {
     this.selectedPaymentMethod = method;
+    this.paymentMethodCollapsed = true;
     this.paymentForm.reset();
     this.cashChange = 0;
     if (method.type === 'cash') {
       this.cashReceivedControl.setValue(this.totalWithShipping);
     }
+  }
+
+  togglePaymentMethodCollapsed(): void {
+    this.paymentMethodCollapsed = !this.paymentMethodCollapsed;
   }
 
   setCashAmount(amount: number): void {
@@ -1218,6 +1314,70 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
     this.cashReceivedControl.setValue(0);
   }
 
+  setShippingPaymentForm(form: 'contado' | 'credito'): void {
+    this.shippingPaymentForm = form;
+    this.paymentFormCollapsed = true;
+    this.paymentModeCollapsed = false;
+    if (form === 'credito') {
+      this.updateCreditCalculations();
+    }
+  }
+
+  togglePaymentFormCollapsed(): void {
+    this.paymentFormCollapsed = !this.paymentFormCollapsed;
+  }
+
+  togglePaymentModeCollapsed(): void {
+    this.paymentModeCollapsed = !this.paymentModeCollapsed;
+  }
+
+  selectCreditInitialPaymentMethod(method: PaymentMethod): void {
+    this.creditInitialPaymentMethod = method;
+  }
+
+  updateCreditCalculations(): void {
+    const total = this.totalWithShipping;
+    this.creditRemainingBalance = Math.max(0, total - (this.creditInitialPayment || 0));
+
+    const n = this.creditNumInstallments;
+    if (n <= 0 || this.creditRemainingBalance <= 0) {
+      this.creditInstallmentsPreview = [];
+      return;
+    }
+
+    const baseAmount = Math.round((this.creditRemainingBalance / n) * 100) / 100;
+    const freqDays: Record<string, number> = { weekly: 7, biweekly: 14, monthly: 30 };
+    const startDate = this.creditFirstDate ? new Date(this.creditFirstDate + 'T12:00:00') : new Date();
+
+    this.creditInstallmentsPreview = Array.from({ length: n }, (_, i) => {
+      const due = new Date(startDate);
+      due.setDate(due.getDate() + freqDays[this.creditFrequency] * i);
+      return {
+        amount: i === n - 1 ? Math.round((this.creditRemainingBalance - baseAmount * (n - 1)) * 100) / 100 : baseAmount,
+        due_date: due.toISOString().split('T')[0],
+      };
+    });
+  }
+
+  private setDefaultCreditFirstDate(): void {
+    const date = new Date();
+    date.setDate(date.getDate() + 30);
+    this.creditFirstDate = date.toISOString().split('T')[0];
+  }
+
+  private loadStoreSettings(): void {
+    this.store
+      .select(fromAuth.selectStoreSettings)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((settings: any) => {
+        if (settings?.pos?.default_payment_form) {
+          this.defaultPaymentForm = settings.pos.default_payment_form;
+          this.shippingPaymentForm = this.defaultPaymentForm;
+        }
+        this.showOnscreenKeypad = settings?.pos?.show_onscreen_keypad !== false;
+      });
+  }
+
   // --- Customer ---
 
   openCustomerSelector(): void {
@@ -1229,6 +1389,11 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
     this.showCustomerSelector = false;
     this.showCreateCustomerForm = false;
     this.customerSearchResults = [];
+  }
+
+  navigateToShippingSettings(): void {
+    this.onModalClosed();
+    this.router.navigate(['/admin/settings/shipping']);
   }
 
   onCustomerSearch(query: string): void {
@@ -1421,16 +1586,16 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
       clearTimeout(this.validationWarningTimeout);
     }
 
-    // Switch tab if the section is in a different tab
-    if (section === 'shipping-method' || section === 'address') {
-      this.activeTab = 'shipping';
-    } else if (section === 'payment') {
-      this.activeTab = 'payment';
-    }
-
     setTimeout(() => {
       this.validationWarningSection = section;
       this.validationWarningMessage = message;
+
+      // Expand collapsed payment sections when validation warns about payment
+      if (section === 'payment') {
+        this.paymentModeCollapsed = false;
+        this.paymentMethodCollapsed = false;
+      }
+
       this.cdr.markForCheck();
 
       // Scroll to the relevant section
@@ -1486,7 +1651,7 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
     };
 
     let paymentRequest: PaymentRequest | null = null;
-    if (this.paymentMode === 'pay_now' && this.selectedPaymentMethod) {
+    if (this.shippingPaymentForm === 'contado' && this.paymentMode === 'pay_now' && this.selectedPaymentMethod) {
       paymentRequest = {
         orderId: 'ORDER_' + Date.now(),
         amount: this.totalWithShipping,
@@ -1496,11 +1661,23 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
       };
     }
 
+    // Build credit config if credit mode is selected
+    const creditConfig = this.shippingPaymentForm === 'credito' ? {
+      num_installments: this.creditNumInstallments,
+      frequency: this.creditFrequency,
+      first_installment_date: this.creditFirstDate,
+      interest_rate: this.creditInterestRate,
+      initial_payment: this.creditInitialPayment,
+      initial_payment_method_id: this.creditInitialPaymentMethod
+        ? parseInt(this.creditInitialPaymentMethod.id)
+        : undefined,
+    } : undefined;
+
     // If customer has no saved address and we have a new address, create it first
     if (!this.selectedCustomerAddressId && address.address_line1 && address.city && this.cartState.customer) {
-      this.createAddressThenProcessOrder(address, shippingAddress, deliveryType, paymentRequest);
+      this.createAddressThenProcessOrder(address, shippingAddress, deliveryType, paymentRequest, creditConfig);
     } else {
-      this.processOrder(shippingAddress, deliveryType, paymentRequest, this.selectedCustomerAddressId);
+      this.processOrder(shippingAddress, deliveryType, paymentRequest, this.selectedCustomerAddressId, creditConfig);
     }
   }
 
@@ -1509,6 +1686,7 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
     shippingAddress: PosShippingAddress,
     deliveryType: string,
     paymentRequest: PaymentRequest | null,
+    creditConfig?: any,
   ): void {
     const customer = this.cartState!.customer!;
     const defaultCountryCode = this.countryService.getDefaultCountry();
@@ -1524,11 +1702,11 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
     }).pipe(takeUntil(this.destroy$)).subscribe({
       next: (response) => {
         const newAddressId = response?.data?.id || response?.id || null;
-        this.processOrder(shippingAddress, deliveryType, paymentRequest, newAddressId);
+        this.processOrder(shippingAddress, deliveryType, paymentRequest, newAddressId, creditConfig);
       },
       error: () => {
         // Fallback: process order without address ID
-        this.processOrder(shippingAddress, deliveryType, paymentRequest, null);
+        this.processOrder(shippingAddress, deliveryType, paymentRequest, null, creditConfig);
       },
     });
   }
@@ -1538,6 +1716,7 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
     deliveryType: string,
     paymentRequest: PaymentRequest | null,
     addressId: number | null,
+    creditConfig?: any,
   ): void {
     const address = this.addressForm.value;
 
@@ -1554,6 +1733,7 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
         },
         paymentRequest,
         'current_user',
+        creditConfig,
       )
       .pipe(takeUntil(this.destroy$))
       .subscribe({

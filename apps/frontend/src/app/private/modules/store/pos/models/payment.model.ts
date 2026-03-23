@@ -6,6 +6,8 @@ export interface PaymentMethod {
   enabled: boolean;
   requiresReference?: boolean;
   referenceLabel?: string;
+  dian_code?: string;
+  original?: any;
 }
 
 export interface PaymentRequest {

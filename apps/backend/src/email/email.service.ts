@@ -5,6 +5,7 @@ import {
   EmailProvider,
   EmailResult,
   EmailConfig,
+  EmailAttachment,
 } from './interfaces/email.interface';
 import { ResendProvider } from './providers/resend.provider';
 import { SesProvider } from './providers/ses.provider';
@@ -224,6 +225,40 @@ export class EmailService implements OnModuleInit {
       return result;
     } catch (error) {
       this.logger.error('Email service error:', error);
+      return {
+        success: false,
+        error: error.message || 'Unknown email service error',
+      };
+    }
+  }
+
+  async sendEmailWithAttachments(
+    to: string,
+    subject: string,
+    html: string,
+    attachments: EmailAttachment[],
+    text?: string,
+  ): Promise<EmailResult> {
+    try {
+      const result = await this.provider.sendEmailWithAttachments(
+        to,
+        subject,
+        html,
+        attachments,
+        text,
+      );
+
+      if (result.success) {
+        this.logger.log(
+          `Email with ${attachments.length} attachment(s) sent successfully to ${to} using ${this.config.provider}`,
+        );
+      } else {
+        this.logger.error(`Failed to send email with attachments to ${to}: ${result.error}`);
+      }
+
+      return result;
+    } catch (error) {
+      this.logger.error('Email service error (with attachments):', error);
       return {
         success: false,
         error: error.message || 'Unknown email service error',

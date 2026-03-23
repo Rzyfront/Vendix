@@ -65,6 +65,7 @@ export class HelpCenterAdminService {
         cover_image_url: article.cover_image_url
           ? await this.s3Service.signUrl(article.cover_image_url)
           : null,
+        content: await this.s3Service.signMarkdownContent(article.content),
       })),
     );
 
@@ -98,6 +99,7 @@ export class HelpCenterAdminService {
       cover_image_url: article.cover_image_url
         ? await this.s3Service.signUrl(article.cover_image_url)
         : null,
+      content: await this.s3Service.signMarkdownContent(article.content),
     };
   }
 
@@ -130,7 +132,7 @@ export class HelpCenterAdminService {
         title: dto.title,
         slug: finalSlug,
         summary: dto.summary,
-        content: dto.content,
+        content: this.s3Service.sanitizeMarkdownContent(dto.content),
         type: dto.type as any,
         status: (dto.status || 'DRAFT') as any,
         category_id: dto.category_id,
@@ -189,7 +191,7 @@ export class HelpCenterAdminService {
         ...(dto.title && { title: dto.title }),
         ...(slug && { slug }),
         ...(dto.summary && { summary: dto.summary }),
-        ...(dto.content !== undefined && { content: dto.content }),
+        ...(dto.content !== undefined && { content: this.s3Service.sanitizeMarkdownContent(dto.content) }),
         ...(dto.type && { type: dto.type as any }),
         ...(dto.status && { status: dto.status as any }),
         ...(dto.category_id && { category_id: dto.category_id }),

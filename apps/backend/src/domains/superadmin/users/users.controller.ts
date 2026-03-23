@@ -15,6 +15,7 @@ import {
   UpdateUserDto,
   UserQueryDto,
 } from '../../organization/users/dto';
+import { SyncPanelUiDto } from './dto/sync-panel-ui.dto';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { UserRole } from '../../auth/enums/user-role.enum';
@@ -66,6 +67,22 @@ export class UsersController {
       stats,
       'Dashboard statistics retrieved successfully',
     );
+  }
+
+  @Get('panel-ui-preview')
+  @ApiOperation({ summary: 'Preview panel UI sync for eligible users' })
+  @ApiResponse({ status: 200, description: 'Panel UI sync preview' })
+  async previewPanelUISync() {
+    const data = await this.usersService.previewPanelUISync();
+    return this.responseService.success(data, 'Panel UI sync preview');
+  }
+
+  @Post('sync-panel-ui')
+  @ApiOperation({ summary: 'Bulk sync panel UI for eligible users' })
+  @ApiResponse({ status: 200, description: 'Panel UI sync completed' })
+  async syncPanelUI(@Body() dto: SyncPanelUiDto) {
+    const result = await this.usersService.syncPanelUI(dto);
+    return this.responseService.success(result, 'Panel UI sync completed');
   }
 
   @Get(':id')

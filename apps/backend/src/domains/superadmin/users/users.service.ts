@@ -2,6 +2,7 @@ import {
   Injectable,
   ConflictException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import {
@@ -14,9 +15,14 @@ import * as bcrypt from 'bcrypt';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
 import { toTitleCase } from '@common/utils/format.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { SyncPanelUiDto } from './dto/sync-panel-ui.dto';
+
+const ELIGIBLE_ROLES = ['super_admin', 'org_admin', 'store_owner', 'store_admin'];
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
@@ -581,5 +587,163 @@ export class UsersService {
 
     const { password, ...userWithoutPassword } = updatedUser;
     return userWithoutPassword;
+  }
+
+  async previewPanelUISync() {
+    // 1. Get current defaults from DefaultPanelUIService
+    const defaults = await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
+
+    // 2. Count eligible users (those with admin/owner roles)
+    const eligible_users = await this.prisma.user_settings.findMany({
+      where: {
+        user: {
+          user_roles: {
+            some: {
+              roles: {
+                name: { in: ELIGIBLE_ROLES },
+              },
+            },
+          },
+        },
+      },
+      include: {
+        user: {
+          select: { id: true, first_name: true, last_name: true, email: true },
+        },
+      },
+    });
+
+    // 3. Calculate how many have outdated configs (missing keys)
+    const default_panel_ui = defaults.panel_ui;
+    let outdated_count = 0;
+    const sample_diff: Record<string, string[]> = {};
+
+    for (const settings of eligible_users) {
+      const config = (settings.config as any) || {};
+      const user_panel_ui = config.panel_ui || {};
+      let has_missing = false;
+
+      for (const app_type of Object.keys(default_panel_ui)) {
+        const default_keys = Object.keys(default_panel_ui[app_type] || {});
+        const user_keys = Object.keys(user_panel_ui[app_type] || {});
+        const missing = default_keys.filter(k => !user_keys.includes(k));
+
+        if (missing.length > 0) {
+          has_missing = true;
+          if (!sample_diff[app_type]) sample_diff[app_type] = [];
+          // Only track unique missing keys
+          for (const m of missing) {
+            if (!sample_diff[app_type].includes(m)) sample_diff[app_type].push(m);
+          }
+        }
+      }
+      if (has_missing) outdated_count++;
+    }
+
+    return {
+      total_eligible: eligible_users.length,
+      outdated_count,
+      eligible_roles: ELIGIBLE_ROLES,
+      default_panel_ui,
+      missing_keys_sample: sample_diff,
+    };
+  }
+
+  async syncPanelUI(dto: SyncPanelUiDto): Promise<{ updated: number; skipped: number; errors: string[] }> {
+    const strategy = dto.strategy || 'merge';
+    const defaults = await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
+    const default_panel_ui = defaults.panel_ui;
+
+    // Build where clause
+    const where: any = {
+      user: {
+        user_roles: {
+          some: {
+            roles: {
+              name: { in: ELIGIBLE_ROLES },
+            },
+          },
+        },
+      },
+    };
+
+    // If specific user_ids provided, add filter
+    if (dto.user_ids && dto.user_ids.length > 0) {
+      where.user_id = { in: dto.user_ids };
+    }
+
+    // Get all eligible user_settings
+    const settings_list = await this.prisma.user_settings.findMany({
+      where,
+      include: {
+        user: { select: { id: true, email: true } },
+      },
+    });
+
+    let updated = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    // Determine which app_types to sync
+    const target_app_types = dto.app_types && dto.app_types.length > 0
+      ? dto.app_types
+      : Object.keys(default_panel_ui);
+
+    for (const settings of settings_list) {
+      try {
+        const config = (settings.config as any) || {};
+        const current_panel_ui = config.panel_ui || {};
+        let changed = false;
+
+        const new_panel_ui = { ...current_panel_ui };
+
+        for (const app_type of target_app_types) {
+          if (!default_panel_ui[app_type]) continue;
+
+          if (strategy === 'replace') {
+            new_panel_ui[app_type] = { ...default_panel_ui[app_type] };
+            changed = true;
+          } else {
+            // merge: add missing keys, keep existing values
+            const current_app = current_panel_ui[app_type] || {};
+            const merged = { ...current_app };
+
+            for (const [key, value] of Object.entries(default_panel_ui[app_type])) {
+              if (!(key in merged)) {
+                merged[key] = value;
+                changed = true;
+              }
+            }
+
+            new_panel_ui[app_type] = merged;
+          }
+        }
+
+        if (!changed && strategy === 'merge') {
+          skipped++;
+          continue;
+        }
+
+        // Update user_settings
+        await this.prisma.user_settings.update({
+          where: { id: settings.id },
+          data: {
+            config: {
+              ...config,
+              panel_ui: new_panel_ui,
+            },
+            updated_at: new Date(),
+          },
+        });
+
+        updated++;
+      } catch (error) {
+        errors.push(`User #${settings.user_id} (${settings.user?.email}): ${error.message}`);
+      }
+    }
+
+    this.logger.log(`Panel UI sync completed: ${updated} updated, ${skipped} skipped, ${errors.length} errors (strategy: ${strategy})`);
+
+    return { updated, skipped, errors };
   }
 }

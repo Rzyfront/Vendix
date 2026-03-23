@@ -1,0 +1,42 @@
+:host {
+  display: block;
+}
+
+@media (max-width: 639px) {
+  :host ::ng-deep app-card > div {
+    border-radius: 0.75rem;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  .shadow-sm,
+  .shadow-md,
+  .shadow-lg {
+    box-shadow: none !important;
+  }
+  .border {
+    border-color: #eee !important;
+  }
+}
+
+h1,
+h2,
+h3,
+p,
+span {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+input,
+textarea,
+select {
+  font-size: 16px !important;
+
+  @media (min-width: 768px) {
+    font-size: 14px !important;
+  }
+}

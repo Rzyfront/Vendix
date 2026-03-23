@@ -55,6 +55,16 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
           <app-icon name="file-text" [size]="18"></app-icon>
           <span>Crear Cotización</span>
         </button>
+      } @else if (isLayawayMode) {
+        <!-- Layaway mode: single button -->
+        <button
+          class="action-btn checkout-btn checkout-btn-full"
+          (click)="layaway.emit()"
+          [disabled]="itemCount === 0"
+        >
+          <app-icon name="calendar" [size]="18"></app-icon>
+          <span>Crear Plan Separé</span>
+        </button>
       } @else {
         <!-- Row 2: Secondary Action Buttons -->
         <div class="actions-row">
@@ -324,12 +334,14 @@ export class PosMobileFooterComponent {
   @Input() itemCount: number = 0;
   @Input() isTablet: boolean = false;
   @Input() isQuotationMode: boolean = false;
+  @Input() isLayawayMode: boolean = false;
 
   @Output() viewCart = new EventEmitter<void>();
   @Output() saveDraft = new EventEmitter<void>();
   @Output() shipping = new EventEmitter<void>();
   @Output() checkout = new EventEmitter<void>();
   @Output() quote = new EventEmitter<void>();
+  @Output() layaway = new EventEmitter<void>();
 
   formatCurrency(amount: number): string {
     return this.currencyService.format(amount);

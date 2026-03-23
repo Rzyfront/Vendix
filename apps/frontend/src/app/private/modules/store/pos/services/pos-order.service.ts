@@ -96,9 +96,6 @@ export class PosOrderService {
       discount_amount: Number(cartState.summary.discountAmount.toFixed(2)),
       total_amount: Number(cartState.summary.total.toFixed(2)),
       requires_payment: false, // Credit sale
-      credit_terms: {
-        payment_terms: 'Pendiente de pago',
-      },
       register_id: 'POS_REGISTER_001',
       seller_user_id: createdBy,
       internal_notes: cartState.notes,

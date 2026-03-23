@@ -9,6 +9,7 @@ import {
   SimpleChanges,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Router, RouterModule } from '@angular/router';
 import { Subject, takeUntil, take } from 'rxjs';
 import { StoreOrdersService } from '../../services/store-orders.service';
 import {
@@ -16,7 +17,7 @@ import {
   DialogService,
   ToastService,
 } from '../../../../../../shared/components';
-import { Order, OrderState } from '../../interfaces/order.interface';
+import { Order, OrderState, OrderCredit, OrderCreditInstallment } from '../../interfaces/order.interface';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { Store } from '@ngrx/store';
 import { Actions, ofType } from '@ngrx/effects';
@@ -25,7 +26,7 @@ import * as InvoicingActions from '../../../invoicing/state/actions/invoicing.ac
 @Component({
   selector: 'app-order-details',
   standalone: true,
-  imports: [CommonModule, ModalComponent, CurrencyPipe],
+  imports: [CommonModule, ModalComponent, CurrencyPipe, RouterModule],
   templateUrl: './order-details.component.html',
   styleUrls: ['./order-details.component.css'],
 })
@@ -61,6 +62,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy, OnChanges {
     private currencyService: CurrencyFormatService,
     private store: Store,
     private actions$: Actions,
+    private router: Router,
   ) {}
 
   ngOnInit(): void {
@@ -288,6 +290,36 @@ export class OrderDetailsComponent implements OnInit, OnDestroy, OnChanges {
         </body>
       </html>
     `;
+  }
+
+  get credit(): OrderCredit | null {
+    return this.order?.credits?.[0] || null;
+  }
+
+  get isCreditOrder(): boolean {
+    return this.order?.payment_form === '2' || (this.order?.credits?.length ?? 0) > 0;
+  }
+
+  get creditProgressPercentage(): number {
+    if (!this.credit) return 0;
+    return Math.round((this.credit.total_paid / this.credit.total_amount) * 100);
+  }
+
+  get nextInstallment(): OrderCreditInstallment | null {
+    if (!this.credit?.installments) return null;
+    return this.credit.installments.find(i => i.state !== 'paid' && i.state !== 'forgiven') || null;
+  }
+
+  viewCreditDetail(): void {
+    if (this.credit) {
+      this.router.navigate(['/admin/orders/credits', this.credit.id]);
+      this.closeModal();
+    }
+  }
+
+  getPaymentFormLabel(): string {
+    if (this.isCreditOrder) return 'Crédito';
+    return 'Contado';
   }
 
   // Helper methods for status display

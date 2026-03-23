@@ -103,6 +103,8 @@ export function getDefaultStoreSettings(): StoreSettings {
         require_closing_count: true,
         track_non_cash_payments: true,
       },
+      default_payment_form: 'contado',
+      show_onscreen_keypad: true,
     },
     receipts: {
       print_receipt: true,
@@ -126,6 +128,8 @@ export function getDefaultStoreSettings(): StoreSettings {
         orders_sales: true,
         orders_purchase_orders: true,
         orders_quotations: true,
+        orders_layaway: true,
+        orders_credits: true,
 
         // Inventario
         inventory: true,
@@ -160,16 +164,18 @@ export function getDefaultStoreSettings(): StoreSettings {
 
         // Contabilidad
         accounting: true,
-        accounting_journal_entries: false,
-        accounting_fiscal_periods: false,
-        accounting_chart_of_accounts: false,
-        accounting_reports: false,
+        accounting_journal_entries: true,
+        accounting_fiscal_periods: true,
+        accounting_chart_of_accounts: true,
+        accounting_reports: true,
 
         // Nómina
         payroll: true,
-        payroll_employees: false,
-        payroll_runs: false,
-        payroll_settings: false,
+        payroll_employees: true,
+        payroll_runs: true,
+        payroll_settlements: true,
+        payroll_advances: true,
+        payroll_settings: true,
 
         // Configuración
         settings: true,
@@ -182,7 +188,7 @@ export function getDefaultStoreSettings(): StoreSettings {
         settings_legal_documents: true,
         settings_users: true,
         settings_roles: true,
-        settings_cash_registers: false,
+        settings_cash_registers: true,
 
         // Ayuda
         help: true,

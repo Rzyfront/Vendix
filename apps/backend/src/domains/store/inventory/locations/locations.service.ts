@@ -256,6 +256,30 @@ export class LocationsService {
   }
 
   /**
+   * Busca una ubicación activa por código (scope auto-aplica org/store)
+   */
+  async findByCode(code: string): Promise<any | null> {
+    return this.prisma.inventory_locations.findFirst({
+      where: {
+        code: { equals: code, mode: 'insensitive' },
+        is_active: true,
+      },
+    });
+  }
+
+  /**
+   * Busca una ubicación activa por nombre (scope auto-aplica org/store)
+   */
+  async findByName(name: string): Promise<any | null> {
+    return this.prisma.inventory_locations.findFirst({
+      where: {
+        name: { equals: name, mode: 'insensitive' },
+        is_active: true,
+      },
+    });
+  }
+
+  /**
    * Obtiene todas las ubicaciones de una organización
    */
   async getLocationsByOrganization(organizationId: number) {

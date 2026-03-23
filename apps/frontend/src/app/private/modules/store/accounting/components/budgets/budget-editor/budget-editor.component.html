@@ -1,0 +1,212 @@
+@if (loading()) {
+  <div class="flex items-center justify-center min-h-[400px]">
+    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+  </div>
+} @else if (budget(); as b) {
+  <div class="w-full">
+
+    <!-- Header -->
+    <div class="flex flex-col gap-3 mb-4 px-2 md:px-0">
+      <div class="flex items-center gap-2">
+        <button
+          (click)="goBack()"
+          class="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-gray-100 transition-colors"
+        >
+          <app-icon name="arrow-left" [size]="18"></app-icon>
+        </button>
+        <div class="flex-1 min-w-0">
+          <h1 class="text-lg md:text-xl font-semibold text-text-primary truncate">
+            {{ b.name }}
+          </h1>
+          <p class="text-xs md:text-sm text-text-secondary">
+            {{ b.fiscal_period?.name || 'Sin periodo' }}
+          </p>
+        </div>
+        <span
+          class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+          [class.bg-amber-100]="b.status === 'draft'"
+          [class.text-amber-800]="b.status === 'draft'"
+          [class.bg-blue-100]="b.status === 'approved'"
+          [class.text-blue-800]="b.status === 'approved'"
+          [class.bg-emerald-100]="b.status === 'active'"
+          [class.text-emerald-800]="b.status === 'active'"
+          [class.bg-gray-100]="b.status === 'closed'"
+          [class.text-gray-800]="b.status === 'closed'"
+        >
+          {{ status_label() }}
+        </span>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex flex-wrap items-center gap-2">
+        @if (is_editable()) {
+          <app-button
+            variant="primary"
+            size="sm"
+            [loading]="saving()"
+            [disabled]="saving()"
+            (clicked)="saveLines()"
+          >
+            Guardar
+          </app-button>
+          <app-button
+            variant="outline"
+            size="sm"
+            (clicked)="approveBudget()"
+            [disabled]="lines().length === 0"
+          >
+            Aprobar
+          </app-button>
+        }
+        @if (b.status === 'approved') {
+          <app-button variant="primary" size="sm" (clicked)="activateBudget()">
+            Activar
+          </app-button>
+        }
+        @if (b.status === 'active') {
+          <app-button variant="outline" size="sm" (clicked)="closeBudget()">
+            Cerrar
+          </app-button>
+          <app-button variant="secondary" size="sm" (clicked)="goToVariance()">
+            Ver Varianza
+          </app-button>
+        }
+        @if (b.status === 'closed') {
+          <app-button variant="secondary" size="sm" (clicked)="goToVariance()">
+            Ver Varianza
+          </app-button>
+        }
+      </div>
+    </div>
+
+    <!-- Add Account Row (only in draft) -->
+    @if (is_editable()) {
+      <div class="flex items-end gap-2 mb-4 px-2 md:px-0">
+        <div class="flex-1 max-w-xs">
+          <app-selector
+            label="Agregar Cuenta"
+            [options]="account_options()"
+            [ngModel]="selected_account_id()"
+            (ngModelChange)="selected_account_id.set($any($event))"
+            placeholder="Seleccionar cuenta..."
+            size="sm"
+          ></app-selector>
+        </div>
+        <app-button
+          variant="outline"
+          size="sm"
+          (clicked)="addLine()"
+          [disabled]="!selected_account_id()"
+        >
+          Agregar
+        </app-button>
+      </div>
+    }
+
+    <!-- Grid Table -->
+    <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[900px] text-sm">
+          <thead>
+            <tr class="bg-gray-50 border-b border-border">
+              <th class="sticky left-0 z-10 bg-gray-50 text-left px-3 py-2.5 font-semibold text-text-secondary text-xs uppercase tracking-wider min-w-[180px]">
+                Cuenta
+              </th>
+              @for (label of month_labels; track label; let i = $index) {
+                <th class="text-right px-2 py-2.5 font-semibold text-text-secondary text-xs uppercase tracking-wider min-w-[90px]">
+                  {{ label }}
+                </th>
+              }
+              <th class="text-right px-3 py-2.5 font-semibold text-text-secondary text-xs uppercase tracking-wider min-w-[100px] bg-gray-100">
+                Total
+              </th>
+              @if (is_editable()) {
+                <th class="px-2 py-2.5 w-10"></th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            @for (line of lines(); track trackByIndex($index); let idx = $index) {
+              <tr class="border-b border-border/50 hover:bg-gray-50/50 transition-colors">
+                <td class="sticky left-0 z-10 bg-surface px-3 py-2 font-medium text-text-primary">
+                  <div class="truncate max-w-[170px]" [title]="line.account_code + ' - ' + line.account_name">
+                    <span class="text-text-secondary text-xs">{{ line.account_code }}</span>
+                    <span class="ml-1">{{ line.account_name }}</span>
+                  </div>
+                </td>
+                @for (month of line.months; track trackByIndex($index); let mi = $index) {
+                  <td class="px-1 py-1">
+                    @if (is_editable()) {
+                      <input
+                        type="number"
+                        [value]="month"
+                        (change)="onCellChange(idx, mi, $any($event.target).value)"
+                        class="w-full text-right px-2 py-1.5 text-sm border border-border rounded-md
+                               focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary
+                               bg-white hover:bg-gray-50 transition-colors
+                               [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        min="0"
+                        step="1000"
+                      />
+                    } @else {
+                      <span class="block text-right px-2 py-1.5 text-sm text-text-primary">
+                        {{ formatCurrency(month) }}
+                      </span>
+                    }
+                  </td>
+                }
+                <td class="px-3 py-2 text-right font-semibold text-text-primary bg-gray-50/50">
+                  {{ formatCurrency(line.total) }}
+                </td>
+                @if (is_editable()) {
+                  <td class="px-1 py-2 text-center">
+                    <button
+                      (click)="removeLine(idx)"
+                      class="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
+                      title="Eliminar linea"
+                    >
+                      <app-icon name="trash-2" [size]="14"></app-icon>
+                    </button>
+                  </td>
+                }
+              </tr>
+            }
+
+            @if (lines().length === 0) {
+              <tr>
+                <td [attr.colspan]="is_editable() ? 15 : 14" class="text-center py-12 text-text-secondary">
+                  <app-icon name="clipboard" [size]="32" class="mx-auto mb-2 opacity-40"></app-icon>
+                  <p>No hay cuentas en este presupuesto</p>
+                  <p class="text-xs mt-1">Agrega cuentas usando el selector de arriba</p>
+                </td>
+              </tr>
+            }
+          </tbody>
+
+          <!-- Column Totals -->
+          @if (lines().length > 0) {
+            <tfoot>
+              <tr class="bg-gray-100 border-t-2 border-border font-semibold">
+                <td class="sticky left-0 z-10 bg-gray-100 px-3 py-2.5 text-text-primary text-sm">
+                  Totales
+                </td>
+                @for (total of column_totals(); track trackByIndex($index)) {
+                  <td class="px-2 py-2.5 text-right text-sm text-text-primary">
+                    {{ formatCurrency(total) }}
+                  </td>
+                }
+                <td class="px-3 py-2.5 text-right text-sm text-text-primary bg-gray-200/50 font-bold">
+                  {{ formatCurrency(grand_total()) }}
+                </td>
+                @if (is_editable()) {
+                  <td class="px-2 py-2.5"></td>
+                }
+              </tr>
+            </tfoot>
+          }
+        </table>
+      </div>
+    </div>
+
+  </div>
+}

@@ -13,7 +13,7 @@
         </div>
         <div class="success-text">
             <h2>¡Pedido confirmado!</h2>
-            <p>Tu pedido <strong>#{{ order.order_number }}</strong> fue registrado. Te notificaremos cuando esté en camino.</p>
+            <p>Tu pedido <strong>#{{ order.order_number }}</strong> fue registrado. {{ postPurchaseMessage }}</p>
         </div>
     </div>
     }
@@ -72,7 +72,12 @@
                         }
                     </div>
                     <div class="item-details">
-                        <span class="item-name">{{ item.product_name }}</span>
+                        <div class="item-name-row">
+                            <span class="item-name">{{ item.product_name }}</span>
+                            @if (item.product_type === 'service') {
+                            <span class="item-type-badge item-type-badge--service">Servicio</span>
+                            }
+                        </div>
                         @if (getVariantLabel(item)) {
                         <span class="item-variant">{{ getVariantLabel(item) }}</span>
                         }

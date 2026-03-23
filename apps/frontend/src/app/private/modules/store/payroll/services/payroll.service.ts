@@ -19,6 +19,16 @@ import {
   EmployeeStats,
   ApiResponse,
   AvailableUser,
+  PayrollSettlement,
+  SettlementStats,
+  CreateSettlementDto,
+  EmployeeAdvance,
+  AdvanceStats,
+  CreateAdvanceDto,
+  AdvanceApproveDto,
+  AdvanceManualPaymentDto,
+  EmployeeAdvanceSummary,
+  BankExportResult,
 } from '../interfaces/payroll.interface';
 
 @Injectable({
@@ -148,6 +158,117 @@ export class PayrollService {
 
   updatePayrollRules(year: number, rules: Partial<PayrollRules>): Observable<ApiResponse<PayrollRules>> {
     return this.http.patch<ApiResponse<PayrollRules>>(this.getApiUrl(`rules/${year}`), rules);
+  }
+
+  // ─── Settlements ───────────────────────────────────────
+
+  getSettlements(query: Record<string, any> = {}): Observable<{ data: PayrollSettlement[]; meta: any }> {
+    const params = this.buildParams(query);
+    return this.http.get<{ data: PayrollSettlement[]; meta: any }>(this.getApiUrl('settlements'), { params });
+  }
+
+  getSettlement(id: number): Observable<ApiResponse<PayrollSettlement>> {
+    return this.http.get<ApiResponse<PayrollSettlement>>(this.getApiUrl(`settlements/${id}`));
+  }
+
+  getSettlementStats(): Observable<ApiResponse<SettlementStats>> {
+    return this.http.get<ApiResponse<SettlementStats>>(this.getApiUrl('settlements/stats'));
+  }
+
+  createSettlement(dto: CreateSettlementDto): Observable<ApiResponse<PayrollSettlement>> {
+    return this.http.post<ApiResponse<PayrollSettlement>>(this.getApiUrl('settlements'), dto);
+  }
+
+  recalculateSettlement(id: number): Observable<ApiResponse<PayrollSettlement>> {
+    return this.http.post<ApiResponse<PayrollSettlement>>(this.getApiUrl(`settlements/${id}/recalculate`), {});
+  }
+
+  approveSettlement(id: number, notes?: string): Observable<ApiResponse<PayrollSettlement>> {
+    return this.http.patch<ApiResponse<PayrollSettlement>>(this.getApiUrl(`settlements/${id}/approve`), { notes });
+  }
+
+  paySettlement(id: number): Observable<ApiResponse<PayrollSettlement>> {
+    return this.http.patch<ApiResponse<PayrollSettlement>>(this.getApiUrl(`settlements/${id}/pay`), {});
+  }
+
+  cancelSettlement(id: number): Observable<ApiResponse<PayrollSettlement>> {
+    return this.http.patch<ApiResponse<PayrollSettlement>>(this.getApiUrl(`settlements/${id}/cancel`), {});
+  }
+
+  getSettlementPayslip(id: number): Observable<Blob> {
+    return this.http.get(this.getApiUrl(`settlements/${id}/payslip`), { responseType: 'blob' });
+  }
+
+  // ─── Advances ─────────────────────────────────────────
+
+  getAdvances(query: Record<string, any> = {}): Observable<{ data: EmployeeAdvance[]; meta: any }> {
+    const params = this.buildParams(query);
+    return this.http.get<{ data: EmployeeAdvance[]; meta: any }>(this.getApiUrl('advances'), { params });
+  }
+
+  getAdvance(id: number): Observable<ApiResponse<EmployeeAdvance>> {
+    return this.http.get<ApiResponse<EmployeeAdvance>>(this.getApiUrl(`advances/${id}`));
+  }
+
+  getAdvanceStats(): Observable<ApiResponse<AdvanceStats>> {
+    return this.http.get<ApiResponse<AdvanceStats>>(this.getApiUrl('advances/stats'));
+  }
+
+  createAdvance(dto: CreateAdvanceDto): Observable<ApiResponse<EmployeeAdvance>> {
+    return this.http.post<ApiResponse<EmployeeAdvance>>(this.getApiUrl('advances'), dto);
+  }
+
+  approveAdvance(id: number, dto?: AdvanceApproveDto): Observable<ApiResponse<EmployeeAdvance>> {
+    return this.http.patch<ApiResponse<EmployeeAdvance>>(this.getApiUrl(`advances/${id}/approve`), dto || {});
+  }
+
+  rejectAdvance(id: number): Observable<ApiResponse<EmployeeAdvance>> {
+    return this.http.patch<ApiResponse<EmployeeAdvance>>(this.getApiUrl(`advances/${id}/reject`), {});
+  }
+
+  cancelAdvance(id: number): Observable<ApiResponse<EmployeeAdvance>> {
+    return this.http.patch<ApiResponse<EmployeeAdvance>>(this.getApiUrl(`advances/${id}/cancel`), {});
+  }
+
+  registerAdvancePayment(id: number, dto: AdvanceManualPaymentDto): Observable<ApiResponse<EmployeeAdvance>> {
+    return this.http.post<ApiResponse<EmployeeAdvance>>(this.getApiUrl(`advances/${id}/pay`), dto);
+  }
+
+  getEmployeeAdvanceSummary(employeeId: number): Observable<ApiResponse<EmployeeAdvanceSummary>> {
+    return this.http.get<ApiResponse<EmployeeAdvanceSummary>>(this.getApiUrl(`advances/employee/${employeeId}/summary`));
+  }
+
+  // ─── Paystubs & ACH ───────────────────────────────────
+
+  getPayslip(itemId: number): Observable<Blob> {
+    return this.http.get(this.getApiUrl(`items/${itemId}/payslip`), { responseType: 'blob' });
+  }
+
+  generateBulkPayslips(runId: number): Observable<ApiResponse<any>> {
+    return this.http.post<ApiResponse<any>>(this.getApiUrl(`runs/${runId}/generate-payslips`), {});
+  }
+
+  exportAch(runId: number, bank: string): Observable<Blob> {
+    return this.http.post(this.getApiUrl(`runs/${runId}/export-ach`), null, {
+      params: { bank },
+      responseType: 'blob',
+    });
+  }
+
+  validateBankData(runId: number): Observable<ApiResponse<any>> {
+    return this.http.get<ApiResponse<any>>(this.getApiUrl(`runs/${runId}/validate-bank-data`));
+  }
+
+  // ─── Helpers ──────────────────────────────────────────
+
+  private buildParams(query: Record<string, any>): Record<string, any> {
+    const params: Record<string, any> = {};
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== null && value !== '') {
+        params[key] = value;
+      }
+    }
+    return params;
   }
 
   /** Map backend payroll_items field to frontend items field */

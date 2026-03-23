@@ -48,6 +48,7 @@ export interface Order {
   discount_amount: number;
   grand_total: number;
   currency: string;
+  payment_form?: string;
   billing_address_id?: number;
   shipping_address_id?: number;
   internal_notes?: string;
@@ -63,6 +64,7 @@ export interface Order {
   addresses_orders_billing_address_idToaddresses?: Address;
   addresses_orders_shipping_address_idToaddresses?: Address;
   payments?: Payment[];
+  credits?: OrderCredit[];
   users?: {
     id: number;
     first_name: string;
@@ -86,6 +88,7 @@ export interface OrderItem {
   total_price: number;
   tax_rate?: number;
   tax_amount_item?: number;
+  item_type?: string;
   created_at: string;
   updated_at: string;
   products?: Product;
@@ -600,4 +603,31 @@ export interface RefundItemRecord {
     name: string;
     code: string;
   };
+}
+
+// ── Credit Types (for Order Detail) ──────────────────────────────
+
+export interface OrderCredit {
+  id: number;
+  credit_number: string;
+  total_amount: number;
+  total_paid: number;
+  remaining_balance: number;
+  num_installments: number;
+  frequency: string;
+  interest_rate: number;
+  state: string;
+  first_installment_date?: string;
+  completed_at?: string;
+  installments?: OrderCreditInstallment[];
+}
+
+export interface OrderCreditInstallment {
+  id: number;
+  installment_number: number;
+  installment_value: number;
+  amount_paid: number;
+  remaining_balance: number;
+  due_date: string;
+  state: string;
 }

@@ -61,100 +61,221 @@
       </div>
     </section>
 
-    <!-- Método de Pago Section -->
+    <!-- Pago Section -->
     <section class="payment-section">
       <div class="section-header">
-        <app-icon name="credit-card" [size]="16" class="section-icon"></app-icon>
-        <h2 class="section-title">Método de Pago</h2>
+        <div class="section-indicator"></div>
+        <h2 class="section-title">Pago</h2>
       </div>
 
-      <div *ngIf="paymentMethods.length > 0; else noPaymentMethods" class="payment-methods-grid">
-        <button
-          *ngFor="let method of paymentMethods"
-          type="button"
-          (click)="selectPaymentMethod(method)"
-          class="payment-method-btn"
-          [class.selected]="paymentState.selectedMethod?.id === method.id"
-        >
-          <app-icon [name]="method.icon" [size]="24"></app-icon>
-          <span class="method-name">{{ method.name }}</span>
-        </button>
-      </div>
-
-      <ng-template #noPaymentMethods>
-        <div class="no-methods">
-          <app-icon name="credit-card" [size]="24"></app-icon>
-          <p>No hay métodos configurados</p>
-          <button class="configure-link" (click)="navigateToSettings()">Configurar ahora</button>
-        </div>
-      </ng-template>
-
-      <!-- Cash Input (when cash selected) -->
-      <div *ngIf="paymentState.selectedMethod?.type === 'cash'" class="cash-section">
-        <div class="cash-inputs">
-          <div class="cash-input-group">
-            <label>Monto Recibido</label>
-            <div class="cash-input" [class.error]="isCashAmountInsufficient">
-              <span class="currency">{{ currencySymbol() }}</span>
-              <input
-                type="number"
-                [formControl]="cashReceivedControl"
-                placeholder="0.00"
-                step="0.01"
-                (input)="calculateChange()"
-              />
-            </div>
-            <span *ngIf="isCashAmountInsufficient" class="error-text">
-              Faltan: {{ missingAmount | currency }}
+      <!-- Sub-section: Forma de Pago -->
+      <div class="collapsible-subsection" [class.collapsed]="paymentFormCollapsed">
+        <div class="subsection-header" (click)="togglePaymentFormCollapsed()">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <app-icon name="layers" [size]="16" class="section-icon"></app-icon>
+            <h2 class="section-title" style="margin: 0;">Forma de Pago</h2>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span *ngIf="paymentFormCollapsed" class="collapsed-badge">
+              <app-icon [name]="paymentState.paymentForm === 'contado' ? 'zap' : 'clock'" [size]="14"></app-icon>
+              {{ paymentState.paymentForm === 'contado' ? 'Contado' : 'Crédito' }}
             </span>
+            <app-icon [name]="paymentFormCollapsed ? 'chevron-down' : 'chevron-up'" [size]="16" style="color: var(--color-text-muted);"></app-icon>
           </div>
-          <div class="cash-input-group">
-            <label>Cambio</label>
-            <div class="change-display">
-              <span>{{ paymentState.change | currency }}</span>
-              <app-icon name="coins" [size]="18"></app-icon>
+        </div>
+
+        <div class="subsection-body" *ngIf="!paymentFormCollapsed">
+          <div class="tab-headers">
+            <button type="button" class="tab-btn"
+              [class.active]="paymentState.paymentForm === 'contado'"
+              (click)="setPaymentForm('contado')">
+              <app-icon name="zap" [size]="16"></app-icon>
+              <span>Contado</span>
+            </button>
+            <button type="button" class="tab-btn"
+              [class.active]="paymentState.paymentForm === 'credito'"
+              (click)="setPaymentForm('credito')">
+              <app-icon name="clock" [size]="16"></app-icon>
+              <span>Crédito</span>
+            </button>
+          </div>
+
+          <!-- Crédito Config (only when credito selected) -->
+          <div *ngIf="paymentState.paymentForm === 'credito'" class="tab-content">
+            <div class="credit-config">
+              <div *ngIf="!cartState?.customer" class="credit-warning">
+                <app-icon name="alert-triangle" [size]="18"></app-icon>
+                <span>Se requiere un cliente para ventas a crédito</span>
+              </div>
+
+              <div class="credit-field">
+                <label>Abono inicial (opcional)</label>
+                <input type="number" [(ngModel)]="creditInitialPayment" (ngModelChange)="updateCreditCalculations()" min="0" [max]="cartState?.summary?.total || 0" step="0.01" placeholder="0.00"/>
+                <span class="hint">Se descuenta del total antes de generar cuotas</span>
+              </div>
+
+              <div *ngIf="creditInitialPayment > 0" class="payment-methods-grid mini">
+                <button *ngFor="let method of paymentMethods" type="button"
+                  class="payment-method-btn mini"
+                  [class.selected]="creditInitialPaymentMethod?.id === method.id"
+                  (click)="selectCreditInitialPaymentMethod(method)">
+                  <app-icon [name]="method.icon" [size]="18"></app-icon>
+                  <span class="method-name">{{ method.name }}</span>
+                </button>
+              </div>
+
+              <div class="credit-field">
+                <label>Periodicidad</label>
+                <div class="frequency-grid">
+                  <button *ngFor="let opt of frequencyOptions" type="button"
+                    class="frequency-btn"
+                    [class.selected]="creditFrequency === opt.value"
+                    (click)="creditFrequency = opt.value; updateCreditCalculations()">
+                    {{ opt.label }}
+                  </button>
+                </div>
+              </div>
+
+              <div class="credit-field">
+                <label>Número de cuotas</label>
+                <input type="number" [(ngModel)]="creditNumInstallments" (ngModelChange)="updateCreditCalculations()" min="1" max="60"/>
+              </div>
+
+              <div class="credit-field">
+                <label>Fecha primera cuota</label>
+                <input type="date" [(ngModel)]="creditFirstDate" (ngModelChange)="updateCreditCalculations()"/>
+              </div>
+
+              <div class="credit-field">
+                <label>Tasa de interés (%) (opcional)</label>
+                <input type="number" [(ngModel)]="creditInterestRate" (ngModelChange)="updateCreditCalculations()" min="0" step="0.1" placeholder="0"/>
+              </div>
+
+              <div class="credit-balance">
+                <span>Saldo a financiar</span>
+                <span>{{ creditRemainingBalance | currency }}</span>
+              </div>
+
+              <div *ngIf="creditInstallmentsPreview.length > 0" class="installments-preview">
+                <div *ngFor="let inst of creditInstallmentsPreview; let i = index" class="installment-row">
+                  <div class="installment-left">
+                    <span class="installment-number">{{ i + 1 }}</span>
+                    <span class="installment-date">{{ inst.due_date }}</span>
+                  </div>
+                  <span class="installment-amount">{{ inst.amount | currency }}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-
-        <!-- Quick Amounts -->
-        <div class="quick-amounts">
-          <button type="button" (click)="setHalfAmount()" class="quick-btn">
-            <span>1/2 Pago</span>
-            <span class="quick-value">{{ (cartState?.summary?.total || 0) / 2 | currency }}</span>
-          </button>
-          <button type="button" (click)="setFullAmount()" class="quick-btn primary">
-            <span>Total</span>
-            <app-icon name="check" [size]="16"></app-icon>
-          </button>
-        </div>
-
-        <!-- Numeric Keypad -->
-        <div class="keypad">
-          <button *ngFor="let num of [1, 2, 3, 4, 5, 6, 7, 8, 9]" type="button" (click)="appendNumber(num)" class="keypad-btn">
-            {{ num }}
-          </button>
-          <button type="button" (click)="clearCashAmount()" class="keypad-btn clear">C</button>
-          <button type="button" (click)="appendNumber(0)" class="keypad-btn">0</button>
-          <button type="button" (click)="backspace()" class="keypad-btn">
-            <app-icon name="delete" [size]="20"></app-icon>
-          </button>
-        </div>
       </div>
 
-      <!-- Reference Input (when required) -->
-      <div *ngIf="paymentState.selectedMethod?.requiresReference" class="reference-section">
-        <div class="reference-header">
-          <app-icon [name]="paymentState.selectedMethod?.icon || 'credit-card'" [size]="28"></app-icon>
-          <p>Ingresa el número de referencia</p>
+      <!-- Sub-section: Método de pago (only when contado) -->
+      <div *ngIf="paymentState.paymentForm === 'contado'" class="collapsible-subsection" [class.collapsed]="paymentMethodCollapsed">
+        <div class="subsection-header" (click)="togglePaymentMethodCollapsed()">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <app-icon name="wallet" [size]="16" class="section-icon"></app-icon>
+            <h2 class="section-title" style="margin: 0;">Método de pago</h2>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span *ngIf="paymentMethodCollapsed && paymentState.selectedMethod" class="collapsed-badge">
+              <app-icon [name]="paymentState.selectedMethod.icon" [size]="14"></app-icon>
+              {{ paymentState.selectedMethod.name }}
+            </span>
+            <app-icon [name]="paymentMethodCollapsed ? 'chevron-down' : 'chevron-up'" [size]="16" style="color: var(--color-text-muted);"></app-icon>
+          </div>
         </div>
-        <app-input
-          [formControl]="referenceControl"
-          [label]="paymentState.selectedMethod?.referenceLabel || 'Referencia'"
-          [placeholder]="'Ingresa la referencia'"
-          [size]="'lg'"
-          [error]="getReferenceError()"
-        ></app-input>
+
+        <div class="subsection-body" *ngIf="!paymentMethodCollapsed">
+          <div *ngIf="paymentMethods.length > 0; else noPaymentMethods" class="payment-methods-grid">
+            <button
+              *ngFor="let method of paymentMethods"
+              type="button"
+              (click)="selectPaymentMethod(method)"
+              class="payment-method-btn"
+              [class.selected]="paymentState.selectedMethod?.id === method.id"
+            >
+              <app-icon [name]="method.icon" [size]="24"></app-icon>
+              <span class="method-name">{{ method.name }}</span>
+            </button>
+          </div>
+
+          <ng-template #noPaymentMethods>
+            <div class="no-methods">
+              <app-icon name="credit-card" [size]="24"></app-icon>
+              <p>No hay métodos configurados</p>
+              <button class="configure-link" (click)="navigateToSettings()">Configurar ahora</button>
+            </div>
+          </ng-template>
+        </div>
+
+        <!-- Cash Input (visible even when grid collapsed) -->
+        <div *ngIf="paymentState.selectedMethod?.type === 'cash'" class="cash-section">
+          <div class="cash-inputs">
+            <div class="cash-input-group">
+              <label>Monto Recibido</label>
+              <div class="cash-input" [class.error]="isCashAmountInsufficient">
+                <span class="currency">{{ currencySymbol() }}</span>
+                <input
+                  type="number"
+                  [formControl]="cashReceivedControl"
+                  placeholder="0.00"
+                  step="0.01"
+                  (input)="calculateChange()"
+                />
+              </div>
+              <span *ngIf="isCashAmountInsufficient" class="error-text">
+                Faltan: {{ missingAmount | currency }}
+              </span>
+            </div>
+            <div class="cash-input-group">
+              <label>Cambio</label>
+              <div class="change-display">
+                <span>{{ paymentState.change | currency }}</span>
+                <app-icon name="coins" [size]="18"></app-icon>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Amounts -->
+          <div *ngIf="showOnscreenKeypad" class="quick-amounts">
+            <button type="button" (click)="setHalfAmount()" class="quick-btn">
+              <span>1/2 Pago</span>
+              <span class="quick-value">{{ (cartState?.summary?.total || 0) / 2 | currency }}</span>
+            </button>
+            <button type="button" (click)="setFullAmount()" class="quick-btn primary">
+              <span>Total</span>
+              <app-icon name="check" [size]="16"></app-icon>
+            </button>
+          </div>
+
+          <!-- Numeric Keypad -->
+          <div *ngIf="showOnscreenKeypad" class="keypad">
+            <button *ngFor="let num of [1, 2, 3, 4, 5, 6, 7, 8, 9]" type="button" (click)="appendNumber(num)" class="keypad-btn">
+              {{ num }}
+            </button>
+            <button type="button" (click)="clearCashAmount()" class="keypad-btn clear">C</button>
+            <button type="button" (click)="appendNumber(0)" class="keypad-btn">0</button>
+            <button type="button" (click)="backspace()" class="keypad-btn">
+              <app-icon name="delete" [size]="20"></app-icon>
+            </button>
+          </div>
+        </div>
+
+        <!-- Reference Input (visible even when grid collapsed) -->
+        <div *ngIf="paymentState.selectedMethod?.requiresReference" class="reference-section">
+          <div class="reference-header">
+            <app-icon [name]="paymentState.selectedMethod?.icon || 'credit-card'" [size]="28"></app-icon>
+            <p>Ingresa el número de referencia</p>
+          </div>
+          <app-input
+            [formControl]="referenceControl"
+            [label]="paymentState.selectedMethod?.referenceLabel || 'Referencia'"
+            [placeholder]="'Ingresa la referencia'"
+            [size]="'lg'"
+            [error]="getReferenceError()"
+          ></app-input>
+        </div>
       </div>
     </section>
 
@@ -162,14 +283,14 @@
     <section class="payment-section">
       <div class="section-header">
         <app-icon name="users" [size]="16" class="section-icon"></app-icon>
-        <h2 class="section-title">Tipo de Venta</h2>
+        <h2 class="section-title">Cliente</h2>
       </div>
 
       <!-- Sale Type Options -->
       <div class="sale-type-options">
         <!-- Anonymous Sale Option -->
         <button
-          *ngIf="allowAnonymousSales"
+          *ngIf="allowAnonymousSales && paymentState.paymentForm !== 'credito'"
           type="button"
           class="sale-type-btn"
           [class.selected]="paymentState.isAnonymousSale"
@@ -306,7 +427,7 @@
     >
       <app-icon *ngIf="!paymentState.isProcessing" name="check-circle" [size]="20"></app-icon>
       <span *ngIf="paymentState.isProcessing" class="spinner"></span>
-      {{ paymentState.selectedMethod?.type === "cash" ? "Cobrar" : "Confirmar Pago" }}
+      {{ paymentState.paymentForm === 'credito' ? 'Crear Venta a Crédito' : paymentState.selectedMethod?.type === 'cash' ? 'Cobrar' : 'Confirmar Pago' }}
     </button>
   </div>
 </app-modal>

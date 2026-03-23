@@ -1,5 +1,5 @@
-<app-sticky-header [title]="isEditMode() ? 'Editar Producto' : 'Nuevo Producto'"
-    [subtitle]="isEditMode() ? 'Gestiona la información, imagenes, variantes e inventario' : 'Registra un nuevo producto en tu catálogo digital'"
+<app-sticky-header [title]="isEditMode() ? (isService ? 'Editar Servicio' : 'Editar Producto') : (isService ? 'Nuevo Servicio' : 'Nuevo Producto')"
+    [subtitle]="isEditMode() ? 'Gestiona la información, imagenes, variantes e inventario' : (isService ? 'Registra un nuevo servicio en tu catálogo digital' : 'Registra un nuevo producto en tu catálogo digital')"
     [icon]="isEditMode() ? 'package' : 'plus-circle'" [showBackButton]="true" backRoute="/admin/products"
     [actions]="productHeaderActions()" (actionClicked)="onHeaderAction($event)" variant="default">
 </app-sticky-header>
@@ -7,6 +7,17 @@
 <div class="p-3 md:p-4 space-y-4 md:space-y-6 max-w-[1600px] mx-auto">
 
     <form [formGroup]="productForm" class="space-y-4 md:space-y-6">
+
+        <!-- Tipo de Producto -->
+        <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
+            <div class="flex items-center gap-2 mb-4">
+                <app-icon name="layers" size="18" class="text-primary-600"></app-icon>
+                <h2 class="text-base font-bold text-gray-900">Tipo de Producto</h2>
+            </div>
+            <app-input-buttons [options]="productTypeOptions" formControlName="product_type"
+                (valueChange)="onProductTypeChange($event)" customWrapperClass="!mt-0">
+            </app-input-buttons>
+        </section>
 
         <!-- Main Grid: General Info + Images (Desktop layout) -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
@@ -280,13 +291,20 @@
                             description="Agrega opciones como tamaño, color o material">
                         </app-setting-toggle>
 
-                        <!-- Row 2, Col 2: Control de inventario -->
+                        <!-- Row 2, Col 2: Control de inventario (hidden for services) -->
+                        @if (!isService) {
                         <app-setting-toggle formControlName="track_inventory"
                             label="Controlar inventario"
                             [description]="productForm.get('track_inventory')?.value
                                 ? 'Se controla el stock de este producto'
                                 : 'Producto bajo pedido — siempre disponible para venta'">
                         </app-setting-toggle>
+                        } @else {
+                        <div class="flex items-center gap-2 p-3 bg-purple-50 rounded-lg border border-purple-100">
+                            <app-icon name="briefcase" size="16" class="text-purple-600"></app-icon>
+                            <span class="text-sm text-purple-700 font-medium">Servicio — siempre disponible</span>
+                        </div>
+                        }
                     </div>
 
                     <!-- E-commerce y Ofertas -->
@@ -358,7 +376,52 @@
                     </div>
                 </section>
 
-                <!-- Dimensiones y Peso Section -->
+                <!-- Service-Specific Fields -->
+                @if (isService) {
+                <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4">
+                    <div class="flex items-center gap-2">
+                        <app-icon name="briefcase" size="18" class="text-primary-600"></app-icon>
+                        <h2 class="text-base font-bold text-gray-900">Detalles del Servicio</h2>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+                        <app-input label="Duración (minutos)" type="number"
+                            formControlName="service_duration_minutes"
+                            placeholder="Ej. 60" customWrapperClass="!mt-0"
+                            helperText="Duración estimada en minutos"></app-input>
+
+                        <app-selector label="Modalidad" [options]="serviceModalityOptions"
+                            formControlName="service_modality"
+                            placeholder="Seleccionar modalidad" customWrapperClass="!mt-0">
+                        </app-selector>
+
+                        <app-selector label="Tipo de Cobro" [options]="servicePricingTypeOptions"
+                            formControlName="service_pricing_type"
+                            placeholder="Seleccionar tipo" customWrapperClass="!mt-0">
+                        </app-selector>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <app-setting-toggle formControlName="requires_booking"
+                            label="Requiere reserva previa"
+                            description="Los clientes deben agendar antes de adquirir">
+                        </app-setting-toggle>
+
+                        <app-setting-toggle formControlName="is_recurring"
+                            label="Servicio recurrente"
+                            description="Se ofrece como suscripción o plan periódico">
+                        </app-setting-toggle>
+                    </div>
+
+                    <app-textarea label="Instrucciones post-compra" formControlName="service_instructions"
+                        placeholder="Instrucciones que recibirá el cliente después de comprar este servicio..."
+                        customWrapperClass="!mt-0">
+                    </app-textarea>
+                </section>
+                }
+
+                <!-- Dimensiones y Peso Section (only for physical products) -->
+                @if (!isService) {
                 <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4">
                     <div class="flex items-center gap-2">
                         <app-icon name="package" size="18" class="text-primary-600"></app-icon>
@@ -388,6 +451,7 @@
                             helperText="kg" customWrapperClass="!mt-0"></app-input>
                     </div>
                 </section>
+                }
             </div>
 
             <!-- Right Column: Images & Stock (Desktop only) -->
@@ -626,7 +690,18 @@
                                     <app-icon name="package" size="16" class="text-primary-600"></app-icon>
                                     <span class="text-xs text-text-secondary font-medium">Reservado para órdenes</span>
                                 </div>
-                                <span class="text-sm font-bold text-text-primary">{{ totalStockReserved }}</span>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-sm font-bold text-text-primary">{{ totalStockReserved }}</span>
+                                    <button *ngIf="totalStockReserved > 0" type="button" (click)="releaseReservations()"
+                                        [disabled]="isReleasingReservations"
+                                        class="text-[10px] font-bold text-destructive hover:text-destructive/80 bg-destructive/10 hover:bg-destructive/20 px-1.5 py-0.5 rounded transition-colors disabled:opacity-50">
+                                        @if (isReleasingReservations) {
+                                            <app-icon name="loader-2" size="10" class="animate-spin"></app-icon>
+                                        } @else {
+                                            Limpiar
+                                        }
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1058,7 +1133,18 @@
             </div>
             <div class="p-4 bg-bg rounded-xl border border-border">
                 <p class="text-[10px] text-text-secondary uppercase font-bold tracking-wider mb-1">Total Reservado</p>
-                <p class="text-2xl font-bold text-text-primary">{{ totalStockReserved }}</p>
+                <div class="flex items-center justify-between">
+                    <p class="text-2xl font-bold text-text-primary">{{ totalStockReserved }}</p>
+                    <button *ngIf="totalStockReserved > 0" type="button" (click)="releaseReservations()"
+                        [disabled]="isReleasingReservations"
+                        class="text-[10px] font-bold text-destructive hover:text-destructive/80 bg-destructive/10 hover:bg-destructive/20 px-2 py-1 rounded-lg transition-colors disabled:opacity-50">
+                        @if (isReleasingReservations) {
+                            <app-icon name="loader-2" size="12" class="animate-spin"></app-icon>
+                        } @else {
+                            Limpiar
+                        }
+                    </button>
+                </div>
             </div>
         </div>
 

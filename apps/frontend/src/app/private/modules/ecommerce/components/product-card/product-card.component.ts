@@ -21,8 +21,13 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
           </div>
         }
 
-        <!-- Stock Badge (POS style con backdrop-blur) — Solo para productos con inventario -->
-        @if (product.track_inventory !== false) {
+        <!-- Service Badge -->
+        @if (product.product_type === 'service') {
+          <div class="stock-badge stock-badge--service">
+            Servicio
+          </div>
+        } @else if (product.track_inventory !== false) {
+          <!-- Stock Badge (POS style con backdrop-blur) — Solo para productos con inventario -->
           @if (product.stock_quantity !== null && product.stock_quantity <= 5 && product.stock_quantity > 0) {
             <div class="stock-badge stock-badge--warning">
               ¡Últimas {{ product.stock_quantity }}!
@@ -85,21 +90,37 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
             <span>Venta por peso</span>
           </div>
         }
+        @if (product.product_type === 'service') {
+          <div class="service-indicators">
+            @if (product.service_duration_minutes) {
+              <div class="service-indicator">
+                <app-icon name="clock" [size]="12"></app-icon>
+                <span>{{ product.service_duration_minutes }} min</span>
+              </div>
+            }
+            @if (product.service_modality) {
+              <div class="service-indicator">
+                <app-icon name="{{ product.service_modality === 'virtual' ? 'monitor' : product.service_modality === 'hybrid' ? 'repeat' : 'map-pin' }}" [size]="12"></app-icon>
+                <span>{{ product.service_modality === 'virtual' ? 'Virtual' : product.service_modality === 'hybrid' ? 'Híbrido' : 'Presencial' }}</span>
+              </div>
+            }
+          </div>
+        }
       </div>
       <div class="actions-container">
         <app-button
           variant="primary"
           size="sm"
           customClasses="buy-btn"
-          [disabled]="product.track_inventory !== false && product.stock_quantity === 0"
+          [disabled]="product.product_type !== 'service' && product.track_inventory !== false && product.stock_quantity === 0"
           (clicked)="onBuyNow($event)">
-          Comprar
+          {{ product.product_type === 'service' ? 'Agendar' : 'Comprar' }}
         </app-button>
         <app-button
           variant="secondary"
           size="sm"
           customClasses="add-to-cart-btn"
-          [disabled]="product.track_inventory !== false && product.stock_quantity === 0"
+          [disabled]="product.product_type !== 'service' && product.track_inventory !== false && product.stock_quantity === 0"
           title="Agregar al carrito"
           (clicked)="onAddToCart($event)">
           <app-icon slot="icon" name="shopping-cart" [size]="16"></app-icon>
@@ -198,6 +219,12 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
         background: rgba(14, 165, 233, 0.8);
         color: white;
         border-color: rgba(14, 165, 233, 0.6);
+      }
+
+      &--service {
+        background: rgba(139, 92, 246, 0.8);
+        color: white;
+        border-color: rgba(139, 92, 246, 0.6);
       }
     }
 
@@ -308,6 +335,24 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
       border-radius: var(--radius-sm);
       background: rgba(59, 130, 246, 0.08);
       color: rgb(37, 99, 235);
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .service-indicators {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+
+    .service-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: var(--radius-sm);
+      background: rgba(139, 92, 246, 0.08);
+      color: rgb(109, 40, 217);
       font-size: 11px;
       font-weight: 500;
     }

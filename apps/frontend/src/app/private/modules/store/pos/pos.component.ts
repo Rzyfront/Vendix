@@ -44,6 +44,9 @@ import { PosCartModalComponent } from './components/pos-cart-modal.component';
 import { PosShippingModalComponent } from './components/pos-shipping-modal/pos-shipping-modal.component';
 import { StoreSettingsService } from '../settings/general/services/store-settings.service';
 import { QuotationsService } from '../quotations/services/quotations.service';
+import { LayawayApiService } from '../layaway/services/layaway.service';
+import { LayawayConfigModalComponent } from './components/layaway-config-modal/layaway-config-modal.component';
+import { CreateLayawayRequest } from '../layaway/interfaces/layaway.interface';
 import { PosCashRegisterService, CashRegisterSession } from './services/pos-cash-register.service';
 import { PosSessionStatusBarComponent } from './components/pos-session-status-bar.component';
 import { PosSessionOpenModalComponent } from './components/pos-session-open-modal.component';
@@ -75,11 +78,12 @@ import { PosSessionDetailModalComponent } from './components/pos-session-detail-
     PosSessionCloseModalComponent,
     PosCashMovementModalComponent,
     PosSessionDetailModalComponent,
+    LayawayConfigModalComponent,
   ],
   template: `
     <div class="flex flex-col gap-4 lg:gap-6 overflow-hidden pos-container">
       <!-- POS Stats (hidden on mobile and in quotation mode) -->
-      @if (!isQuotationMode()) {
+      @if (!isQuotationMode() && !isLayawayMode()) {
         <div class="flex-none hidden lg:block">
           <app-pos-stats [cartState]="cartState"></app-pos-stats>
         </div>
@@ -114,6 +118,9 @@ import { PosSessionDetailModalComponent } from './components/pos-session-detail-
                     <app-badge variant="primary" class="hidden sm:inline-flex"
                       >Cotización</app-badge
                     >
+                  } @else if (isLayawayMode()) {
+                    <span>Modo Plan Separé</span>
+                    <app-badge variant="warning" class="hidden sm:inline-flex">Separé</app-badge>
                   } @else if (isEditMode()) {
                     <span>Editando Orden #{{ editingOrderNumber() }}</span>
                     <app-badge variant="warning" class="hidden sm:inline-flex"
@@ -132,9 +139,11 @@ import { PosSessionDetailModalComponent } from './components/pos-session-detail-
                   {{
                     isQuotationMode()
                       ? 'Crear cotización'
-                      : isEditMode()
-                        ? 'Modificar items de la orden'
-                        : 'Punto de venta'
+                      : isLayawayMode()
+                        ? 'Crear plan separé'
+                        : isEditMode()
+                          ? 'Modificar items de la orden'
+                          : 'Punto de venta'
                   }}
                 </span>
               </div>
@@ -304,10 +313,12 @@ import { PosSessionDetailModalComponent } from './components/pos-session-detail-
                 class="h-full block"
                 [isEditMode]="isEditMode()"
                 [isQuotationMode]="isQuotationMode()"
+                [isLayawayMode]="isLayawayMode()"
                 (saveDraft)="onSaveDraft()"
                 (shipping)="onShipping()"
                 (checkout)="onCheckout()"
                 (quote)="onQuote()"
+                (layaway)="onLayaway()"
               ></app-pos-cart>
             </div>
           </div>
@@ -331,11 +342,13 @@ import { PosSessionDetailModalComponent } from './components/pos-session-detail-
         [itemCount]="cartItems.length"
         [isTablet]="isTablet()"
         [isQuotationMode]="isQuotationMode()"
+        [isLayawayMode]="isLayawayMode()"
         (viewCart)="onOpenCartModal()"
         (saveDraft)="onSaveDraft()"
         (shipping)="onShipping()"
         (checkout)="onCheckout()"
         (quote)="onQuote()"
+        (layaway)="onLayaway()"
       ></app-pos-mobile-footer>
 
       <!-- Mobile Cart Modal -->
@@ -429,6 +442,18 @@ import { PosSessionDetailModalComponent } from './components/pos-session-detail-
           (isOpenChange)="showSessionDetailModal = $event"
         ></app-pos-session-detail-modal>
       }
+
+      <!-- Layaway Config Modal -->
+      @if (showLayawayConfigModal()) {
+        <app-layaway-config-modal
+          [cartItems]="cartState?.items || []"
+          [cartTotal]="cartSummary.total"
+          [customer]="selectedCustomer"
+          [isSaving]="loading"
+          (save)="onLayawayConfigSave($event)"
+          (close)="showLayawayConfigModal.set(false)"
+        />
+      }
     </div>
   `,
   styles: [
@@ -505,6 +530,10 @@ export class PosComponent implements OnInit, OnDestroy {
   isQuotationMode = signal(false);
   editingQuotationId = signal<string | null>(null);
 
+  // Layaway mode
+  isLayawayMode = signal(false);
+  showLayawayConfigModal = signal(false);
+
   // Mobile detection signal
   isMobile = signal(false);
 
@@ -543,6 +572,7 @@ export class PosComponent implements OnInit, OnDestroy {
     private ordersService: StoreOrdersService,
     private settingsService: StoreSettingsService,
     private quotationsService: QuotationsService,
+    private layawayService: LayawayApiService,
     private cashRegisterService: PosCashRegisterService,
   ) {}
 
@@ -564,6 +594,7 @@ export class PosComponent implements OnInit, OnDestroy {
     this.loadStoreSettings();
     this.checkEditMode();
     this.checkQuotationMode();
+    this.checkLayawayMode();
     this.validateScheduleOnInit();
 
     // Listen for lazy session validation from payment service
@@ -842,6 +873,62 @@ export class PosComponent implements OnInit, OnDestroy {
       });
   }
 
+  onLayaway(): void {
+    if (!this.selectedCustomer) {
+      this.toastService.warning('Debes asignar un cliente para crear un plan separé');
+      this.onOpenCustomerModal();
+      return;
+    }
+
+    if (!this.cartState || this.isEmpty) {
+      this.toastService.warning('El carrito está vacío');
+      return;
+    }
+
+    this.showLayawayConfigModal.set(true);
+  }
+
+  onLayawayConfigSave(config: any): void {
+    if (!this.cartState || !this.selectedCustomer) return;
+
+    this.loading = true;
+    this.showLayawayConfigModal.set(false);
+
+    const items = this.cartState.items.map((item) => ({
+      product_id: typeof item.product.id === 'string' ? parseInt(item.product.id, 10) : item.product.id,
+      product_name: item.product.name,
+      quantity: item.quantity,
+      unit_price: item.unitPrice,
+      tax_amount: item.taxAmount || 0,
+      discount_amount: 0,
+    }));
+
+    const dto: CreateLayawayRequest = {
+      customer_id: this.selectedCustomer.id,
+      down_payment_amount: config.down_payment_amount || 0,
+      notes: config.notes || undefined,
+      internal_notes: config.internal_notes || undefined,
+      items,
+      installments: config.installments || [],
+    };
+
+    this.layawayService.create(dto)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (res: any) => {
+          this.loading = false;
+          const planNumber = res?.data?.plan_number || res?.plan_number || '';
+          this.toastService.success(`Plan Separé ${planNumber} creado correctamente`);
+          this.onClearCart();
+          this.router.navigate(['/admin/orders/layaway']);
+        },
+        error: (err: any) => {
+          this.loading = false;
+          this.toastService.error(err?.error?.message || 'Error al crear plan separé');
+        },
+      });
+  }
+
   onCheckout(): void {
     if (!this.cartState || this.isEmpty) return;
 
@@ -1110,6 +1197,19 @@ export class PosComponent implements OnInit, OnDestroy {
         } else {
           this.isQuotationMode.set(false);
           this.editingQuotationId.set(null);
+        }
+      });
+  }
+
+  private checkLayawayMode(): void {
+    this.route.queryParams
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((params) => {
+        const mode = params['mode'];
+        if (mode === 'layaway') {
+          this.isLayawayMode.set(true);
+        } else {
+          this.isLayawayMode.set(false);
         }
       });
   }

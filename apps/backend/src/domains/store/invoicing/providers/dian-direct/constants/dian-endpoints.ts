@@ -27,4 +27,6 @@ export const DIAN_SOAP_ACTIONS = {
     'http://wcf.dian.colombia/IWcfDianCustomerServices/GetStatus',
   GetStatusZip:
     'http://wcf.dian.colombia/IWcfDianCustomerServices/GetStatusZip',
+  SendNominaSync:
+    'http://wcf.dian.colombia/IWcfDianCustomerServices/SendNominaSync',
 } as const;

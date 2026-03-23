@@ -350,6 +350,7 @@ export class ProductCreatePageComponent implements OnInit {
   imageIds: (number | null)[] = []; // Parallel array: DB image ID (null for new/unsaved images)
   activeImageIndex = 0;
   isStockDetailsOpen = false;
+  isReleasingReservations = false;
   categoryOptions: MultiSelectorOption[] = [];
   brandOptions: SelectorOption[] = [];
   taxCategoryOptions: MultiSelectorOption[] = [];
@@ -363,6 +364,50 @@ export class ProductCreatePageComponent implements OnInit {
     { value: 'unit', label: 'Venta por unidad' },
     { value: 'weight', label: 'Venta por peso (kg)' },
   ];
+
+  productTypeOptions: { value: string; label: string }[] = [
+    { value: 'physical', label: 'Producto Físico' },
+    { value: 'service', label: 'Servicio' },
+  ];
+
+  serviceModalityOptions: SelectorOption[] = [
+    { value: 'in_person', label: 'Presencial' },
+    { value: 'virtual', label: 'Virtual' },
+    { value: 'hybrid', label: 'Híbrido' },
+  ];
+
+  servicePricingTypeOptions: SelectorOption[] = [
+    { value: 'per_hour', label: 'Por hora' },
+    { value: 'per_session', label: 'Por sesión' },
+    { value: 'package', label: 'Paquete' },
+    { value: 'subscription', label: 'Suscripción' },
+  ];
+
+  get isService(): boolean {
+    return this.productForm.get('product_type')?.value === 'service';
+  }
+
+  onProductTypeChange(value: string): void {
+    if (value === 'service') {
+      this.productForm.patchValue({
+        track_inventory: false,
+        weight: 0,
+        dimensions: { length: 0, width: 0, height: 0 },
+        stock_quantity: 0,
+      });
+    } else {
+      this.productForm.patchValue({
+        track_inventory: true,
+        service_duration_minutes: null,
+        service_modality: null,
+        service_pricing_type: null,
+        requires_booking: false,
+        is_recurring: false,
+        service_instructions: '',
+      });
+    }
+    this.cdr.detectChanges();
+  }
 
   // Variants State
   hasVariants = false;
@@ -519,6 +564,13 @@ export class ProductCreatePageComponent implements OnInit {
       }),
       state: [ProductState.ACTIVE],
       pricing_type: ['unit' as const],
+      product_type: ['physical' as const],
+      service_duration_minutes: [null],
+      service_modality: [null],
+      service_pricing_type: [null],
+      requires_booking: [false],
+      is_recurring: [false],
+      service_instructions: [''],
     });
 
     this.setupPriceCalculations(form);
@@ -628,6 +680,13 @@ export class ProductCreatePageComponent implements OnInit {
       state: product.state,
       pricing_type:
         (product.pricing_type as any)?.value || product.pricing_type || 'unit',
+      product_type: product.product_type || 'physical',
+      service_duration_minutes: product.service_duration_minutes || null,
+      service_modality: product.service_modality || null,
+      service_pricing_type: product.service_pricing_type || null,
+      requires_booking: product.requires_booking || false,
+      is_recurring: product.is_recurring || false,
+      service_instructions: product.service_instructions || '',
       weight: product.weight || 0,
       dimensions: {
         length: product.dimensions?.length || 0,
@@ -1185,6 +1244,36 @@ export class ProductCreatePageComponent implements OnInit {
     return expiryDate < today;
   }
 
+  async releaseReservations(): Promise<void> {
+    if (!this.product?.id || this.totalStockReserved === 0) return;
+
+    const confirmed = await this.dialogService.confirm({
+      title: 'Liberar Reservas',
+      message: `Se liberarán ${this.totalStockReserved} unidades reservadas de este producto. Las reservas activas serán canceladas y el stock quedará disponible nuevamente.`,
+      confirmText: 'Liberar Reservas',
+      cancelText: 'Cancelar',
+      confirmVariant: 'danger',
+    });
+
+    if (!confirmed) return;
+
+    this.isReleasingReservations = true;
+    this.inventoryService.releaseReservationsByProduct(this.product.id).subscribe({
+      next: (response) => {
+        const data = response.data;
+        this.toastService.success(
+          `${data.released_count} reserva(s) liberadas (${data.total_quantity} unidades)`,
+        );
+        this.loadProduct(this.productId!);
+        this.isReleasingReservations = false;
+      },
+      error: (error) => {
+        this.toastService.error('Error al liberar reservas: ' + error);
+        this.isReleasingReservations = false;
+      },
+    });
+  }
+
   triggerFileUpload(): void {
     const fileInput = document.querySelector('.file-input') as HTMLInputElement;
     fileInput?.click();
@@ -1358,6 +1447,8 @@ export class ProductCreatePageComponent implements OnInit {
       }),
     );
 
+    const isServiceType = formValue.product_type === 'service';
+
     // Basic DTO
     const productData: CreateProductDto = {
       name: formValue.name,
@@ -1370,10 +1461,12 @@ export class ProductCreatePageComponent implements OnInit {
       sale_price: Number(formValue.sale_price),
       available_for_ecommerce: !!formValue.available_for_ecommerce,
       sku: formValue.sku || undefined,
-      track_inventory: !!formValue.track_inventory,
-      stock_quantity: formValue.track_inventory
-        ? Number(formValue.stock_quantity)
-        : undefined,
+      track_inventory: isServiceType ? false : !!formValue.track_inventory,
+      stock_quantity: isServiceType
+        ? undefined
+        : formValue.track_inventory
+          ? Number(formValue.stock_quantity)
+          : undefined,
       category_ids: formValue.category_ids || [],
       tax_category_ids: formValue.tax_category_ids || [],
       brand_id: formValue.brand_id ? Number(formValue.brand_id) : null,
@@ -1382,19 +1475,37 @@ export class ProductCreatePageComponent implements OnInit {
         typeof formValue.pricing_type === 'object'
           ? formValue.pricing_type.value
           : formValue.pricing_type || 'unit',
-      images: images.length > 0 ? images : undefined,
-      weight: formValue.weight > 0 ? Number(formValue.weight) : undefined,
-      dimensions:
-        formValue.dimensions &&
-        (formValue.dimensions.length > 0 ||
-          formValue.dimensions.width > 0 ||
-          formValue.dimensions.height > 0)
-          ? {
-              length: Number(formValue.dimensions.length),
-              width: Number(formValue.dimensions.width),
-              height: Number(formValue.dimensions.height),
-            }
+      product_type: formValue.product_type || 'physical',
+      // Service-specific fields
+      ...(isServiceType && {
+        service_duration_minutes: formValue.service_duration_minutes
+          ? Number(formValue.service_duration_minutes)
           : undefined,
+        service_modality: formValue.service_modality || undefined,
+        service_pricing_type: formValue.service_pricing_type || undefined,
+        requires_booking: !!formValue.requires_booking,
+        is_recurring: !!formValue.is_recurring,
+        service_instructions: formValue.service_instructions || undefined,
+      }),
+      images: images.length > 0 ? images : undefined,
+      weight: isServiceType
+        ? undefined
+        : formValue.weight > 0
+          ? Number(formValue.weight)
+          : undefined,
+      dimensions:
+        isServiceType
+          ? undefined
+          : formValue.dimensions &&
+              (formValue.dimensions.length > 0 ||
+                formValue.dimensions.width > 0 ||
+                formValue.dimensions.height > 0)
+            ? {
+                length: Number(formValue.dimensions.length),
+                width: Number(formValue.dimensions.width),
+                height: Number(formValue.dimensions.height),
+              }
+            : undefined,
     };
 
     // Add Variants - ALWAYS send the array so the backend can handle the toggle

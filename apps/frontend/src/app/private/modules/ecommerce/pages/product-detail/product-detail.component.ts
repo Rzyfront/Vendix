@@ -91,6 +91,33 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                 <span class="count">({{ p.review_count }})</span>
               </div>
 
+              <!-- Service Info Section -->
+              @if (p.product_type === 'service') {
+                <div class="service-info-section">
+                  <span class="service-badge-detail">Servicio</span>
+                  <div class="service-details">
+                    @if (p.service_duration_minutes) {
+                      <div class="service-detail-item">
+                        <app-icon name="clock" [size]="14" />
+                        <span>{{ p.service_duration_minutes }} minutos</span>
+                      </div>
+                    }
+                    @if (p.service_modality) {
+                      <div class="service-detail-item">
+                        <app-icon [name]="p.service_modality === 'virtual' ? 'monitor' : p.service_modality === 'hybrid' ? 'repeat' : 'map-pin'" [size]="14" />
+                        <span>{{ p.service_modality === 'virtual' ? 'Virtual' : p.service_modality === 'hybrid' ? 'Híbrido' : 'Presencial' }}</span>
+                      </div>
+                    }
+                    @if (p.requires_booking) {
+                      <div class="service-detail-item">
+                        <app-icon name="calendar-check" [size]="14" />
+                        <span>Requiere reserva previa</span>
+                      </div>
+                    }
+                  </div>
+                </div>
+              }
+
               <div class="price-line">
                 @if (displayPriceLabel(); as label) {
                   <span class="text-sm text-text-muted font-medium mr-1">{{ label }}</span>
@@ -173,11 +200,11 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                   variant="primary"
                   size="sm"
                   customClasses="btn-cart"
-                  [disabled]="!isOnDemand() && displayStock() === 0"
+                  [disabled]="!isService() && !isOnDemand() && displayStock() === 0"
                   (clicked)="onAddToCart(p)"
                 >
                   <app-icon slot="icon" name="shopping-cart" [size]="18" />
-                  {{ !isOnDemand() && displayStock() === 0 ? 'Agotado' : 'Añadir' }}
+                  {{ isService() ? 'Agendar' : (!isOnDemand() && displayStock() === 0 ? 'Agotado' : 'Añadir') }}
                 </app-button>
 
                 <app-button
@@ -196,15 +223,18 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                 size="md"
                 [fullWidth]="true"
                 customClasses="btn-buy-now"
-                [disabled]="!isOnDemand() && displayStock() === 0"
+                [disabled]="!isService() && !isOnDemand() && displayStock() === 0"
                 (clicked)="onBuyNow(p)"
               >
-                {{ !isOnDemand() && displayStock() === 0 ? 'Agotado' : 'Comprar ahora' }}
+                {{ isService() ? 'Agendar ahora' : (!isOnDemand() && displayStock() === 0 ? 'Agotado' : 'Comprar ahora') }}
               </app-button>
 
               <!-- Stock Minimal -->
               <div class="stock-minimal">
-                @if (isOnDemand()) {
+                @if (isService()) {
+                  <span class="s-dot service"></span>
+                  <span class="s-text">Servicio disponible</span>
+                } @else if (isOnDemand()) {
                   <span class="s-dot on-demand"></span>
                   <span class="s-text">Disponible bajo pedido</span>
                 } @else if (displayStock() > 0) {
@@ -408,9 +438,36 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
       padding: 0.85rem 1.5rem;
     }
 
+    .service-info-section {
+      display: flex; flex-direction: column; gap: 0.5rem;
+      padding: 0.75rem 1rem;
+      background: rgba(139, 92, 246, 0.06);
+      border: 1px solid rgba(139, 92, 246, 0.15);
+      border-radius: var(--radius-lg);
+    }
+    .service-badge-detail {
+      display: inline-flex;
+      align-self: flex-start;
+      padding: 0.2rem 0.6rem;
+      border-radius: var(--radius-pill);
+      font-size: 0.65rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: rgba(139, 92, 246, 0.15);
+      color: rgb(109, 40, 217);
+    }
+    .service-details {
+      display: flex; flex-wrap: wrap; gap: 0.75rem;
+    }
+    .service-detail-item {
+      display: flex; align-items: center; gap: 0.3rem;
+      font-size: 0.8rem; color: var(--color-text-secondary);
+    }
+
     .stock-minimal {
-      display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; 
-      .s-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; &.warn { background: #f59e0b; } &.err { background: #ef4444; } &.on-demand { background: #0ea5e9; } }
+      display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem;
+      .s-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; &.warn { background: #f59e0b; } &.err { background: #ef4444; } &.on-demand { background: #0ea5e9; } &.service { background: #8b5cf6; } }
       .s-text { color: var(--color-text-muted); }
     }
 
@@ -629,6 +686,12 @@ export class ProductDetailComponent implements OnInit {
   isOnDemand = computed((): boolean => {
     const p = this.product();
     return p?.track_inventory === false;
+  });
+
+  /** True when the product is a service */
+  isService = computed((): boolean => {
+    const p = this.product();
+    return p?.product_type === 'service';
   });
 
   // Quick View Modal

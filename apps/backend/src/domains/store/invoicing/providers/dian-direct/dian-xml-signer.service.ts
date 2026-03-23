@@ -52,11 +52,18 @@ export class DianXmlSignerService {
         ],
       });
 
+      // Detect root element type (Invoice, CreditNote, or DebitNote)
+      const root_element = xml_content.includes('<CreditNote')
+        ? 'CreditNote'
+        : xml_content.includes('<DebitNote')
+          ? 'DebitNote'
+          : 'Invoice';
+
       // Compute and insert signature
       sig.computeSignature(xml_content, {
         location: {
           reference:
-            "/*[local-name()='Invoice']/*[local-name()='UBLExtensions']/*[local-name()='UBLExtension'][2]/*[local-name()='ExtensionContent']",
+            `/*[local-name()='${root_element}']/*[local-name()='UBLExtensions']/*[local-name()='UBLExtension'][2]/*[local-name()='ExtensionContent']`,
           action: 'append',
         },
       });
@@ -103,6 +110,62 @@ export class DianXmlSignerService {
       const certificate = forge.pki.certificateToPem(cert_bag.cert);
 
       return { private_key, certificate };
+    } catch (error) {
+      if (
+        error.message.includes('Invalid password') ||
+        error.message.includes('PKCS#12 MAC could not be verified')
+      ) {
+        throw new Error('Invalid certificate password');
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Extracts credentials from a .p12 certificate file.
+   * Returns PEM private key, PEM certificate, and DER-encoded base64 certificate
+   * (needed for WS-Security BinarySecurityToken).
+   */
+  extractCredentials(
+    p12_buffer: Buffer,
+    password: string,
+  ): {
+    private_key_pem: string;
+    certificate_pem: string;
+    certificate_der_base64: string;
+  } {
+    try {
+      const forge = require('node-forge');
+      const p12_asn1 = forge.asn1.fromDer(p12_buffer.toString('binary'));
+      const p12 = forge.pkcs12.pkcs12FromAsn1(p12_asn1, password);
+
+      // Extract private key
+      const key_bags = p12.getBags({
+        bagType: forge.oids.pkcs8ShroudedKeyBag,
+      });
+      const key_bag = key_bags[forge.oids.pkcs8ShroudedKeyBag]?.[0];
+      if (!key_bag) {
+        throw new Error('No private key found in .p12 file');
+      }
+      const private_key_pem = forge.pki.privateKeyToPem(key_bag.key);
+
+      // Extract certificate
+      const cert_bags = p12.getBags({ bagType: forge.oids.certBag });
+      const cert_bag = cert_bags[forge.oids.certBag]?.[0];
+      if (!cert_bag?.cert) {
+        throw new Error('No certificate found in .p12 file');
+      }
+      const certificate_pem = forge.pki.certificateToPem(cert_bag.cert);
+
+      // Convert certificate to DER-encoded base64 (for WS-Security BinarySecurityToken)
+      const cert_asn1 = forge.pki.certificateToAsn1(cert_bag.cert);
+      const cert_der_bytes = forge.asn1.toDer(cert_asn1).getBytes();
+      const certificate_der_base64 = Buffer.from(
+        cert_der_bytes,
+        'binary',
+      ).toString('base64');
+
+      return { private_key_pem, certificate_pem, certificate_der_base64 };
     } catch (error) {
       if (
         error.message.includes('Invalid password') ||

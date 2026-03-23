@@ -3,18 +3,20 @@
 
     <!-- Steps indicator -->
     <div class="steps">
+        @if (!cartHasOnlyServices) {
         <div class="step" [class.active]="step >= 1" [class.completed]="step > 1">
             <span class="step-number">1</span>
             <span class="step-label">Dirección</span>
         </div>
         <div class="step-line" [class.completed]="step > 1"></div>
-        <div class="step" [class.active]="step >= 2" [class.completed]="step > 2">
-            <span class="step-number">2</span>
+        }
+        <div class="step" [class.active]="step >= 1" [class.completed]="cartHasOnlyServices ? step > 1 : step > 2">
+            <span class="step-number">{{ cartHasOnlyServices ? '1' : '2' }}</span>
             <span class="step-label">Pago</span>
         </div>
-        <div class="step-line" [class.completed]="step > 2"></div>
-        <div class="step" [class.active]="step >= 3">
-            <span class="step-number">3</span>
+        <div class="step-line" [class.completed]="cartHasOnlyServices ? step > 1 : step > 2"></div>
+        <div class="step" [class.active]="cartHasOnlyServices ? step >= 2 : step >= 3">
+            <span class="step-number">{{ cartHasOnlyServices ? '2' : '3' }}</span>
             <span class="step-label">Confirmar</span>
         </div>
     </div>
@@ -27,8 +29,8 @@
     } @else {
     <div class="checkout-content">
         <div class="checkout-main">
-            <!-- Step 1: Address -->
-            @if (step === 1) {
+            <!-- Step 1: Address (hidden for service-only carts) -->
+            @if (step === 1 && !cartHasOnlyServices) {
             <div class="checkout-section">
                 <h2>Dirección de Envío</h2>
 
@@ -123,11 +125,13 @@
             </div>
             }
 
-            <!-- Step 2: Payment -->
-            @if (step === 2) {
+            <!-- Step 2: Payment (shown at step 1 for service-only carts, step 2 otherwise) -->
+            @if (cartHasOnlyServices ? step === 1 : step === 2) {
             <div class="checkout-section">
+                @if (!cartHasOnlyServices) {
                 <h2>Opciones de Envío</h2>
-                @if (shipping_options.length > 0) {
+                }
+                @if (!cartHasOnlyServices && shipping_options.length > 0) {
                 <div class="payment-list" style="margin-bottom: 2rem;">
                     @for (option of shipping_options; track option.id) {
                     <div class="payment-card" [class.selected]="selected_shipping_option_id === option.id"
@@ -145,7 +149,7 @@
                     </div>
                     }
                 </div>
-                } @else {
+                } @else if (!cartHasOnlyServices) {
                 <div class="error-message" style="margin-bottom: 2rem;">
                     <i class="pi pi-exclamation-triangle"></i>
                     No hay opciones de envío disponibles para esta ubicación. Por favor revisa tu dirección.
@@ -174,12 +178,13 @@
             </div>
             }
 
-            <!-- Step 3: Confirm -->
-            @if (step === 3) {
+            <!-- Step 3: Confirm (step 2 for service-only carts) -->
+            @if (cartHasOnlyServices ? step === 2 : step === 3) {
             <div class="checkout-section">
                 <h2>Confirmar Pedido</h2>
 
                 <div class="confirm-details">
+                    @if (!cartHasOnlyServices) {
                     <div class="confirm-block">
                         <h3>Dirección de Envío</h3>
                         @if (use_new_address) {
@@ -206,6 +211,7 @@
                         }
                         }
                     </div>
+                    }
 
                     <div class="confirm-block">
                         <h3>Método de Pago</h3>
@@ -245,12 +251,12 @@
                 </app-button>
                 }
 
-                @if (step < 3) {
+                @if (step < (cartHasOnlyServices ? 2 : 3)) {
                 <app-button variant="primary" (clicked)="nextStep()">
                     Continuar
                     <app-icon slot="icon" name="arrow-right" [size]="16"></app-icon>
                 </app-button>
-                } @else {
+                } @else if (step >= (cartHasOnlyServices ? 2 : 3)) {
                 <app-button variant="primary" (clicked)="placeOrder()" [loading]="is_submitting" [disabled]="is_submitting">
                     @if (!is_submitting) {
                     <app-icon slot="icon" name="check" [size]="16"></app-icon>
@@ -283,10 +289,12 @@
                     <span>Subtotal</span>
                     <span>{{ cart.subtotal | currency }}</span>
                 </div>
+                @if (!cartHasOnlyServices) {
                 <div class="summary-row">
                     <span>Envío</span>
                     <span>{{ shipping_cost === 0 ? 'Gratis' : (shipping_cost | currency) }}</span>
                 </div>
+                }
 
                 <hr>
 

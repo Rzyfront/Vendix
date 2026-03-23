@@ -319,6 +319,11 @@ export class PosSettingsDto {
   @ValidateNested()
   @Type(() => CashRegisterSettingsDto)
   cash_register?: CashRegisterSettingsDto;
+
+  @ApiProperty({ example: true, required: false, description: 'Show on-screen numeric keypad in POS cash payment' })
+  @IsOptional()
+  @IsBoolean()
+  show_onscreen_keypad?: boolean;
 }
 
 export class ReceiptsSettingsDto {

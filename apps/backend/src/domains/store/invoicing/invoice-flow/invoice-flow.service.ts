@@ -8,6 +8,7 @@ import { RequestContextService } from '../../../../common/context/request-contex
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { ProviderInvoiceData } from '../providers/invoice-provider.interface';
 import { InvoiceProviderResolver } from '../providers/invoice-provider-resolver.service';
+import { InvoiceRetryQueueService } from '../services/invoice-retry-queue.service';
 
 type InvoiceStatus =
   | 'draft'
@@ -48,6 +49,7 @@ export class InvoiceFlowService {
     private readonly prisma: StorePrismaService,
     private readonly resolver: InvoiceProviderResolver,
     private readonly event_emitter: EventEmitter2,
+    private readonly retry_queue: InvoiceRetryQueueService,
   ) {}
 
   private getContext() {
@@ -179,6 +181,18 @@ export class InvoiceFlowService {
       this.logger.error(
         `Failed to send invoice #${id} to provider: ${error.message}`,
       );
+
+      // Enqueue for retry if it's a transient error (network, timeout, SOAP fault)
+      // Don't retry certificate expiry or validation errors
+      const is_transient = this.isTransientError(error);
+      if (is_transient) {
+        this.retry_queue
+          .enqueue(id, invoice.organization_id, invoice.store_id, error.message)
+          .catch((e) =>
+            this.logger.error(`Failed to enqueue invoice #${id} for retry: ${e.message}`),
+          );
+      }
+
       throw new VendixHttpException(ErrorCodes.INVOICING_PROVIDER_001);
     }
 
@@ -314,5 +328,49 @@ export class InvoiceFlowService {
 
   getValidTransitions(currentStatus: string): InvoiceStatus[] {
     return VALID_TRANSITIONS[currentStatus as InvoiceStatus] || [];
+  }
+
+  /**
+   * Determines if an error is transient (network, timeout, SOAP fault)
+   * and therefore eligible for retry.
+   * Non-transient: certificate expiry, validation errors, missing config.
+   */
+  private isTransientError(error: any): boolean {
+    const message = (error.message || '').toLowerCase();
+
+    // Non-retryable patterns
+    const non_retryable = [
+      'certificado',
+      'certificate',
+      'expiró',
+      'expired',
+      'no active dian configuration',
+      'store context required',
+      'invalid state transition',
+      'must have at least one item',
+    ];
+
+    if (non_retryable.some((pattern) => message.includes(pattern))) {
+      return false;
+    }
+
+    // Retryable patterns
+    const retryable = [
+      'econnrefused',
+      'econnreset',
+      'etimedout',
+      'enotfound',
+      'socket hang up',
+      'timeout',
+      'network',
+      'soap',
+      '503',
+      '502',
+      '500',
+      'service unavailable',
+      'bad gateway',
+    ];
+
+    return retryable.some((pattern) => message.includes(pattern));
   }
 }

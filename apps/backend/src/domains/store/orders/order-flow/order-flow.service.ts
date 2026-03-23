@@ -166,6 +166,7 @@ export class OrderFlowService {
               select: {
                 quantity: true,
                 cost_price: true,
+                item_type: true,
               },
             },
           },
@@ -173,7 +174,11 @@ export class OrderFlowService {
 
         if (order_with_items?.order_items) {
           const total_cost = order_with_items.order_items.reduce(
-            (sum, item) => sum + (Number(item.cost_price || 0) * Number(item.quantity)),
+            (sum, item) => {
+              // Services don't have inventory COGS
+              if (item.item_type === 'service') return sum;
+              return sum + (Number(item.cost_price || 0) * Number(item.quantity));
+            },
             0,
           );
 
@@ -202,7 +207,7 @@ export class OrderFlowService {
           include: {
             order_items: {
               include: {
-                products: { select: { id: true, track_inventory: true } },
+                products: { select: { id: true, track_inventory: true, product_type: true } },
                 product_variants: { select: { id: true } },
               },
             },
@@ -210,7 +215,7 @@ export class OrderFlowService {
         });
 
         for (const item of orderWithItems?.order_items || []) {
-          if (!item.products?.track_inventory) continue;
+          if (!item.products?.track_inventory || item.products?.product_type === 'service') continue;
 
           const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
             item.product_id,
@@ -228,15 +233,14 @@ export class OrderFlowService {
             order_item_id: item.id,
             create_movement: true,
           });
-
-          await this.stockLevelManager.releaseReservation(
-            item.product_id,
-            item.product_variant_id || undefined,
-            location_id,
-            'order',
-            orderId,
-          );
         }
+
+        // Release all reservations by reference (fixes mismatched location bug)
+        await this.stockLevelManager.releaseReservationsByReference(
+          'order',
+          orderId,
+          'consumed',
+        );
       } catch (error) {
         this.logger.error(`Failed to update stock for finished order #${orderId}: ${error.message}`);
       }
@@ -630,36 +634,15 @@ export class OrderFlowService {
       });
     }
 
-    // Release reserved stock
-    const orderWithItems = await this.prisma.orders.findUnique({
-      where: { id: orderId },
-      include: {
-        order_items: {
-          include: {
-            products: { select: { id: true, track_inventory: true } },
-            product_variants: { select: { id: true } },
-          },
-        },
-      },
-    });
-
-    for (const item of orderWithItems?.order_items || []) {
-      if (!item.products?.track_inventory) continue;
-      try {
-        const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
-          item.product_id,
-          item.product_variant_id || undefined,
-        );
-        await this.stockLevelManager.releaseReservation(
-          item.product_id,
-          item.product_variant_id || undefined,
-          location_id,
-          'order',
-          orderId,
-        );
-      } catch (error) {
-        this.logger.warn(`Failed to release stock for cancelled order #${orderId}, item ${item.id}: ${error.message}`);
-      }
+    // Release reserved stock by reference (no location_id needed — fixes mismatched location bug)
+    try {
+      await this.stockLevelManager.releaseReservationsByReference(
+        'order',
+        orderId,
+        'cancelled',
+      );
+    } catch (error) {
+      this.logger.warn(`Failed to release stock for cancelled order #${orderId}: ${error.message}`);
     }
 
     this.validateTransition(order.state as OrderState, 'cancelled');

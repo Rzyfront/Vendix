@@ -1,11 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import { S3Service } from '../../../common/services/s3.service';
 import { ArticleQueryDto } from './dto/article-query.dto';
 import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class ArticlesService {
-  constructor(private readonly prisma: GlobalPrismaService) {}
+  constructor(
+    private readonly prisma: GlobalPrismaService,
+    private readonly s3Service: S3Service,
+  ) {}
 
   async findAll(query: ArticleQueryDto) {
     const { page = 1, limit = 10, category, type, module } = query;
@@ -39,8 +43,18 @@ export class ArticlesService {
       this.prisma.help_articles.count({ where }),
     ]);
 
+    const signedData = await Promise.all(
+      data.map(async (article) => ({
+        ...article,
+        cover_image_url: article.cover_image_url
+          ? await this.s3Service.signUrl(article.cover_image_url)
+          : null,
+        content: await this.s3Service.signMarkdownContent(article.content),
+      })),
+    );
+
     return {
-      data,
+      data: signedData,
       meta: {
         total,
         page,
@@ -75,7 +89,17 @@ export class ArticlesService {
       },
     });
 
-    return results;
+    const signedResults = await Promise.all(
+      results.map(async (article) => ({
+        ...article,
+        cover_image_url: article.cover_image_url
+          ? await this.s3Service.signUrl(article.cover_image_url)
+          : null,
+        content: await this.s3Service.signMarkdownContent(article.content),
+      })),
+    );
+
+    return signedResults;
   }
 
   async findBySlug(slug: string) {
@@ -98,7 +122,14 @@ export class ArticlesService {
       data: { view_count: { increment: 1 } },
     });
 
-    return { ...article, view_count: article.view_count + 1 };
+    return {
+      ...article,
+      view_count: article.view_count + 1,
+      cover_image_url: article.cover_image_url
+        ? await this.s3Service.signUrl(article.cover_image_url)
+        : null,
+      content: await this.s3Service.signMarkdownContent(article.content),
+    };
   }
 
   async incrementView(id: number) {

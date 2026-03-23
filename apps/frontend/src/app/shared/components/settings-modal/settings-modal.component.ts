@@ -146,6 +146,16 @@ const APP_MODULES = {
           label: 'Cotizaciones',
           description: 'Cotizaciones y presupuestos para clientes',
         },
+        {
+          key: 'orders_layaway',
+          label: 'Plan Separe',
+          description: 'Planes de pago a cuotas con reserva de productos',
+        },
+        {
+          key: 'orders_credits',
+          label: 'Créditos',
+          description: 'Ventas a crédito con cronograma de cuotas e intereses',
+        },
       ],
     },
 
@@ -317,8 +327,18 @@ const APP_MODULES = {
         },
         {
           key: 'payroll_runs',
+          label: 'Períodos de Nómina',
+          description: 'Períodos y corridas de nómina',
+        },
+        {
+          key: 'payroll_settlements',
           label: 'Liquidaciones',
-          description: 'Liquidación y corridas de nómina',
+          description: 'Liquidación por terminación de empleados',
+        },
+        {
+          key: 'payroll_advances',
+          label: 'Adelantos',
+          description: 'Adelantos y préstamos a empleados',
         },
         {
           key: 'payroll_settings',

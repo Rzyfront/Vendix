@@ -202,3 +202,140 @@ export interface ApiResponse<T> {
   timestamp?: string;
   path?: string;
 }
+
+// ─── Settlement Interfaces ──────────────────────────────────
+
+export interface PayrollSettlement {
+  id: number;
+  organization_id: number;
+  store_id: number | null;
+  employee_id: number;
+  settlement_number: string;
+  status: 'draft' | 'calculated' | 'approved' | 'paid' | 'cancelled';
+  termination_date: string;
+  termination_reason: string;
+  hire_date: string;
+  days_worked: number;
+  base_salary: number;
+  contract_type: string;
+  severance: number;
+  severance_interest: number;
+  bonus: number;
+  vacation: number;
+  pending_salary: number;
+  indemnification: number;
+  health_deduction: number;
+  pension_deduction: number;
+  other_deductions: number;
+  total_deductions: number;
+  gross_settlement: number;
+  net_settlement: number;
+  calculation_detail: any;
+  document_url: string | null;
+  notes: string | null;
+  employee?: any;
+  approved_by_user?: any;
+  created_at: string;
+}
+
+export interface SettlementStats {
+  by_status: {
+    draft: number;
+    calculated: number;
+    approved: number;
+    paid: number;
+    cancelled: number;
+  };
+  totals: {
+    total_gross: number;
+    total_net: number;
+  };
+}
+
+export interface CreateSettlementDto {
+  employee_id: number;
+  termination_date: string;
+  termination_reason: string;
+  notes?: string;
+  pending_salary_days?: number;
+}
+
+// ─── Advance Interfaces ─────────────────────────────────────
+
+export interface EmployeeAdvance {
+  id: number;
+  organization_id: number;
+  employee_id: number;
+  advance_number: string;
+  amount_requested: number;
+  amount_approved: number;
+  amount_paid: number;
+  amount_pending: number;
+  installments: number;
+  installment_value: number;
+  frequency: string;
+  status: 'pending' | 'approved' | 'repaying' | 'paid' | 'rejected' | 'cancelled';
+  advance_date: string;
+  reason: string | null;
+  notes: string | null;
+  employee?: any;
+  advance_payments?: AdvancePayment[];
+  approved_by_user?: any;
+  approved_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface AdvancePayment {
+  id: number;
+  advance_id: number;
+  payroll_item_id: number | null;
+  amount: number;
+  payment_date: string;
+  payment_type: 'payroll_deduction' | 'manual';
+  notes: string | null;
+}
+
+export interface AdvanceStats {
+  total_active: number;
+  total_pending_approval: number;
+  total_amount_pending: number;
+  total_deducted_this_month: number;
+}
+
+export interface CreateAdvanceDto {
+  employee_id: number;
+  amount_requested: number;
+  installments: number;
+  frequency?: string;
+  advance_date: string;
+  reason?: string;
+}
+
+export interface AdvanceApproveDto {
+  amount_approved?: number;
+  installments?: number;
+  notes?: string;
+}
+
+export interface AdvanceManualPaymentDto {
+  amount: number;
+  payment_date: string;
+  notes?: string;
+}
+
+export interface EmployeeAdvanceSummary {
+  total_advances: number;
+  active_advances: number;
+  total_requested: number;
+  total_approved: number;
+  total_paid: number;
+  total_pending: number;
+}
+
+export interface BankExportResult {
+  download_url: string;
+  file_name: string;
+  record_count: number;
+  total_amount: number;
+}

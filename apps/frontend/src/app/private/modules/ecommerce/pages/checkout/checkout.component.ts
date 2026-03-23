@@ -45,6 +45,16 @@ export class CheckoutComponent implements OnInit, OnDestroy {
 
   step = 1; // 1: Address, 2: Payment, 3: Confirm
 
+  /** True when all cart items are services (no physical products) */
+  get cartHasOnlyServices(): boolean {
+    return this.cart_service.hasOnlyServices();
+  }
+
+  /** True when the cart has at least one physical product */
+  get cartHasPhysicalItems(): boolean {
+    return this.cart_service.hasPhysicalItems();
+  }
+
   // Recommendations
   recommendedProducts = signal<EcommerceProduct[]>([]);
   quickViewOpen = false;
@@ -339,9 +349,15 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     };
   }
 
+  /** The step number that corresponds to Payment in the current flow */
+  private get paymentStep(): number {
+    return this.cartHasOnlyServices ? 1 : 2;
+  }
+
   // Override nextStep to load shipping if moving from Step 1
   nextStep(): void {
-    if (this.step === 1) {
+    // Address step (only for carts with physical items)
+    if (this.step === 1 && !this.cartHasOnlyServices) {
       if (this.use_new_address && !this.address_form.valid) {
         this.error_message = 'Por favor completa la dirección de envío';
         this.address_form.markAllAsTouched();
@@ -365,15 +381,18 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       return;
     }
 
-    if (this.step === 2 && !this.selected_payment_method_id) {
-      this.error_message = 'Por favor selecciona un método de pago';
-      return;
-    }
+    // Payment step validation
+    if (this.step === this.paymentStep) {
+      if (!this.selected_payment_method_id) {
+        this.error_message = 'Por favor selecciona un método de pago';
+        return;
+      }
 
-    // Check shipping selection
-    if (this.step === 2 && this.shipping_options.length > 0 && !this.selected_shipping_method_id) {
-      this.error_message = 'Por favor selecciona un método de envío';
-      return;
+      // Check shipping selection (only for physical items)
+      if (!this.cartHasOnlyServices && this.shipping_options.length > 0 && !this.selected_shipping_method_id) {
+        this.error_message = 'Por favor selecciona un método de envío';
+        return;
+      }
     }
 
     this.error_message = '';
@@ -466,11 +485,14 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     const request: CheckoutRequest = {
       payment_method_id: this.selected_payment_method_id,
       notes: this.notes || undefined,
-      shipping_method_id: this.selected_shipping_method_id || undefined,
-      shipping_rate_id: this.selected_shipping_option_id || undefined
+      // Only include shipping fields when cart has physical items
+      ...(!this.cartHasOnlyServices ? {
+        shipping_method_id: this.selected_shipping_method_id || undefined,
+        shipping_rate_id: this.selected_shipping_option_id || undefined,
+      } : {}),
     };
 
-    if (this.use_new_address) {
+    if (!this.cartHasOnlyServices && this.use_new_address) {
       // Convert IDs to names for backend compatibility
       let addressValue = { ...this.address_form.value };
 
@@ -496,7 +518,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       }
 
       request.shipping_address = addressValue;
-    } else if (this.selected_address_id) {
+    } else if (!this.cartHasOnlyServices && this.selected_address_id) {
       request.shipping_address_id = this.selected_address_id;
     }
 

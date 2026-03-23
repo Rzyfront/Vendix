@@ -390,7 +390,7 @@ export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnCh
         sunday: { open: 'closed', close: 'closed' },
       },
       enable_schedule_validation: false,
-      offline_mode_enabled: false,
+      show_onscreen_keypad: true,
       require_cash_drawer_open: false,
       auto_print_receipt: true,
       allow_price_edit: true,

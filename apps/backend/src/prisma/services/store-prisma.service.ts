@@ -35,6 +35,9 @@ export class StorePrismaService extends BasePrismaService {
     'cash_registers',
     'cash_register_sessions',
     'cash_register_movements',
+    'layaway_plans',
+    'credits',
+    'exogenous_reports',
   ];
 
   constructor() {
@@ -119,6 +122,26 @@ export class StorePrismaService extends BasePrismaService {
       'accounting_entries', // Org scoped
       'employees', // Org scoped
       'payroll_runs', // Org scoped
+      'layaway_items', // Relational
+      'layaway_installments', // Relational
+      'layaway_payments', // Relational
+      'credit_installments', // Relational
+      'credit_installment_payments', // Relational
+      'bank_accounts', // Org scoped
+      'fixed_asset_categories', // Org scoped
+      'fixed_assets', // Org scoped
+      'budgets', // Org scoped
+      'consolidation_sessions', // Org scoped
+      'intercompany_transactions', // Org scoped
+      'bank_transactions', // Relational
+      'bank_reconciliations', // Relational
+      'bank_reconciliation_matches', // Relational
+      'depreciation_entries', // Relational
+      'budget_lines', // Relational
+      'consolidation_adjustments', // Relational
+      'withholding_calculations', // Org scoped (organization_id + optional store_id)
+      'withholding_concepts', // Org scoped
+      'uvt_values', // Org scoped
     ];
 
     for (const model of all_scoped_models) {
@@ -223,6 +246,9 @@ export class StorePrismaService extends BasePrismaService {
       payroll_items: {
         payroll_run: { organization_id: context.organization_id },
       },
+      employee_advance_payments: {
+        advance: { organization_id: context.organization_id },
+      },
       promotion_products: { promotions: { store_id: context.store_id } },
       promotion_categories: { promotions: { store_id: context.store_id } },
       order_promotions: { orders: { store_id: context.store_id } },
@@ -230,6 +256,17 @@ export class StorePrismaService extends BasePrismaService {
       coupon_categories: { coupon: { store_id: context.store_id } },
       coupon_uses: { coupon: { store_id: context.store_id } },
       quotation_items: { quotation: { store_id: context.store_id } },
+      layaway_items: { layaway_plan: { store_id: context.store_id } },
+      layaway_installments: { layaway_plan: { store_id: context.store_id } },
+      layaway_payments: { layaway_plan: { store_id: context.store_id } },
+      credit_installments: { credits: { store_id: context.store_id } },
+      credit_installment_payments: { credit_installments: { credits: { store_id: context.store_id } } },
+      bank_transactions: { bank_account: { organization_id: context.organization_id } },
+      bank_reconciliations: { bank_account: { organization_id: context.organization_id } },
+      bank_reconciliation_matches: { reconciliation: { bank_account: { organization_id: context.organization_id } } },
+      depreciation_entries: { fixed_asset: { organization_id: context.organization_id } },
+      budget_lines: { budget: { organization_id: context.organization_id } },
+      consolidation_adjustments: { session: { organization_id: context.organization_id } },
     };
 
     const security_filter: Record<string, any> = {};
@@ -246,6 +283,17 @@ export class StorePrismaService extends BasePrismaService {
       'accounting_entries',
       'employees',
       'payroll_runs',
+      'payroll_settlements',
+      'employee_advances',
+      'bank_accounts',
+      'fixed_asset_categories',
+      'fixed_assets',
+      'budgets',
+      'consolidation_sessions',
+      'intercompany_transactions',
+      'withholding_concepts',
+      'withholding_calculations',
+      'uvt_values',
     ];
 
     if (this.store_scoped_models.includes(model)) {
@@ -596,6 +644,62 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.accounting_entry_lines;
   }
 
+  get accounting_account_mappings() {
+    return this.baseClient.accounting_account_mappings;
+  }
+
+  // Bank Reconciliation models
+  get bank_accounts() {
+    return this.scoped_client.bank_accounts;
+  }
+
+  get bank_transactions() {
+    return this.scoped_client.bank_transactions;
+  }
+
+  get bank_reconciliations() {
+    return this.scoped_client.bank_reconciliations;
+  }
+
+  get bank_reconciliation_matches() {
+    return this.scoped_client.bank_reconciliation_matches;
+  }
+
+  // Fixed Assets models
+  get fixed_asset_categories() {
+    return this.scoped_client.fixed_asset_categories;
+  }
+
+  get fixed_assets() {
+    return this.scoped_client.fixed_assets;
+  }
+
+  get depreciation_entries() {
+    return this.scoped_client.depreciation_entries;
+  }
+
+  // Budget models
+  get budgets() {
+    return this.scoped_client.budgets;
+  }
+
+  get budget_lines() {
+    return this.scoped_client.budget_lines;
+  }
+
+  // Consolidation models
+  get consolidation_sessions() {
+    return this.scoped_client.consolidation_sessions;
+  }
+
+  get intercompany_transactions() {
+    return this.scoped_client.intercompany_transactions;
+  }
+
+  get consolidation_adjustments() {
+    return this.scoped_client.consolidation_adjustments;
+  }
+
   // Payroll models
   get employees() {
     return this.scoped_client.employees;
@@ -607,6 +711,18 @@ export class StorePrismaService extends BasePrismaService {
 
   get payroll_items() {
     return this.scoped_client.payroll_items;
+  }
+
+  get payroll_settlements() {
+    return this.scoped_client.payroll_settlements;
+  }
+
+  get employee_advances() {
+    return this.scoped_client.employee_advances;
+  }
+
+  get employee_advance_payments() {
+    return this.scoped_client.employee_advance_payments;
   }
 
   // Quotations models
@@ -642,6 +758,49 @@ export class StorePrismaService extends BasePrismaService {
 
   get cash_register_movements() {
     return this.scoped_client.cash_register_movements;
+  }
+
+  // Layaway models
+  get layaway_plans() {
+    return this.scoped_client.layaway_plans;
+  }
+
+  get layaway_items() {
+    return this.scoped_client.layaway_items;
+  }
+
+  get layaway_installments() {
+    return this.scoped_client.layaway_installments;
+  }
+
+  get layaway_payments() {
+    return this.scoped_client.layaway_payments;
+  }
+
+  // Credits models
+  get credits() {
+    return this.scoped_client.credits;
+  }
+
+  get credit_installments() {
+    return this.scoped_client.credit_installments;
+  }
+
+  get credit_installment_payments() {
+    return this.scoped_client.credit_installment_payments;
+  }
+
+  // Withholding Tax models (org scoped)
+  get withholding_concepts() {
+    return this.scoped_client.withholding_concepts;
+  }
+
+  get withholding_calculations() {
+    return this.scoped_client.withholding_calculations;
+  }
+
+  get uvt_values() {
+    return this.scoped_client.uvt_values;
   }
 
   // Global tables (no store scoping)

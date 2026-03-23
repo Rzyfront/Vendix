@@ -1,0 +1,371 @@
+<!-- Session Detail View -->
+<div class="w-full">
+
+  <!-- Header Bar -->
+  <div class="bg-surface border-b border-border px-3 py-3 md:px-6 md:py-4 mb-4 md:mb-6 rounded-t-xl">
+    <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+      <!-- Left: Back + Title -->
+      <div class="flex items-center gap-3">
+        <button
+          class="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+          (click)="goBack()"
+        >
+          <app-icon name="arrow-left" [size]="20"></app-icon>
+        </button>
+        <div>
+          <h1 class="text-base md:text-xl font-semibold text-text-primary">
+            {{ session()?.name || 'Cargando...' }}
+          </h1>
+          @if (session()?.fiscal_period) {
+            <p class="text-xs md:text-sm text-text-secondary">
+              {{ session()!.fiscal_period!.name }} &middot; {{ session()!.session_date | date:'mediumDate' }}
+            </p>
+          }
+        </div>
+      </div>
+
+      <!-- Right: Status + Actions -->
+      <div class="flex items-center gap-2 flex-wrap">
+        <app-badge [variant]="getStatusBadgeVariant()">
+          {{ getStatusLabel() }}
+        </app-badge>
+
+        @if (session()?.status === 'draft') {
+          <app-button variant="primary" size="sm" (clicked)="onStart()" [loading]="action_loading()">
+            Iniciar
+          </app-button>
+        }
+        @if (session()?.status === 'in_progress') {
+          <app-button variant="primary" size="sm" (clicked)="onComplete()" [loading]="action_loading()">
+            Completar
+          </app-button>
+        }
+        @if (session()?.status !== 'completed' && session()?.status !== 'cancelled') {
+          <app-button variant="outline" size="sm" (clicked)="onCancel()" [loading]="action_loading()">
+            Cancelar
+          </app-button>
+        }
+        <app-button variant="outline" size="sm" (clicked)="onExport()" [loading]="export_loading()">
+          <app-icon name="download" [size]="14" class="mr-1"></app-icon>
+          Exportar
+        </app-button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="px-2 md:px-0 mb-4">
+    <app-scrollable-tabs
+      [tabs]="tabs"
+      [activeTab]="active_tab()"
+      (tabChange)="onTabChange($event)"
+      size="sm"
+    ></app-scrollable-tabs>
+  </div>
+
+  <!-- Tab Content -->
+  <div class="px-2 md:px-0">
+
+    <!-- Intercompany Tab -->
+    @if (active_tab() === 'intercompany') {
+      <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
+                  md:border md:border-border">
+        <!-- Header -->
+        <div class="px-3 py-3 md:px-4 md:py-4 md:border-b md:border-border">
+          <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center">
+            <h2 class="text-sm font-semibold text-text-primary md:text-base">
+              Transacciones Intercompany ({{ ic_transactions().length }})
+            </h2>
+            <div class="flex items-center gap-2">
+              @if (session()?.status === 'in_progress') {
+                <app-button variant="outline" size="sm" (clicked)="onDetectIC()" [loading]="ic_loading()">
+                  Detectar
+                </app-button>
+                @if (ic_transactions().length > 0) {
+                  <app-button variant="secondary" size="sm" (clicked)="onAutoEliminate()" [loading]="auto_eliminate_loading()">
+                    Auto-eliminar IC
+                  </app-button>
+                  <app-button variant="primary" size="sm" (clicked)="onEliminateAllIC()" [loading]="ic_loading()">
+                    Eliminar Todas
+                  </app-button>
+                }
+              }
+            </div>
+          </div>
+        </div>
+
+        <!-- IC Table -->
+        <div class="relative p-2 md:p-4">
+          <app-responsive-data-view
+            [data]="ic_transactions()"
+            [columns]="ic_columns"
+            [cardConfig]="ic_card_config"
+            [actions]="ic_table_actions"
+            [loading]="ic_loading()"
+            emptyMessage="No se detectaron transacciones intercompany"
+            emptyIcon="git-merge"
+          ></app-responsive-data-view>
+        </div>
+      </div>
+    }
+
+    <!-- Drill-down Tab -->
+    @if (active_tab() === 'drilldown') {
+      <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
+                  md:border md:border-border">
+        <!-- Header -->
+        <div class="px-3 py-3 md:px-4 md:py-4 md:border-b md:border-border">
+          <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center">
+            <h2 class="text-sm font-semibold text-text-primary md:text-base">
+              Drill-down de Transacciones
+            </h2>
+          </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="px-3 py-3 md:px-4 border-b border-border/50">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <app-selector
+              label="Tienda"
+              [options]="store_options()"
+              (valueChange)="onDrilldownFilterChange('store_id', $event)"
+              placeholder="Todas las tiendas"
+            ></app-selector>
+            <app-selector
+              label="Cuenta"
+              [options]="drilldown_account_options()"
+              (valueChange)="onDrilldownFilterChange('account_id', $event)"
+              placeholder="Todas las cuentas"
+            ></app-selector>
+            <app-selector
+              label="Estado"
+              [options]="eliminated_options"
+              (valueChange)="onDrilldownFilterChange('eliminated', $event)"
+              placeholder="Todos"
+            ></app-selector>
+          </div>
+        </div>
+
+        <!-- Results Table -->
+        <div class="relative p-2 md:p-4">
+          <app-responsive-data-view
+            [data]="drilldown_data()"
+            [columns]="ic_columns"
+            [cardConfig]="ic_card_config"
+            [loading]="drilldown_loading()"
+            emptyMessage="No hay transacciones con los filtros seleccionados"
+            emptyIcon="search"
+          ></app-responsive-data-view>
+
+          <!-- Pagination -->
+          @if (drilldown_meta(); as meta) {
+            @if (meta.total_pages > 1) {
+              <div class="flex items-center justify-between mt-4 pt-3 border-t border-border/50">
+                <span class="text-xs text-text-secondary">
+                  {{ meta.total }} transacciones &middot; Pagina {{ meta.page }} de {{ meta.total_pages }}
+                </span>
+                <div class="flex items-center gap-2">
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    [disabled]="meta.page <= 1"
+                    (clicked)="onDrilldownPageChange(meta.page - 1)"
+                  >
+                    Anterior
+                  </app-button>
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    [disabled]="meta.page >= meta.total_pages"
+                    (clicked)="onDrilldownPageChange(meta.page + 1)"
+                  >
+                    Siguiente
+                  </app-button>
+                </div>
+              </div>
+            }
+          }
+        </div>
+      </div>
+    }
+
+    <!-- Adjustments Tab -->
+    @if (active_tab() === 'adjustments') {
+      <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
+                  md:border md:border-border">
+        <!-- Header -->
+        <div class="px-3 py-3 md:px-4 md:py-4 md:border-b md:border-border">
+          <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center">
+            <h2 class="text-sm font-semibold text-text-primary md:text-base">
+              Ajustes de Consolidacion ({{ adjustments().length }})
+            </h2>
+            @if (session()?.status === 'in_progress') {
+              <app-button variant="primary" size="sm" (clicked)="is_adjustment_modal_open = true">
+                Agregar Ajuste
+              </app-button>
+            }
+          </div>
+        </div>
+
+        <!-- Adjustments Table -->
+        <div class="relative p-2 md:p-4">
+          <app-responsive-data-view
+            [data]="adjustments()"
+            [columns]="adj_columns"
+            [cardConfig]="adj_card_config"
+            [actions]="adj_table_actions"
+            [loading]="adj_loading()"
+            emptyMessage="No hay ajustes de consolidacion"
+            emptyIcon="sliders"
+          ></app-responsive-data-view>
+        </div>
+      </div>
+
+      <!-- Adjustment Create Modal -->
+      <app-modal
+        [isOpen]="is_adjustment_modal_open"
+        (isOpenChange)="is_adjustment_modal_open = $event"
+        (cancel)="is_adjustment_modal_open = false"
+        title="Nuevo Ajuste de Consolidacion"
+        size="md"
+      >
+        <div class="p-4 space-y-4">
+          <form [formGroup]="adj_form">
+            <app-selector
+              label="Cuenta"
+              formControlName="account_id"
+              [options]="account_options()"
+              [required]="true"
+              placeholder="Seleccionar cuenta"
+            ></app-selector>
+
+            <app-selector
+              label="Tipo"
+              formControlName="type"
+              [options]="adjustment_type_options"
+              [required]="true"
+            ></app-selector>
+
+            <div class="grid grid-cols-2 gap-3">
+              <app-input
+                label="Debito"
+                formControlName="debit_amount"
+                [control]="adj_form.get('debit_amount')"
+                type="number"
+                placeholder="0.00"
+              ></app-input>
+              <app-input
+                label="Credito"
+                formControlName="credit_amount"
+                [control]="adj_form.get('credit_amount')"
+                type="number"
+                placeholder="0.00"
+              ></app-input>
+            </div>
+
+            <app-textarea
+              label="Descripcion"
+              formControlName="description"
+              [rows]="2"
+              [required]="true"
+              placeholder="Descripcion del ajuste"
+            ></app-textarea>
+          </form>
+        </div>
+
+        <div slot="footer">
+          <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+            <app-button variant="outline" (clicked)="is_adjustment_modal_open = false">
+              Cancelar
+            </app-button>
+            <app-button
+              variant="primary"
+              (clicked)="onSubmitAdjustment()"
+              [disabled]="adj_form.invalid || adj_submitting()"
+              [loading]="adj_submitting()"
+            >
+              Agregar
+            </app-button>
+          </div>
+        </div>
+      </app-modal>
+    }
+
+    <!-- Reports Tab -->
+    @if (active_tab() === 'reports') {
+      <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
+                  md:border md:border-border">
+        <!-- Report Selector -->
+        <div class="px-3 py-3 md:px-4 md:py-4 md:border-b md:border-border">
+          <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center">
+            <h2 class="text-sm font-semibold text-text-primary md:text-base">
+              Reportes Consolidados
+            </h2>
+            <app-selector
+              class="w-full md:w-64"
+              [options]="report_type_options"
+              [ngModel]="selected_report()"
+              (valueChange)="onReportTypeChange($event)"
+              placeholder="Seleccionar reporte"
+            ></app-selector>
+          </div>
+        </div>
+
+        <!-- Report Content -->
+        <div class="relative p-2 md:p-4 min-h-[300px]">
+          @if (report_loading()) {
+            <div class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
+              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          }
+
+          @if (report_data(); as data) {
+            <!-- Combined / Consolidated table -->
+            @if (data.consolidated && data.consolidated.rows) {
+              <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="border-b border-border">
+                      <th class="text-left py-2 px-3 text-text-secondary font-medium">Cuenta</th>
+                      <th class="text-right py-2 px-3 text-text-secondary font-medium">Combinado</th>
+                      <th class="text-right py-2 px-3 text-text-secondary font-medium">Ajustes</th>
+                      <th class="text-right py-2 px-3 text-text-secondary font-medium">Consolidado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (row of data.consolidated.rows; track row.account_code || $index) {
+                      <tr class="border-b border-border/50 hover:bg-gray-50 transition-colors">
+                        <td class="py-2 px-3 text-text-primary">
+                          {{ row.account_code }} - {{ row.account_name }}
+                        </td>
+                        <td class="py-2 px-3 text-right text-text-secondary">
+                          {{ formatCurrency(row.combined_balance ?? row.combined ?? 0) }}
+                        </td>
+                        <td class="py-2 px-3 text-right text-text-secondary">
+                          {{ formatCurrency(row.adjustment_total ?? row.adjustments ?? 0) }}
+                        </td>
+                        <td class="py-2 px-3 text-right font-medium text-text-primary">
+                          {{ formatCurrency(row.consolidated_balance ?? row.balance ?? 0) }}
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            } @else {
+              <div class="flex flex-col items-center justify-center py-12 text-text-secondary">
+                <app-icon name="bar-chart-2" [size]="48" class="mb-3 opacity-40"></app-icon>
+                <p class="text-sm">Selecciona un reporte para visualizar</p>
+              </div>
+            }
+          } @else if (!report_loading()) {
+            <div class="flex flex-col items-center justify-center py-12 text-text-secondary">
+              <app-icon name="bar-chart-2" [size]="48" class="mb-3 opacity-40"></app-icon>
+              <p class="text-sm">Selecciona un reporte para visualizar</p>
+            </div>
+          }
+        </div>
+      </div>
+    }
+  </div>
+</div>

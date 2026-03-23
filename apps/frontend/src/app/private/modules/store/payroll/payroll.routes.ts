@@ -32,6 +32,20 @@ export const payrollRoutes: Routes = [
                     ),
             },
             {
+                path: 'settlements',
+                loadComponent: () =>
+                    import('./pages/payroll-settlements-page.component').then(
+                        (c) => c.PayrollSettlementsPageComponent,
+                    ),
+            },
+            {
+                path: 'advances',
+                loadComponent: () =>
+                    import('./pages/payroll-advances-page.component').then(
+                        (c) => c.PayrollAdvancesPageComponent,
+                    ),
+            },
+            {
                 path: 'settings',
                 loadComponent: () =>
                     import('./components/payroll-settings/payroll-settings.component').then(

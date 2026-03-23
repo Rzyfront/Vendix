@@ -61,6 +61,34 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   // Phase 2: Sales discounts (POS coupons, manual discounts)
   'payment.received.sales_discount': '4175',
   'credit_sale.created.sales_discount': '4175',
+  // Layaway (Plan Separé)
+  'layaway.payment.cash': '1105',
+  'layaway.payment.bank': '1110',
+  'layaway.payment.customer_advance': '2805',
+  'layaway.completed.customer_advance': '2805',
+  'layaway.completed.revenue': '4135',
+  // Fixed Assets - Depreciation
+  'depreciation.monthly.depreciation_expense': '5199',
+  'depreciation.monthly.accumulated_depreciation': '1592',
+  // Fixed Assets - Disposal
+  'disposal.fixed_asset.asset_cost': '1520',
+  'disposal.fixed_asset.accumulated_depreciation': '1592',
+  'disposal.fixed_asset.loss': '5310',
+  'disposal.fixed_asset.gain': '4245',
+  'disposal.fixed_asset.cash': '1105',
+  // Withholding Tax (Retención en la Fuente)
+  'withholding.applied.expense': '5195',
+  'withholding.applied.withholding_payable': '2365',
+  'withholding.applied.accounts_payable': '2205',
+  // Settlement (Liquidación por Terminación)
+  'settlement.paid.severance': '2610',
+  'settlement.paid.severance_interest': '2615',
+  'settlement.paid.bonus': '2620',
+  'settlement.paid.vacation': '2625',
+  'settlement.paid.pending_salary': '5105',
+  'settlement.paid.indemnification': '5105',
+  'settlement.paid.social_deductions': '2370',
+  'settlement.paid.bank': '1110',
 };
 
 /**

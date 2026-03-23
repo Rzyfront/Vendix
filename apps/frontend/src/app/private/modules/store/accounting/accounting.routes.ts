@@ -48,6 +48,96 @@ export const accountingRoutes: Routes = [
           ),
       },
       {
+        path: 'fixed-assets',
+        loadComponent: () =>
+          import('./components/fixed-assets/fixed-assets.component').then(
+            (c) => c.FixedAssetsComponent,
+          ),
+      },
+      {
+        path: 'consolidation',
+        loadComponent: () =>
+          import('./components/consolidation/consolidation.component').then(
+            (c) => c.ConsolidationComponent,
+          ),
+        children: [
+          {
+            path: '',
+            loadComponent: () =>
+              import('./components/consolidation/consolidation-sessions/consolidation-sessions.component').then(
+                (c) => c.ConsolidationSessionsComponent,
+              ),
+          },
+          {
+            path: ':id',
+            loadComponent: () =>
+              import('./components/consolidation/session-detail/session-detail.component').then(
+                (c) => c.SessionDetailComponent,
+              ),
+          },
+        ],
+      },
+      {
+        path: 'bank-reconciliation',
+        loadComponent: () =>
+          import('./components/bank-reconciliation/bank-reconciliation.component').then(
+            (c) => c.BankReconciliationComponent,
+          ),
+        children: [
+          {
+            path: '',
+            loadComponent: () =>
+              import('./components/bank-reconciliation/bank-accounts.component').then(
+                (c) => c.BankAccountsComponent,
+              ),
+          },
+          {
+            path: 'reconciliations',
+            loadComponent: () =>
+              import('./components/bank-reconciliation/reconciliation-list.component').then(
+                (c) => c.ReconciliationListComponent,
+              ),
+          },
+          {
+            path: 'reconciliations/:id',
+            loadComponent: () =>
+              import('./components/bank-reconciliation/reconciliation-workspace.component').then(
+                (c) => c.ReconciliationWorkspaceComponent,
+              ),
+          },
+        ],
+      },
+      {
+        path: 'budgets',
+        loadComponent: () =>
+          import('./components/budgets/budgets.component').then(
+            (c) => c.BudgetsComponent,
+          ),
+        children: [
+          {
+            path: '',
+            loadComponent: () =>
+              import('./components/budgets/budget-list/budget-list.component').then(
+                (c) => c.BudgetListComponent,
+              ),
+          },
+          {
+            path: ':budgetId/editor',
+            loadComponent: () =>
+              import('./components/budgets/budget-editor/budget-editor.component').then(
+                (c) => c.BudgetEditorComponent,
+              ),
+          },
+          {
+            path: ':budgetId/variance',
+            loadComponent: () =>
+              import('./components/budgets/budget-variance/budget-variance.component').then(
+                (c) => c.BudgetVarianceComponent,
+              ),
+          },
+        ],
+      },
+      {
         path: 'reports',
         loadComponent: () =>
           import('./components/reports/reports.component').then(
