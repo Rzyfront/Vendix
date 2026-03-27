@@ -188,12 +188,13 @@
   font-family: var(--font-primary);
   z-index: 99999;
 
-  // Actions dropdown: align to left
+  // Actions dropdown: align to right (expand to left)
   &.actions-dropdown {
-    left: 0;
+    right: 0;
+    left: auto;
   }
 
-  // Filters dropdown: align to right
+  // Filters dropdown: align to right (expand to left)
   &.filters-dropdown {
     right: 0;
   }
