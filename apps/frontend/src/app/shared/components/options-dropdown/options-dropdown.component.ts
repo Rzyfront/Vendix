@@ -78,11 +78,13 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
   @Output() clearAllFilters = new EventEmitter<void>();
 
   @ViewChild('dropdownContainer') dropdownContainer!: ElementRef<HTMLElement>;
-  @ViewChild('triggerButton') triggerButton!: ElementRef<HTMLButtonElement>;
+  @ViewChild('actionsTriggerButton') actionsTriggerButton!: ElementRef<HTMLButtonElement>;
+  @ViewChild('filtersTriggerButton') filtersTriggerButton!: ElementRef<HTMLButtonElement>;
 
   private cdr = inject(ChangeDetectorRef);
 
-  isOpen: boolean = false;
+  isActionsOpen: boolean = false;
+  isFiltersOpen: boolean = false;
   activeFiltersCount: number = 0;
 
   /** Position for mobile dropdown */
@@ -144,8 +146,19 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
     this.activeFiltersCount = count;
   }
 
-  toggleDropdown(): void {
-    this.isOpen = !this.isOpen;
+  toggleActionsDropdown(): void {
+    this.isActionsOpen = !this.isActionsOpen;
+    this.isFiltersOpen = false;
+  }
+
+  toggleFiltersDropdown(): void {
+    this.isFiltersOpen = !this.isFiltersOpen;
+    this.isActionsOpen = false;
+  }
+
+  closeAllDropdowns(): void {
+    this.isActionsOpen = false;
+    this.isFiltersOpen = false;
   }
 
   private calculateDropdownPosition(): void {
@@ -155,7 +168,7 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
   }
 
   closeDropdown(): void {
-    this.isOpen = false;
+    this.closeAllDropdowns();
   }
 
   @HostListener('document:click', ['$event'])
@@ -164,7 +177,7 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
       this.dropdownContainer &&
       !this.dropdownContainer.nativeElement.contains(event.target as Node)
     ) {
-      this.closeDropdown();
+      this.closeAllDropdowns();
     }
   }
 
@@ -175,7 +188,7 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
 
   @HostListener('window:scroll')
   onWindowScroll(): void {
-    if (this.isOpen) {
+    if (this.isActionsOpen || this.isFiltersOpen) {
       this.calculateDropdownPosition();
     }
   }
@@ -228,7 +241,15 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
 
   onActionClick(action: string): void {
     this.actionClick.emit(action);
-    this.closeDropdown();
+    this.closeAllDropdowns();
+  }
+
+  get hasActions(): boolean {
+    return this.actions.length > 0;
+  }
+
+  get hasFilters(): boolean {
+    return this.filters.length > 0;
   }
 
   /**
