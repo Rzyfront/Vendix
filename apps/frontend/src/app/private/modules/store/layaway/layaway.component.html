@@ -1,19 +1,55 @@
 <!-- Stats: sticky mobile, static desktop -->
 @if (stats()) {
-  <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
-    <app-stats title="Planes Activos" [value]="stats()!.active" iconName="clock" iconBgColor="bg-blue-100" iconColor="text-blue-600"></app-stats>
-    <app-stats title="Completados" [value]="stats()!.completed" iconName="check-circle" iconBgColor="bg-emerald-100" iconColor="text-emerald-600"></app-stats>
-    <app-stats title="Vencidos" [value]="stats()!.overdue" iconName="alert-triangle" iconBgColor="bg-red-100" iconColor="text-red-600"></app-stats>
-    <app-stats title="Por Cobrar" [value]="'$' + stats()!.total_receivable" iconName="dollar-sign" iconBgColor="bg-purple-100" iconColor="text-purple-600"></app-stats>
+  <div
+    class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+  >
+    <app-stats
+      title="Planes Activos"
+      [value]="stats()!.active"
+      smallText="Planes en curso"
+      iconName="clock"
+      iconBgColor="bg-blue-100"
+      iconColor="text-blue-600"
+    ></app-stats>
+    <app-stats
+      title="Completados"
+      [value]="stats()!.completed"
+      smallText="Pagos finalizados"
+      iconName="check-circle"
+      iconBgColor="bg-emerald-100"
+      iconColor="text-emerald-600"
+    ></app-stats>
+    <app-stats
+      title="Vencidos"
+      [value]="stats()!.overdue"
+      smallText="Requieren atención"
+      iconName="alert-triangle"
+      iconBgColor="bg-red-100"
+      iconColor="text-red-600"
+    ></app-stats>
+    <app-stats
+      title="Por Cobrar"
+      [value]="stats()!.total_receivable | currency:0"
+      smallText="Monto total pendiente"
+      iconName="dollar-sign"
+      iconBgColor="bg-purple-100"
+      iconColor="text-purple-600"
+    ></app-stats>
   </div>
 }
 
 <!-- Card container -->
-<div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border">
+<app-card [responsive]="true" [padding]="false">
   <!-- Search: sticky below stats on mobile -->
-  <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
-    <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-      <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
+  <div
+    class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+  >
+    <div
+      class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+    >
+      <h2
+        class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
+      >
         Planes Separé ({{ layaways().length }})
       </h2>
       <div class="flex items-center gap-2 w-full md:w-auto">
@@ -23,7 +59,12 @@
           [debounceTime]="300"
           (searchChange)="onSearch($event)"
         ></app-inputsearch>
-        <app-button variant="outline" size="sm" customClasses="w-9 h-9 !px-0 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]" (clicked)="openCreateModal()">
+        <app-button
+          variant="outline"
+          size="sm"
+          customClasses="w-9 h-9 !px-0 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+          (clicked)="openCreateModal()"
+        >
           <app-icon slot="icon" name="plus" [size]="18"></app-icon>
         </app-button>
       </div>
@@ -33,7 +74,9 @@
   <!-- Loading -->
   @if (loading()) {
     <div class="p-4 md:p-6 text-center">
-      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+      <div
+        class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"
+      ></div>
     </div>
   }
 
@@ -58,4 +101,4 @@
       }
     </div>
   }
-</div>
+</app-card>

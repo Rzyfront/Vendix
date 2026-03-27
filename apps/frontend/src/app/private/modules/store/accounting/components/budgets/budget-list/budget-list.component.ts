@@ -1,4 +1,11 @@
-import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  OnDestroy,
+  inject,
+  signal,
+  computed,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
@@ -7,6 +14,7 @@ import { AccountingService } from '../../../services/accounting.service';
 import { Budget, FiscalPeriod } from '../../../interfaces/accounting.interface';
 import { BudgetCreateModalComponent } from '../budget-create-modal/budget-create-modal.component';
 import {
+  CardComponent,
   InputsearchComponent,
   StatsComponent,
   ResponsiveDataViewComponent,
@@ -33,6 +41,7 @@ interface BudgetStats {
   standalone: true,
   imports: [
     CommonModule,
+    CardComponent,
     InputsearchComponent,
     StatsComponent,
     ResponsiveDataViewComponent,
@@ -60,7 +69,9 @@ export class BudgetListComponent implements OnInit, OnDestroy {
     return {
       total: items.length,
       draft: items.filter((b) => b.status === 'draft').length,
-      active: items.filter((b) => b.status === 'active' || b.status === 'approved').length,
+      active: items.filter(
+        (b) => b.status === 'active' || b.status === 'approved',
+      ).length,
       closed: items.filter((b) => b.status === 'closed').length,
     };
   });
@@ -102,7 +113,12 @@ export class BudgetListComponent implements OnInit, OnDestroy {
   ];
 
   dropdown_actions: DropdownAction[] = [
-    { label: 'Nuevo Presupuesto', icon: 'plus', action: 'create', variant: 'primary' },
+    {
+      label: 'Nuevo Presupuesto',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   table_actions: TableAction[] = [
@@ -117,7 +133,10 @@ export class BudgetListComponent implements OnInit, OnDestroy {
       icon: 'bar-chart-2',
       variant: 'secondary',
       action: (row: Budget) => this.onVariance(row),
-      show: (row: Budget) => row.status === 'active' || row.status === 'approved' || row.status === 'closed',
+      show: (row: Budget) =>
+        row.status === 'active' ||
+        row.status === 'approved' ||
+        row.status === 'closed',
     },
     {
       label: 'Eliminar',
@@ -151,14 +170,16 @@ export class BudgetListComponent implements OnInit, OnDestroy {
       label: 'Umbral %',
       align: 'right',
       priority: 2,
-      transform: (val: number | undefined) => (val !== undefined && val !== null ? `${val}%` : '-'),
+      transform: (val: number | undefined) =>
+        val !== undefined && val !== null ? `${val}%` : '-',
     },
     {
       key: 'created_at',
       label: 'Creado',
       sortable: true,
       priority: 2,
-      transform: (val: string) => (val ? new Date(val).toLocaleDateString() : '-'),
+      transform: (val: string) =>
+        val ? new Date(val).toLocaleDateString() : '-',
     },
   ];
 
@@ -187,7 +208,8 @@ export class BudgetListComponent implements OnInit, OnDestroy {
         key: 'variance_threshold',
         label: 'Umbral',
         icon: 'percent',
-        transform: (val: number | undefined) => (val !== undefined && val !== null ? `${val}%` : '-'),
+        transform: (val: number | undefined) =>
+          val !== undefined && val !== null ? `${val}%` : '-',
       },
     ],
   };
@@ -254,11 +276,17 @@ export class BudgetListComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
-          this.toast_service.show({ variant: 'success', description: 'Presupuesto eliminado' });
+          this.toast_service.show({
+            variant: 'success',
+            description: 'Presupuesto eliminado',
+          });
           this.loadBudgets();
         },
         error: () => {
-          this.toast_service.show({ variant: 'error', description: 'Error al eliminar presupuesto' });
+          this.toast_service.show({
+            variant: 'error',
+            description: 'Error al eliminar presupuesto',
+          });
         },
       });
   }

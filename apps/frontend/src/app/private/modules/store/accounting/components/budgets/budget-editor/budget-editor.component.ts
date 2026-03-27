@@ -21,6 +21,7 @@ import {
   SelectorOption,
   IconComponent,
 } from '../../../../../../../shared/components/index';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 const MONTH_KEYS = [
   'month_01', 'month_02', 'month_03', 'month_04',
@@ -62,6 +63,7 @@ export class BudgetEditorComponent implements OnInit, OnDestroy {
   private router = inject(Router);
   private accounting_service = inject(AccountingService);
   private toast_service = inject(ToastService);
+  private currencyService = inject(CurrencyFormatService);
 
   budget = signal<Budget | null>(null);
   lines = signal<EditorLine[]>([]);
@@ -318,7 +320,7 @@ export class BudgetEditorComponent implements OnInit, OnDestroy {
   }
 
   formatCurrency(value: number): string {
-    return `$${value.toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+    return this.currencyService.format(Number(value) || 0, 0);
   }
 
   trackByIndex(index: number): number {

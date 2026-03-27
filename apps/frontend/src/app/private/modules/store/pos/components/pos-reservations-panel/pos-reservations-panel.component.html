@@ -1,0 +1,77 @@
+<div class="reservations-panel">
+  <!-- Header -->
+  <div class="panel-header">
+    <h3>Reservas Hoy ({{ todayBookings().length }})</h3>
+    <div class="header-actions">
+      <button class="icon-btn" (click)="quickBook.emit()" title="Reserva rapida">
+        <app-icon name="plus" [size]="18"></app-icon>
+      </button>
+      <button class="icon-btn" (click)="walkIn.emit()" title="Walk-in">
+        <app-icon name="user-plus" [size]="18"></app-icon>
+      </button>
+      <button class="icon-btn" (click)="loadTodayBookings()" title="Actualizar">
+        <app-icon name="refresh-cw" [size]="16"></app-icon>
+      </button>
+      <button class="icon-btn" (click)="close.emit()" title="Cerrar">
+        <app-icon name="x" [size]="18"></app-icon>
+      </button>
+    </div>
+  </div>
+
+  <!-- Timeline -->
+  <div class="timeline-container">
+    @if (loading()) {
+      <div class="loading-center">
+        <app-spinner size="sm" color="primary"></app-spinner>
+      </div>
+    } @else if (todayBookings().length === 0) {
+      <div class="empty-state">
+        <app-icon name="calendar" [size]="32"></app-icon>
+        <p>No hay reservas para hoy</p>
+        <app-button variant="primary" size="sm" (clicked)="quickBook.emit()">
+          <app-icon name="plus" [size]="14" slot="icon"></app-icon> Nueva Reserva
+        </app-button>
+      </div>
+    } @else {
+      <div class="timeline">
+        @for (slot of timeSlots; track slot) {
+          <div class="time-row">
+            <span class="time-label">{{ slot }}</span>
+            <div class="time-line"></div>
+          </div>
+        }
+
+        <!-- Booking blocks -->
+        @for (booking of todayBookings(); track booking.id) {
+          <div
+            class="booking-block status-{{ booking.status }}"
+            [style.top.%]="getBlockTop(booking)"
+            [style.height.%]="getBlockHeight(booking)"
+            (click)="toggleBookingActions(booking)">
+            <div class="block-header">
+              <span class="block-time">{{ formatTime(booking.start_time) }}</span>
+              <span class="block-status">{{ getStatusLabel(booking.status) }}</span>
+            </div>
+            <span class="block-service">{{ booking.product?.name || booking.service_name || 'Servicio' }}</span>
+            <span class="block-customer">{{ booking.customer?.first_name || booking.customer?.name || '' }} {{ booking.customer?.last_name || '' }}</span>
+
+            @if (expandedBookingId() === booking.id) {
+              <div class="block-actions" (click)="$event.stopPropagation()">
+                @if (booking.status === 'pending') {
+                  <app-button variant="primary" size="sm" (clicked)="confirm(booking)">Confirmar</app-button>
+                }
+                @if (booking.status === 'confirmed') {
+                  <app-button variant="primary" size="sm" (clicked)="complete(booking)">Completar</app-button>
+                  <app-button variant="ghost" size="sm" (clicked)="noShow(booking)">No Show</app-button>
+                }
+              </div>
+            }
+          </div>
+        }
+
+        <!-- Current time line -->
+        <div class="current-time-line" [style.top.%]="currentTimePercent()"></div>
+      </div>
+    }
+  </div>
+</div>

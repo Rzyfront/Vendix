@@ -1,4 +1,12 @@
-import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges, inject } from '@angular/core';
+import {
+  Component,
+  Input,
+  Output,
+  EventEmitter,
+  OnChanges,
+  SimpleChanges,
+  inject,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -25,9 +33,9 @@ import {
   ButtonComponent,
   IconComponent,
   PaginationComponent,
+  EmptyStateComponent,
+  CardComponent,
 } from '../../../../../../shared/components/index';
-
-import { ProductEmptyStateComponent } from '../product-empty-state.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
 // Import styles
@@ -42,11 +50,12 @@ import './product-list.component.css';
     FormsModule,
     InputsearchComponent,
     OptionsDropdownComponent,
-    ProductEmptyStateComponent,
+    EmptyStateComponent,
     ResponsiveDataViewComponent,
     ButtonComponent,
     IconComponent,
     PaginationComponent,
+    CardComponent,
   ],
   templateUrl: './product-list.component.html',
 })
@@ -123,7 +132,12 @@ export class ProductListComponent implements OnChanges {
 
   // Dropdown actions for the filter/options dropdown
   dropdownActions: DropdownAction[] = [
-    { label: 'Nuevo Producto', icon: 'plus', action: 'create', variant: 'primary' },
+    {
+      label: 'Nuevo Producto',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
     { label: 'Carga Masiva', icon: 'upload-cloud', action: 'bulk-upload' },
     { label: 'Carga de Imágenes', icon: 'image', action: 'bulk-image-upload' },
   ];
@@ -168,12 +182,12 @@ export class ProductListComponent implements OnChanges {
     },
     {
       key: 'pricing_type',
-      label: 'Precio',
+      label: 'Unidad de medida',
       sortable: false,
       width: '80px',
       align: 'center',
       priority: 3,
-      transform: (value: string) => value === 'weight' ? 'Peso' : 'Unidad',
+      transform: (value: string) => (value === 'weight' ? 'Peso' : 'Unidad'),
     },
     {
       key: 'product_type',
@@ -191,7 +205,8 @@ export class ProductListComponent implements OnChanges {
           service: '#8b5cf6',
         },
       },
-      transform: (value: string) => value === 'service' ? 'Servicio' : 'Producto',
+      transform: (value: string) =>
+        value === 'service' ? 'Servicio' : 'Producto',
     },
     {
       key: 'stock_quantity',
@@ -201,8 +216,11 @@ export class ProductListComponent implements OnChanges {
       align: 'center',
       priority: 1,
       transform: (value: number, item?: any) =>
-        item?.product_type === 'service' ? 'Servicio' :
-        item?.track_inventory === false ? 'Disponible' : (value?.toString() || '0'),
+        item?.product_type === 'service'
+          ? 'Servicio'
+          : item?.track_inventory === false
+            ? 'Disponible'
+            : value?.toString() || '0',
     },
     {
       key: 'state',
@@ -271,10 +289,13 @@ export class ProductListComponent implements OnChanges {
         key: 'stock_quantity',
         label: 'Stock',
         transform: (val: any, item?: any) =>
-          item?.product_type === 'service' ? 'Servicio' :
-          item?.track_inventory === false ? 'Disponible' : (val?.toString() || '0'),
-      }
-    ]
+          item?.product_type === 'service'
+            ? 'Servicio'
+            : item?.track_inventory === false
+              ? 'Disponible'
+              : val?.toString() || '0',
+      },
+    ],
   };
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -285,31 +306,37 @@ export class ProductListComponent implements OnChanges {
 
   private updateFilterOptions(): void {
     // Update category options
-    const categoryFilter = this.filterConfigs.find(f => f.key === 'category_id');
+    const categoryFilter = this.filterConfigs.find(
+      (f) => f.key === 'category_id',
+    );
     if (categoryFilter) {
       categoryFilter.options = [
         { value: '', label: 'Todas las Categorías' },
-        ...this.categories.map(cat => ({
+        ...this.categories.map((cat) => ({
           value: cat.id.toString(),
           label: cat.name,
         })),
       ];
       categoryFilter.disabled = this.categories.length === 0;
-      categoryFilter.helpText = this.categories.length === 0 ? 'No hay categorías disponibles' : undefined;
+      categoryFilter.helpText =
+        this.categories.length === 0
+          ? 'No hay categorías disponibles'
+          : undefined;
     }
 
     // Update brand options
-    const brandFilter = this.filterConfigs.find(f => f.key === 'brand_id');
+    const brandFilter = this.filterConfigs.find((f) => f.key === 'brand_id');
     if (brandFilter) {
       brandFilter.options = [
         { value: '', label: 'Todas las Marcas' },
-        ...this.brands.map(brand => ({
+        ...this.brands.map((brand) => ({
           value: brand.id.toString(),
           label: brand.name,
         })),
       ];
       brandFilter.disabled = this.brands.length === 0;
-      brandFilter.helpText = this.brands.length === 0 ? 'No hay marcas disponibles' : undefined;
+      brandFilter.helpText =
+        this.brands.length === 0 ? 'No hay marcas disponibles' : undefined;
     }
 
     // Force re-render by creating new array reference
@@ -377,8 +404,8 @@ export class ProductListComponent implements OnChanges {
     return state;
   }
 
-  formatCurrency(value: number): string {
-    return this.currencyService.format(value);
+  formatCurrency(value: any): string {
+    return this.currencyService.format(Number(value) || 0);
   }
 
   getEmptyStateTitle(): string {

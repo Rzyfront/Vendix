@@ -65,12 +65,10 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
             <!-- Amount -->
             <app-input
               label="Monto"
-              type="number"
+              [currency]="true"
               formControlName="amount"
               [control]="expenseForm.get('amount')"
               [required]="true"
-              min="0"
-              step="0.01"
               [prefixIcon]="true"
             >
               <span slot="prefix-icon" class="text-text-secondary">$</span>

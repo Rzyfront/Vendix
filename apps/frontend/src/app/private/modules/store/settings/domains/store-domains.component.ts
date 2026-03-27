@@ -25,6 +25,7 @@ import {
   FilterConfig,
   DropdownAction,
   FilterValues,
+  CardComponent,
 } from '../../../../../shared/components/index';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { StoreDomainsService } from './store-domains.service';
@@ -48,6 +49,7 @@ import { DomainFormModalComponent } from './components/domain-form-modal.compone
     IconComponent,
     StatsComponent,
     InputsearchComponent,
+    CardComponent,
     DomainFormModalComponent,
     ConfirmationModalComponent,
     OptionsDropdownComponent,
@@ -56,7 +58,7 @@ import { DomainFormModalComponent } from './components/domain-form-modal.compone
     <div class="w-full">
       <!-- Stats Cards — sticky on mobile, static on desktop -->
       <div
-        class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
           title="Total"
@@ -93,9 +95,7 @@ import { DomainFormModalComponent } from './components/domain-form-modal.compone
       </div>
 
       <!-- List Component Container — mobile-first: surface styles only on desktop -->
-      <div
-        class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border"
-      >
+      <app-card [responsive]="true" [padding]="false">
         <!-- Search Section — sticky on mobile -->
         <div
           class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
@@ -177,7 +177,7 @@ import { DomainFormModalComponent } from './components/domain-form-modal.compone
           >
           </app-responsive-data-view>
         </div>
-      </div>
+      </app-card>
 
       <!-- Templates -->
       <ng-template #hostnameTemplate let-item>
@@ -304,7 +304,12 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
   filterValues: FilterValues = {};
 
   dropdownActions: DropdownAction[] = [
-    { label: 'Nuevo Dominio', icon: 'plus', action: 'create', variant: 'primary' },
+    {
+      label: 'Nuevo Dominio',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   table_columns: TableColumn[] = [

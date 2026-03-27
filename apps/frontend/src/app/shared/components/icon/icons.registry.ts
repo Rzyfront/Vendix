@@ -185,6 +185,10 @@ import {
   ArrowLeftRight,
   LayoutGrid,
   SearchX,
+  // Booking time-of-day icons
+  Sunrise,
+  Sun,
+  Moon,
 } from 'lucide-angular';
 
 /**
@@ -431,6 +435,11 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'arrow-left-right': ArrowLeftRight,
   'layout-grid': LayoutGrid,
   'search-x': SearchX,
+
+  // Booking time-of-day icons
+  sunrise: Sunrise,
+  sun: Sun,
+  moon: Moon,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

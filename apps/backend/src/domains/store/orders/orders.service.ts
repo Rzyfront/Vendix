@@ -44,7 +44,9 @@ export class OrdersService {
     }
 
     // Validar horario de atención antes de crear la orden
-    await this.scheduleValidationService.validateOrThrow(store_id, true);
+    if (!createOrderDto.skip_schedule_validation) {
+      await this.scheduleValidationService.validateOrThrow(store_id, true);
+    }
 
     const user = await this.prisma.users.findUnique({
       where: { id: createOrderDto.customer_id },

@@ -467,6 +467,161 @@ export class NotificationsEventsListener {
     }
   }
 
+  // ===== BOOKING EVENTS =====
+
+  @OnEvent('booking.created')
+  async handleBookingCreated(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    customer_name: string;
+    service_name: string;
+    date: string;
+    start_time: string;
+    channel: string;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'booking_created',
+      'Nueva Reserva',
+      `Reserva ${event.booking_number} - ${event.service_name} para ${event.customer_name} el ${event.date} a las ${event.start_time} (${event.channel})`,
+      { booking_id: event.booking_id, booking_number: event.booking_number },
+    );
+  }
+
+  @OnEvent('booking.confirmed')
+  async handleBookingConfirmed(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    customer_name: string;
+    service_name: string;
+    date: string;
+    start_time: string;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'booking_confirmed',
+      'Reserva Confirmada',
+      `Reserva ${event.booking_number} confirmada - ${event.service_name} para ${event.customer_name} el ${event.date} a las ${event.start_time}`,
+      { booking_id: event.booking_id, booking_number: event.booking_number },
+    );
+  }
+
+  @OnEvent('booking.cancelled')
+  async handleBookingCancelled(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    customer_name: string;
+    service_name: string;
+    date: string;
+    start_time: string;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'booking_cancelled',
+      'Reserva Cancelada',
+      `Reserva ${event.booking_number} cancelada - ${event.service_name} de ${event.customer_name} (${event.date} ${event.start_time})`,
+      { booking_id: event.booking_id, booking_number: event.booking_number },
+    );
+  }
+
+  @OnEvent('booking.no_show')
+  async handleBookingNoShow(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    customer_name: string;
+    service_name: string;
+    date: string;
+    start_time: string;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'booking_no_show',
+      'No Show',
+      `${event.customer_name} no asistió a ${event.service_name} - Reserva ${event.booking_number} (${event.date} ${event.start_time})`,
+      { booking_id: event.booking_id, booking_number: event.booking_number },
+    );
+  }
+
+  @OnEvent('booking.reminder')
+  async handleBookingReminder(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    customer_name: string;
+    service_name: string;
+    date: string;
+    start_time: string;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'booking_reminder',
+      'Recordatorio de Reserva',
+      `Recordatorio: ${event.customer_name} tiene reserva de ${event.service_name} mañana a las ${event.start_time} (${event.booking_number})`,
+      { booking_id: event.booking_id, booking_number: event.booking_number },
+    );
+  }
+
+  @OnEvent('booking.rescheduled')
+  async handleBookingRescheduled(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    new_date: string;
+    new_start_time: string;
+    new_end_time: string;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'booking_rescheduled',
+      'Reserva Reprogramada',
+      `Reserva ${event.booking_number} reprogramada al ${event.new_date} a las ${event.new_start_time}`,
+      { booking_id: event.booking_id, booking_number: event.booking_number },
+    );
+  }
+
+  @OnEvent('booking.completed')
+  async handleBookingCompleted(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    customer_name: string;
+    service_name: string;
+    date: string;
+    start_time: string;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'booking_completed',
+      'Reserva Completada',
+      `Reserva ${event.booking_number} completada - ${event.service_name} de ${event.customer_name} (${event.date} ${event.start_time})`,
+      { booking_id: event.booking_id, booking_number: event.booking_number },
+    );
+  }
+
+  // ===== REVIEW EVENTS =====
+
+  @OnEvent('review.created')
+  async handleNewReview(event: {
+    store_id: number;
+    review_id: number;
+    product_id: number;
+    product_name: string;
+    customer_name: string;
+    rating: number;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'new_review',
+      'Nueva Reseña',
+      `${event.customer_name} dejó una reseña de ${'★'.repeat(event.rating)}${'☆'.repeat(5 - event.rating)} para ${event.product_name}`,
+      { review_id: event.review_id, product_id: event.product_id },
+    );
+  }
+
   // ─── Private Helpers ─────────────────────────────────────────────
 
   private formatDate(date: Date): string {

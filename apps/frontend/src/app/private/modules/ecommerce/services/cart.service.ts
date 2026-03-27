@@ -23,6 +23,8 @@ export interface CartItem {
         final_price: number;
         weight?: number;
         product_type?: 'physical' | 'service';
+        requires_booking?: boolean;
+        service_duration_minutes?: number;
     };
     variant: {
         name: string;
@@ -142,6 +144,8 @@ export class CartService {
                                             image_url: product.image_url,
                                             weight: product.weight || 0,
                                             product_type: product.product_type,
+                                            requires_booking: product.requires_booking,
+                                            service_duration_minutes: product.service_duration_minutes ?? undefined,
                                         },
                                         variant: localItem.product_variant_id
                                             ? {
@@ -422,6 +426,20 @@ export class CartService {
         const cart = this.cart_subject.value;
         if (!cart) return false;
         return cart.items.some(item => item.product.product_type === 'service');
+    }
+
+    /** Returns true if the cart contains at least one item that requires booking */
+    hasBookableServices(): boolean {
+        const cart = this.cart_subject.value;
+        if (!cart?.items) return false;
+        return cart.items.some((item: CartItem) => item.product?.requires_booking === true);
+    }
+
+    /** Returns the cart items that require booking */
+    getBookableItems(): CartItem[] {
+        const cart = this.cart_subject.value;
+        if (!cart?.items) return [];
+        return cart.items.filter((item: CartItem) => item.product?.requires_booking === true);
     }
 
     // ========== SHIPPING ==========

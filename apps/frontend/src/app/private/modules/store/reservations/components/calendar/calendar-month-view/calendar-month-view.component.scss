@@ -1,0 +1,156 @@
+:host {
+  display: block;
+}
+
+.month-grid {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-background);
+}
+
+.weekday-header {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  background: var(--color-background);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.weekday {
+  padding: 10px 4px;
+  text-align: center;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+
+.days-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.day-cell {
+  min-height: 80px;
+  padding: 8px;
+  border: none;
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  transition: background 0.15s ease;
+  font-family: inherit;
+
+  &:nth-child(7n) {
+    border-right: none;
+  }
+
+  &:hover {
+    background: var(--color-surface);
+  }
+
+  &.other-month {
+    opacity: 0.4;
+
+    .day-number {
+      color: var(--color-text-muted);
+    }
+  }
+
+  &.today {
+    .day-number {
+      background: var(--color-primary);
+      color: var(--color-text-on-primary);
+      border-radius: 50%;
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+    }
+  }
+
+  &.has-bookings:hover {
+    background: rgba(var(--color-primary-rgb, 126, 215, 165), 0.06);
+  }
+}
+
+.day-number {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  line-height: 1;
+}
+
+.booking-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.density-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+
+  &.density-low {
+    background: #10b981;
+  }
+
+  &.density-medium {
+    background: #f59e0b;
+  }
+
+  &.density-high {
+    background: #ef4444;
+  }
+}
+
+.booking-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+// Responsive
+@media (max-width: 640px) {
+  .weekday {
+    padding: 6px 2px;
+    font-size: 10px;
+  }
+
+  .day-cell {
+    min-height: 50px;
+    padding: 4px;
+    gap: 4px;
+  }
+
+  .day-number {
+    font-size: 12px;
+  }
+
+  .day-cell.today .day-number {
+    width: 22px;
+    height: 22px;
+    font-size: 11px;
+  }
+
+  .booking-indicator {
+    gap: 2px;
+  }
+
+  .density-dot {
+    width: 6px;
+    height: 6px;
+  }
+
+  .booking-count {
+    font-size: 10px;
+  }
+}

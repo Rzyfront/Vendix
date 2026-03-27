@@ -7,12 +7,10 @@ import {
 export class OrderFormatUtils {
   /**
    * Format currency amount
+   * @deprecated Use CurrencyFormatService.format() instead for store-aware formatting
    */
-  static formatCurrency(amount: number, currency: string): string {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: currency,
-    }).format(amount);
+  static formatCurrency(amount: number, _currency: string): string {
+    return `$${(amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
 
   /**

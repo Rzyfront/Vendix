@@ -15,6 +15,13 @@ export interface PaymentMethod {
     max_amount: number | null;
 }
 
+export interface BookingSelection {
+    product_id: number;
+    date: string;
+    start_time: string;
+    end_time: string;
+}
+
 export interface CheckoutRequest {
     shipping_address_id?: number;
     shipping_address?: {
@@ -30,6 +37,7 @@ export interface CheckoutRequest {
     shipping_rate_id?: number;
     payment_method_id: number;
     notes?: string;
+    bookings?: BookingSelection[];
 }
 
 export interface CheckoutResponse {

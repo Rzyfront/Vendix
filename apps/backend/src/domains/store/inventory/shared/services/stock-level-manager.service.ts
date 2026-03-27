@@ -481,14 +481,21 @@ export class StockLevelManager {
         });
 
         if (stock_level) {
+          const data: any = {
+            quantity_reserved: Math.max(0, stock_level.quantity_reserved - group.total_quantity),
+            last_updated: new Date(),
+            updated_at: new Date(),
+          };
+
+          if (status === 'consumed') {
+            data.quantity_on_hand = Math.max(0, stock_level.quantity_on_hand - group.total_quantity);
+          } else {
+            data.quantity_available = stock_level.quantity_available + group.total_quantity;
+          }
+
           await prisma.stock_levels.update({
             where: { id: stock_level.id },
-            data: {
-              quantity_reserved: Math.max(0, stock_level.quantity_reserved - group.total_quantity),
-              quantity_available: stock_level.quantity_available + group.total_quantity,
-              last_updated: new Date(),
-              updated_at: new Date(),
-            },
+            data,
           });
         }
 

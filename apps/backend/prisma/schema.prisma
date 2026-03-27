@@ -45,6 +45,10 @@ model users {
   refresh_tokens             refresh_tokens[]
   refunds                    refunds[]
   reviews                    reviews[]
+  // Review system
+  review_responses_created   review_responses[]           @relation("review_responses_user")
+  review_votes_cast          review_votes[]               @relation("review_votes_user")
+  review_reports_filed       review_reports[]             @relation("review_reports_user")
   sales_orders1              sales_orders[]               @relation("sales_orders_approved_by")
   sales_orders               sales_orders[]               @relation("sales_orders_created_by")
   stock_reservations         stock_reservations[]
@@ -135,6 +139,17 @@ model users {
   data_export_requests             data_export_requests[]
   anonymization_requests_target    anonymization_requests[] @relation("anonymization_target")
   anonymization_requests_requester anonymization_requests[] @relation("anonymization_requester")
+
+  // Bookings
+  bookings_as_customer bookings[] @relation("bookings_customer")
+  bookings_created     bookings[] @relation("bookings_created_by")
+
+  // Dispatch Notes
+  dispatch_notes_as_customer  dispatch_notes[] @relation("dispatch_notes_customer")
+  dispatch_notes_created_by   dispatch_notes[] @relation("dispatch_notes_created_by")
+  dispatch_notes_confirmed_by dispatch_notes[] @relation("dispatch_notes_confirmed_by")
+  dispatch_notes_delivered_by dispatch_notes[] @relation("dispatch_notes_delivered_by")
+  dispatch_notes_voided_by    dispatch_notes[] @relation("dispatch_notes_voided_by")
 
   @@index([email_verified])
   @@index([state])
@@ -369,10 +384,10 @@ model organizations {
   employee_advances         employee_advances[]
 
   // Legal / Tax
-  uvt_values                uvt_values[]
-  withholding_concepts      withholding_concepts[]
-  withholding_calculations  withholding_calculations[]
-  exogenous_reports         exogenous_reports[]
+  uvt_values               uvt_values[]
+  withholding_concepts     withholding_concepts[]
+  withholding_calculations withholding_calculations[]
+  exogenous_reports        exogenous_reports[]
 
   // Invoice Retry Queue
   invoice_retry_queue invoice_retry_queue[]
@@ -467,6 +482,7 @@ model stores {
   quotations                  quotations[]
   promotions                  promotions[]
   coupons                     coupons[]
+  reviews                     reviews[]
 
   // Cash Register
   cash_registers          cash_registers[]
@@ -496,6 +512,14 @@ model stores {
 
   // Invoice Retry Queue
   invoice_retry_queue invoice_retry_queue[]
+
+  // Bookings
+  bookings            bookings[]
+  service_schedules   service_schedules[]
+  schedule_exceptions schedule_exceptions[]
+
+  // Dispatch Notes
+  dispatch_notes dispatch_notes[]
 
   @@unique([organization_id, slug])
   @@index([onboarding])
@@ -599,12 +623,13 @@ model categories {
 }
 
 model currencies {
-  code           String                 @id @db.VarChar(3)
-  name           String                 @unique @db.VarChar(255)
-  symbol         String                 @db.VarChar(10)
-  decimal_places Int                    @default(2) @db.SmallInt
-  position       currency_position_enum @default(after)
-  state          currency_state_enum    @default(active)
+  code           String                     @id @db.VarChar(3)
+  name           String                     @unique @db.VarChar(255)
+  symbol         String                     @db.VarChar(10)
+  decimal_places Int                        @default(2) @db.SmallInt
+  position       currency_position_enum     @default(after)
+  format_style   currency_format_style_enum @default(comma_dot)
+  state          currency_state_enum        @default(active)
 }
 
 model inventory_transactions {
@@ -708,6 +733,9 @@ model orders {
   coupon_uses                                     coupon_uses[]
   cash_register_movements                         cash_register_movements[]
   credits                                         credits[]
+
+  // Bookings
+  booking bookings?
 
   @@unique([store_id, order_number])
   @@index([store_id, order_number])
@@ -846,6 +874,7 @@ model product_variants {
   quotation_items          quotation_items[]
   inventory_cost_layers    inventory_cost_layers[]
   layaway_items            layaway_items[]
+  dispatch_note_items      dispatch_note_items[]
 
   @@unique([product_id, sku])
 }
@@ -914,6 +943,14 @@ model products {
   inventory_cost_layers    inventory_cost_layers[]
   layaway_items            layaway_items[]
 
+  // Bookings
+  bookings            bookings[]
+  service_schedules   service_schedules[]
+  schedule_exceptions schedule_exceptions[]
+
+  // Dispatch Notes
+  dispatch_note_items dispatch_note_items[]
+
   @@unique([store_id, slug])
   @@unique([store_id, sku])
   @@index([store_id, sku])
@@ -964,15 +1001,68 @@ model refunds {
 }
 
 model reviews {
-  id         Int               @id @default(autoincrement())
-  product_id Int?
-  user_id    Int?
-  rating     Int?
-  comment    String?
-  state      review_state_enum @default(pending)
-  created_at DateTime?         @default(now()) @db.Timestamp(6)
-  products   products?         @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  users      users?            @relation(fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id                Int               @id @default(autoincrement())
+  store_id          Int
+  product_id        Int
+  user_id           Int
+  rating            Int
+  title             String?           @db.VarChar(255)
+  comment           String            @db.Text
+  state             review_state_enum @default(pending)
+  verified_purchase Boolean           @default(false)
+  helpful_count     Int               @default(0)
+  report_count      Int               @default(0)
+  created_at        DateTime?         @default(now()) @db.Timestamp(6)
+  updated_at        DateTime?         @updatedAt
+  products          products          @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  users             users             @relation(fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  stores            stores            @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  review_responses  review_responses?
+  review_votes      review_votes[]
+  review_reports    review_reports[]
+
+  @@unique([user_id, product_id])
+  @@index([store_id])
+  @@index([product_id, state])
+  @@index([user_id])
+}
+
+model review_responses {
+  id         Int       @id @default(autoincrement())
+  review_id  Int       @unique
+  user_id    Int
+  content    String    @db.Text
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  updated_at DateTime? @updatedAt
+  reviews    reviews   @relation(fields: [review_id], references: [id], onDelete: Cascade)
+  users      users     @relation("review_responses_user", fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+}
+
+model review_votes {
+  id         Int      @id @default(autoincrement())
+  review_id  Int
+  user_id    Int
+  is_helpful Boolean
+  created_at DateTime @default(now()) @db.Timestamp(6)
+  reviews    reviews  @relation(fields: [review_id], references: [id], onDelete: Cascade)
+  users      users    @relation("review_votes_user", fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([review_id, user_id])
+  @@index([review_id])
+}
+
+model review_reports {
+  id         Int                  @id @default(autoincrement())
+  review_id  Int
+  user_id    Int
+  reason     String               @db.VarChar(500)
+  status     review_report_status @default(pending)
+  created_at DateTime             @default(now()) @db.Timestamp(6)
+  reviews    reviews              @relation(fields: [review_id], references: [id], onDelete: Cascade)
+  users      users                @relation("review_reports_user", fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([review_id, user_id])
+  @@index([review_id])
 }
 
 model tax_categories {
@@ -1045,6 +1135,8 @@ model inventory_locations {
   inventory_cost_layers    inventory_cost_layers[]
   refund_items             refund_items[]
   layaway_items            layaway_items[]
+  dispatch_notes           dispatch_notes[]           @relation("dispatch_notes_location")
+  dispatch_note_items      dispatch_note_items[]      @relation("dispatch_note_items_location")
 
   @@unique([organization_id, code])
   @@index([organization_id, store_id])
@@ -1146,32 +1238,32 @@ model inventory_serial_numbers {
 }
 
 model suppliers {
-  id                Int                 @id @default(autoincrement())
-  organization_id   Int
-  name              String              @db.VarChar(255)
-  code              String              @db.VarChar(50)
-  contact_person    String?             @db.VarChar(255)
-  mobile            String?             @db.VarChar(50)
-  email             String?             @db.VarChar(255)
-  phone             String?             @db.VarChar(50)
-  website           String?             @db.VarChar(255)
-  tax_id            String?             @db.VarChar(50)
-  tax_regime        String?             @db.VarChar(50)
-  document_type     String?             @db.VarChar(10)
-  verification_digit String?            @db.VarChar(1)
-  payment_terms     String?             @db.VarChar(255)
-  currency          String?             @db.VarChar(10)
-  notes             String?
-  lead_time_days    Int?
-  is_active         Boolean             @default(true)
-  address_id        Int?
-  created_at        DateTime?           @default(now()) @db.Timestamp(6)
-  updated_at        DateTime?           @default(now()) @db.Timestamp(6)
-  purchase_orders        purchase_orders[]
-  supplier_products      supplier_products[]
-  organizations          organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  addresses              addresses?                 @relation("supplier_addresses", fields: [address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  invoices               invoices[]
+  id                       Int                        @id @default(autoincrement())
+  organization_id          Int
+  name                     String                     @db.VarChar(255)
+  code                     String                     @db.VarChar(50)
+  contact_person           String?                    @db.VarChar(255)
+  mobile                   String?                    @db.VarChar(50)
+  email                    String?                    @db.VarChar(255)
+  phone                    String?                    @db.VarChar(50)
+  website                  String?                    @db.VarChar(255)
+  tax_id                   String?                    @db.VarChar(50)
+  tax_regime               String?                    @db.VarChar(50)
+  document_type            String?                    @db.VarChar(10)
+  verification_digit       String?                    @db.VarChar(1)
+  payment_terms            String?                    @db.VarChar(255)
+  currency                 String?                    @db.VarChar(10)
+  notes                    String?
+  lead_time_days           Int?
+  is_active                Boolean                    @default(true)
+  address_id               Int?
+  created_at               DateTime?                  @default(now()) @db.Timestamp(6)
+  updated_at               DateTime?                  @default(now()) @db.Timestamp(6)
+  purchase_orders          purchase_orders[]
+  supplier_products        supplier_products[]
+  organizations            organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  addresses                addresses?                 @relation("supplier_addresses", fields: [address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  invoices                 invoices[]
   withholding_calculations withholding_calculations[]
 
   @@unique([organization_id, code])
@@ -1441,6 +1533,7 @@ model sales_orders {
   organizations       organizations           @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   addresses           addresses?              @relation("sales_orders_shipping_address", fields: [shipping_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   invoices            invoices[]
+  dispatch_notes      dispatch_notes[]
 
   @@unique([organization_id, order_number])
 }
@@ -1840,6 +1933,8 @@ enum notification_type_enum {
   installment_overdue
   installment_paid
   credit_completed
+  new_review
+  review_moderated
 }
 
 model notifications {
@@ -1934,6 +2029,12 @@ enum currency_state_enum {
 enum currency_position_enum {
   before // Símbolo antes: $100
   after // Símbolo después: 100$
+}
+
+enum currency_format_style_enum {
+  comma_dot   // 1,234.56 (US/UK)
+  dot_comma   // 1.234,56 (Europe/Latin America)
+  space_comma // 1 234,56 (French)
 }
 
 enum inventory_transaction_type_enum {
@@ -2047,6 +2148,12 @@ enum review_state_enum {
   rejected
   hidden
   flagged
+}
+
+enum review_report_status {
+  pending
+  reviewed
+  dismissed
 }
 
 enum user_state_enum {
@@ -2258,6 +2365,14 @@ enum return_order_status_enum {
   draft
   processed
   cancelled
+}
+
+enum dispatch_note_status_enum {
+  draft
+  confirmed
+  delivered
+  invoiced
+  voided
 }
 
 enum related_order_type_enum {
@@ -2759,6 +2874,7 @@ model ai_engine_configs {
   updated_at     DateTime? @default(now()) @db.Timestamp(6)
 
   applications ai_engine_applications[]
+  logs         ai_engine_logs[]
 
   @@unique([provider, model_id])
 }
@@ -2784,6 +2900,99 @@ model ai_engine_applications {
   config ai_engine_configs? @relation(fields: [config_id], references: [id], onDelete: SetNull)
 
   @@index([config_id])
+}
+
+model ai_engine_logs {
+  id                Int      @id @default(autoincrement())
+  request_id        String   @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  app_key           String?  @db.VarChar(100)
+  config_id         Int?
+  organization_id   Int?
+  store_id          Int?
+  user_id           Int?
+  model             String?  @db.VarChar(100)
+  prompt_tokens     Int      @default(0)
+  completion_tokens Int      @default(0)
+  cost_usd          Decimal  @default(0) @db.Decimal(12, 8)
+  latency_ms        Int      @default(0)
+  status            String   @default("success") @db.VarChar(20)
+  error_message     String?  @db.Text
+  input_preview     String?  @db.Text
+  created_at        DateTime @default(now()) @db.Timestamp(6)
+
+  config ai_engine_configs? @relation(fields: [config_id], references: [id], onDelete: SetNull)
+
+  @@index([organization_id])
+  @@index([store_id])
+  @@index([app_key])
+  @@index([created_at])
+  @@index([config_id])
+}
+
+enum ai_conversation_status_enum {
+  active
+  archived
+  deleted
+}
+
+enum ai_message_role_enum {
+  system
+  user
+  assistant
+  tool
+}
+
+model ai_conversations {
+  id              Int                         @id @default(autoincrement())
+  store_id        Int
+  organization_id Int
+  user_id         Int
+  title           String?                     @db.VarChar(255)
+  summary         String?                     @db.Text
+  app_key         String?                     @db.VarChar(100)
+  status          ai_conversation_status_enum @default(active)
+  metadata        Json?
+  created_at      DateTime                    @default(now()) @db.Timestamp(6)
+  updated_at      DateTime                    @default(now()) @db.Timestamp(6)
+
+  messages ai_messages[]
+
+  @@index([store_id])
+  @@index([store_id, user_id])
+  @@index([status])
+}
+
+model ai_messages {
+  id              Int                  @id @default(autoincrement())
+  conversation_id Int
+  role            ai_message_role_enum
+  content         String               @db.Text
+  tool_calls      Json?
+  tokens_used     Int                  @default(0)
+  cost_usd        Decimal              @default(0) @db.Decimal(12, 8)
+  metadata        Json?
+  created_at      DateTime             @default(now()) @db.Timestamp(6)
+
+  conversation ai_conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+
+  @@index([conversation_id])
+  @@index([conversation_id, created_at])
+}
+
+model ai_embeddings {
+  id              Int                          @id @default(autoincrement())
+  store_id        Int
+  organization_id Int
+  entity_type     String                       @db.VarChar(50)
+  entity_id       Int
+  content         String                       @db.Text
+  embedding       Unsupported("vector(1536)")?
+  metadata        Json?
+  created_at      DateTime                     @default(now()) @db.Timestamp(6)
+  updated_at      DateTime                     @default(now()) @db.Timestamp(6)
+
+  @@unique([store_id, entity_type, entity_id])
+  @@index([store_id, entity_type])
 }
 
 // ── Help Center ──────────────────────────────────────────────────
@@ -2901,21 +3110,22 @@ model invoices {
   created_at          DateTime?                 @default(now()) @db.Timestamp(6)
   updated_at          DateTime?                 @default(now()) @db.Timestamp(6)
 
-  organization       organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store              stores               @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  customer           users?               @relation("invoices_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  supplier           suppliers?           @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  order              orders?              @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  sales_order        sales_orders?        @relation(fields: [sales_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  related_invoice    invoices?            @relation("invoice_credit_debit_notes", fields: [related_invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  credit_debit_notes invoices[]           @relation("invoice_credit_debit_notes")
-  resolution         invoice_resolutions? @relation(fields: [resolution_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  accounting_entry   accounting_entries?  @relation(fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  created_by_user    users?               @relation("invoices_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  organization             organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store                    stores                     @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  customer                 users?                     @relation("invoices_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  supplier                 suppliers?                 @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  order                    orders?                    @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  sales_order              sales_orders?              @relation(fields: [sales_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  related_invoice          invoices?                  @relation("invoice_credit_debit_notes", fields: [related_invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  credit_debit_notes       invoices[]                 @relation("invoice_credit_debit_notes")
+  resolution               invoice_resolutions?       @relation(fields: [resolution_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  accounting_entry         accounting_entries?        @relation(fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by_user          users?                     @relation("invoices_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   invoice_items            invoice_items[]
   invoice_taxes            invoice_taxes[]
   withholding_calculations withholding_calculations[]
   invoice_retry_queue      invoice_retry_queue[]
+  dispatch_notes           dispatch_notes[]
 
   @@unique([organization_id, invoice_type, invoice_number])
   @@index([store_id, status])
@@ -3754,6 +3964,15 @@ enum anonymization_status_enum {
   rejected
 }
 
+enum booking_status_enum {
+  pending
+  confirmed
+  in_progress
+  completed
+  cancelled
+  no_show
+}
+
 model credits {
   id                        Int                        @id @default(autoincrement())
   store_id                  Int
@@ -4256,17 +4475,17 @@ model uvt_values {
 }
 
 model withholding_concepts {
-  id                   Int                              @id @default(autoincrement())
+  id                   Int                            @id @default(autoincrement())
   organization_id      Int
-  code                 String                           @db.VarChar(30)
-  name                 String                           @db.VarChar(150)
-  rate                 Decimal                          @db.Decimal(7, 4)
-  min_uvt_threshold    Decimal                          @default(0) @db.Decimal(10, 2)
+  code                 String                         @db.VarChar(30)
+  name                 String                         @db.VarChar(150)
+  rate                 Decimal                        @db.Decimal(7, 4)
+  min_uvt_threshold    Decimal                        @default(0) @db.Decimal(10, 2)
   applies_to           withholding_applies_to_enum
-  supplier_type_filter withholding_supplier_type_enum   @default(any)
-  is_active            Boolean                          @default(true)
-  created_at           DateTime?                        @default(now()) @db.Timestamp(6)
-  updated_at           DateTime?                        @default(now()) @db.Timestamp(6)
+  supplier_type_filter withholding_supplier_type_enum @default(any)
+  is_active            Boolean                        @default(true)
+  created_at           DateTime?                      @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?                      @default(now()) @db.Timestamp(6)
 
   organization             organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   withholding_calculations withholding_calculations[]
@@ -4276,18 +4495,18 @@ model withholding_concepts {
 }
 
 model withholding_calculations {
-  id               Int       @id @default(autoincrement())
-  organization_id  Int
-  store_id         Int?
-  invoice_id       Int?
-  supplier_id      Int?
-  concept_id       Int
-  base_amount      Decimal   @db.Decimal(12, 2)
-  withholding_rate Decimal   @db.Decimal(7, 4)
-  withholding_amount Decimal @db.Decimal(12, 2)
-  uvt_value_used   Decimal   @db.Decimal(12, 2)
-  year             Int
-  created_at       DateTime? @default(now()) @db.Timestamp(6)
+  id                 Int       @id @default(autoincrement())
+  organization_id    Int
+  store_id           Int?
+  invoice_id         Int?
+  supplier_id        Int?
+  concept_id         Int
+  base_amount        Decimal   @db.Decimal(12, 2)
+  withholding_rate   Decimal   @db.Decimal(7, 4)
+  withholding_amount Decimal   @db.Decimal(12, 2)
+  uvt_value_used     Decimal   @db.Decimal(12, 2)
+  year               Int
+  created_at         DateTime? @default(now()) @db.Timestamp(6)
 
   organization organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store        stores?              @relation(fields: [store_id], references: [id], onDelete: Cascade)
@@ -4303,25 +4522,25 @@ model withholding_calculations {
 // ── Información Exógena DIAN ──────────────────────────────
 
 model exogenous_reports {
-  id                 Int                          @id @default(autoincrement())
-  organization_id    Int
-  store_id           Int?
-  fiscal_year        Int
-  format_code        String                       @db.VarChar(10)
-  status             exogenous_report_status_enum @default(draft)
-  total_records      Int                          @default(0)
-  total_amount       Decimal                      @default(0) @db.Decimal(15, 2)
-  file_key           String?                      @db.Text
-  validation_errors  Json?
-  generated_at       DateTime?                    @db.Timestamp(6)
-  submitted_at       DateTime?                    @db.Timestamp(6)
+  id                  Int                          @id @default(autoincrement())
+  organization_id     Int
+  store_id            Int?
+  fiscal_year         Int
+  format_code         String                       @db.VarChar(10)
+  status              exogenous_report_status_enum @default(draft)
+  total_records       Int                          @default(0)
+  total_amount        Decimal                      @default(0) @db.Decimal(15, 2)
+  file_key            String?                      @db.Text
+  validation_errors   Json?
+  generated_at        DateTime?                    @db.Timestamp(6)
+  submitted_at        DateTime?                    @db.Timestamp(6)
   submission_response Json?
-  created_by_user_id Int?
-  created_at         DateTime?                    @default(now()) @db.Timestamp(6)
-  updated_at         DateTime?                    @default(now()) @db.Timestamp(6)
+  created_by_user_id  Int?
+  created_at          DateTime?                    @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?                    @default(now()) @db.Timestamp(6)
 
-  organization         organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store                stores?                @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  organization           organizations            @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store                  stores?                  @relation(fields: [store_id], references: [id], onDelete: Cascade)
   exogenous_report_lines exogenous_report_lines[]
 
   @@unique([organization_id, fiscal_year, format_code])
@@ -4330,16 +4549,16 @@ model exogenous_reports {
 }
 
 model exogenous_report_lines {
-  id                Int       @id @default(autoincrement())
-  report_id         Int
-  third_party_nit   String    @db.VarChar(20)
-  third_party_name  String    @db.VarChar(255)
-  third_party_dv    String?   @db.VarChar(1)
-  concept_code      String    @db.VarChar(10)
-  payment_amount    Decimal   @default(0) @db.Decimal(15, 2)
-  tax_amount        Decimal   @default(0) @db.Decimal(15, 2)
-  withholding_amount Decimal  @default(0) @db.Decimal(15, 2)
-  line_data         Json?
+  id                 Int     @id @default(autoincrement())
+  report_id          Int
+  third_party_nit    String  @db.VarChar(20)
+  third_party_name   String  @db.VarChar(255)
+  third_party_dv     String? @db.VarChar(1)
+  concept_code       String  @db.VarChar(10)
+  payment_amount     Decimal @default(0) @db.Decimal(15, 2)
+  tax_amount         Decimal @default(0) @db.Decimal(15, 2)
+  withholding_amount Decimal @default(0) @db.Decimal(15, 2)
+  line_data          Json?
 
   report exogenous_reports @relation(fields: [report_id], references: [id], onDelete: Cascade)
 
@@ -4350,16 +4569,16 @@ model exogenous_report_lines {
 // ── HABEAS DATA (Protección de Datos) ─────────────────────
 
 model user_consents {
-  id           Int                @id @default(autoincrement())
+  id           Int               @id @default(autoincrement())
   user_id      Int
   consent_type consent_type_enum
-  granted      Boolean            @default(false)
-  granted_at   DateTime?          @db.Timestamp(6)
-  revoked_at   DateTime?          @db.Timestamp(6)
-  ip_address   String?            @db.VarChar(45)
-  user_agent   String?            @db.Text
-  created_at   DateTime?          @default(now()) @db.Timestamp(6)
-  updated_at   DateTime?          @default(now()) @db.Timestamp(6)
+  granted      Boolean           @default(false)
+  granted_at   DateTime?         @db.Timestamp(6)
+  revoked_at   DateTime?         @db.Timestamp(6)
+  ip_address   String?           @db.VarChar(45)
+  user_agent   String?           @db.Text
+  created_at   DateTime?         @default(now()) @db.Timestamp(6)
+  updated_at   DateTime?         @default(now()) @db.Timestamp(6)
 
   user users @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
@@ -4369,15 +4588,15 @@ model user_consents {
 }
 
 model data_export_requests {
-  id              Int                      @id @default(autoincrement())
+  id              Int                     @id @default(autoincrement())
   user_id         Int
-  status          data_export_status_enum  @default(pending)
-  file_key        String?                  @db.Text
-  file_expires_at DateTime?                @db.Timestamp(6)
-  requested_at    DateTime                 @default(now()) @db.Timestamp(6)
-  completed_at    DateTime?                @db.Timestamp(6)
-  error_message   String?                  @db.Text
-  created_at      DateTime?                @default(now()) @db.Timestamp(6)
+  status          data_export_status_enum @default(pending)
+  file_key        String?                 @db.Text
+  file_expires_at DateTime?               @db.Timestamp(6)
+  requested_at    DateTime                @default(now()) @db.Timestamp(6)
+  completed_at    DateTime?               @db.Timestamp(6)
+  error_message   String?                 @db.Text
+  created_at      DateTime?               @default(now()) @db.Timestamp(6)
 
   user users @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
@@ -4385,14 +4604,14 @@ model data_export_requests {
 }
 
 model anonymization_requests {
-  id                   Int                        @id @default(autoincrement())
+  id                   Int                       @id @default(autoincrement())
   user_id              Int
   requested_by_user_id Int
-  reason               String                     @db.Text
-  status               anonymization_status_enum  @default(pending)
-  anonymized_at        DateTime?                  @db.Timestamp(6)
-  original_data_hash   String?                    @db.VarChar(64)
-  created_at           DateTime?                  @default(now()) @db.Timestamp(6)
+  reason               String                    @db.Text
+  status               anonymization_status_enum @default(pending)
+  anonymized_at        DateTime?                 @db.Timestamp(6)
+  original_data_hash   String?                   @db.VarChar(64)
+  created_at           DateTime?                 @default(now()) @db.Timestamp(6)
 
   user         users @relation("anonymization_target", fields: [user_id], references: [id], onDelete: Cascade)
   requested_by users @relation("anonymization_requester", fields: [requested_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -4442,4 +4661,157 @@ model invoice_retry_queue {
 
   @@index([status, next_retry_at])
   @@index([invoice_id])
+}
+
+model bookings {
+  id                 Int                 @id @default(autoincrement())
+  store_id           Int
+  customer_id        Int
+  product_id         Int
+  booking_number     String              @db.VarChar(50)
+  date               DateTime            @db.Date
+  start_time         String              @db.VarChar(5)
+  end_time           String              @db.VarChar(5)
+  status             booking_status_enum @default(pending)
+  channel            order_channel_enum  @default(pos)
+  notes              String?             @db.Text
+  internal_notes     String?             @db.Text
+  order_id           Int?                @unique
+  created_by_user_id Int?
+  created_at         DateTime?           @default(now()) @db.Timestamp(6)
+  updated_at         DateTime?           @default(now()) @db.Timestamp(6)
+
+  store      stores   @relation(fields: [store_id], references: [id])
+  customer   users    @relation("bookings_customer", fields: [customer_id], references: [id])
+  product    products @relation(fields: [product_id], references: [id])
+  order      orders?  @relation(fields: [order_id], references: [id])
+  created_by users?   @relation("bookings_created_by", fields: [created_by_user_id], references: [id])
+
+  @@unique([store_id, booking_number])
+  @@index([store_id, date])
+  @@index([store_id, status])
+  @@index([store_id, product_id, date])
+  @@index([customer_id])
+}
+
+model service_schedules {
+  id                    Int       @id @default(autoincrement())
+  store_id              Int
+  product_id            Int
+  day_of_week           Int       @db.SmallInt
+  start_time            String    @db.VarChar(5)
+  end_time              String    @db.VarChar(5)
+  slot_duration_minutes Int
+  capacity              Int       @default(1)
+  buffer_minutes        Int       @default(0)
+  is_active             Boolean   @default(true)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+
+  store   stores   @relation(fields: [store_id], references: [id])
+  product products @relation(fields: [product_id], references: [id])
+
+  @@unique([store_id, product_id, day_of_week])
+  @@index([store_id])
+  @@index([product_id])
+}
+
+model schedule_exceptions {
+  id                Int       @id @default(autoincrement())
+  store_id          Int
+  product_id        Int?
+  date              DateTime  @db.Date
+  is_closed         Boolean   @default(false)
+  custom_start_time String?   @db.VarChar(5)
+  custom_end_time   String?   @db.VarChar(5)
+  custom_capacity   Int?
+  reason            String?   @db.VarChar(255)
+  created_at        DateTime? @default(now()) @db.Timestamp(6)
+  updated_at        DateTime? @default(now()) @db.Timestamp(6)
+
+  store   stores    @relation(fields: [store_id], references: [id])
+  product products? @relation(fields: [product_id], references: [id])
+
+  @@index([store_id, date])
+  @@index([product_id])
+}
+
+// ===== DISPATCH NOTES SYSTEM =====
+
+model dispatch_notes {
+  id                   Int                       @id @default(autoincrement())
+  store_id             Int
+  dispatch_number      String                    @db.VarChar(50)
+  status               dispatch_note_status_enum @default(draft)
+  customer_id          Int
+  customer_name        String?                   @db.VarChar(255)
+  customer_tax_id      String?                   @db.VarChar(50)
+  customer_address     Json?
+  sales_order_id       Int?
+  invoice_id           Int?
+  emission_date        DateTime                  @default(now()) @db.Timestamp(6)
+  agreed_delivery_date DateTime?                 @db.Timestamp(6)
+  actual_delivery_date DateTime?                 @db.Timestamp(6)
+  dispatch_location_id Int?
+  subtotal_amount      Decimal                   @default(0) @db.Decimal(12, 2)
+  discount_amount      Decimal                   @default(0) @db.Decimal(12, 2)
+  tax_amount           Decimal                   @default(0) @db.Decimal(12, 2)
+  grand_total          Decimal                   @default(0) @db.Decimal(12, 2)
+  currency             String?                   @db.VarChar(10)
+  notes                String?                   @db.Text
+  internal_notes       String?                   @db.Text
+  void_reason          String?                   @db.Text
+  created_by_user_id   Int?
+  confirmed_by_user_id Int?
+  delivered_by_user_id Int?
+  voided_by_user_id    Int?
+  confirmed_at         DateTime?                 @db.Timestamp(6)
+  delivered_at         DateTime?                 @db.Timestamp(6)
+  voided_at            DateTime?                 @db.Timestamp(6)
+  created_at           DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?                 @default(now()) @db.Timestamp(6)
+
+  dispatch_note_items dispatch_note_items[]
+  store               stores                @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  customer            users                 @relation("dispatch_notes_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  sales_order         sales_orders?         @relation(fields: [sales_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  invoice             invoices?             @relation(fields: [invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  dispatch_location   inventory_locations?  @relation("dispatch_notes_location", fields: [dispatch_location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by_user     users?                @relation("dispatch_notes_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  confirmed_by_user   users?                @relation("dispatch_notes_confirmed_by", fields: [confirmed_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  delivered_by_user   users?                @relation("dispatch_notes_delivered_by", fields: [delivered_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  voided_by_user      users?                @relation("dispatch_notes_voided_by", fields: [voided_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, dispatch_number])
+  @@index([store_id, status])
+  @@index([customer_id])
+  @@index([sales_order_id])
+  @@index([invoice_id])
+}
+
+model dispatch_note_items {
+  id                  Int       @id @default(autoincrement())
+  dispatch_note_id    Int
+  product_id          Int
+  product_variant_id  Int?
+  location_id         Int?
+  ordered_quantity    Int       @default(0)
+  dispatched_quantity Int
+  unit_price          Decimal?  @db.Decimal(12, 2)
+  discount_amount     Decimal?  @default(0) @db.Decimal(12, 2)
+  tax_amount          Decimal?  @default(0) @db.Decimal(12, 2)
+  total_price         Decimal?  @db.Decimal(12, 2)
+  cost_price          Decimal?  @db.Decimal(12, 2)
+  lot_serial          String?   @db.VarChar(100)
+  sales_order_item_id Int?
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+
+  dispatch_note   dispatch_notes       @relation(fields: [dispatch_note_id], references: [id], onDelete: Cascade)
+  product         products             @relation(fields: [product_id], references: [id], onDelete: Restrict)
+  product_variant product_variants?    @relation(fields: [product_variant_id], references: [id], onDelete: Restrict)
+  location        inventory_locations? @relation("dispatch_note_items_location", fields: [location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([dispatch_note_id])
+  @@index([product_id])
+  @@index([sales_order_item_id])
 }

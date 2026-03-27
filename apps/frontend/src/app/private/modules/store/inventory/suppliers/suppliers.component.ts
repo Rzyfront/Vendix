@@ -32,7 +32,7 @@ import { SupplierListComponent } from './components/supplier-list/supplier-list.
   template: `
     <div class="w-full overflow-x-hidden">
       <!-- Stats Grid: sticky at top on mobile -->
-      <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Total Proveedores"
           [value]="stats.total"

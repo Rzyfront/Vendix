@@ -30,6 +30,7 @@ export interface Currency {
   symbol: string;
   decimal_places: number;
   position: 'before' | 'after';
+  format_style?: 'comma_dot' | 'dot_comma' | 'space_comma';
   state: 'active' | 'inactive' | 'deprecated';
 }
 
@@ -74,6 +75,9 @@ export class CurrencyFormatService {
   );
   readonly currencyDecimals = computed(
     () => this.currentCurrency()?.decimal_places ?? 2,
+  );
+  readonly currencyFormatStyle = computed(
+    () => this.currentCurrency()?.format_style || 'comma_dot',
   );
 
   /**
@@ -172,15 +176,25 @@ export class CurrencyFormatService {
     }
   }
 
+  private getLocaleForStyle(style?: string): string {
+    switch (style) {
+      case 'dot_comma':   return 'de-DE';
+      case 'space_comma': return 'fr-FR';
+      case 'comma_dot':
+      default:            return 'en-US';
+    }
+  }
+
   /**
    * Formatea un monto con la moneda actual
    */
-  format(amount: number, decimals?: number): string {
+  format(amount: number | string | null | undefined, decimals?: number): string {
+    const num = Number(amount) || 0;
     const currency = this.currentCurrency();
     if (!currency) {
       // Fallback con símbolo por defecto mientras carga la moneda
       const dec = decimals ?? 2;
-      const formatted = amount.toLocaleString('en-US', {
+      const formatted = num.toLocaleString('en-US', {
         minimumFractionDigits: dec,
         maximumFractionDigits: dec,
       });
@@ -189,7 +203,8 @@ export class CurrencyFormatService {
     }
 
     const dec = decimals ?? currency.decimal_places ?? 2;
-    const formatted = amount.toLocaleString('en-US', {
+    const locale = this.getLocaleForStyle(currency.format_style);
+    const formatted = num.toLocaleString(locale, {
       minimumFractionDigits: dec,
       maximumFractionDigits: dec,
     });
@@ -206,18 +221,19 @@ export class CurrencyFormatService {
    * Formatea un monto con sufijos compactos (K/M) respetando la posición de la moneda.
    * Ideal para stats cards, tooltips y celdas de tabla.
    */
-  formatCompact(amount: number): string {
+  formatCompact(amount: number | string | null | undefined): string {
+    const num = Number(amount) || 0;
     const currency = this.currentCurrency();
     const symbol = currency?.symbol || '$';
     const position = currency?.position || 'before';
 
     let formatted: string;
-    if (Math.abs(amount) >= 1_000_000) {
-      formatted = `${(amount / 1_000_000).toFixed(1)}M`;
-    } else if (Math.abs(amount) >= 1_000) {
-      formatted = `${(amount / 1_000).toFixed(1)}K`;
+    if (Math.abs(num) >= 1_000_000) {
+      formatted = `${(num / 1_000_000).toFixed(1)}M`;
+    } else if (Math.abs(num) >= 1_000) {
+      formatted = `${(num / 1_000).toFixed(1)}K`;
     } else {
-      formatted = Math.round(amount).toLocaleString('en-US');
+      formatted = Math.round(num).toLocaleString(this.getLocaleForStyle(currency?.format_style));
     }
 
     return position === 'before'
@@ -228,18 +244,19 @@ export class CurrencyFormatService {
   /**
    * Formato compacto para ejes de gráficos: K enteros, sin decimales.
    */
-  formatChartAxis(value: number): string {
+  formatChartAxis(value: number | string | null | undefined): string {
+    const num = Number(value) || 0;
     const currency = this.currentCurrency();
     const symbol = currency?.symbol || '$';
     const position = currency?.position || 'before';
 
     let formatted: string;
-    if (Math.abs(value) >= 1_000_000) {
-      formatted = `${Math.round(value / 1_000_000)}M`;
-    } else if (Math.abs(value) >= 1_000) {
-      formatted = `${Math.round(value / 1_000)}K`;
+    if (Math.abs(num) >= 1_000_000) {
+      formatted = `${Math.round(num / 1_000_000)}M`;
+    } else if (Math.abs(num) >= 1_000) {
+      formatted = `${Math.round(num / 1_000)}K`;
     } else {
-      formatted = `${Math.round(value)}`;
+      formatted = `${Math.round(num)}`;
     }
 
     return position === 'before'

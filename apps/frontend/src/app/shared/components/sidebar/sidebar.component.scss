@@ -632,4 +632,11 @@
   .sidebar.sidebar-mobile .sidebar-mobile-close {
     display: flex;
   }
+
+  /* Fullscreen mode: reset safe-area offsets so sidebar fills entire viewport */
+  :host-context(html.fullscreen-active) .sidebar.sidebar-mobile {
+    top: 0;
+    height: 100vh;
+    padding-top: 0;
+  }
 }

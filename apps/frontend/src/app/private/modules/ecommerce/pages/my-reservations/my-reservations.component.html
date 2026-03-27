@@ -1,0 +1,187 @@
+<!-- Header -->
+<div class="reservations-page">
+    <div class="reservations-container">
+        <div class="page-header">
+            <button class="back-button" (click)="goBack()">
+                <app-icon name="arrow-left" [size]="20" />
+            </button>
+            <h1>Mis Reservas</h1>
+        </div>
+
+        <!-- Loading -->
+        @if (loading()) {
+            <div class="loading-state">
+                <div class="spinner"></div>
+                <p>Cargando reservas...</p>
+            </div>
+        }
+
+        <!-- Error -->
+        @if (error() && !loading()) {
+            <div class="error-state">
+                <app-icon name="alert-circle" [size]="32" />
+                <p>No se pudieron cargar tus reservas</p>
+                <app-button (clicked)="loadBookings()" variant="outline" size="sm">Reintentar</app-button>
+            </div>
+        }
+
+        <!-- Empty -->
+        @if (!loading() && !error() && sortedBookings().length === 0) {
+            <div class="empty-state">
+                <app-icon name="calendar" [size]="48" />
+                <h2>No tienes reservas aún</h2>
+                <p>Cuando reserves un servicio, aparecerá aquí</p>
+            </div>
+        }
+
+        <!-- Bookings list -->
+        @if (!loading() && !error() && sortedBookings().length > 0) {
+            <div class="bookings-list">
+                @for (booking of sortedBookings(); track booking.id) {
+                    <div class="booking-card">
+                        <div class="card-header">
+                            <div class="card-title">
+                                <h3>{{ booking.product_name }}</h3>
+                                <span
+                                    class="status-badge"
+                                    [style.color]="getStatusConfig(booking.status).color"
+                                    [style.background]="getStatusConfig(booking.status).bgColor"
+                                >
+                                    {{ getStatusConfig(booking.status).label }}
+                                </span>
+                            </div>
+                            @if (booking.booking_number) {
+                                <span class="booking-number">N.° {{ booking.booking_number }}</span>
+                            }
+                        </div>
+
+                        <div class="card-details">
+                            <div class="detail">
+                                <app-icon name="calendar" [size]="16" />
+                                <span>{{ formatDateLong(booking.date) }}</span>
+                            </div>
+                            <div class="detail">
+                                <app-icon name="clock" [size]="16" />
+                                <span>{{ formatTime(booking.start_time) }} - {{ formatTime(booking.end_time) }}</span>
+                            </div>
+                            @if (booking.notes) {
+                                <div class="detail">
+                                    <app-icon name="file-text" [size]="16" />
+                                    <span>{{ booking.notes }}</span>
+                                </div>
+                            }
+                        </div>
+
+                        @if (canModify(booking)) {
+                            <div class="card-actions">
+                                <button class="action-btn reschedule" (click)="openRescheduleDialog(booking)">
+                                    <app-icon name="refresh-cw" [size]="14" />
+                                    Reagendar
+                                </button>
+                                <button class="action-btn cancel" (click)="openCancelDialog(booking.id)">
+                                    <app-icon name="x" [size]="14" />
+                                    Cancelar
+                                </button>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+<!-- Cancel confirmation dialog -->
+@if (cancelDialogOpen()) {
+    <div class="dialog-overlay" (click)="closeCancelDialog()">
+        <div class="dialog" (click)="$event.stopPropagation()">
+            <h2>Cancelar reserva</h2>
+            <p>¿Estás seguro de que deseas cancelar esta reserva? Esta acción no se puede deshacer.</p>
+            <div class="dialog-actions">
+                <app-button
+                    (clicked)="closeCancelDialog()"
+                    variant="outline"
+                    size="sm"
+                >No, mantener</app-button>
+                <app-button
+                    (clicked)="confirmCancel()"
+                    variant="danger"
+                    size="sm"
+                    [loading]="cancelling()"
+                    [disabled]="cancelling()"
+                >Sí, cancelar</app-button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Reschedule dialog -->
+@if (rescheduleDialogOpen()) {
+    <div class="dialog-overlay" (click)="closeRescheduleDialog()">
+        <div class="dialog dialog-lg" (click)="$event.stopPropagation()">
+            <h2>Reagendar reserva</h2>
+
+            @if (loadingRescheduleSlots()) {
+                <div class="loading-inline">
+                    <div class="spinner-sm"></div>
+                    <span>Cargando disponibilidad...</span>
+                </div>
+            } @else {
+                <!-- Date selection -->
+                <div class="reschedule-section">
+                    <h3>Selecciona una fecha</h3>
+                    <div class="date-pills">
+                        @for (date of rescheduleDates(); track date) {
+                            <button
+                                class="date-pill"
+                                [class.selected]="rescheduleSelectedDate() === date"
+                                [class.has-slots]="dateHasSlots(date)"
+                                [disabled]="!dateHasSlots(date)"
+                                (click)="selectRescheduleDate(date)"
+                            >
+                                {{ formatDateDisplay(date) }}
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                <!-- Slot selection -->
+                @if (rescheduleSelectedDate()) {
+                    <div class="reschedule-section">
+                        <h3>Selecciona un horario</h3>
+                        @if (rescheduleSlotsForDate().length === 0) {
+                            <p class="no-slots-msg">No hay horarios disponibles para esta fecha</p>
+                        } @else {
+                            <div class="slot-pills">
+                                @for (slot of rescheduleSlotsForDate(); track slot.start_time) {
+                                    <button
+                                        class="slot-pill"
+                                        [class.selected]="rescheduleSelectedSlot()?.start_time === slot.start_time"
+                                        (click)="selectRescheduleSlot(slot)"
+                                    >
+                                        {{ formatTime(slot.start_time) }}
+                                        <span class="slot-avail">{{ slot.available }} {{ slot.available === 1 ? 'cupo' : 'cupos' }}</span>
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            }
+
+            <div class="dialog-actions">
+                <app-button
+                    (clicked)="closeRescheduleDialog()"
+                    variant="outline"
+                    size="sm"
+                >Cancelar</app-button>
+                <app-button
+                    (clicked)="confirmReschedule()"
+                    size="sm"
+                    [loading]="rescheduling()"
+                    [disabled]="rescheduling() || !rescheduleSelectedSlot()"
+                >Reagendar</app-button>
+            </div>
+        </div>
+    </div>
+}

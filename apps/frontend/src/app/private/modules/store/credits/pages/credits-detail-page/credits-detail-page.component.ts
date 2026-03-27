@@ -3,7 +3,11 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { ToastService, ModalComponent } from '../../../../../../shared/components';
+import {
+  ToastService,
+  ModalComponent,
+  CardComponent,
+} from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { CreditsApiService } from '../../services/credits.service';
 import { PaymentMethodsService } from '../../../settings/payments/services/payment-methods.service';
@@ -12,7 +16,15 @@ import { Credit, CreditInstallment } from '../../interfaces/credit.interface';
 @Component({
   selector: 'app-credits-detail-page',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent, FormsModule, ModalComponent, CurrencyPipe],
+  imports: [
+    CommonModule,
+    RouterModule,
+    IconComponent,
+    FormsModule,
+    ModalComponent,
+    CurrencyPipe,
+    CardComponent,
+  ],
   templateUrl: './credits-detail-page.component.html',
   styleUrls: ['./credits-detail-page.component.scss'],
 })
@@ -39,12 +51,14 @@ export class CreditsDetailPageComponent implements OnInit {
     const id = Number(this.route.snapshot.paramMap.get('id'));
     this.loadCredit(id);
 
-    this.payment_methods_service.getStorePaymentMethods({ is_active: true } as any).subscribe({
-      next: (response: any) => {
-        const methods = response.data || response;
-        this.paymentMethods.set(Array.isArray(methods) ? methods : []);
-      },
-    });
+    this.payment_methods_service
+      .getStorePaymentMethods({ is_active: true } as any)
+      .subscribe({
+        next: (response: any) => {
+          const methods = response.data || response;
+          this.paymentMethods.set(Array.isArray(methods) ? methods : []);
+        },
+      });
   }
 
   loadCredit(id: number) {
@@ -81,24 +95,26 @@ export class CreditsDetailPageComponent implements OnInit {
 
     this.isProcessingPayment.set(true);
 
-    this.credits_service.registerPayment(credit.id, {
-      installment_id: installment.id,
-      amount: this.paymentAmount,
-      store_payment_method_id: this.paymentMethodId || undefined,
-      payment_reference: this.paymentReference || undefined,
-      notes: this.paymentNotes || undefined,
-    }).subscribe({
-      next: () => {
-        this.isProcessingPayment.set(false);
-        this.closePaymentModal();
-        this.loadCredit(credit.id);
-        this.toast.success('Pago registrado correctamente');
-      },
-      error: (err: any) => {
-        this.isProcessingPayment.set(false);
-        this.toast.error(err.error?.message || 'Error al registrar el pago');
-      },
-    });
+    this.credits_service
+      .registerPayment(credit.id, {
+        installment_id: installment.id,
+        amount: this.paymentAmount,
+        store_payment_method_id: this.paymentMethodId || undefined,
+        payment_reference: this.paymentReference || undefined,
+        notes: this.paymentNotes || undefined,
+      })
+      .subscribe({
+        next: () => {
+          this.isProcessingPayment.set(false);
+          this.closePaymentModal();
+          this.loadCredit(credit.id);
+          this.toast.success('Pago registrado correctamente');
+        },
+        error: (err: any) => {
+          this.isProcessingPayment.set(false);
+          this.toast.error(err.error?.message || 'Error al registrar el pago');
+        },
+      });
   }
 
   getStateLabel(state: string): string {
@@ -173,6 +189,9 @@ export class CreditsDetailPageComponent implements OnInit {
         }
       }
     }
-    return payments.sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime());
+    return payments.sort(
+      (a, b) =>
+        new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime(),
+    );
   }
 }

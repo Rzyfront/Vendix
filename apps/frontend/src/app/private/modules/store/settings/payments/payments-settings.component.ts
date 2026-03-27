@@ -21,6 +21,7 @@ import {
   TableColumn,
   TableAction,
   ItemListCardConfig,
+  CardComponent,
 } from '../../../../../../app/shared/components/index';
 
 @Component({
@@ -35,12 +36,13 @@ import {
     InputsearchComponent,
     IconComponent,
     ResponsiveDataViewComponent,
+    CardComponent,
   ],
   template: `
     <div class="w-full md:space-y-4">
       <!-- Stats: Sticky on mobile, static on desktop -->
       <div
-        class="stats-container !mb-0 md:!mb-6 sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
           title="Total Métodos"
@@ -77,10 +79,7 @@ import {
       </div>
 
       <!-- Content Container: Transparent on mobile, surface on desktop -->
-      <div
-        class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-                  md:border md:border-border"
-      >
+      <app-card [responsive]="true" [padding]="false">
         <!-- Search Section: Sticky on mobile, static on desktop -->
         <div
           class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
@@ -168,7 +167,7 @@ import {
             }
           </div>
         }
-      </div>
+      </app-card>
     </div>
 
     <!-- Add Payment Method Modal -->

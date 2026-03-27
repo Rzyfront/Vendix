@@ -26,6 +26,7 @@ import {
 import { PoReceiveModalComponent } from '../po-receive-modal/po-receive-modal.component';
 import { PoPaymentModalComponent } from '../po-payment-modal/po-payment-modal.component';
 import { PoTimelineComponent } from '../po-timeline/po-timeline.component';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'app-po-detail-modal',
@@ -578,6 +579,7 @@ export class PoDetailModalComponent {
   private purchaseOrdersService = inject(PurchaseOrdersService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
+  private currencyService = inject(CurrencyFormatService);
 
   readonly isOpen = input<boolean>(false);
   readonly order = input<PurchaseOrder | null>(null);
@@ -916,7 +918,7 @@ export class PoDetailModalComponent {
   }
 
   formatCurrency(amount: number): string {
-    return '$' + Number(amount || 0).toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    return this.currencyService.format(Number(amount) || 0);
   }
 
   formatFileSize(bytes: number): string {

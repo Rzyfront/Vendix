@@ -22,7 +22,6 @@ import { OrganizationStoresService } from './services/organization-stores.servic
 
 // Import new components
 import {
-  StoreEmptyStateComponent,
   StoreCreateModalComponent,
   StoreEditModalComponent,
   StoreDeleteConfirmationComponent,
@@ -44,6 +43,7 @@ import {
   StatsComponent,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  EmptyStateComponent,
 } from '../../../../shared/components/index';
 
 interface StatItem {
@@ -63,7 +63,7 @@ interface StatItem {
     FormsModule,
     ReactiveFormsModule,
     StatsComponent,
-    StoreEmptyStateComponent,
+    EmptyStateComponent,
     StoreCreateModalComponent,
     StoreEditModalComponent,
     StoreDeleteConfirmationComponent,
@@ -74,7 +74,7 @@ interface StatItem {
     ButtonComponent,
   ],
   template: `
-    <div class="space-y-6">
+    <div class="space-y-4">
       <!-- Stats Cards -->
       <div class="stats-container">
         <app-stats
@@ -171,16 +171,19 @@ interface StatItem {
         </div>
 
         <!-- Empty State -->
-        <app-store-empty-state
+        <app-empty-state
           *ngIf="!isLoading && stores.length === 0"
+          icon="store"
           [title]="getEmptyStateTitle()"
           [description]="getEmptyStateDescription()"
-          [showAdditionalActions]="hasFilters"
+          actionButtonText="Crear Tienda"
+          [showRefreshButton]="hasFilters"
+          [showClearFilters]="hasFilters"
           (actionClick)="openCreateStoreModal()"
           (refreshClick)="refreshStores()"
           (clearFiltersClick)="clearFilters()"
         >
-        </app-store-empty-state>
+        </app-empty-state>
 
         <!-- Stores Table -->
         <div *ngIf="!isLoading && stores.length > 0" class="p-6">

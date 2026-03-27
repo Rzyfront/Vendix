@@ -5,6 +5,7 @@ import { FormsModule, ReactiveFormsModule, FormBuilder, Validators } from '@angu
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CatalogService, ProductDetail, ProductVariantDetail, EcommerceProduct, CatalogQuery } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
+import { EcommerceReviewsService } from '../../services/reviews.service';
 import { ProductCarouselComponent } from '../../components/product-carousel';
 import { SpinnerComponent } from '../../../../../shared/components/spinner/spinner.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal';
@@ -286,51 +287,145 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
             (quick_view)="onQuickView($event)"
           />
 
-          <!-- Reviews Integrated -->
-          <div class="reviews-minimal">
-            <h3 class="rv-title">Opiniones ({{ p.review_count || 0 }})</h3>
-            <div class="rv-grid">
-              <div class="rv-list">
+          <!-- Reviews Section -->
+          <div class="reviews-section">
+            <h3 class="rv-section-title">Opiniones ({{ reviewsTotalCount() }})</h3>
+
+            <!-- Rating Summary -->
+            @if (reviewsTotalCount() > 0) {
+              <div class="rv-summary">
+                <div class="rv-summary-left">
+                  <span class="rv-avg">{{ avgRating() }}</span>
+                  <div class="rv-avg-stars">
+                    @for (s of [1,2,3,4,5]; track s) {
+                      <app-icon name="star" [size]="16" [class]="s <= avgRating() ? 'text-warning fill-warning' : 'text-gray-300'" />
+                    }
+                  </div>
+                  <span class="rv-total">{{ reviewsTotalCount() }} opiniones</span>
+                </div>
+                <div class="rv-bars">
+                  @for (star of [5,4,3,2,1]; track star) {
+                    <div class="rv-bar-row">
+                      <span class="rv-bar-label">{{ star }}</span>
+                      <app-icon name="star" [size]="10" class="text-warning fill-warning" />
+                      <div class="rv-bar-track">
+                        <div class="rv-bar-fill" [style.width.%]="reviewsTotalCount() > 0 ? (ratingDistribution()[star] / reviewsTotalCount() * 100) : 0"></div>
+                      </div>
+                      <span class="rv-bar-count">{{ ratingDistribution()[star] }}</span>
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+
+            <!-- Sort controls -->
+            @if (reviewsTotalCount() > 0) {
+              <div class="rv-sort">
+                <button [class.active]="reviewsSortBy() === 'recent'" (click)="onReviewsSortChange('recent')">Más recientes</button>
+                <button [class.active]="reviewsSortBy() === 'helpful'" (click)="onReviewsSortChange('helpful')">Más útiles</button>
+              </div>
+            }
+
+            <!-- Reviews List -->
+            <div class="rv-list">
+              @if (reviewsLoading()) {
+                <div class="rv-loading">Cargando opiniones...</div>
+              } @else {
                 @for (review of latestReviews(); track review.id) {
                   <div class="rv-card">
                     <div class="rv-top">
-                      <span class="rv-user">{{ review.user_name }}</span>
+                      <div class="rv-user-info">
+                        <span class="rv-user">{{ review.users?.first_name }} {{ review.users?.last_name }}</span>
+                        @if (review.verified_purchase) {
+                          <span class="rv-verified">Compra verificada</span>
+                        }
+                      </div>
                       <div class="rv-stars">
                         @for (s of [1,2,3,4,5]; track s) {
-                          <app-icon name="star" [size]="10" [class]="s <= review.rating ? 'text-warning fill-warning' : 'text-gray-300'" />
+                          <app-icon name="star" [size]="12" [class]="s <= review.rating ? 'text-warning fill-warning' : 'text-gray-300'" />
                         }
                       </div>
                     </div>
+                    @if (review.title) {
+                      <p class="rv-title-text">{{ review.title }}</p>
+                    }
                     <p class="rv-text">{{ review.comment }}</p>
+                    <div class="rv-footer">
+                      <span class="rv-date">{{ review.created_at | date:'mediumDate' }}</span>
+                      <div class="rv-helpful">
+                        <span>{{ review.helpful_count || 0 }} útil</span>
+                        <button class="rv-vote-btn" (click)="onVoteReview(review.id, true)" title="Útil">
+                          <app-icon name="thumbs-up" [size]="14" />
+                        </button>
+                        <button class="rv-vote-btn" (click)="onVoteReview(review.id, false)" title="No útil">
+                          <app-icon name="thumbs-down" [size]="14" />
+                        </button>
+                      </div>
+                    </div>
+                    @if (review.review_responses) {
+                      <div class="rv-response">
+                        <span class="rv-response-label">Respuesta del vendedor:</span>
+                        <p>{{ review.review_responses.content }}</p>
+                      </div>
+                    }
                   </div>
                 }
+                @empty {
+                  <p class="rv-empty">Aún no hay opiniones para este producto.</p>
+                }
+              }
+            </div>
+
+            <!-- Pagination -->
+            @if (reviewsTotalPages() > 1) {
+              <div class="rv-pagination">
+                @for (pg of [].constructor(reviewsTotalPages()); track $index) {
+                  <button
+                    class="rv-page-btn"
+                    [class.active]="reviewsPage() === $index + 1"
+                    (click)="onReviewsPageChange($index + 1)"
+                  >{{ $index + 1 }}</button>
+                }
               </div>
-              
-              <div class="rv-form-mini">
+            }
+
+            <!-- Write Review Form -->
+            <div class="rv-form-section">
+              @if (reviewSubmitted()) {
+                <div class="rv-submitted">
+                  <app-icon name="check-circle" [size]="24" class="text-green-500" />
+                  <p>Tu reseña fue enviada y está pendiente de moderación.</p>
+                </div>
+              } @else if (canWriteReview()?.can_review) {
+                <h4 class="rv-form-title">Escribe tu opinión</h4>
                 <form [formGroup]="reviewForm" (ngSubmit)="onSubmitReview()">
                   <div class="star-picker">
                     @for (s of [1,2,3,4,5]; track s) {
                       <app-icon
                         name="star"
-                        [size]="20"
-                        [class]="s <= (reviewForm.get('rating')?.value ?? 0) ? 'text-warning fill-warning' : 'text-gray-300'"
+                        [size]="24"
+                        [class]="s <= (reviewForm.get('rating')?.value ?? 0) ? 'text-warning fill-warning cursor-pointer' : 'text-gray-300 cursor-pointer'"
                         (click)="reviewForm.get('rating')?.setValue(s)"
-                        class="cursor-pointer"
                       />
                     }
                   </div>
-                  <textarea formControlName="comment" placeholder="Comparte tu opinión..."></textarea>
+                  <input type="text" formControlName="title" placeholder="Título (opcional)" class="rv-input" />
+                  <textarea formControlName="comment" placeholder="Comparte tu opinión..." class="rv-textarea"></textarea>
                   <app-button
                     type="submit"
                     variant="primary"
                     size="sm"
                     [fullWidth]="true"
-                    [disabled]="reviewForm.invalid"
+                    [disabled]="reviewForm.invalid || reviewSubmitting()"
                   >
-                    Publicar
+                    {{ reviewSubmitting() ? 'Enviando...' : 'Publicar opinión' }}
                   </app-button>
                 </form>
-              </div>
+              } @else if (canWriteReview()?.reason === 'already_reviewed') {
+                <p class="rv-info">Ya has dejado una reseña para este producto.</p>
+              } @else if (canWriteReview()?.reason === 'no_purchase') {
+                <p class="rv-info">Compra este producto para dejar una reseña.</p>
+              }
             </div>
           </div>
         </div>
@@ -499,19 +594,58 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
       }
     }
 
-    .reviews-minimal {
+    .reviews-section {
       margin-top: 4rem; padding-top: 2rem; border-top: 1px solid var(--color-border);
-      .rv-title { font-size: 1.25rem; font-weight: 800; margin-bottom: 1.5rem; }
-      .rv-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 3rem; @media (max-width: 800px) { grid-template-columns: 1fr; } }
-      .rv-card { padding-bottom: 1rem; border-bottom: 1px solid var(--color-border-light); margin-bottom: 1rem; }
-      .rv-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }
-      .rv-user { font-weight: 700; font-size: 0.9rem; }
-      .rv-text { font-size: 0.875rem; color: var(--color-text-secondary); margin: 0; }
-      .rv-form-mini {
-        background: var(--color-surface); padding: 1.5rem; border-radius: var(--radius-lg); height: fit-content;
-        .star-picker { display: flex; gap: 0.25rem; margin-bottom: 1rem; }
-        textarea { width: 100%; height: 80px; padding: 0.75rem; border-radius: var(--radius-md); border: 1px solid var(--color-border); margin-bottom: 1rem; font-size: 0.875rem; resize: none; background: var(--color-background); }
+      .rv-section-title { font-size: 1.25rem; font-weight: 800; margin-bottom: 1.5rem; }
+      .rv-summary { display: flex; gap: 2rem; margin-bottom: 2rem; padding: 1.5rem; background: var(--color-surface); border-radius: var(--radius-lg); }
+      .rv-summary-left { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; min-width: 100px; }
+      .rv-avg { font-size: 2.5rem; font-weight: 800; line-height: 1; }
+      .rv-avg-stars { display: flex; gap: 2px; }
+      .rv-total { font-size: 0.75rem; color: var(--color-text-muted); }
+      .rv-bars { flex: 1; display: flex; flex-direction: column; gap: 0.35rem; justify-content: center; }
+      .rv-bar-row { display: flex; align-items: center; gap: 0.5rem; }
+      .rv-bar-label { font-size: 0.75rem; font-weight: 600; width: 12px; text-align: right; }
+      .rv-bar-track { flex: 1; height: 8px; background: var(--color-border-light); border-radius: 4px; overflow: hidden; }
+      .rv-bar-fill { height: 100%; background: var(--color-warning); border-radius: 4px; transition: width 0.3s ease; }
+      .rv-bar-count { font-size: 0.7rem; color: var(--color-text-muted); width: 20px; }
+      .rv-sort { display: flex; gap: 0.5rem; margin-bottom: 1.5rem;
+        button { padding: 0.4rem 0.8rem; border-radius: var(--radius-md); border: 1px solid var(--color-border); background: transparent; font-size: 0.8rem; cursor: pointer; color: var(--color-text-secondary);
+          &.active { background: var(--color-primary); color: white; border-color: var(--color-primary); }
+        }
       }
+      .rv-list { display: flex; flex-direction: column; }
+      .rv-card { padding: 1rem 0; border-bottom: 1px solid var(--color-border-light); }
+      .rv-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.4rem; }
+      .rv-user-info { display: flex; flex-direction: column; gap: 0.15rem; }
+      .rv-user { font-weight: 700; font-size: 0.9rem; }
+      .rv-verified { font-size: 0.65rem; color: var(--color-success); font-weight: 600; }
+      .rv-stars { display: flex; gap: 1px; }
+      .rv-title-text { font-weight: 700; font-size: 0.875rem; margin: 0.25rem 0; }
+      .rv-text { font-size: 0.875rem; color: var(--color-text-secondary); margin: 0.25rem 0 0; }
+      .rv-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem; }
+      .rv-date { font-size: 0.7rem; color: var(--color-text-muted); }
+      .rv-helpful { display: flex; align-items: center; gap: 0.5rem; font-size: 0.7rem; color: var(--color-text-muted); }
+      .rv-vote-btn { background: none; border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 0.2rem 0.4rem; cursor: pointer; display: flex; align-items: center; color: var(--color-text-muted);
+        &:hover { background: var(--color-surface); color: var(--color-text-primary); }
+      }
+      .rv-response { margin-top: 0.75rem; padding: 0.75rem; background: var(--color-surface); border-radius: var(--radius-md); border-left: 3px solid var(--color-primary); }
+      .rv-response-label { font-size: 0.75rem; font-weight: 700; color: var(--color-primary); display: block; margin-bottom: 0.25rem; }
+      .rv-response p { font-size: 0.8rem; margin: 0; color: var(--color-text-secondary); }
+      .rv-empty { text-align: center; padding: 2rem; color: var(--color-text-muted); font-size: 0.9rem; }
+      .rv-loading { text-align: center; padding: 2rem; color: var(--color-text-muted); }
+      .rv-pagination { display: flex; justify-content: center; gap: 0.5rem; margin-top: 1.5rem; }
+      .rv-page-btn { width: 32px; height: 32px; border-radius: var(--radius-md); border: 1px solid var(--color-border); background: transparent; cursor: pointer; font-size: 0.8rem;
+        &.active { background: var(--color-primary); color: white; border-color: var(--color-primary); }
+      }
+      .rv-form-section { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid var(--color-border-light); }
+      .rv-form-title { font-size: 1rem; font-weight: 700; margin-bottom: 1rem; }
+      .rv-input { width: 100%; padding: 0.6rem 0.75rem; border-radius: var(--radius-md); border: 1px solid var(--color-border); margin-bottom: 0.75rem; font-size: 0.875rem; background: var(--color-background); }
+      .rv-textarea { width: 100%; height: 80px; padding: 0.75rem; border-radius: var(--radius-md); border: 1px solid var(--color-border); margin-bottom: 0.75rem; font-size: 0.875rem; resize: none; background: var(--color-background); }
+      .star-picker { display: flex; gap: 0.25rem; margin-bottom: 1rem; }
+      .rv-submitted { display: flex; align-items: center; gap: 0.75rem; padding: 1rem; background: var(--color-surface); border-radius: var(--radius-md);
+        p { margin: 0; font-size: 0.875rem; color: var(--color-success); }
+      }
+      .rv-info { font-size: 0.875rem; color: var(--color-text-muted); padding: 1rem; background: var(--color-surface); border-radius: var(--radius-md); }
     }
 
     /* ─── Mobile Compact ─── */
@@ -536,11 +670,12 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
       .product-content-flow .info-label { font-size: 0.65rem; }
       .product-content-flow .cat-tag { font-size: 0.6rem; padding: 0.15rem 0.4rem; }
       .product-content-flow .desc-text { font-size: 0.8rem; line-height: 1.5; }
-      .reviews-minimal { margin-top: 2rem; padding-top: 1rem; }
-      .reviews-minimal .rv-title { font-size: 1rem; margin-bottom: 0.75rem; }
-      .reviews-minimal .rv-grid { gap: 1.5rem; }
-      .reviews-minimal .rv-form-mini { padding: 1rem; }
-      .reviews-minimal .rv-form-mini textarea { height: 60px; padding: 0.5rem; font-size: 0.8rem; }
+      .reviews-section { margin-top: 2rem; padding-top: 1rem; }
+      .reviews-section .rv-section-title { font-size: 1rem; margin-bottom: 0.75rem; }
+      .reviews-section .rv-summary { flex-direction: column; gap: 1rem; padding: 1rem; }
+      .reviews-section .rv-summary-left { flex-direction: row; gap: 0.75rem; }
+      .reviews-section .rv-avg { font-size: 1.75rem; }
+      .reviews-section .rv-textarea { height: 60px; font-size: 0.8rem; }
     }
   `],
 })
@@ -551,6 +686,7 @@ export class ProductDetailComponent implements OnInit {
   private cartService = inject(CartService);
   private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
+  private reviewsService = inject(EcommerceReviewsService);
 
   // States
   product = signal<ProductDetail | null>(null);
@@ -707,17 +843,25 @@ export class ProductDetailComponent implements OnInit {
   // Review Form
   reviewForm = this.fb.group({
     rating: [5, [Validators.required, Validators.min(1), Validators.max(5)]],
+    title: [''],
     comment: ['', [Validators.required, Validators.minLength(10)]],
   });
 
+  // Reviews state
+  reviewsList = signal<any[]>([]);
+  reviewsLoading = signal(false);
+  reviewsPage = signal(1);
+  reviewsTotalPages = signal(1);
+  reviewsTotalCount = signal(0);
+  reviewsSortBy = signal<'recent' | 'helpful'>('recent');
+  ratingDistribution = signal<Record<number, number>>({ 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 });
+  avgRating = signal(0);
+  canWriteReview = signal<{ can_review: boolean; reason?: string } | null>(null);
+  reviewSubmitting = signal(false);
+  reviewSubmitted = signal(false);
+
   // Computed
-  latestReviews = computed(() => {
-    const p = this.product();
-    if (!p || !p.reviews) return [];
-    return [...p.reviews]
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-      .slice(0, 3);
-  });
+  latestReviews = computed(() => this.reviewsList());
 
   // Convert ProductDetail to EcommerceProduct for ShareModal
   productForShare = computed((): EcommerceProduct | null => {
@@ -768,6 +912,8 @@ export class ProductDetailComponent implements OnInit {
             }
           }
           this.loadRecommendations(product);
+          this.loadReviews(product.id);
+          this.checkCanReview(product.id);
         } else {
           this.hasError.set(true);
         }
@@ -787,6 +933,59 @@ export class ProductDetailComponent implements OnInit {
       next: (response) => {
         this.recommendedProducts.set(response.data.filter(p => p.id !== product.id));
       }
+    });
+  }
+
+  loadReviews(productId: number): void {
+    this.reviewsLoading.set(true);
+    this.reviewsService.getProductReviews(productId, {
+      page: this.reviewsPage(),
+      limit: 5,
+      sort_by: this.reviewsSortBy(),
+    }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (res) => {
+        if (res.success !== false) {
+          this.reviewsList.set(res.reviews || []);
+          this.reviewsTotalPages.set(res.meta?.totalPages || 1);
+          this.reviewsTotalCount.set(res.total_count || 0);
+          this.ratingDistribution.set(res.rating_distribution || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 });
+          this.avgRating.set(res.avg_rating || 0);
+        }
+        this.reviewsLoading.set(false);
+      },
+      error: () => this.reviewsLoading.set(false),
+    });
+  }
+
+  checkCanReview(productId: number): void {
+    this.reviewsService.canReview(productId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (res) => {
+        if (res.success !== false) {
+          this.canWriteReview.set(res.data);
+        }
+      },
+    });
+  }
+
+  onReviewsPageChange(page: number): void {
+    this.reviewsPage.set(page);
+    const p = this.product();
+    if (p) this.loadReviews(p.id);
+  }
+
+  onReviewsSortChange(sortBy: 'recent' | 'helpful'): void {
+    this.reviewsSortBy.set(sortBy);
+    this.reviewsPage.set(1);
+    const p = this.product();
+    if (p) this.loadReviews(p.id);
+  }
+
+  onVoteReview(reviewId: number, isHelpful: boolean): void {
+    this.reviewsService.voteReview(reviewId, isHelpful).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        const p = this.product();
+        if (p) this.loadReviews(p.id);
+      },
     });
   }
 
@@ -861,21 +1060,23 @@ export class ProductDetailComponent implements OnInit {
 
   onSubmitReview(): void {
     if (this.reviewForm.invalid) return;
-    const currentProduct = this.product();
-    if (currentProduct) {
-      const newReview = {
-        id: Math.floor(Math.random() * 10000),
-        rating: this.reviewForm.get('rating')?.value ?? 5,
-        comment: this.reviewForm.get('comment')?.value ?? '',
-        created_at: new Date().toISOString(),
-        user_name: 'Comprador'
-      };
-      this.product.set({
-        ...currentProduct,
-        reviews: [newReview, ...(currentProduct.reviews || [])],
-        review_count: (currentProduct.review_count || 0) + 1
-      });
-    }
-    this.reviewForm.reset({ rating: 5, comment: '' });
+    const p = this.product();
+    if (!p) return;
+    this.reviewSubmitting.set(true);
+    this.reviewsService.submitReview({
+      product_id: p.id,
+      rating: this.reviewForm.get('rating')?.value ?? 5,
+      title: this.reviewForm.get('title')?.value || undefined,
+      comment: this.reviewForm.get('comment')?.value ?? '',
+    }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        this.reviewSubmitting.set(false);
+        this.reviewSubmitted.set(true);
+        this.reviewForm.reset({ rating: 5, comment: '', title: '' });
+        this.loadReviews(p.id);
+        this.checkCanReview(p.id);
+      },
+      error: () => this.reviewSubmitting.set(false),
+    });
   }
 }

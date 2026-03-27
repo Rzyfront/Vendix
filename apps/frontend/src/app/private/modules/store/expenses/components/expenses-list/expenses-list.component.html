@@ -1,7 +1,6 @@
 <div class="md:space-y-4">
   <!-- Lista de Gastos -->
-  <div
-    class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border">
+  <app-card [responsive]="true" [padding]="false">
     <!-- Search Section: sticky below stats on mobile, normal on desktop -->
     <div
       class="sticky top-[99px] z-10 bg-background px-2 py-1.5 pt-[5px] -mt-[5px] md:mt-0 md:pt-4 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
@@ -41,27 +40,19 @@
     </div>
 
     <!-- Empty State -->
-    <div *ngIf="!loading && expenses.length === 0" class="p-8 text-center">
-      <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
-        <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-          stroke-linejoin="round" viewBox="0 0 24 24">
-          <circle cx="8" cy="8" r="6" />
-          <path d="M18.09 10.37A6 6 0 1 1 10.34 18" />
-          <path d="M7 6h1v4" />
-          <path d="m16.71 13.88.7.71-2.82 2.82" />
-        </svg>
-      </div>
-      <h3 class="text-lg font-medium text-text-primary mb-2">{{ getEmptyStateTitle() }}</h3>
-      <p class="text-text-secondary mb-4">{{ getEmptyStateDescription() }}</p>
-      <div class="flex flex-col items-center sm:flex-row gap-2 justify-center">
-        <app-button variant="primary" (clicked)="create.emit()">
-          Crear nuevo gasto
-        </app-button>
-        <app-button *ngIf="hasFilters" variant="ghost" (clicked)="onClearFilters()">
-          Limpiar filtros
-        </app-button>
-      </div>
-    </div>
+    <app-empty-state
+      *ngIf="!loading && expenses.length === 0"
+      icon="coins"
+      [title]="getEmptyStateTitle()"
+      [description]="getEmptyStateDescription()"
+      actionButtonText="Crear nuevo gasto"
+      [showActionButton]="!hasFilters"
+      [showRefreshButton]="true"
+      [showClearFilters]="hasFilters"
+      (actionClick)="create.emit()"
+      (refreshClick)="refresh.emit()"
+      (clearFiltersClick)="onClearFilters()"
+    ></app-empty-state>
 
     <!-- Expenses List -->
     <div *ngIf="!loading && expenses.length > 0" class="px-2 pb-2 pt-3 md:p-4">
@@ -80,5 +71,5 @@
         ></app-pagination>
       </div>
     </div>
-  </div>
+  </app-card>
 </div>

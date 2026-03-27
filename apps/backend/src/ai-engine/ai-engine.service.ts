@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import {
@@ -7,15 +7,16 @@ import {
   AIMessage,
   AIRequestOptions,
   AIResponse,
+  AIStreamChunk,
 } from './interfaces/ai-provider.interface';
 import { OpenAICompatibleProvider } from './providers/openai-compatible.provider';
 import { AnthropicCompatibleProvider } from './providers/anthropic-compatible.provider';
 import { VendixHttpException, ErrorCodes } from '../common/errors';
-
-interface RateLimitEntry {
-  count: number;
-  windowStart: number;
-}
+import Redis from 'ioredis';
+import { REDIS_CLIENT } from '../common/redis/redis.module';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { AILoggingService } from './ai-logging.service';
+import { RequestContextService } from '../common/context/request-context.service';
 
 @Injectable()
 export class AIEngineService implements OnModuleInit {
@@ -23,11 +24,13 @@ export class AIEngineService implements OnModuleInit {
   private providers: Map<number, AIProvider> = new Map();
   private configSettings: Map<number, Record<string, any>> = new Map();
   private defaultConfigId: number | null = null;
-  private rateLimitMap: Map<string, RateLimitEntry> = new Map();
 
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly configService: ConfigService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly aiLoggingService: AILoggingService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async onModuleInit() {
@@ -212,101 +215,269 @@ export class AIEngineService implements OnModuleInit {
     variables?: Record<string, string>,
     extraMessages?: AIMessage[],
   ): Promise<AIResponse> {
-    const app = await this.prisma.ai_engine_applications.findUnique({
-      where: { key: appKey },
-    });
+    const startTime = Date.now();
+    let logStatus: 'success' | 'error' = 'error';
+    let logResponse: AIResponse = { success: false, error: 'No attempt made' };
+    let resolvedConfigId: number | null = null;
 
-    if (!app) {
-      throw new VendixHttpException(ErrorCodes.AI_APP_001);
-    }
+    try {
+      const app = await this.prisma.ai_engine_applications.findUnique({
+        where: { key: appKey },
+      });
 
-    if (!app.is_active) {
-      throw new VendixHttpException(ErrorCodes.AI_APP_003);
-    }
+      if (!app) {
+        throw new VendixHttpException(ErrorCodes.AI_APP_001);
+      }
 
-    // Rate limit check
-    this.checkRateLimit(app);
+      if (!app.is_active) {
+        throw new VendixHttpException(ErrorCodes.AI_APP_003);
+      }
 
-    // Resolve provider
-    const provider = app.config_id
-      ? this.providers.get(app.config_id)
-      : this.getDefaultProvider();
+      // Rate limit check
+      await this.checkRateLimit(app);
 
-    if (!provider) {
-      throw new VendixHttpException(
-        app.config_id ? ErrorCodes.AI_CONFIG_001 : ErrorCodes.AI_PROVIDER_002,
+      // Resolve provider
+      resolvedConfigId = app.config_id || this.defaultConfigId;
+      const provider = app.config_id
+        ? this.providers.get(app.config_id)
+        : this.getDefaultProvider();
+
+      if (!provider) {
+        throw new VendixHttpException(
+          app.config_id ? ErrorCodes.AI_CONFIG_001 : ErrorCodes.AI_PROVIDER_002,
+        );
+      }
+
+      // Build messages
+      const messages: AIMessage[] = [];
+
+      if (app.system_prompt) {
+        messages.push({
+          role: 'system',
+          content: this.interpolate(app.system_prompt, variables),
+        });
+      }
+
+      if (app.prompt_template) {
+        messages.push({
+          role: 'user',
+          content: this.interpolate(app.prompt_template, variables),
+        });
+      }
+
+      if (extraMessages) {
+        messages.push(...extraMessages);
+      }
+
+      // Build options from application config
+      const options: AIRequestOptions = {};
+      if (app.temperature !== null) {
+        options.temperature = Number(app.temperature);
+      }
+      if (app.max_tokens !== null) {
+        options.maxTokens = app.max_tokens;
+      }
+
+      // Execute with retry
+      const retryConfig = app.retry_config as {
+        maxRetries?: number;
+        delayMs?: number;
+      } | null;
+      const maxRetries = retryConfig?.maxRetries ?? 0;
+      const delayMs = retryConfig?.delayMs ?? 1000;
+
+      let lastResponse: AIResponse = { success: false, error: 'No attempt made' };
+
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        lastResponse = await provider.chat(messages, options);
+
+        if (lastResponse.success) {
+          // Sanitize thinking blocks based on config setting
+          const configId = app.config_id || this.defaultConfigId;
+          const thinking = this.isThinkingEnabled(configId);
+          lastResponse = this.sanitizeResponse(lastResponse, thinking);
+
+          // Post-process output format
+          lastResponse.content = this.formatOutput(
+            lastResponse.content || '',
+            app.output_format,
+          );
+
+          logStatus = 'success';
+          logResponse = lastResponse;
+          return lastResponse;
+        }
+
+        if (attempt < maxRetries) {
+          this.logger.warn(
+            `AI app "${appKey}" attempt ${attempt + 1} failed, retrying in ${delayMs}ms`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+      }
+
+      this.logger.error(
+        `AI app "${appKey}" failed after ${maxRetries + 1} attempts: ${lastResponse.error}`,
       );
-    }
+      logResponse = lastResponse;
+      return lastResponse;
+    } catch (error: any) {
+      logResponse = { success: false, error: error.message };
+      throw error;
+    } finally {
+      const latencyMs = Date.now() - startTime;
+      const context = RequestContextService.getContext();
+      const configSettings = resolvedConfigId
+        ? this.configSettings.get(resolvedConfigId)
+        : undefined;
 
-    // Build messages
-    const messages: AIMessage[] = [];
+      const costUsd = this.aiLoggingService.calculateCost(
+        configSettings,
+        logResponse.usage?.promptTokens ?? 0,
+        logResponse.usage?.completionTokens ?? 0,
+      );
 
-    if (app.system_prompt) {
-      messages.push({
-        role: 'system',
-        content: this.interpolate(app.system_prompt, variables),
+      this.aiLoggingService.logRequest({
+        app_key: appKey,
+        config_id: resolvedConfigId ?? undefined,
+        organization_id: context?.organization_id,
+        store_id: context?.store_id,
+        user_id: context?.user_id,
+        model: logResponse.model,
+        prompt_tokens: logResponse.usage?.promptTokens ?? 0,
+        completion_tokens: logResponse.usage?.completionTokens ?? 0,
+        cost_usd: costUsd,
+        latency_ms: latencyMs,
+        status: logStatus,
+        error_message: logStatus === 'error' ? logResponse.error : undefined,
+        input_preview: variables ? JSON.stringify(variables) : undefined,
+      });
+
+      this.eventEmitter.emit('ai.request.completed', {
+        app_key: appKey,
+        cost_usd: costUsd,
+        latency_ms: latencyMs,
+        status: logStatus,
+        organization_id: context?.organization_id,
+        store_id: context?.store_id,
       });
     }
+  }
 
-    if (app.prompt_template) {
-      messages.push({
-        role: 'user',
-        content: this.interpolate(app.prompt_template, variables),
+  async *runStream(
+    appKey: string,
+    variables?: Record<string, string>,
+    extraMessages?: AIMessage[],
+  ): AsyncGenerator<AIStreamChunk> {
+    const startTime = Date.now();
+    let lastChunk: AIStreamChunk | null = null;
+    let resolvedConfigId: number | null = null;
+
+    try {
+      const app = await this.prisma.ai_engine_applications.findUnique({
+        where: { key: appKey },
+      });
+
+      if (!app) {
+        lastChunk = { type: 'error', error: 'AI application not found' };
+        yield lastChunk;
+        return;
+      }
+
+      if (!app.is_active) {
+        lastChunk = { type: 'error', error: 'AI application is disabled' };
+        yield lastChunk;
+        return;
+      }
+
+      await this.checkRateLimit(app);
+
+      resolvedConfigId = app.config_id || this.defaultConfigId;
+      const provider = app.config_id
+        ? this.providers.get(app.config_id)
+        : this.getDefaultProvider();
+
+      if (!provider) {
+        lastChunk = { type: 'error', error: 'No AI provider configured' };
+        yield lastChunk;
+        return;
+      }
+
+      if (!provider.chatStream) {
+        lastChunk = { type: 'error', error: 'Streaming not supported by this provider' };
+        yield lastChunk;
+        return;
+      }
+
+      // Build messages
+      const messages: AIMessage[] = [];
+
+      if (app.system_prompt) {
+        messages.push({
+          role: 'system',
+          content: this.interpolate(app.system_prompt, variables),
+        });
+      }
+
+      if (app.prompt_template) {
+        messages.push({
+          role: 'user',
+          content: this.interpolate(app.prompt_template, variables),
+        });
+      }
+
+      if (extraMessages) {
+        messages.push(...extraMessages);
+      }
+
+      const options: AIRequestOptions = {};
+      if (app.temperature !== null) {
+        options.temperature = Number(app.temperature);
+      }
+      if (app.max_tokens !== null) {
+        options.maxTokens = app.max_tokens;
+      }
+
+      try {
+        for await (const chunk of provider.chatStream(messages, options)) {
+          lastChunk = chunk;
+          yield chunk;
+        }
+      } catch (error: any) {
+        lastChunk = { type: 'error', error: error.message };
+        yield lastChunk;
+      }
+    } finally {
+      // Log after stream completes — always runs regardless of early returns
+      const latencyMs = Date.now() - startTime;
+      const context = RequestContextService.getContext();
+      const configSettings = resolvedConfigId
+        ? this.configSettings.get(resolvedConfigId)
+        : undefined;
+
+      const usage = lastChunk?.type === 'done' ? lastChunk.usage : undefined;
+      const costUsd = this.aiLoggingService.calculateCost(
+        configSettings,
+        usage?.promptTokens ?? 0,
+        usage?.completionTokens ?? 0,
+      );
+
+      this.aiLoggingService.logRequest({
+        app_key: appKey,
+        config_id: resolvedConfigId ?? undefined,
+        organization_id: context?.organization_id,
+        store_id: context?.store_id,
+        user_id: context?.user_id,
+        model: undefined,
+        prompt_tokens: usage?.promptTokens ?? 0,
+        completion_tokens: usage?.completionTokens ?? 0,
+        cost_usd: costUsd,
+        latency_ms: latencyMs,
+        status: lastChunk?.type === 'error' ? 'error' : 'success',
+        error_message: lastChunk?.type === 'error' ? lastChunk.error : undefined,
+        input_preview: variables ? JSON.stringify(variables) : undefined,
       });
     }
-
-    if (extraMessages) {
-      messages.push(...extraMessages);
-    }
-
-    // Build options from application config
-    const options: AIRequestOptions = {};
-    if (app.temperature !== null) {
-      options.temperature = Number(app.temperature);
-    }
-    if (app.max_tokens !== null) {
-      options.maxTokens = app.max_tokens;
-    }
-
-    // Execute with retry
-    const retryConfig = app.retry_config as {
-      maxRetries?: number;
-      delayMs?: number;
-    } | null;
-    const maxRetries = retryConfig?.maxRetries ?? 0;
-    const delayMs = retryConfig?.delayMs ?? 1000;
-
-    let lastResponse: AIResponse = { success: false, error: 'No attempt made' };
-
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      lastResponse = await provider.chat(messages, options);
-
-      if (lastResponse.success) {
-        // Sanitize thinking blocks based on config setting
-        const configId = app.config_id || this.defaultConfigId;
-        const thinking = this.isThinkingEnabled(configId);
-        lastResponse = this.sanitizeResponse(lastResponse, thinking);
-
-        // Post-process output format
-        lastResponse.content = this.formatOutput(
-          lastResponse.content || '',
-          app.output_format,
-        );
-        return lastResponse;
-      }
-
-      if (attempt < maxRetries) {
-        this.logger.warn(
-          `AI app "${appKey}" attempt ${attempt + 1} failed, retrying in ${delayMs}ms`,
-        );
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
-    }
-
-    this.logger.error(
-      `AI app "${appKey}" failed after ${maxRetries + 1} attempts: ${lastResponse.error}`,
-    );
-    return lastResponse;
   }
 
   async getApplication(appKey: string) {
@@ -337,7 +508,7 @@ export class AIEngineService implements OnModuleInit {
     );
   }
 
-  private checkRateLimit(app: any): void {
+  private async checkRateLimit(app: any): Promise<void> {
     const rateLimit = app.rate_limit as {
       maxRequests?: number;
       windowSeconds?: number;
@@ -345,21 +516,18 @@ export class AIEngineService implements OnModuleInit {
 
     if (!rateLimit?.maxRequests || !rateLimit?.windowSeconds) return;
 
-    const now = Date.now();
-    const windowMs = rateLimit.windowSeconds * 1000;
-    const limitKey = `app:${app.key}`;
-    const entry = this.rateLimitMap.get(limitKey);
+    const key = `ai:ratelimit:${app.key}`;
 
-    if (!entry || now - entry.windowStart > windowMs) {
-      this.rateLimitMap.set(limitKey, { count: 1, windowStart: now });
-      return;
-    }
+    const pipeline = this.redis.pipeline();
+    pipeline.incr(key);
+    pipeline.expire(key, rateLimit.windowSeconds);
+    const results = await pipeline.exec();
 
-    if (entry.count >= rateLimit.maxRequests) {
+    const current = (results?.[0]?.[1] as number) || 0;
+
+    if (current > rateLimit.maxRequests) {
       throw new VendixHttpException(ErrorCodes.AI_APP_004);
     }
-
-    entry.count++;
   }
 
   private isThinkingEnabled(configId: number | null): boolean {

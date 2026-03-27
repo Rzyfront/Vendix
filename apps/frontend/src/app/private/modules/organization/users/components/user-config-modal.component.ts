@@ -297,6 +297,8 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
         orders_quotations: true,
         orders_layaway: true,
         orders_credits: true,
+        orders_reservations: true,
+        orders_dispatch_notes: true,
         inventory: true,
         inventory_pop: true,
         inventory_adjustments: false,

@@ -1,0 +1,270 @@
+<div class="quick-book-overlay" (click)="close.emit()">
+  <div class="quick-book-modal" (click)="$event.stopPropagation()">
+    <!-- Header -->
+    <div class="modal-header">
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+          <app-icon name="calendar-plus" [size]="18" class="text-primary"></app-icon>
+        </div>
+        <div>
+          <h3 class="text-sm font-bold text-text-primary leading-none">Nueva Reserva</h3>
+          <span class="text-[10px] text-text-secondary">Paso {{ currentStep() }} de 3</span>
+        </div>
+      </div>
+      <button
+        class="w-8 h-8 rounded-lg hover:bg-surface-hover flex items-center justify-center transition-colors"
+        (click)="close.emit()"
+      >
+        <app-icon name="x" [size]="18" class="text-text-secondary"></app-icon>
+      </button>
+    </div>
+
+    <!-- Step Indicators -->
+    <div class="step-indicators">
+      <button
+        class="step-dot"
+        [class.active]="currentStep() >= 1"
+        [class.current]="currentStep() === 1"
+        (click)="goToStep(1)"
+      >
+        <span class="step-number">1</span>
+        <span class="step-label">Servicio</span>
+      </button>
+      <div class="step-line" [class.active]="currentStep() >= 2"></div>
+      <button
+        class="step-dot"
+        [class.active]="currentStep() >= 2"
+        [class.current]="currentStep() === 2"
+        (click)="goToStep(2)"
+      >
+        <span class="step-number">2</span>
+        <span class="step-label">Horario</span>
+      </button>
+      <div class="step-line" [class.active]="currentStep() >= 3"></div>
+      <button
+        class="step-dot"
+        [class.active]="currentStep() >= 3"
+        [class.current]="currentStep() === 3"
+        (click)="goToStep(3)"
+      >
+        <span class="step-number">3</span>
+        <span class="step-label">Cliente</span>
+      </button>
+    </div>
+
+    <!-- Modal Content -->
+    <div class="modal-content">
+      <!-- Step 1: Select Service -->
+      @if (currentStep() === 1) {
+        <div class="step-content">
+          <p class="step-title">Selecciona el servicio</p>
+
+          @if (loading()) {
+            <div class="flex items-center justify-center py-8">
+              <app-spinner size="md" color="primary"></app-spinner>
+            </div>
+          } @else if (services().length === 0) {
+            <div class="flex flex-col items-center py-8 text-center">
+              <app-icon name="package" [size]="32" class="text-text-secondary/40 mb-2"></app-icon>
+              <p class="text-sm text-text-secondary">No hay servicios con reserva disponibles</p>
+            </div>
+          } @else {
+            <div class="services-grid">
+              @for (service of services(); track service.id) {
+                <button
+                  class="service-card"
+                  [class.selected]="selectedService()?.id === service.id"
+                  (click)="selectService(service)"
+                >
+                  <div class="service-icon">
+                    <app-icon name="briefcase" [size]="20" class="text-primary"></app-icon>
+                  </div>
+                  <div class="service-info">
+                    <span class="service-name">{{ service.name }}</span>
+                    @if (service.booking_duration_minutes) {
+                      <span class="service-duration">{{ service.booking_duration_minutes }} min</span>
+                    }
+                    @if (service.price) {
+                      <span class="service-price">{{ service.price | currency:'COP':'symbol-narrow':'1.0-0' }}</span>
+                    }
+                  </div>
+                </button>
+              }
+            </div>
+          }
+        </div>
+      }
+
+      <!-- Step 2: Select Date/Time -->
+      @if (currentStep() === 2) {
+        <div class="step-content">
+          <p class="step-title">Selecciona fecha y horario</p>
+
+          <!-- Date Selector -->
+          <div class="date-selector">
+            @for (date of availableDates(); track date) {
+              <button
+                class="date-chip"
+                [class.selected]="selectedDate() === date"
+                (click)="onDateChange(date)"
+              >
+                {{ formatDateLabel(date) }}
+              </button>
+            }
+          </div>
+
+          <!-- Slots -->
+          <div class="slots-section">
+            @if (slotsLoading()) {
+              <div class="flex items-center justify-center py-6">
+                <app-spinner size="sm" color="primary"></app-spinner>
+              </div>
+            } @else if (slotsForDate().length === 0) {
+              <div class="flex flex-col items-center py-6 text-center">
+                <app-icon name="clock" [size]="24" class="text-text-secondary/40 mb-2"></app-icon>
+                <p class="text-xs text-text-secondary">No hay horarios disponibles para esta fecha</p>
+              </div>
+            } @else {
+              <div class="slots-grid">
+                @for (slot of slotsForDate(); track slot.start_time) {
+                  <button
+                    class="slot-chip"
+                    [class.selected]="selectedSlot()?.start_time === slot.start_time"
+                    [class.unavailable]="!slot.available"
+                    [disabled]="!slot.available"
+                    (click)="selectSlot(slot)"
+                  >
+                    {{ formatTime(slot.start_time) }}
+                  </button>
+                }
+              </div>
+            }
+          </div>
+        </div>
+      }
+
+      <!-- Step 3: Customer + Notes -->
+      @if (currentStep() === 3) {
+        <div class="step-content">
+          <p class="step-title">Cliente y notas</p>
+
+          <!-- Selected customer display -->
+          @if (selectedCustomer()) {
+            <div class="selected-customer">
+              <div class="flex items-center gap-2 flex-1 min-w-0">
+                <div class="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <app-icon name="user" [size]="16" class="text-primary"></app-icon>
+                </div>
+                <div class="min-w-0">
+                  <p class="text-sm font-semibold text-text-primary truncate">{{ selectedCustomer().name }}</p>
+                  @if (selectedCustomer().email) {
+                    <p class="text-[10px] text-text-secondary truncate">{{ selectedCustomer().email }}</p>
+                  }
+                </div>
+              </div>
+              <button
+                class="w-6 h-6 rounded-full hover:bg-surface-hover flex items-center justify-center"
+                (click)="clearCustomer()"
+              >
+                <app-icon name="x" [size]="14" class="text-text-secondary"></app-icon>
+              </button>
+            </div>
+          } @else {
+            <!-- Customer Search -->
+            <div class="customer-search-wrapper">
+              <app-icon name="search" [size]="16" class="search-icon"></app-icon>
+              <input
+                type="text"
+                class="customer-search-input"
+                placeholder="Buscar cliente por nombre, email o teléfono..."
+                [ngModel]="customerSearch()"
+                (ngModelChange)="searchCustomers($event)"
+              />
+            </div>
+
+            @if (customers().length > 0) {
+              <div class="customer-results">
+                @for (customer of customers(); track customer.id) {
+                  <button class="customer-item" (click)="selectCustomer(customer)">
+                    <div class="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                      <app-icon name="user" [size]="14" class="text-primary"></app-icon>
+                    </div>
+                    <div class="min-w-0">
+                      <p class="text-sm font-medium text-text-primary truncate">{{ customer.name }}</p>
+                      <p class="text-[10px] text-text-secondary truncate">
+                        {{ customer.email || customer.phone || '' }}
+                      </p>
+                    </div>
+                  </button>
+                }
+              </div>
+            }
+          }
+
+          <!-- Notes -->
+          <div class="notes-section">
+            <label class="text-xs font-medium text-text-secondary mb-1 block">Notas (opcional)</label>
+            <textarea
+              class="notes-textarea"
+              rows="2"
+              placeholder="Notas adicionales para la reserva..."
+              [ngModel]="notes()"
+              (ngModelChange)="notes.set($event)"
+            ></textarea>
+          </div>
+
+          <!-- Summary -->
+          @if (selectedService() && selectedSlot() && selectedCustomer()) {
+            <div class="booking-summary">
+              <p class="text-[10px] font-semibold text-text-secondary uppercase tracking-wider mb-2">Resumen</p>
+              <div class="summary-row">
+                <app-icon name="briefcase" [size]="14" class="text-text-secondary"></app-icon>
+                <span>{{ selectedService().name }}</span>
+              </div>
+              <div class="summary-row">
+                <app-icon name="calendar" [size]="14" class="text-text-secondary"></app-icon>
+                <span>{{ formatDateLabel(selectedDate()) }} - {{ formatTime(selectedSlot().start_time) }}</span>
+              </div>
+              <div class="summary-row">
+                <app-icon name="user" [size]="14" class="text-text-secondary"></app-icon>
+                <span>{{ selectedCustomer().name }}</span>
+              </div>
+            </div>
+          }
+        </div>
+      }
+    </div>
+
+    <!-- Footer -->
+    <div class="modal-footer">
+      @if (currentStep() > 1) {
+        <app-button variant="outline" size="sm" (clicked)="goToStep(currentStep() - 1)">
+          <app-icon name="arrow-left" [size]="14" slot="icon"></app-icon>
+          Atrás
+        </app-button>
+      } @else {
+        <div></div>
+      }
+
+      @if (currentStep() === 3) {
+        <app-button
+          variant="primary"
+          size="sm"
+          [disabled]="!selectedService() || !selectedSlot() || !selectedCustomer() || submitting()"
+          (clicked)="submit()"
+        >
+          @if (submitting()) {
+            <app-spinner size="sm" color="white"></app-spinner>
+          } @else {
+            <ng-container ngProjectAs="[slot=icon]">
+              <app-icon name="check" [size]="14" slot="icon"></app-icon>
+            </ng-container>
+          }
+          @if (!submitting()) {
+            Crear Reserva
+          }
+        </app-button>
+      }
+    </div>
+  </div>
+</div>

@@ -6,10 +6,17 @@ import { Subject, takeUntil, forkJoin } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
-import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../../../shared/components/index';
-import { SelectorComponent, SelectorOption } from '../../../../../../shared/components/selector/selector.component';
+import {
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
+} from '../../../../../../shared/components/index';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../shared/components/selector/selector.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
@@ -31,6 +38,7 @@ import {
     CommonModule,
     RouterModule,
     FormsModule,
+    CardComponent,
     ResponsiveDataViewComponent,
     SelectorComponent,
     IconComponent,
@@ -42,19 +50,31 @@ import {
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
       <!-- Header -->
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+      >
         <div>
           <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/reports" class="hover:text-primary">Reportes</a>
+            <a routerLink="/admin/reports" class="hover:text-primary"
+              >Reportes</a
+            >
             <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/reports/inventory" class="hover:text-primary">Inventario</a>
+            <a routerLink="/admin/reports/inventory" class="hover:text-primary"
+              >Inventario</a
+            >
             <app-icon name="chevron-right" [size]="14"></app-icon>
             <span>Análisis de Movimientos</span>
           </div>
-          <h1 class="text-2xl font-bold text-text-primary">Análisis de Movimientos</h1>
-          <p class="text-text-secondary mt-1">Tendencias, distribución y detalle de movimientos de inventario</p>
+          <h1 class="text-2xl font-bold text-text-primary">
+            Análisis de Movimientos
+          </h1>
+          <p class="text-text-secondary mt-1">
+            Tendencias, distribución y detalle de movimientos de inventario
+          </p>
         </div>
-        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        <div
+          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3"
+        >
           <vendix-date-range-filter
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
@@ -73,7 +93,11 @@ import {
             <button
               (click)="activeView.set('chart')"
               class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-              [class]="activeView() === 'chart' ? 'bg-primary text-white' : 'bg-surface text-text-secondary hover:bg-background'"
+              [class]="
+                activeView() === 'chart'
+                  ? 'bg-primary text-white'
+                  : 'bg-surface text-text-secondary hover:bg-background'
+              "
             >
               <app-icon name="bar-chart-2" [size]="16"></app-icon>
               Gráficas
@@ -81,7 +105,11 @@ import {
             <button
               (click)="activeView.set('table')"
               class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-              [class]="activeView() === 'table' ? 'bg-primary text-white' : 'bg-surface text-text-secondary hover:bg-background'"
+              [class]="
+                activeView() === 'table'
+                  ? 'bg-primary text-white'
+                  : 'bg-surface text-text-secondary hover:bg-background'
+              "
             >
               <app-icon name="table" [size]="16"></app-icon>
               Tabla
@@ -134,39 +162,50 @@ import {
       @if (activeView() === 'chart') {
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <!-- Trends Line Chart -->
-          <div class="bg-surface border border-border rounded-xl p-4">
-            <h3 class="font-semibold text-text-primary mb-4">Tendencia de Movimientos</h3>
+          <app-card shadow="none" [responsivePadding]="true">
+            <span class="text-sm font-bold text-[var(--color-text-primary)]"
+              >Tendencia de Movimientos</span
+            >
             <div class="h-[350px]">
               <app-chart
                 [options]="trendsChartOptions()"
                 [loading]="loadingTrends()"
               ></app-chart>
             </div>
-          </div>
+          </app-card>
 
           <!-- Distribution Pie/Donut Chart -->
-          <div class="bg-surface border border-border rounded-xl p-4">
-            <h3 class="font-semibold text-text-primary mb-4">Distribución por Tipo</h3>
+          <app-card shadow="none" [responsivePadding]="true">
+            <span class="text-sm font-bold text-[var(--color-text-primary)]"
+              >Distribución por Tipo</span
+            >
             <div class="h-[350px]">
               <app-chart
                 [options]="distributionChartOptions()"
                 [loading]="loadingSummary()"
               ></app-chart>
             </div>
-          </div>
+          </app-card>
         </div>
       }
 
       <!-- Table View -->
       @if (activeView() === 'table') {
-        <div class="bg-surface border border-border rounded-xl overflow-hidden">
-          <div class="p-4 border-b border-border">
-            <h3 class="font-semibold text-text-primary">
+        <app-card
+          shadow="none"
+          [padding]="false"
+          overflow="hidden"
+          [showHeader]="true"
+        >
+          <div slot="header" class="flex flex-col">
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">
               Movimientos Detallados
-              <span class="text-text-secondary font-normal text-sm ml-2">
+              <span
+                class="text-xs text-[var(--color-text-secondary)] font-normal ml-2"
+              >
                 ({{ movements().length }} registros)
               </span>
-            </h3>
+            </span>
           </div>
 
           <div class="p-4">
@@ -179,7 +218,7 @@ import {
               emptyIcon="activity"
             ></app-responsive-data-view>
           </div>
-        </div>
+        </app-card>
       }
     </div>
   `,
@@ -364,7 +403,10 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
         ...query,
         granularity: this.granularity() as any,
       }),
-      movements: this.analyticsService.getStockMovements({ ...query, limit: 100 }),
+      movements: this.analyticsService.getStockMovements({
+        ...query,
+        limit: 100,
+      }),
     })
       .pipe(takeUntil(this.destroy$))
       .subscribe({
@@ -448,10 +490,14 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
   private updateTrendsChart(trends: MovementTrend[]): void {
     const labels = trends.map((t) => t.period);
     const style = getComputedStyle(document.documentElement);
-    const successColor = style.getPropertyValue('--color-success').trim() || '#10b981';
-    const dangerColor = style.getPropertyValue('--color-danger').trim() || '#ef4444';
-    const primaryColor = style.getPropertyValue('--color-primary').trim() || '#3b82f6';
-    const warnColor = style.getPropertyValue('--color-warning').trim() || '#f59e0b';
+    const successColor =
+      style.getPropertyValue('--color-success').trim() || '#10b981';
+    const dangerColor =
+      style.getPropertyValue('--color-danger').trim() || '#ef4444';
+    const primaryColor =
+      style.getPropertyValue('--color-primary').trim() || '#3b82f6';
+    const warnColor =
+      style.getPropertyValue('--color-warning').trim() || '#f59e0b';
 
     this.trendsChartOptions.set({
       tooltip: {
@@ -462,7 +508,13 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
         data: ['Entradas', 'Salidas', 'Ajustes', 'Transferencias'],
         bottom: 0,
       },
-      grid: { left: '3%', right: '4%', bottom: '15%', top: '5%', containLabel: true },
+      grid: {
+        left: '3%',
+        right: '4%',
+        bottom: '15%',
+        top: '5%',
+        containLabel: true,
+      },
       xAxis: {
         type: 'category',
         data: labels,

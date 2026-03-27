@@ -10,7 +10,7 @@ import { OrderStats } from '../interfaces/order.interface';
   standalone: true,
   imports: [CommonModule, StatsComponent],
   template: `
-    <div class="space-y-6">
+    <div class="space-y-4">
       <div class="stats-container">
         <app-stats
           title="Total Orders"

@@ -301,6 +301,19 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.push_subscriptions;
   }
 
+  // Booking models
+  get bookings() {
+    return this.baseClient.bookings;
+  }
+
+  get service_schedules() {
+    return this.baseClient.service_schedules;
+  }
+
+  get schedule_exceptions() {
+    return this.baseClient.schedule_exceptions;
+  }
+
   // Support models
   get support_tickets() {
     return this.baseClient.support_tickets;
@@ -329,6 +342,22 @@ export class GlobalPrismaService extends BasePrismaService {
 
   get ai_engine_applications() {
     return this.baseClient.ai_engine_applications;
+  }
+
+  get ai_engine_logs() {
+    return this.baseClient.ai_engine_logs;
+  }
+
+  get ai_conversations() {
+    return this.baseClient.ai_conversations;
+  }
+
+  get ai_messages() {
+    return this.baseClient.ai_messages;
+  }
+
+  get ai_embeddings() {
+    return this.baseClient.ai_embeddings;
   }
 
   // Help Center models (global - no scoping)

@@ -26,7 +26,10 @@ import {
   FilterValues,
   IconComponent,
   PaginationComponent,
+  EmptyStateComponent,
+  CardComponent,
 } from '../../../../../../shared/components/index';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-expenses-list',
@@ -40,6 +43,8 @@ import {
     ButtonComponent,
     IconComponent,
     PaginationComponent,
+    EmptyStateComponent,
+    CardComponent,
   ],
   templateUrl: './expenses-list.component.html',
 })
@@ -53,6 +58,7 @@ export class ExpensesListComponent {
   @Output() refresh = new EventEmitter<void>();
 
   private store = inject(Store);
+  private currencyService = inject(CurrencyFormatService);
 
   // Observables from store for current filter values
   search$: Observable<string> = this.store.select(selectSearch);
@@ -84,7 +90,12 @@ export class ExpensesListComponent {
   // Dropdown actions
   dropdownActions: DropdownAction[] = [
     { label: 'Categorías', icon: 'folder', action: 'categories' },
-    { label: 'Nuevo Gasto', icon: 'plus', action: 'create', variant: 'primary' },
+    {
+      label: 'Nuevo Gasto',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   // Table actions
@@ -106,7 +117,7 @@ export class ExpensesListComponent {
       sortable: true,
       align: 'right',
       priority: 1,
-      transform: (val: any) => (val ? `$${Number(val).toFixed(2)}` : '$0.00'),
+      transform: (val: any) => this.currencyService.format(Number(val) || 0),
     },
     {
       key: 'expense_date',
@@ -144,7 +155,8 @@ export class ExpensesListComponent {
   // Card Config for mobile
   cardConfig: ItemListCardConfig = {
     titleKey: 'description',
-    subtitleTransform: (item: any) => item?.expense_categories?.name || 'Sin categoría',
+    subtitleTransform: (item: any) =>
+      item?.expense_categories?.name || 'Sin categoría',
     badgeKey: 'state',
     badgeConfig: {
       type: 'status',
@@ -160,13 +172,14 @@ export class ExpensesListComponent {
     footerKey: 'amount',
     footerLabel: 'Monto',
     footerStyle: 'prominent',
-    footerTransform: (val: any) => `$${Number(val).toFixed(2)}`,
+    footerTransform: (val: any) => this.currencyService.format(Number(val) || 0),
     detailKeys: [
       {
         key: 'expense_date',
         label: 'Fecha',
         icon: 'calendar',
-        transform: (val: any) => (val ? new Date(val).toLocaleDateString() : '-'),
+        transform: (val: any) =>
+          val ? new Date(val).toLocaleDateString() : '-',
       },
     ],
   };

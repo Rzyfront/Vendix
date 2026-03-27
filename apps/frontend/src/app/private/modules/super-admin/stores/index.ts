@@ -4,7 +4,6 @@ export { StoreCreateModalComponent } from './components/store-create-modal.compo
 export { StoreEditModalComponent } from './components/store-edit-modal.component';
 export { StoreSettingsModalComponent } from './components/store-settings-modal.component';
 export { StoreStatsComponent } from './components/store-stats.component';
-export { StoreEmptyStateComponent } from './components/store-empty-state.component';
 
 // Services
 export { StoresService } from './services/stores.service';

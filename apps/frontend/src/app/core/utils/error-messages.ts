@@ -168,6 +168,28 @@ export const ERROR_MESSAGES: Record<string, string> = {
   AI_APP_002: 'Ya existe una aplicacion con esa clave.',
   AI_APP_003: 'La aplicacion de IA esta deshabilitada.',
   AI_APP_004: 'Se excedio el limite de solicitudes de esta aplicacion.',
+  AI_QUEUE_001: 'Error processing AI request. Please try again.',
+  AI_QUEUE_002: 'AI task not found.',
+  AI_CACHE_001: 'Temporary error. Please try again.',
+  AI_LOG_001: 'Error logging AI operation.',
+  AI_STREAM_001: 'This AI provider does not support streaming.',
+  AI_STREAM_002: 'AI streaming failed. Please try again.',
+  AI_CHAT_001: 'Conversation not found.',
+  AI_CHAT_002: 'This conversation has been archived.',
+  AI_CHAT_003: 'You do not have access to this conversation.',
+  AI_CHAT_004: 'Please enter a message.',
+
+  // AI Agent
+  AI_AGENT_001: 'The AI assistant reached its processing limit. Please try a simpler request.',
+  AI_AGENT_002: 'The AI assistant took too long to respond. Please try again.',
+  AI_AGENT_003: 'An error occurred while processing your request.',
+  AI_AGENT_004: 'You do not have permission to perform this action.',
+  AI_AGENT_005: 'This action requires your confirmation before proceeding.',
+
+  // AI Embeddings
+  AI_EMBED_001: 'Error generating content analysis. Please try again.',
+  AI_EMBED_002: 'No relevant information found.',
+  AI_EMBED_003: 'Search failed. Please try again.',
 
   // Layaway (Plan Separe)
   LAY_FIND_001: 'El plan separe no fue encontrado.',
@@ -195,6 +217,20 @@ export const ERROR_MESSAGES: Record<string, string> = {
   HABEAS_EXPORT_PROCESSING: 'Ya hay una exportacion en proceso.',
   HABEAS_ANON_REQUEST_NOT_FOUND: 'No se encontro la solicitud de anonimizacion.',
   HABEAS_CONSENT_INVALID: 'Tipo de consentimiento invalido.',
+
+  // AI MCP
+  AI_MCP_001: 'La autenticacion fallo. Verifique sus credenciales.',
+  AI_MCP_002: 'No tiene permisos para realizar esta accion.',
+  AI_MCP_003: 'Limite de solicitudes excedido. Espere antes de intentar de nuevo.',
+  AI_MCP_004: 'Formato de solicitud invalido.',
+
+  // Dispatch Notes (Remisiones)
+  DSP_FIND_001: 'Remisión no encontrada',
+  DSP_VALIDATE_001: 'Transición de estado no válida para esta remisión',
+  DSP_VALIDATE_002: 'Stock insuficiente para confirmar la remisión',
+  DSP_VALIDATE_003: 'El cliente no está activo',
+  DSP_VALIDATE_004: 'La remisión solo puede modificarse en estado borrador',
+  DSP_VALIDATE_005: 'La cantidad a despachar excede la cantidad pendiente del pedido',
 
   // ICA Municipal Tax
   ICA_RATE_NOT_FOUND: 'No se encontro tarifa ICA para el municipio.',

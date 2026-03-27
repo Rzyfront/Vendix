@@ -27,7 +27,10 @@ import {
   FilterValues,
   IconComponent,
   PaginationComponent,
+  EmptyStateComponent,
+  CardComponent,
 } from '../../../../../../shared/components/index';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-invoice-list',
@@ -41,6 +44,8 @@ import {
     ButtonComponent,
     IconComponent,
     PaginationComponent,
+    EmptyStateComponent,
+    CardComponent,
   ],
   templateUrl: './invoice-list.component.html',
 })
@@ -54,6 +59,7 @@ export class InvoiceListComponent {
   @Output() refresh = new EventEmitter<void>();
 
   private store = inject(Store);
+  private currencyService = inject(CurrencyFormatService);
 
   // Observables from store for current filter values
   search$: Observable<string> = this.store.select(selectSearch);
@@ -101,7 +107,12 @@ export class InvoiceListComponent {
   // Dropdown actions
   dropdownActions: DropdownAction[] = [
     { label: 'Resoluciones', icon: 'settings', action: 'resolutions' },
-    { label: 'Nueva Factura', icon: 'plus', action: 'create', variant: 'primary' },
+    {
+      label: 'Nueva Factura',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   // Table actions
@@ -136,7 +147,7 @@ export class InvoiceListComponent {
       sortable: true,
       align: 'right',
       priority: 1,
-      transform: (val: any) => (val ? `$${Number(val).toFixed(2)}` : '$0.00'),
+      transform: (val: any) => this.currencyService.format(Number(val) || 0),
     },
     {
       key: 'issue_date',
@@ -188,13 +199,14 @@ export class InvoiceListComponent {
     footerKey: 'total_amount',
     footerLabel: 'Total',
     footerStyle: 'prominent',
-    footerTransform: (val: any) => `$${Number(val).toFixed(2)}`,
+    footerTransform: (val: any) => this.currencyService.format(Number(val) || 0),
     detailKeys: [
       {
         key: 'issue_date',
         label: 'Fecha',
         icon: 'calendar',
-        transform: (val: any) => (val ? new Date(val).toLocaleDateString() : '-'),
+        transform: (val: any) =>
+          val ? new Date(val).toLocaleDateString() : '-',
       },
       {
         key: 'invoice_type',
@@ -270,7 +282,11 @@ export class InvoiceListComponent {
   }
 
   get hasFilters(): boolean {
-    return !!(this.searchTerm || this.filterValues['status'] || this.filterValues['invoice_type']);
+    return !!(
+      this.searchTerm ||
+      this.filterValues['status'] ||
+      this.filterValues['invoice_type']
+    );
   }
 
   getEmptyStateTitle(): string {

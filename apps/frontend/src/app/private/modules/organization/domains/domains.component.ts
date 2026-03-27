@@ -17,7 +17,6 @@ import { OrganizationDomainsService } from './services/organization-domains.serv
 import { OrganizationStoresService } from '../stores/services/organization-stores.service';
 
 import {
-  DomainEmptyStateComponent,
   DomainCreateModalComponent,
   DomainEditModalComponent,
   DomainDeleteConfirmationComponent,
@@ -35,6 +34,7 @@ import {
   SelectorOption,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  EmptyStateComponent,
 } from '../../../../shared/components/index';
 
 interface StatItem {
@@ -60,7 +60,7 @@ interface StoreOption {
     FormsModule,
     ReactiveFormsModule,
     StatsComponent,
-    DomainEmptyStateComponent,
+    EmptyStateComponent,
     DomainCreateModalComponent,
     DomainEditModalComponent,
     DomainDeleteConfirmationComponent,
@@ -180,16 +180,19 @@ interface StoreOption {
         </div>
 
         <!-- Empty State -->
-        <app-domain-empty-state
+        <app-empty-state
           *ngIf="!isLoading && domains.length === 0"
+          icon="globe"
           [title]="getEmptyStateTitle()"
           [description]="getEmptyStateDescription()"
-          [showAdditionalActions]="hasFilters"
+          actionButtonText="Crear Dominio"
+          [showRefreshButton]="hasFilters"
+          [showClearFilters]="hasFilters"
           (actionClick)="openCreateModal()"
           (refreshClick)="refreshDomains()"
           (clearFiltersClick)="clearFilters()"
         >
-        </app-domain-empty-state>
+        </app-empty-state>
 
         <!-- Domains Table -->
         <div *ngIf="!isLoading && domains.length > 0" class="p-6">

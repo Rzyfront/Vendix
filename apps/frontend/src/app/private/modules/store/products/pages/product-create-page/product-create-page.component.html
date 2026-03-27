@@ -91,7 +91,7 @@
                         <!-- Row 1: Costo | Margen | Precio Base -->
                         <app-input
                             [label]="productForm.get('pricing_type')?.value === 'weight' ? 'Costo por kg' : 'Precio de Costo'"
-                            type="number" formControlName="cost_price"
+                            [currency]="true" formControlName="cost_price"
                             [error]="getErrorMessage('cost_price')" prefix="$" placeholder="0.00"
                             tooltipText="Precio al que adquieres el producto. Se usa para calcular la rentabilidad."
                             customWrapperClass="!mt-0"></app-input>
@@ -103,7 +103,7 @@
 
                         <app-input
                             [label]="productForm.get('pricing_type')?.value === 'weight' ? 'Precio por kg (PVP)' : 'Precio Base (PVP)'"
-                            type="number" formControlName="base_price"
+                            [currency]="true" formControlName="base_price"
                             [error]="getErrorMessage('base_price')" prefix="$" placeholder="0.00"
                             tooltipText="Precio de venta antes de impuestos. Se calcula automáticamente si defines costo + margen."
                             [required]="true"
@@ -327,7 +327,7 @@
                                             Precio de Oferta
                                         </span>
                                     </div>
-                                    <app-input type="number"
+                                    <app-input [currency]="true"
                                         formControlName="sale_price" [error]="getErrorMessage('sale_price')"
                                         prefix="$" placeholder="0.00"
                                         customWrapperClass="!mt-0"
@@ -927,7 +927,7 @@
                         @if (expandedVariantIndex() === idx) {
                             <div class="px-3 pb-3 space-y-3 border-t border-gray-200 pt-3">
                                 <div class="grid grid-cols-2 gap-3">
-                                    <app-input label="Costo" type="number" size="sm" [(ngModel)]="variant.cost_price"
+                                    <app-input label="Costo" [currency]="true" size="sm" [(ngModel)]="variant.cost_price"
                                         [ngModelOptions]="{standalone: true}" placeholder="0.00"
                                         (ngModelChange)="onVariantCostOrMarginChange(variant)"
                                         customWrapperClass="!mt-0" prefix="$"></app-input>
@@ -935,7 +935,7 @@
                                         [ngModelOptions]="{standalone: true}" placeholder="0.00"
                                         (ngModelChange)="onVariantCostOrMarginChange(variant)"
                                         customWrapperClass="!mt-0" suffix="%"></app-input>
-                                    <app-input label="Precio Venta" type="number" size="sm" [(ngModel)]="variant.price"
+                                    <app-input label="Precio Venta" [currency]="true" size="sm" [(ngModel)]="variant.price"
                                         [ngModelOptions]="{standalone: true}" placeholder="0.00"
                                         (ngModelChange)="onVariantPriceChange(variant)"
                                         customWrapperClass="!mt-0" prefix="$"></app-input>
@@ -1039,7 +1039,7 @@
                                 </td>
                                 <!-- Cost -->
                                 <td class="px-3 py-2">
-                                    <app-input type="number" size="sm" [(ngModel)]="variant.cost_price"
+                                    <app-input [currency]="true" size="sm" [(ngModel)]="variant.cost_price"
                                         [ngModelOptions]="{standalone: true}" placeholder="0.00"
                                         (ngModelChange)="onVariantCostOrMarginChange(variant)"
                                         customWrapperClass="!mt-0" prefix="$"></app-input>
@@ -1053,7 +1053,7 @@
                                 </td>
                                 <!-- Sale Price -->
                                 <td class="px-3 py-2">
-                                    <app-input type="number" size="sm" [(ngModel)]="variant.price"
+                                    <app-input [currency]="true" size="sm" [(ngModel)]="variant.price"
                                         [ngModelOptions]="{standalone: true}" placeholder="0.00"
                                         (ngModelChange)="onVariantPriceChange(variant)"
                                         customWrapperClass="!mt-0" prefix="$"></app-input>
@@ -1065,7 +1065,7 @@
                                             [ngModelOptions]="{standalone: true}"
                                             class="w-3.5 h-3.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer">
                                         @if (variant.is_on_sale) {
-                                            <app-input type="number" size="sm" [(ngModel)]="variant.sale_price"
+                                            <app-input [currency]="true" size="sm" [(ngModel)]="variant.sale_price"
                                                 [ngModelOptions]="{standalone: true}" placeholder="0.00"
                                                 customWrapperClass="!mt-0" prefix="$"></app-input>
                                         } @else {

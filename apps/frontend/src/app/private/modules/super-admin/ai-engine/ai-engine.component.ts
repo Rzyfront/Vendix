@@ -13,7 +13,6 @@ import { AIEngineService } from './services/ai-engine.service';
 import {
   AIEngineConfigModalComponent,
   AIEngineAppModalComponent,
-  AIEngineEmptyStateComponent,
 } from './components/index';
 
 import {
@@ -29,6 +28,8 @@ import {
   ResponsiveDataViewComponent,
   ItemListCardConfig,
   PaginationComponent,
+  EmptyStateComponent,
+  CardComponent,
 } from '../../../../shared/components/index';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 
@@ -50,13 +51,14 @@ type ActiveTab = 'configs' | 'apps';
     ReactiveFormsModule,
     AIEngineConfigModalComponent,
     AIEngineAppModalComponent,
-    AIEngineEmptyStateComponent,
+    EmptyStateComponent,
     ResponsiveDataViewComponent,
     InputsearchComponent,
     ButtonComponent,
     StatsComponent,
     SelectorComponent,
     PaginationComponent,
+    CardComponent,
   ],
   templateUrl: './ai-engine.component.html',
   styleUrls: ['./ai-engine.component.css'],
@@ -204,8 +206,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
       key: 'config',
       label: 'Configuracion',
       priority: 2,
-      transform: (value: any) =>
-        value ? `${value.label}` : 'Default',
+      transform: (value: any) => (value ? `${value.label}` : 'Default'),
     },
     {
       key: 'output_format',
@@ -323,7 +324,9 @@ export class AIEngineComponent implements OnInit, OnDestroy {
             this.configPagination.total = response.meta.total || 0;
             this.configPagination.totalPages =
               response.meta.totalPages ||
-              Math.ceil(this.configPagination.total / this.configPagination.limit);
+              Math.ceil(
+                this.configPagination.total / this.configPagination.limit,
+              );
           }
         },
         error: (error) => {
@@ -587,7 +590,9 @@ export class AIEngineComponent implements OnInit, OnDestroy {
           if (result.success) {
             this.toastService.success('Test exitoso');
           } else {
-            this.toastService.error(`Test fallo: ${result.error || 'Error desconocido'}`);
+            this.toastService.error(
+              `Test fallo: ${result.error || 'Error desconocido'}`,
+            );
           }
         },
         error: (error) => {

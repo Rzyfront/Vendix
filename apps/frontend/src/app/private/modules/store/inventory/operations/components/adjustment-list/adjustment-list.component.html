@@ -1,7 +1,6 @@
 <div class="md:space-y-4">
   <!-- Lista de Ajustes -->
-  <div
-    class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border">
+  <app-card [responsive]="true" [padding]="false">
     <!-- Search Section: sticky below stats on mobile, normal on desktop -->
     <div
       class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
@@ -43,27 +42,18 @@
 
     <!-- Estado Vacío -->
     @if (!isLoading() && adjustments().length === 0) {
-    <div class="p-8 md:p-12 text-center text-gray-500">
-      <app-icon name="clipboard-list" [size]="48" class="mx-auto mb-4 text-gray-300">
-      </app-icon>
-      <h3 class="text-lg font-medium text-gray-900">{{ getEmptyStateTitle() }}</h3>
-      <p class="mt-1 text-sm text-text-secondary">{{ getEmptyStateDescription() }}</p>
-
-      @if (hasFilters()) {
-      <div class="mt-6 flex justify-center gap-3">
-        <app-button variant="outline" (clicked)="onClearFilters()">
-          Limpiar filtros
-        </app-button>
-      </div>
-      } @else {
-      <div class="mt-6">
-        <app-button variant="primary" (clicked)="onActionClick('create')">
-          <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-          Crear Ajuste
-        </app-button>
-      </div>
-      }
-    </div>
+      <app-empty-state
+        icon="clipboard-list"
+        [title]="getEmptyStateTitle()"
+        [description]="getEmptyStateDescription()"
+        actionButtonText="Crear Ajuste"
+        [showActionButton]="!hasFilters()"
+        [showRefreshButton]="true"
+        [showClearFilters]="hasFilters()"
+        (actionClick)="onActionClick('create')"
+        (refreshClick)="onActionClick('refresh')"
+        (clearFiltersClick)="onClearFilters()"
+      ></app-empty-state>
     }
 
     <!-- Adjustments List -->
@@ -86,5 +76,5 @@
       </div>
     </div>
     }
-  </div>
+  </app-card>
 </div>

@@ -3,9 +3,13 @@ import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
-import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../../../shared/components/index';
+import {
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
+} from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
@@ -14,7 +18,10 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 import { AnalyticsService } from '../../services/analytics.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
-import { SalesByPaymentMethod, SalesAnalyticsQueryDto } from '../../interfaces/sales-analytics.interface';
+import {
+  SalesByPaymentMethod,
+  SalesAnalyticsQueryDto,
+} from '../../interfaces/sales-analytics.interface';
 
 import { EChartsOption } from 'echarts';
 
@@ -24,6 +31,7 @@ import { EChartsOption } from 'echarts';
   imports: [
     CommonModule,
     RouterModule,
+    CardComponent,
     ChartComponent,
     ResponsiveDataViewComponent,
     IconComponent,
@@ -33,19 +41,31 @@ import { EChartsOption } from 'echarts';
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
       <!-- Header -->
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+      >
         <div>
           <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/reports" class="hover:text-primary">Reportes</a>
+            <a routerLink="/admin/reports" class="hover:text-primary"
+              >Reportes</a
+            >
             <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/reports/sales" class="hover:text-primary">Ventas</a>
+            <a routerLink="/admin/reports/sales" class="hover:text-primary"
+              >Ventas</a
+            >
             <app-icon name="chevron-right" [size]="14"></app-icon>
             <span>Por Método de Pago</span>
           </div>
-          <h1 class="text-2xl font-bold text-text-primary">Ventas por Método de Pago</h1>
-          <p class="text-text-secondary mt-1">Distribución de ventas por forma de pago</p>
+          <h1 class="text-2xl font-bold text-text-primary">
+            Ventas por Método de Pago
+          </h1>
+          <p class="text-text-secondary mt-1">
+            Distribución de ventas por forma de pago
+          </p>
         </div>
-        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        <div
+          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3"
+        >
           <vendix-date-range-filter
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
@@ -60,9 +80,9 @@ import { EChartsOption } from 'echarts';
       <!-- Content Grid -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Pie Chart -->
-        <div class="bg-surface border border-border rounded-xl overflow-hidden">
-          <div class="p-4 border-b border-border">
-            <h3 class="font-semibold text-text-primary">Distribución por Método</h3>
+        <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+          <div slot="header" class="flex flex-col">
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">Distribución por Método</span>
           </div>
           <div class="p-4">
             @if (loading()) {
@@ -76,12 +96,12 @@ import { EChartsOption } from 'echarts';
               ></app-chart>
             }
           </div>
-        </div>
+        </app-card>
 
         <!-- Table -->
-        <div class="bg-surface border border-border rounded-xl overflow-hidden">
-          <div class="p-4 border-b border-border">
-            <h3 class="font-semibold text-text-primary">Detalle por Método</h3>
+        <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+          <div slot="header" class="flex flex-col">
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">Detalle por Método</span>
           </div>
           <div class="p-4">
             <app-responsive-data-view
@@ -93,7 +113,7 @@ import { EChartsOption } from 'echarts';
               emptyIcon="credit-card"
             ></app-responsive-data-view>
           </div>
-        </div>
+        </app-card>
       </div>
     </div>
   `,

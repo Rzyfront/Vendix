@@ -61,7 +61,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
       </div>
 
       <!-- Stats: Sticky on mobile, static on desktop (hidden on settings tab) -->
-      <div *ngIf="activeTab === 'employees' || activeTab === 'payroll-runs'" class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div *ngIf="activeTab === 'employees' || activeTab === 'payroll-runs'" class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <vendix-payroll-stats [view]="activeTab"></vendix-payroll-stats>
       </div>
 

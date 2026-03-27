@@ -38,6 +38,13 @@ export class StorePrismaService extends BasePrismaService {
     'layaway_plans',
     'credits',
     'exogenous_reports',
+    'bookings',
+    'service_schedules',
+    'schedule_exceptions',
+    'reviews',
+    'ai_conversations',
+    'ai_embeddings',
+    'dispatch_notes',
   ];
 
   constructor() {
@@ -142,6 +149,11 @@ export class StorePrismaService extends BasePrismaService {
       'withholding_calculations', // Org scoped (organization_id + optional store_id)
       'withholding_concepts', // Org scoped
       'uvt_values', // Org scoped
+      'review_responses', // Relational
+      'review_votes', // Relational
+      'review_reports', // Relational
+      'ai_messages', // Relational
+      'dispatch_note_items', // Relational
     ];
 
     for (const model of all_scoped_models) {
@@ -267,6 +279,11 @@ export class StorePrismaService extends BasePrismaService {
       depreciation_entries: { fixed_asset: { organization_id: context.organization_id } },
       budget_lines: { budget: { organization_id: context.organization_id } },
       consolidation_adjustments: { session: { organization_id: context.organization_id } },
+      review_responses: { reviews: { store_id: context.store_id } },
+      review_votes: { reviews: { store_id: context.store_id } },
+      review_reports: { reviews: { store_id: context.store_id } },
+      ai_messages: { conversation: { store_id: context.store_id, organization_id: context.organization_id } },
+      dispatch_note_items: { dispatch_note: { store_id: context.store_id } },
     };
 
     const security_filter: Record<string, any> = {};
@@ -801,6 +818,58 @@ export class StorePrismaService extends BasePrismaService {
 
   get uvt_values() {
     return this.scoped_client.uvt_values;
+  }
+
+  // Bookings models
+  get bookings() {
+    return this.scoped_client.bookings;
+  }
+
+  get service_schedules() {
+    return this.scoped_client.service_schedules;
+  }
+
+  get schedule_exceptions() {
+    return this.scoped_client.schedule_exceptions;
+  }
+
+  // Reviews models
+  get reviews() {
+    return this.scoped_client.reviews;
+  }
+
+  get review_responses() {
+    return this.scoped_client.review_responses;
+  }
+
+  get review_votes() {
+    return this.scoped_client.review_votes;
+  }
+
+  get review_reports() {
+    return this.scoped_client.review_reports;
+  }
+
+  // AI Chat models
+  get ai_conversations() {
+    return this.scoped_client.ai_conversations;
+  }
+
+  get ai_messages() {
+    return this.scoped_client.ai_messages;
+  }
+
+  get ai_embeddings() {
+    return this.scoped_client.ai_embeddings;
+  }
+
+  // Dispatch Notes models
+  get dispatch_notes() {
+    return this.scoped_client.dispatch_notes;
+  }
+
+  get dispatch_note_items() {
+    return this.scoped_client.dispatch_note_items;
   }
 
   // Global tables (no store scoping)

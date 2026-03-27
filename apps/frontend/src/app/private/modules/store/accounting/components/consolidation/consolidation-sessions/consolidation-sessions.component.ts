@@ -1,4 +1,11 @@
-import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  OnDestroy,
+  inject,
+  signal,
+  computed,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
@@ -6,6 +13,7 @@ import { Subject, takeUntil } from 'rxjs';
 import { AccountingService } from '../../../services/accounting.service';
 import { ConsolidationSession } from '../../../interfaces/accounting.interface';
 import {
+  CardComponent,
   StatsComponent,
   InputsearchComponent,
   ResponsiveDataViewComponent,
@@ -25,6 +33,7 @@ import { SessionCreateModalComponent } from '../session-create-modal/session-cre
   standalone: true,
   imports: [
     CommonModule,
+    CardComponent,
     StatsComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
@@ -33,9 +42,10 @@ import { SessionCreateModalComponent } from '../session-create-modal/session-cre
   ],
   template: `
     <div class="w-full">
-
       <!-- Stats: Sticky on mobile, static on desktop -->
-      <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         <app-stats
           title="Total Sesiones"
           [value]="stats().total"
@@ -71,15 +81,19 @@ import { SessionCreateModalComponent } from '../session-create-modal/session-cre
       </div>
 
       <!-- Unified Container: Search Header + Data -->
-      <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-                  md:border md:border-border">
-
+      <app-card [responsive]="true" [padding]="false">
         <!-- Search Header -->
-        <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                    md:mt-0 md:static md:bg-transparent md:px-4 md:py-4 md:border-b md:border-border">
-          <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-            <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
-                       md:text-lg md:font-semibold md:text-text-primary">
+        <div
+          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                    md:mt-0 md:static md:bg-transparent md:px-4 md:py-4 md:border-b md:border-border"
+        >
+          <div
+            class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+          >
+            <h2
+              class="text-[13px] font-bold text-gray-600 tracking-wide
+                       md:text-lg md:font-semibold md:text-text-primary"
+            >
               Sesiones de Consolidacion ({{ filtered_sessions().length }})
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
@@ -111,7 +125,7 @@ import { SessionCreateModalComponent } from '../session-create-modal/session-cre
             (rowClick)="onRowClick($event)"
           ></app-responsive-data-view>
         </div>
-      </div>
+      </app-card>
 
       <!-- Create Modal -->
       <vendix-session-create-modal
@@ -153,7 +167,12 @@ export class ConsolidationSessionsComponent implements OnInit, OnDestroy {
   });
 
   dropdown_actions: DropdownAction[] = [
-    { label: 'Nueva Sesion', icon: 'plus', action: 'create', variant: 'primary' },
+    {
+      label: 'Nueva Sesion',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   table_actions: TableAction[] = [
@@ -255,7 +274,10 @@ export class ConsolidationSessionsComponent implements OnInit, OnDestroy {
           this.loading.set(false);
         },
         error: () => {
-          this.toast_service.show({ variant: 'error', description: 'Error cargando sesiones de consolidacion' });
+          this.toast_service.show({
+            variant: 'error',
+            description: 'Error cargando sesiones de consolidacion',
+          });
           this.loading.set(false);
         },
       });

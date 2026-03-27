@@ -5,13 +5,17 @@ metadata:
   scope: [root]
   auto_invoke: "Managing State"
 ---
+
 # Vendix Frontend State Management
+
+> **Tip**: Antes de usar ToastService o toast-container, consulta su README en `apps/frontend/src/app/shared/components/toast/README.md` para conocer sus metodos, variantes y patrones de uso.
 
 > **Services, Toast & Notifications** - Reactive state, HTTP services, and notification system.
 
 ## 🎯 State Management Principles
 
 **Vendix uses a hybrid approach:**
+
 - **Services with BehaviorSubject** for global state
 - **Signals (Angular 20)** for local component state
 - **RxJS Observables** for asynchronous operations
@@ -209,18 +213,18 @@ export class {Module}Service {
 **File:** `shared/components/toast/toast.service.ts`
 
 ```typescript
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, signal, computed } from "@angular/core";
 
 export interface Toast {
   id: string;
-  variant: 'success' | 'error' | 'warning' | 'info';
+  variant: "success" | "error" | "warning" | "info";
   message: string;
   duration?: number;
   leaving?: boolean;
 }
 
 @Injectable({
-  providedIn: 'root',
+  providedIn: "root",
 })
 export class ToastService {
   private toasts_sig = signal<Toast[]>([]);
@@ -231,13 +235,13 @@ export class ToastService {
   show(input: Partial<Toast> & { message: string }) {
     const toast: Toast = {
       id: Math.random().toString(36).slice(2),
-      variant: input.variant ?? 'default',
+      variant: input.variant ?? "default",
       message: input.message,
       duration: input.duration ?? this.default_duration,
       leaving: false,
     };
 
-    this.toasts_sig.update(toasts => [toast, ...toasts]);
+    this.toasts_sig.update((toasts) => [toast, ...toasts]);
 
     // Auto-remove after duration
     setTimeout(() => {
@@ -246,26 +250,26 @@ export class ToastService {
   }
 
   remove(id: string) {
-    this.toasts_sig.update(toasts =>
-      toasts.filter(toast => toast.id !== id)
+    this.toasts_sig.update((toasts) =>
+      toasts.filter((toast) => toast.id !== id),
     );
   }
 
   // Convenience methods
   success(message: string, duration?: number) {
-    this.show({ variant: 'success', message, duration });
+    this.show({ variant: "success", message, duration });
   }
 
   error(message: string, duration?: number) {
-    this.show({ variant: 'error', message, duration });
+    this.show({ variant: "error", message, duration });
   }
 
   warning(message: string, duration?: number) {
-    this.show({ variant: 'warning', message, duration });
+    this.show({ variant: "warning", message, duration });
   }
 
   info(message: string, duration?: number) {
-    this.show({ variant: 'info', message, duration });
+    this.show({ variant: "info", message, duration });
   }
 }
 ```
@@ -275,12 +279,12 @@ export class ToastService {
 **File:** `shared/components/toast/toast.component.ts`
 
 ```typescript
-import { Component } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { ToastService, Toast } from './toast.service';
+import { Component } from "@angular/core";
+import { CommonModule } from "@angular/common";
+import { ToastService, Toast } from "./toast.service";
 
 @Component({
-  selector: 'app-toast',
+  selector: "app-toast",
   standalone: true,
   imports: [CommonModule],
   template: `
@@ -292,7 +296,8 @@ import { ToastService, Toast } from './toast.service';
           [class.error]="toast.variant === 'error'"
           [class.warning]="toast.variant === 'warning'"
           [class.info]="toast.variant === 'info'"
-          [class.leaving]="toast.leaving">
+          [class.leaving]="toast.leaving"
+        >
           <div class="toast-content">
             <span>{{ toast.message }}</span>
             <button (click)="remove(toast.id)">×</button>
@@ -301,7 +306,7 @@ import { ToastService, Toast } from './toast.service';
       }
     </div>
   `,
-  styleUrls: ['./toast.component.scss'],
+  styleUrls: ["./toast.component.scss"],
 })
 export class ToastComponent {
   toasts = this.toast_service.toasts;
@@ -323,15 +328,15 @@ export class ToastComponent {
 **File:** `core/interceptors/auth.interceptor.ts`
 
 ```typescript
-import { Injectable } from '@angular/core';
+import { Injectable } from "@angular/core";
 import {
   HttpInterceptor,
   HttpRequest,
   HttpHandler,
   HttpEvent,
-} from '@angular/common/http';
-import { Observable } from 'rxjs';
-import { AuthService } from '@/app/core/services/auth.service';
+} from "@angular/common/http";
+import { Observable } from "rxjs";
+import { AuthService } from "@/app/core/services/auth.service";
 
 @Injectable()
 export class AuthInterceptor implements HttpInterceptor {
@@ -361,17 +366,17 @@ export class AuthInterceptor implements HttpInterceptor {
 **File:** `core/interceptors/error.interceptor.ts`
 
 ```typescript
-import { Injectable } from '@angular/core';
+import { Injectable } from "@angular/core";
 import {
   HttpInterceptor,
   HttpRequest,
   HttpHandler,
   HttpEvent,
   HttpErrorResponse,
-} from '@angular/common/http';
-import { Observable, throwError, catchError } from 'rxjs';
-import { Router } from '@angular/router';
-import { ToastService } from '@/app/shared/components/toast/toast.service';
+} from "@angular/common/http";
+import { Observable, throwError, catchError } from "rxjs";
+import { Router } from "@angular/router";
+import { ToastService } from "@/app/shared/components/toast/toast.service";
 
 @Injectable()
 export class ErrorInterceptor implements HttpInterceptor {
@@ -388,20 +393,22 @@ export class ErrorInterceptor implements HttpInterceptor {
       catchError((error: HttpErrorResponse) => {
         if (error.status === 401) {
           // Unauthorized - redirect to login
-          this.router.navigate(['/auth/login']);
-          this.toast_service.error('Session expired. Please login again.');
+          this.router.navigate(["/auth/login"]);
+          this.toast_service.error("Session expired. Please login again.");
         } else if (error.status === 403) {
           // Forbidden
-          this.toast_service.error('You do not have permission to perform this action.');
+          this.toast_service.error(
+            "You do not have permission to perform this action.",
+          );
         } else if (error.status === 404) {
           // Not found
-          this.toast_service.error('Resource not found.');
+          this.toast_service.error("Resource not found.");
         } else if (error.status >= 500) {
           // Server error
-          this.toast_service.error('Server error. Please try again later.');
+          this.toast_service.error("Server error. Please try again later.");
         } else {
           // Other errors
-          this.toast_service.error(error.error?.message || 'An error occurred');
+          this.toast_service.error(error.error?.message || "An error occurred");
         }
 
         return throwError(() => error);
@@ -487,12 +494,12 @@ export class MyComponent {
 
 ## 🔍 Key Files Reference
 
-| File | Purpose |
-|------|---------|
-| `shared/components/toast/toast.service.ts` | Notification system |
-| `core/interceptors/auth.interceptor.ts` | JWT injection |
-| `core/interceptors/error.interceptor.ts` | Global error handling |
-| `*/services/*.service.ts` | Business logic and API |
+| File                                       | Purpose                |
+| ------------------------------------------ | ---------------------- |
+| `shared/components/toast/toast.service.ts` | Notification system    |
+| `core/interceptors/auth.interceptor.ts`    | JWT injection          |
+| `core/interceptors/error.interceptor.ts`   | Global error handling  |
+| `*/services/*.service.ts`                  | Business logic and API |
 
 ---
 

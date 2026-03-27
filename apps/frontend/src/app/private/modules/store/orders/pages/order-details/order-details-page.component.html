@@ -44,29 +44,23 @@
     ></app-sticky-header>
 
     <!-- Main Grid: Two columns -->
-    <div class="max-w-[1600px] mx-auto px-3 py-3 sm:px-4 sm:py-4 lg:px-6 lg:py-5">
+    <div class="max-w-[1600px] mx-auto">
 
-      <!-- Channel + Delivery Badges Row -->
-      <div class="flex flex-wrap items-center gap-2 mb-4">
-        <!-- Channel badge -->
-        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold border"
-          [ngClass]="{
-            'bg-blue-50 text-blue-700 border-blue-200': channelConfig().color === 'blue',
-            'bg-green-50 text-green-700 border-green-200': channelConfig().color === 'green',
-            'bg-emerald-50 text-emerald-700 border-emerald-200': channelConfig().color === 'emerald',
-            'bg-purple-50 text-purple-700 border-purple-200': channelConfig().color === 'purple',
-            'bg-orange-50 text-orange-700 border-orange-200': channelConfig().color === 'orange'
-          }"
-        >
-          <app-icon [name]="channelConfig().icon" size="14"></app-icon>
-          {{ channelConfig().label }}
-        </span>
-
-        <!-- Delivery type badge -->
-        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-gray-50 text-gray-700 border border-gray-200">
-          <app-icon [name]="deliveryConfig().icon" size="14"></app-icon>
-          {{ deliveryConfig().label }}
-        </span>
+      <!-- Channel + Delivery Info Bar -->
+      <div class="bg-surface border border-border rounded-lg px-3 py-2 mb-4">
+        <div class="flex items-center gap-3 text-[12px]">
+          <div class="flex items-center gap-1.5 text-text-primary font-medium">
+            <app-icon [name]="channelConfig().icon" size="14" class="text-text-secondary"></app-icon>
+            <span>Canal:</span>
+            <span class="text-text-secondary font-normal">{{ channelConfig().label }}</span>
+          </div>
+          <span class="w-px h-3.5 bg-border"></span>
+          <div class="flex items-center gap-1.5 text-text-primary font-medium">
+            <app-icon [name]="deliveryConfig().icon" size="14" class="text-text-secondary"></app-icon>
+            <span>Entrega:</span>
+            <span class="text-text-secondary font-normal">{{ deliveryConfig().label }}</span>
+          </div>
+        </div>
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-3 lg:gap-5">

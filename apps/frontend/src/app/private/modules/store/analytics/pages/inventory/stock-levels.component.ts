@@ -4,17 +4,28 @@ import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
 
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
-import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../../../shared/components/index';
-import { SelectorComponent, SelectorOption } from '../../../../../../shared/components/selector/selector.component';
+import {
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
+} from '../../../../../../shared/components/index';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../shared/components/selector/selector.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 import { AnalyticsService } from '../../services/analytics.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { InventorySummary, StockLevelReport, InventoryAnalyticsQueryDto } from '../../interfaces/inventory-analytics.interface';
+import {
+  InventorySummary,
+  StockLevelReport,
+  InventoryAnalyticsQueryDto,
+} from '../../interfaces/inventory-analytics.interface';
 
 @Component({
   selector: 'vendix-stock-levels',
@@ -23,6 +34,7 @@ import { InventorySummary, StockLevelReport, InventoryAnalyticsQueryDto } from '
     CommonModule,
     RouterModule,
     FormsModule,
+    CardComponent,
     StatsComponent,
     ResponsiveDataViewComponent,
     SelectorComponent,
@@ -32,19 +44,27 @@ import { InventorySummary, StockLevelReport, InventoryAnalyticsQueryDto } from '
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
       <!-- Header -->
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+      >
         <div>
           <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/reports" class="hover:text-primary">Reportes</a>
+            <a routerLink="/admin/reports" class="hover:text-primary"
+              >Reportes</a
+            >
             <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/reports/inventory" class="hover:text-primary">Inventario</a>
+            <a routerLink="/admin/reports/inventory" class="hover:text-primary"
+              >Inventario</a
+            >
             <app-icon name="chevron-right" [size]="14"></app-icon>
             <span>Niveles de Stock</span>
           </div>
           <h1 class="text-2xl font-bold text-text-primary">Niveles de Stock</h1>
           <p class="text-text-secondary mt-1">Estado actual del inventario</p>
         </div>
-        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        <div
+          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3"
+        >
           <div class="w-full sm:w-40">
             <app-selector
               [options]="statusOptions"
@@ -65,7 +85,9 @@ import { InventorySummary, StockLevelReport, InventoryAnalyticsQueryDto } from '
       @if (loadingSummary()) {
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
           @for (i of [1, 2, 3, 4]; track i) {
-            <div class="bg-surface border border-border rounded-xl p-4 animate-pulse">
+            <div
+              class="bg-surface border border-border rounded-xl p-4 animate-pulse"
+            >
               <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
               <div class="h-8 bg-gray-200 rounded w-3/4"></div>
             </div>
@@ -92,7 +114,9 @@ import { InventorySummary, StockLevelReport, InventoryAnalyticsQueryDto } from '
           <app-stats
             title="Stock Bajo"
             [value]="summary()?.low_stock_count || 0"
-            [smallText]="(summary()?.low_stock_percentage || 0).toFixed(1) + '%'"
+            [smallText]="
+              (summary()?.low_stock_percentage || 0).toFixed(1) + '%'
+            "
             iconName="alert-triangle"
             iconBgColor="bg-yellow-100"
             iconColor="text-yellow-600"
@@ -101,7 +125,9 @@ import { InventorySummary, StockLevelReport, InventoryAnalyticsQueryDto } from '
           <app-stats
             title="Agotado"
             [value]="summary()?.out_of_stock_count || 0"
-            [smallText]="(summary()?.out_of_stock_percentage || 0).toFixed(1) + '%'"
+            [smallText]="
+              (summary()?.out_of_stock_percentage || 0).toFixed(1) + '%'
+            "
             iconName="x-circle"
             iconBgColor="bg-red-100"
             iconColor="text-red-600"
@@ -110,14 +136,14 @@ import { InventorySummary, StockLevelReport, InventoryAnalyticsQueryDto } from '
       }
 
       <!-- Main Content -->
-      <div class="bg-surface border border-border rounded-xl overflow-hidden">
-        <div class="p-4 border-b border-border">
-          <h3 class="font-semibold text-text-primary">
+      <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+        <div slot="header" class="flex flex-col">
+          <span class="text-sm font-bold text-[var(--color-text-primary)]">
             Detalle de Stock
-            <span class="text-text-secondary font-normal text-sm ml-2">
+            <span class="text-xs text-[var(--color-text-secondary)] font-normal ml-2">
               ({{ data().length }} productos)
             </span>
-          </h3>
+          </span>
         </div>
 
         <div class="p-4">
@@ -130,7 +156,7 @@ import { InventorySummary, StockLevelReport, InventoryAnalyticsQueryDto } from '
             emptyIcon="package"
           ></app-responsive-data-view>
         </div>
-      </div>
+      </app-card>
     </div>
   `,
 })
@@ -289,7 +315,7 @@ export class StockLevelsComponent implements OnInit, OnDestroy {
   loadData(): void {
     this.loading.set(true);
     const query: InventoryAnalyticsQueryDto = {
-      status: this.statusFilter() as any || undefined,
+      status: (this.statusFilter() as any) || undefined,
       limit: 100,
     };
 
@@ -311,7 +337,9 @@ export class StockLevelsComponent implements OnInit, OnDestroy {
   exportReport(): void {
     this.exporting.set(true);
     this.analyticsService
-      .exportInventoryAnalytics({ status: this.statusFilter() as any || undefined })
+      .exportInventoryAnalytics({
+        status: (this.statusFilter() as any) || undefined,
+      })
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (blob) => {

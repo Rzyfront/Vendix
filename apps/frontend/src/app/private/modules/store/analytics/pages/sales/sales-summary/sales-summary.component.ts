@@ -4,16 +4,26 @@ import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable, Subject, combineLatest, takeUntil } from 'rxjs';
 
+import { CardComponent } from '../../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
-import { FilterConfig, FilterValues } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
-import { CurrencyPipe, CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import {
+  FilterConfig,
+  FilterValues,
+} from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import {
+  CurrencyPipe,
+  CurrencyFormatService,
+} from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { ExportButtonComponent } from '../../../components/export-button/export-button.component';
 
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
-import { SalesSummary, SalesTrend } from '../../../interfaces/sales-analytics.interface';
+import {
+  SalesSummary,
+  SalesTrend,
+} from '../../../interfaces/sales-analytics.interface';
 
 import * as SalesActions from '../state/sales-summary.actions';
 import * as SalesSelectors from '../state/sales-summary.selectors';
@@ -26,6 +36,7 @@ import { EChartsOption } from 'echarts';
   imports: [
     CommonModule,
     RouterLink,
+    CardComponent,
     StatsComponent,
     ChartComponent,
     IconComponent,
@@ -42,14 +53,30 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
 
   // Observables from store
-  summary$: Observable<SalesSummary | null> = this.store.select(SalesSelectors.selectSummary);
-  trends$: Observable<SalesTrend[]> = this.store.select(SalesSelectors.selectTrends);
-  loading$: Observable<boolean> = this.store.select(SalesSelectors.selectLoading);
-  loadingTrends$: Observable<boolean> = this.store.select(SalesSelectors.selectLoadingTrends);
-  exporting$: Observable<boolean> = this.store.select(SalesSelectors.selectExporting);
-  dateRange$: Observable<DateRangeFilter> = this.store.select(SalesSelectors.selectDateRange);
-  granularity$: Observable<string> = this.store.select(SalesSelectors.selectGranularity);
-  channel$: Observable<string> = this.store.select(SalesSelectors.selectChannel);
+  summary$: Observable<SalesSummary | null> = this.store.select(
+    SalesSelectors.selectSummary,
+  );
+  trends$: Observable<SalesTrend[]> = this.store.select(
+    SalesSelectors.selectTrends,
+  );
+  loading$: Observable<boolean> = this.store.select(
+    SalesSelectors.selectLoading,
+  );
+  loadingTrends$: Observable<boolean> = this.store.select(
+    SalesSelectors.selectLoadingTrends,
+  );
+  exporting$: Observable<boolean> = this.store.select(
+    SalesSelectors.selectExporting,
+  );
+  dateRange$: Observable<DateRangeFilter> = this.store.select(
+    SalesSelectors.selectDateRange,
+  );
+  granularity$: Observable<string> = this.store.select(
+    SalesSelectors.selectGranularity,
+  );
+  channel$: Observable<string> = this.store.select(
+    SalesSelectors.selectChannel,
+  );
 
   // Chart options (updated when trends change)
   revenueChartOptions: EChartsOption = {};
@@ -141,19 +168,26 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
 
     // Update date range if changed
     const currentRange = this.filterValues;
-    if (dateFrom !== currentRange['date_from'] || dateTo !== currentRange['date_to']) {
-      this.store.dispatch(SalesActions.setDateRange({
-        dateRange: {
-          start_date: dateFrom || '',
-          end_date: dateTo || '',
-          preset: 'custom',
-        },
-      }));
+    if (
+      dateFrom !== currentRange['date_from'] ||
+      dateTo !== currentRange['date_to']
+    ) {
+      this.store.dispatch(
+        SalesActions.setDateRange({
+          dateRange: {
+            start_date: dateFrom || '',
+            end_date: dateTo || '',
+            preset: 'custom',
+          },
+        }),
+      );
     }
 
     // Update granularity if changed
     if (granularity !== currentRange['granularity']) {
-      this.store.dispatch(SalesActions.setGranularity({ granularity: granularity || 'day' }));
+      this.store.dispatch(
+        SalesActions.setGranularity({ granularity: granularity || 'day' }),
+      );
     }
 
     // Update channel if changed
@@ -163,13 +197,15 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
   }
 
   onClearAllFilters(): void {
-    this.store.dispatch(SalesActions.setDateRange({
-      dateRange: {
-        start_date: this.getDefaultStartDate(),
-        end_date: this.getDefaultEndDate(),
-        preset: 'thisMonth',
-      },
-    }));
+    this.store.dispatch(
+      SalesActions.setDateRange({
+        dateRange: {
+          start_date: this.getDefaultStartDate(),
+          end_date: this.getDefaultEndDate(),
+          preset: 'thisMonth',
+        },
+      }),
+    );
     this.store.dispatch(SalesActions.setGranularity({ granularity: 'day' }));
     this.store.dispatch(SalesActions.setChannel({ channel: '' }));
   }
@@ -200,10 +236,14 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
     // Read theme-aware colors from CSS custom properties
     const style = getComputedStyle(document.documentElement);
     const successColor = '#22c55e';
-    const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
-    const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+    const borderColor =
+      style.getPropertyValue('--color-border').trim() || '#e5e7eb';
+    const textSecondary =
+      style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
-    const labels = trends.map((t) => this.formatPeriodLabel(t.period, granularity));
+    const labels = trends.map((t) =>
+      this.formatPeriodLabel(t.period, granularity),
+    );
     const revenues = trends.map((t) => t.revenue);
 
     this.revenueChartOptions = {
@@ -244,7 +284,10 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
           areaStyle: {
             color: {
               type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
               colorStops: [
                 { offset: 0, color: `${successColor}4D` },
                 { offset: 1, color: `${successColor}0D` },
@@ -256,7 +299,6 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
         },
       ],
     };
-
   }
 
   private formatPeriodLabel(period: string, granularity: string): string {

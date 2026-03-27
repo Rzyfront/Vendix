@@ -1,0 +1,74 @@
+<div class="schedule-management">
+  <div class="schedule-management__header">
+    <h2>Gestionar Horarios</h2>
+    <p class="schedule-management__subtitle">Configura los horarios semanales y excepciones para cada servicio con reservas.</p>
+  </div>
+
+  <div class="schedule-management__content">
+    <!-- Service List Panel -->
+    <div class="schedule-management__services-panel">
+      <h3 class="panel-title">
+        <app-icon name="calendar" [size]="18"></app-icon>
+        Servicios
+      </h3>
+
+      @if (loading()) {
+        <div class="loading-container">
+          <app-spinner size="md"></app-spinner>
+        </div>
+      } @else if (services().length === 0) {
+        <div class="empty-state">
+          <app-icon name="calendar" [size]="32"></app-icon>
+          <p>No hay servicios con reservas habilitadas.</p>
+        </div>
+      } @else {
+        <ul class="service-list">
+          @for (service of services(); track service.id) {
+            <li
+              class="service-item"
+              [class.service-item--active]="selectedService()?.id === service.id"
+              (click)="selectService(service)"
+            >
+              <div class="service-item__info">
+                <span class="service-item__name">{{ service.name }}</span>
+                @if (service.service_duration_minutes) {
+                  <span class="service-item__duration">
+                    <app-icon name="clock" [size]="14"></app-icon>
+                    {{ formatDuration(service.service_duration_minutes) }}
+                  </span>
+                }
+              </div>
+              <app-icon name="chevron-right" [size]="16"></app-icon>
+            </li>
+          }
+        </ul>
+      }
+    </div>
+
+    <!-- Editor Panel -->
+    <div class="schedule-management__editor-panel">
+      @if (selectedService(); as service) {
+        <div class="editor-header">
+          <h3>{{ service.name }}</h3>
+          @if (service.service_duration_minutes) {
+            <span class="editor-header__duration">
+              <app-icon name="clock" [size]="14"></app-icon>
+              {{ formatDuration(service.service_duration_minutes) }}
+            </span>
+          }
+        </div>
+
+        <div class="editor-sections">
+          <app-weekly-schedule-editor [productId]="service.id"></app-weekly-schedule-editor>
+          <app-exceptions-manager [productId]="service.id"></app-exceptions-manager>
+        </div>
+      } @else {
+        <div class="empty-editor">
+          <app-icon name="calendar" [size]="48"></app-icon>
+          <h3>Selecciona un servicio</h3>
+          <p>Elige un servicio de la lista para configurar su horario semanal y excepciones.</p>
+        </div>
+      }
+    </div>
+  </div>
+</div>

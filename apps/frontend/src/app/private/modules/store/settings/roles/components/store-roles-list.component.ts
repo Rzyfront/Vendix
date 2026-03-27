@@ -13,6 +13,7 @@ import {
   FilterConfig,
   FilterValues,
   DropdownAction,
+  CardComponent,
 } from '../../../../../../shared/components';
 import { StoreRole } from '../interfaces/store-role.interface';
 
@@ -26,17 +27,23 @@ import { StoreRole } from '../interfaces/store-role.interface';
     OptionsDropdownComponent,
     IconComponent,
     ButtonComponent,
+    CardComponent,
   ],
   template: `
-    <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border">
-
+    <app-card [responsive]="true" [padding]="false">
       <!-- Search Section: sticky below stats on mobile -->
-      <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                  md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
-        <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
+      <div
+        class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                  md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+      >
+        <div
+          class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+        >
           <!-- Title -->
-          <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
-                     md:text-lg md:font-semibold md:text-text-primary">
+          <h2
+            class="text-[13px] font-bold text-gray-600 tracking-wide
+                     md:text-lg md:font-semibold md:text-text-primary"
+          >
             Roles
             <span class="text-text-secondary font-normal">
               ({{ totalCount }})
@@ -79,14 +86,25 @@ import { StoreRole } from '../interfaces/store-role.interface';
 
       <!-- Loading State -->
       <div *ngIf="loading" class="p-4 md:p-6 text-center">
-        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div
+          class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+        ></div>
         <p class="mt-2 text-text-secondary">Cargando roles...</p>
       </div>
 
       <!-- Empty State -->
-      <div *ngIf="!loading && roles.length === 0" class="p-12 text-center text-gray-500">
-        <app-icon name="shield" [size]="48" class="mx-auto mb-4 text-gray-300"></app-icon>
-        <h3 class="text-lg font-medium text-gray-900">No se encontraron roles</h3>
+      <div
+        *ngIf="!loading && roles.length === 0"
+        class="p-12 text-center text-gray-500"
+      >
+        <app-icon
+          name="shield"
+          [size]="48"
+          class="mx-auto mb-4 text-gray-300"
+        ></app-icon>
+        <h3 class="text-lg font-medium text-gray-900">
+          No se encontraron roles
+        </h3>
         <p class="mt-1">Comienza creando un nuevo rol personalizado.</p>
         <div class="mt-6 flex justify-center">
           <app-button variant="primary" (clicked)="create.emit()">
@@ -112,7 +130,7 @@ import { StoreRole } from '../interfaces/store-role.interface';
           (sort)="onSortChange($event)"
         ></app-responsive-data-view>
       </div>
-    </div>
+    </app-card>
   `,
   styles: [
     `
@@ -134,7 +152,10 @@ export class StoreRolesListComponent {
   @Output() delete = new EventEmitter<StoreRole>();
   @Output() searchChange = new EventEmitter<string>();
   @Output() filterChange = new EventEmitter<Record<string, string>>();
-  @Output() sort = new EventEmitter<{ column: string; direction: 'asc' | 'desc' | null }>();
+  @Output() sort = new EventEmitter<{
+    column: string;
+    direction: 'asc' | 'desc' | null;
+  }>();
 
   searchTerm = '';
   filterValues: FilterValues = {};
@@ -189,13 +210,15 @@ export class StoreRolesListComponent {
       key: '_count.user_roles',
       label: 'Usuarios',
       priority: 2,
-      transform: (value: any, item: any) => String(item?._count?.user_roles || 0),
+      transform: (value: any, item: any) =>
+        String(item?._count?.user_roles || 0),
     },
     {
       key: 'permissions',
       label: 'Permisos',
       priority: 3,
-      transform: (value: any) => String(Array.isArray(value) ? value.length : 0),
+      transform: (value: any) =>
+        String(Array.isArray(value) ? value.length : 0),
     },
   ];
 
@@ -278,7 +301,10 @@ export class StoreRolesListComponent {
     }
   }
 
-  onSortChange(event: { column: string; direction: 'asc' | 'desc' | null }): void {
+  onSortChange(event: {
+    column: string;
+    direction: 'asc' | 'desc' | null;
+  }): void {
     this.sort.emit(event);
   }
 }

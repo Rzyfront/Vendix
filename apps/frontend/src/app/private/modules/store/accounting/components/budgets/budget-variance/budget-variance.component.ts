@@ -20,6 +20,7 @@ import {
   SelectorOption,
   IconComponent,
 } from '../../../../../../../shared/components/index';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'vendix-budget-variance',
@@ -40,6 +41,7 @@ export class BudgetVarianceComponent implements OnInit, OnDestroy {
   private router = inject(Router);
   private accounting_service = inject(AccountingService);
   private toast_service = inject(ToastService);
+  private currencyService = inject(CurrencyFormatService);
 
   budget = signal<Budget | null>(null);
   variance_rows = signal<VarianceRow[]>([]);
@@ -145,7 +147,7 @@ export class BudgetVarianceComponent implements OnInit, OnDestroy {
   }
 
   formatCurrency(value: number): string {
-    return `$${value.toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+    return this.currencyService.format(Number(value) || 0, 0);
   }
 
   formatPct(value: number): string {

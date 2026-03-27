@@ -1,6 +1,11 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup } from '@angular/forms';
+import {
+  FormsModule,
+  ReactiveFormsModule,
+  FormBuilder,
+  FormGroup,
+} from '@angular/forms';
 import { debounceTime, distinctUntilChanged, Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 import { Router } from '@angular/router';
@@ -33,6 +38,7 @@ import {
   ItemListCardConfig,
   IconComponent,
   PaginationComponent,
+  CardComponent,
 } from '../../../../shared/components/index';
 
 @Component({
@@ -50,6 +56,7 @@ import {
     ModalComponent,
     IconComponent,
     PaginationComponent,
+    CardComponent,
   ],
   templateUrl: './support.component.html',
   styleUrls: ['./support.component.css'],
@@ -103,13 +110,13 @@ export class SupportComponent implements OnInit {
       key: 'organization',
       label: 'Organización',
       sortable: false,
-      transform: (value: any) => value?.name || '-'
+      transform: (value: any) => value?.name || '-',
     },
     {
       key: 'store',
       label: 'Tienda',
       sortable: false,
-      transform: (value: any) => value?.name || '-'
+      transform: (value: any) => value?.name || '-',
     },
     {
       key: 'priority',
@@ -119,14 +126,14 @@ export class SupportComponent implements OnInit {
       badgeConfig: {
         type: 'custom',
         colorMap: {
-          'P0': '#dc2626',
-          'P1': '#f97316',
-          'P2': '#f59e0b',
-          'P3': '#22c55e',
-          'P4': '#6b7280',
-        }
+          P0: '#dc2626',
+          P1: '#f97316',
+          P2: '#f59e0b',
+          P3: '#22c55e',
+          P4: '#6b7280',
+        },
       },
-      transform: (value: any) => this.getPriorityLabel(value)
+      transform: (value: any) => this.getPriorityLabel(value),
     },
     {
       key: 'status',
@@ -136,22 +143,22 @@ export class SupportComponent implements OnInit {
       badgeConfig: {
         type: 'custom',
         colorMap: {
-          'NEW': '#10b981',
-          'OPEN': '#22c55e',
-          'IN_PROGRESS': '#eab308',
-          'WAITING_RESPONSE': '#f97316',
-          'RESOLVED': '#14b8a6',
-          'CLOSED': '#6b7280',
-          'REOPENED': '#ef4444',
-        }
+          NEW: '#10b981',
+          OPEN: '#22c55e',
+          IN_PROGRESS: '#eab308',
+          WAITING_RESPONSE: '#f97316',
+          RESOLVED: '#14b8a6',
+          CLOSED: '#6b7280',
+          REOPENED: '#ef4444',
+        },
       },
-      transform: (value: any) => this.getStatusLabel(value)
+      transform: (value: any) => this.getStatusLabel(value),
     },
     {
       key: 'created_at',
       label: 'Creado',
       sortable: true,
-      transform: (value: string) => this.formatDate(value)
+      transform: (value: string) => this.formatDate(value),
     },
   ];
 
@@ -179,21 +186,33 @@ export class SupportComponent implements OnInit {
     badgeConfig: {
       type: 'custom',
       colorMap: {
-        'Nuevo': '#10b981',
-        'Abierto': '#22c55e',
+        Nuevo: '#10b981',
+        Abierto: '#22c55e',
         'En Progreso': '#eab308',
-        'Esperando': '#f97316',
-        'Resuelto': '#14b8a6',
-        'Cerrado': '#6b7280',
-        'Reabierto': '#ef4444',
-      }
+        Esperando: '#f97316',
+        Resuelto: '#14b8a6',
+        Cerrado: '#6b7280',
+        Reabierto: '#ef4444',
+      },
     },
     badgeTransform: (v: any) => this.getStatusLabel(v),
     detailKeys: [
-      { key: 'organization', label: 'Organización', transform: (v: any) => v?.name || '-' },
+      {
+        key: 'organization',
+        label: 'Organización',
+        transform: (v: any) => v?.name || '-',
+      },
       { key: 'store', label: 'Tienda', transform: (v: any) => v?.name || '-' },
-      { key: 'priority', label: 'Prioridad', transform: (v: any) => this.getPriorityLabel(v) },
-      { key: 'created_at', label: 'Creado', transform: (v: string) => this.formatDate(v) },
+      {
+        key: 'priority',
+        label: 'Prioridad',
+        transform: (v: any) => this.getPriorityLabel(v),
+      },
+      {
+        key: 'created_at',
+        label: 'Creado',
+        transform: (v: string) => this.formatDate(v),
+      },
     ],
   };
 
@@ -254,13 +273,15 @@ export class SupportComponent implements OnInit {
     this.loadTickets();
 
     // Setup user search debounce
-    this.userSearchSubject.pipe(
-      debounceTime(400),
-      distinctUntilChanged(),
-      takeUntil(this.userSearchDestroy$)
-    ).subscribe(searchTerm => {
-      this.loadUsers(searchTerm);
-    });
+    this.userSearchSubject
+      .pipe(
+        debounceTime(400),
+        distinctUntilChanged(),
+        takeUntil(this.userSearchDestroy$),
+      )
+      .subscribe((searchTerm) => {
+        this.loadUsers(searchTerm);
+      });
   }
 
   ngOnDestroy(): void {
@@ -298,7 +319,9 @@ export class SupportComponent implements OnInit {
       next: (response) => {
         this.tickets = response.data;
         this.pagination.total = response.meta.total;
-        this.pagination.totalPages = response.meta.pages || Math.ceil(this.pagination.total / this.pagination.limit);
+        this.pagination.totalPages =
+          response.meta.pages ||
+          Math.ceil(this.pagination.total / this.pagination.limit);
         this.isLoading = false;
       },
       error: (err) => {
@@ -355,24 +378,28 @@ export class SupportComponent implements OnInit {
   assignTicket(): void {
     if (!this.selectedTicket) return;
 
-    const assigned_to_user_id = this.assignForm.get('assigned_to_user_id')?.value;
+    const assigned_to_user_id = this.assignForm.get(
+      'assigned_to_user_id',
+    )?.value;
     if (!assigned_to_user_id) {
       this.toastService.error('Selecciona un usuario para asignar');
       return;
     }
 
-    this.supportService.assignTicket(this.selectedTicket.id, { assigned_to_user_id }).subscribe({
-      next: () => {
-        this.toastService.success('Ticket asignado correctamente');
-        this.showAssignModal = false;
-        this.assignForm.reset();
-        this.loadTickets();
-      },
-      error: (err) => {
-        console.error('Error assigning ticket:', err);
-        this.toastService.error('Error al asignar ticket');
-      },
-    });
+    this.supportService
+      .assignTicket(this.selectedTicket.id, { assigned_to_user_id })
+      .subscribe({
+        next: () => {
+          this.toastService.success('Ticket asignado correctamente');
+          this.showAssignModal = false;
+          this.assignForm.reset();
+          this.loadTickets();
+        },
+        error: (err) => {
+          console.error('Error assigning ticket:', err);
+          this.toastService.error('Error al asignar ticket');
+        },
+      });
   }
 
   getStatusLabel(status: TicketStatus): string {
@@ -433,7 +460,10 @@ export class SupportComponent implements OnInit {
   }
 
   canCloseTicket(ticket: Ticket): boolean {
-    return ticket.status !== TicketStatus.CLOSED && ticket.status !== TicketStatus.RESOLVED;
+    return (
+      ticket.status !== TicketStatus.CLOSED &&
+      ticket.status !== TicketStatus.RESOLVED
+    );
   }
 
   canAssignTicket(ticket: Ticket): boolean {

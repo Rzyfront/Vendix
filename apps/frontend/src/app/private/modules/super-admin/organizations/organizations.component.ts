@@ -16,7 +16,6 @@ import { Organization } from '../../../../core/models/organization.model';
 // Import new components
 import {
   OrganizationStatsComponent,
-  OrganizationEmptyStateComponent,
   OrganizationCreateModalComponent,
   OrganizationEditModalComponent,
 } from './components/index';
@@ -35,6 +34,7 @@ import {
   ItemListCardConfig,
   TableColumn,
   TableAction,
+  EmptyStateComponent,
 } from '../../../../shared/components/index';
 
 // Import styles (CSS instead of SCSS to avoid loader issues)
@@ -49,7 +49,7 @@ import './organizations.component.css';
     FormsModule,
     ReactiveFormsModule,
     OrganizationStatsComponent,
-    OrganizationEmptyStateComponent,
+    EmptyStateComponent,
     OrganizationCreateModalComponent,
     OrganizationEditModalComponent,
     InputsearchComponent,
@@ -139,13 +139,15 @@ import './organizations.component.css';
         </div>
 
         <!-- Empty State -->
-        <app-organization-empty-state
+        <app-empty-state
           *ngIf="!isLoading && organizations.length === 0"
+          icon="building"
           [title]="getEmptyStateTitle()"
           [description]="getEmptyStateDescription()"
+          actionButtonText="Crear Organizacion"
           (actionClick)="openCreateOrganizationModal()"
         >
-        </app-organization-empty-state>
+        </app-empty-state>
 
         <!-- Organizations Table -->
         <div *ngIf="!isLoading && organizations.length > 0" class="p-6">

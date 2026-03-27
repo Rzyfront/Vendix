@@ -13,8 +13,14 @@ import {
   DropdownAction,
   FilterValues,
   PaginationComponent,
+  CardComponent,
 } from '../../../../../../../shared/components';
-import { Ticket, TicketStatus, TicketPriority, TicketCategory } from '../../models/ticket.model';
+import {
+  Ticket,
+  TicketStatus,
+  TicketPriority,
+  TicketCategory,
+} from '../../models/ticket.model';
 
 @Component({
   selector: 'app-ticket-list',
@@ -27,13 +33,20 @@ import { Ticket, TicketStatus, TicketPriority, TicketCategory } from '../../mode
     IconComponent,
     ButtonComponent,
     PaginationComponent,
+    CardComponent,
   ],
   template: `
-    <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border">
+    <app-card [responsive]="true" [padding]="false">
       <!-- Search Section (sticky on mobile) -->
-      <div class="sticky top-[99px] bg-background px-2 py-1.5 -mt-[5px] md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
-        <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-          <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
+      <div
+        class="sticky top-[99px] bg-background px-2 py-1.5 -mt-[5px] md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+      >
+        <div
+          class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+        >
+          <h2
+            class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
+          >
             Todos los Tickets ({{ totalItems }})
           </h2>
 
@@ -61,15 +74,26 @@ import { Ticket, TicketStatus, TicketPriority, TicketCategory } from '../../mode
 
       <!-- Loading State -->
       <div *ngIf="loading" class="p-4 md:p-6 text-center">
-        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div
+          class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+        ></div>
         <p class="mt-2 text-text-secondary">Cargando tickets...</p>
       </div>
 
       <!-- Empty State -->
-      <div *ngIf="!loading && tickets.length === 0" class="p-12 text-center text-gray-500">
-        <app-icon name="ticket" [size]="48" class="mx-auto mb-4 text-gray-300"></app-icon>
+      <div
+        *ngIf="!loading && tickets.length === 0"
+        class="p-12 text-center text-gray-500"
+      >
+        <app-icon
+          name="ticket"
+          [size]="48"
+          class="mx-auto mb-4 text-gray-300"
+        ></app-icon>
         <h3 class="text-lg font-medium text-gray-900">No hay tickets aún</h3>
-        <p class="mt-1">Crea tu primer ticket y te ayudaremos lo antes posible.</p>
+        <p class="mt-1">
+          Crea tu primer ticket y te ayudaremos lo antes posible.
+        </p>
         <div class="mt-6 flex justify-center">
           <app-button variant="primary" (clicked)="create.emit()">
             <app-icon slot="icon" name="plus" [size]="16"></app-icon>
@@ -105,7 +129,7 @@ import { Ticket, TicketStatus, TicketPriority, TicketCategory } from '../../mode
           ></app-pagination>
         </div>
       </div>
-    </div>
+    </app-card>
   `,
 })
 export class TicketListComponent implements OnInit {
@@ -171,7 +195,12 @@ export class TicketListComponent implements OnInit {
   filterValues: FilterValues = {};
 
   dropdownActions: DropdownAction[] = [
-    { label: 'Nuevo Ticket', icon: 'plus', action: 'create', variant: 'primary' },
+    {
+      label: 'Nuevo Ticket',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   columns: TableColumn[] = [
@@ -227,7 +256,7 @@ export class TicketListComponent implements OnInit {
       key: 'category',
       label: 'Categoría',
       priority: 3,
-      transform: (val: any) => val ? this.getCategoryLabel(val) : '-',
+      transform: (val: any) => (val ? this.getCategoryLabel(val) : '-'),
     },
     {
       key: 'created_at',
@@ -248,8 +277,16 @@ export class TicketListComponent implements OnInit {
     badgeConfig: { type: 'status', size: 'sm' },
     badgeTransform: (v: any) => this.getStatusLabel(v),
     detailKeys: [
-      { key: 'priority', label: 'Prioridad', transform: (v: any) => this.getPriorityLabel(v) },
-      { key: 'category', label: 'Categoría', transform: (v: any) => this.getCategoryLabel(v) },
+      {
+        key: 'priority',
+        label: 'Prioridad',
+        transform: (v: any) => this.getPriorityLabel(v),
+      },
+      {
+        key: 'category',
+        label: 'Categoría',
+        transform: (v: any) => this.getCategoryLabel(v),
+      },
       {
         key: 'created_at',
         label: 'Creado',
@@ -259,7 +296,8 @@ export class TicketListComponent implements OnInit {
     footerKey: '_count.comments',
     footerLabel: 'Comentarios',
     footerStyle: 'default',
-    footerTransform: (v: any) => (v ? `${v} ${v === 1 ? 'comentario' : 'comentarios'}` : 'Sin comentarios'),
+    footerTransform: (v: any) =>
+      v ? `${v} ${v === 1 ? 'comentario' : 'comentarios'}` : 'Sin comentarios',
   };
 
   actions: TableAction[] = [];

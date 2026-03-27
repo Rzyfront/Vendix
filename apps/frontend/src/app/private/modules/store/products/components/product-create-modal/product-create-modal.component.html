@@ -18,7 +18,7 @@
 
       <!-- Price & SKU Row -->
       <div class="grid grid-cols-2 gap-2 md:gap-4">
-        <app-input label="Precio Base" type="number" formControlName="base_price" [error]="getErrorMessage('base_price')"
+        <app-input label="Precio Base" [currency]="true" formControlName="base_price" [error]="getErrorMessage('base_price')"
           prefix="$" [required]="true" placeholder="0.00"></app-input>
 
         <div>

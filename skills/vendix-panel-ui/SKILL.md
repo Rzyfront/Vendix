@@ -17,6 +17,8 @@ metadata:
 
 # Vendix Panel UI System
 
+> **Tip**: Antes de usar settings-modal o sidebar, consulta sus READMEs en `apps/frontend/src/app/shared/components/{settings-modal,sidebar}/README.md` para conocer sus inputs, outputs y patrones de configuracion.
+
 > **Module visibility control** — Determines which modules and submodules appear in the sidebar for each app type (ORG_ADMIN, STORE_ADMIN, STORE_ECOMMERCE).
 
 ---

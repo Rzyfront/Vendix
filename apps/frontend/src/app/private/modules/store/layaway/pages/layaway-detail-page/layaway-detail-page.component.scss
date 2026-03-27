@@ -2,11 +2,6 @@
   display: block;
 }
 
-@media (max-width: 639px) {
-  :host ::ng-deep app-card > div {
-    border-radius: 0.75rem;
-  }
-}
 
 @media print {
   .no-print {

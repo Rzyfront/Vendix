@@ -5,7 +5,10 @@ metadata:
   scope: [root]
   auto_invoke: "Verifying Build"
 ---
+
 # Buildcheck Dev
+
+> **Tip**: Si al verificar el build ves errores en shared components, consulta el README del componente en `apps/frontend/src/app/shared/components/{componente}/README.md` para verificar el uso correcto de inputs y outputs.
 
 > **CRITICAL SKILL - ALWAYS ACTIVE** - Build verification is the MOST CRITICAL RESPONSIBILITY. A task is NEVER complete if there are compilation errors.
 
@@ -25,6 +28,7 @@ metadata:
 ## Verification Workflow
 
 ### Step 1: Make Code Changes
+
 Apply your changes to the codebase.
 
 ### Step 2: Check Docker Logs (WATCH MODE - Development)
@@ -50,6 +54,7 @@ docker logs --tail 40 vendix_postgres
 ```
 
 **Verify container status:**
+
 ```bash
 # Always verify containers are running
 docker ps
@@ -58,15 +63,18 @@ docker ps
 ### Step 3: Analyze Results
 
 **If NO errors:**
+
 - Verify one more time
 - Only then mark task complete
 
 **If errors exist:**
+
 - DO NOT mark task complete
 - Fix the errors
 - Return to Step 2
 
 ### Step 4: Recursive Check
+
 - Check not just the immediate component
 - Check all dependencies
 - Check all related components
@@ -83,6 +91,7 @@ docker logs --tail 40 vendix_backend
 ```
 
 **Look for:**
+
 - `ERROR` messages
 - `TypeError` or `ReferenceError`
 - Compilation errors
@@ -92,6 +101,7 @@ docker logs --tail 40 vendix_backend
 - `Nest application successfully started` (good)
 
 **Example of GOOD output:**
+
 ```
 [Nest] INFO [NestFactory] Starting Nest application...
 [Nest] INFO [InstanceLoader] modules dependencies initialized
@@ -100,6 +110,7 @@ docker logs --tail 40 vendix_backend
 ```
 
 **Example of BAD output:**
+
 ```
 [ERROR] TypeError: Cannot read property 'user_name' of undefined
 [ERROR] src/domains/auth/auth.service.ts:45:20 - error TS2304
@@ -114,6 +125,7 @@ docker logs --tail 40 vendix_frontend
 ```
 
 **Look for:**
+
 - `ERROR` messages
 - `ERROR in` compilation errors
 - Template parsing errors
@@ -123,12 +135,14 @@ docker logs --tail 40 vendix_frontend
 - `webpack: Compiled successfully` (good)
 
 **Example of GOOD output:**
+
 ```
 ✓ Compiled successfully in 2345ms
 webpack: Compiled successfully
 ```
 
 **Example of BAD output:**
+
 ```
 ERROR in src/app/shared/components/button/button.component.ts:12:5
 TS2322: Type 'string' is not assignable to type 'ButtonVariant'
@@ -143,6 +157,7 @@ docker logs --tail 40 vendix_postgres
 ```
 
 **Look for:**
+
 - `ERROR:` messages
 - Connection refused
 - Syntax errors in queries
@@ -155,11 +170,13 @@ docker logs --tail 40 vendix_postgres
 ### TypeScript Errors
 
 **Error:**
+
 ```
 TS2322: Type 'X' is not assignable to type 'Y'
 ```
 
 **Fix:**
+
 1. Check type definitions
 2. Verify interface contracts
 3. Ensure proper typing
@@ -170,11 +187,13 @@ TS2322: Type 'X' is not assignable to type 'Y'
 ### Module Not Found
 
 **Error:**
+
 ```
 Error: Cannot find module '@/shared/components/...'
 ```
 
 **Fix:**
+
 1. Verify import path
 2. Check if file exists
 3. Verify tsconfig paths
@@ -185,11 +204,13 @@ Error: Cannot find module '@/shared/components/...'
 ### Prisma Client Errors
 
 **Error:**
+
 ```
 Error: Prisma Client is not generated
 ```
 
 **Fix:**
+
 1. Run: `npx prisma generate`
 2. Verify schema.prisma is valid
 3. Re-check logs after fix
@@ -199,11 +220,13 @@ Error: Prisma Client is not generated
 ### Template Errors
 
 **Error:**
+
 ```
 NG2: Property 'user_name' does not exist on type 'Component'
 ```
 
 **Fix:**
+
 1. Check component TypeScript file
 2. Verify property is defined
 3. Check for proper decorators (@Input, signal)
@@ -230,6 +253,7 @@ Before marking ANY task as complete:
 ## CRITICAL UNDERSTANDING
 
 **A task is NEVER complete if there are:**
+
 - Build errors
 - Compilation errors
 - Runtime errors
@@ -238,6 +262,7 @@ Before marking ANY task as complete:
 - Template parsing errors
 
 **You must:**
+
 - ALWAYS verify build status recursively
 - ALWAYS fix ALL issues before considering work done
 - NEVER accept "it should work" - verify with logs
@@ -288,6 +313,7 @@ docker restart <container>
 ```
 
 **Development mode characteristics:**
+
 - Watch mode enabled (hot-reload)
 - Changes reflect automatically
 - Compilation errors appear in logs
@@ -298,6 +324,7 @@ docker restart <container>
 ### PRODUCTION MODE (Only if human requests EXPLICITLY)
 
 **ONLY run production build when:**
+
 - Human says it explicitly ("run production build")
 - Human asks if code compiles for production
 - Preparing for a deployment
@@ -343,6 +370,7 @@ cd apps/frontend && npm run build
 ### How to Recreate
 
 **Option 1: Restart + Rebuild (Recommended for minor changes)**
+
 ```bash
 # Restart and rebuild a specific container
 docker-compose restart <service>
@@ -351,6 +379,7 @@ docker-compose restart backend
 ```
 
 **Option 2: Rebuild (Without stopping)**
+
 ```bash
 # Rebuild without stopping other services
 docker-compose build --no-cache <service>
@@ -358,6 +387,7 @@ docker-compose up -d <service>
 ```
 
 **Option 3: Full Recreate (For critical changes)**
+
 ```bash
 # Stop, remove, and recreate container
 docker-compose down
@@ -369,6 +399,7 @@ docker-compose up -d <service>
 ```
 
 **Option 4: Force Recreate (Clears cache)**
+
 ```bash
 # Force recreate - removes containers and recreates them
 docker-compose up -d --force-recreate
@@ -395,13 +426,13 @@ docker logs --tail 40 vendix_frontend
 
 ### Common Scenarios
 
-| Problem | Solution |
-|---------|----------|
-| New dependencies in package.json | `docker-compose build --no-cache backend` |
+| Problem                           | Solution                                      |
+| --------------------------------- | --------------------------------------------- |
+| New dependencies in package.json  | `docker-compose build --no-cache backend`     |
 | Changes in volumes/docker-compose | `docker-compose down && docker-compose up -d` |
-| Corrupt node_modules cache | `docker-compose build --no-cache frontend` |
-| Persistent nonsensical errors | `docker-compose up -d --force-recreate` |
-| Changes in Dockerfile | `docker-compose up -d --build` |
+| Corrupt node_modules cache        | `docker-compose build --no-cache frontend`    |
+| Persistent nonsensical errors     | `docker-compose up -d --force-recreate`       |
+| Changes in Dockerfile             | `docker-compose up -d --build`                |
 
 ---
 
@@ -414,18 +445,19 @@ docker logs --tail 40 vendix_frontend
 
 ## Quick Reference
 
-| Component | Command |
-|-----------|---------|
-| Backend | `docker logs --tail 40 vendix_backend` |
-| Frontend | `docker logs --tail 40 vendix_frontend` |
-| Database | `docker logs --tail 40 vendix_postgres` |
-| All | Run all three commands |
+| Component | Command                                 |
+| --------- | --------------------------------------- |
+| Backend   | `docker logs --tail 40 vendix_backend`  |
+| Frontend  | `docker logs --tail 40 vendix_frontend` |
+| Database  | `docker logs --tail 40 vendix_postgres` |
+| All       | Run all three commands                  |
 
 ---
 
 ## YOUR FINAL CHECKPOINT
 
 **Remember: Code quality and consistency directly impact:**
+
 - Project success
 - Team productivity
 - Long-term maintainability

@@ -13,8 +13,8 @@ import {
   FilterConfig,
   DropdownAction,
   FilterValues,
-  IconComponent,
-  ButtonComponent,
+  EmptyStateComponent,
+  CardComponent,
 } from '../../../../../../../shared/components/index';
 
 // Interfaces
@@ -29,8 +29,8 @@ import { InventoryMovement, MovementType } from '../../../interfaces';
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
-    IconComponent,
-    ButtonComponent,
+    EmptyStateComponent,
+    CardComponent,
   ],
   templateUrl: './movement-list.component.html',
 })
@@ -83,8 +83,7 @@ export class MovementListComponent {
       sortable: true,
       width: '120px',
       priority: 3,
-      transform: (value: string) =>
-        new Date(value).toLocaleDateString('es-CO'),
+      transform: (value: string) => new Date(value).toLocaleDateString('es-CO'),
     },
     {
       key: 'products.name',
@@ -104,11 +103,16 @@ export class MovementListComponent {
       label: 'Cantidad',
       align: 'right',
       priority: 1,
-      transform: (value: number, item?: any) => this.formatQuantity(value, item?.movement_type),
+      transform: (value: number, item?: any) =>
+        this.formatQuantity(value, item?.movement_type),
       cellStyle: (_value: number, item?: any) => {
-        const isInbound = item?.movement_type === 'stock_in' || item?.movement_type === 'return';
+        const isInbound =
+          item?.movement_type === 'stock_in' ||
+          item?.movement_type === 'return';
         return {
-          color: isInbound ? 'var(--color-success)' : 'var(--color-error, #ef4444)',
+          color: isInbound
+            ? 'var(--color-success)'
+            : 'var(--color-error, #ef4444)',
           'font-weight': '700',
         };
       },
@@ -139,8 +143,7 @@ export class MovementListComponent {
   // Card Config for mobile
   cardConfig: ItemListCardConfig = {
     titleKey: 'products.name',
-    titleTransform: (item: any) =>
-      item.products?.name || 'Sin producto',
+    titleTransform: (item: any) => item.products?.name || 'Sin producto',
     subtitleKey: 'movement_type',
     subtitleTransform: (val: MovementType) => this.getTypeLabel(val),
     badgeKey: 'movement_type',
@@ -169,8 +172,7 @@ export class MovementListComponent {
         key: 'created_at',
         label: 'Fecha',
         icon: 'calendar',
-        transform: (val: string) =>
-          new Date(val).toLocaleDateString('es-CO'),
+        transform: (val: string) => new Date(val).toLocaleDateString('es-CO'),
       },
       {
         key: 'to_location.name',
@@ -226,8 +228,7 @@ export class MovementListComponent {
   }
 
   formatQuantity(value: number, type: MovementType): string {
-    const isInbound =
-      type === 'stock_in' || type === 'return';
+    const isInbound = type === 'stock_in' || type === 'return';
     return isInbound ? `+${value}` : `-${value}`;
   }
 

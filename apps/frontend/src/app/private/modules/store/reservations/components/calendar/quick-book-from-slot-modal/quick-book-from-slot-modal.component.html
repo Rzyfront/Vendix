@@ -1,0 +1,317 @@
+<app-modal [isOpen]="isOpen()" (isOpenChange)="$event ? null : onClose()"
+  (opened)="onOpen()" (cancel)="onClose()" title="Nueva Reserva" size="md">
+
+  <!-- Hero Header -->
+  <div class="booking-hero">
+    <div class="hero-icon-wrapper">
+      <app-icon name="sparkles" [size]="20"></app-icon>
+    </div>
+    @if (prefilledDate() && prefilledTime()) {
+      <div class="hero-datetime">
+        <span class="datetime-chip">
+          <app-icon name="calendar" [size]="14"></app-icon>
+          {{ formatDate(prefilledDate()) }}
+        </span>
+        <span class="datetime-chip">
+          <app-icon name="clock" [size]="14"></app-icon>
+          {{ formatTime(prefilledTime()) }}
+          @if (selectedService()?.service_duration_minutes) {
+            <span class="time-arrow">→</span>
+            {{ formatTime(getEndTime()) }}
+          }
+        </span>
+      </div>
+    }
+  </div>
+
+  <!-- Step Indicator -->
+  <app-steps-line
+    [steps]="wizardSteps"
+    [currentStep]="currentStep()"
+    size="sm"
+    orientation="horizontal">
+  </app-steps-line>
+
+  <!-- Step 1: Service Selection -->
+  @if (currentStep() === 0) {
+    <div class="step-content fade-in">
+      @if (loadingServices()) {
+        <div class="loading-state">
+          <app-spinner size="md" color="primary"></app-spinner>
+          <span class="loading-text">Cargando servicios...</span>
+        </div>
+      } @else if (services().length === 0) {
+        <div class="empty-state">
+          <div class="empty-icon-wrapper">
+            <app-icon name="briefcase" [size]="32"></app-icon>
+          </div>
+          <h4 class="empty-title">Sin servicios disponibles</h4>
+          <p class="empty-description">No hay servicios configurados para reserva. Agrega servicios desde el catálogo de productos.</p>
+        </div>
+      } @else {
+        <!-- Service Search -->
+        <div class="service-search-wrapper">
+          <app-icon name="search" [size]="16" class="search-prefix-icon"></app-icon>
+          <input
+            type="text"
+            class="search-input"
+            placeholder="Buscar servicio..."
+            [value]="serviceSearch()"
+            (input)="serviceSearch.set($any($event.target).value)"
+          />
+          @if (serviceSearch()) {
+            <button class="search-clear-btn" (click)="serviceSearch.set('')">
+              <app-icon name="x" [size]="14"></app-icon>
+            </button>
+          }
+        </div>
+
+        <div class="services-grid">
+          @for (service of filteredServices(); track service.id) {
+            <button
+              class="service-card"
+              [class.selected]="selectedService()?.id === service.id"
+              (click)="selectService(service)">
+              <div class="card-header">
+                <span class="service-name">{{ service.name }}</span>
+                @if (selectedService()?.id === service.id) {
+                  <div class="selected-badge">
+                    <app-icon name="circle-check" [size]="16"></app-icon>
+                  </div>
+                }
+              </div>
+              <div class="card-details">
+                @if (service.service_duration_minutes) {
+                  <span class="detail-badge duration-badge">
+                    <app-icon name="clock" [size]="12"></app-icon>
+                    {{ service.service_duration_minutes }} min
+                  </span>
+                }
+                @if (service.base_price) {
+                  <span class="detail-badge price-badge">
+                    ${{ service.base_price | number:'1.0-0' }}
+                  </span>
+                }
+              </div>
+            </button>
+          }
+        </div>
+
+        @if (hasMoreServices()) {
+          <p class="services-hint">
+            Mostrando 5 de {{ services().length }} servicios. Usa el buscador para encontrar más.
+          </p>
+        }
+        @if (serviceSearch() && filteredServices().length === 0) {
+          <p class="services-hint">No se encontraron servicios para "{{ serviceSearch() }}"</p>
+        }
+      }
+    </div>
+  }
+
+  <!-- Step 2: Customer + Notes -->
+  @if (currentStep() === 1) {
+    <div class="step-content fade-in">
+
+      <!-- Customer Search Section -->
+      <div class="form-section">
+        <div class="section-header">
+          <div class="section-icon-badge customer-badge">
+            <app-icon name="user" [size]="14"></app-icon>
+          </div>
+          <div class="section-title">
+            <span class="title-text">Cliente</span>
+            <span class="title-required">*</span>
+          </div>
+        </div>
+
+        @if (selectedCustomer()) {
+          <div class="selected-customer-chip">
+            <div class="customer-avatar">
+              {{ selectedCustomer().first_name?.charAt(0) }}{{ selectedCustomer().last_name?.charAt(0) }}
+            </div>
+            <div class="customer-chip-info">
+              <span class="chip-name">{{ selectedCustomer().first_name }} {{ selectedCustomer().last_name }}</span>
+              @if (selectedCustomer().email || selectedCustomer().phone) {
+                <span class="chip-detail">{{ selectedCustomer().email || selectedCustomer().phone }}</span>
+              }
+            </div>
+            <button class="chip-clear" (click)="clearCustomer()">
+              <app-icon name="x" [size]="14"></app-icon>
+            </button>
+          </div>
+        } @else {
+          <div class="search-wrapper">
+            <app-icon name="search" [size]="16" class="search-prefix-icon"></app-icon>
+            <input
+              type="text"
+              class="search-input"
+              placeholder="Buscar por nombre, email o teléfono..."
+              [value]="customerSearch()"
+              (input)="onCustomerSearch($any($event.target).value)"
+            />
+            @if (searchingCustomers()) {
+              <div class="search-suffix">
+                <app-spinner size="sm" color="primary"></app-spinner>
+              </div>
+            }
+          </div>
+
+          @if (customers().length > 0) {
+            <div class="customer-dropdown">
+              @for (customer of customers(); track customer.id) {
+                <button class="customer-option" (click)="selectCustomer(customer)">
+                  <div class="option-avatar">
+                    {{ customer.first_name?.charAt(0) }}{{ customer.last_name?.charAt(0) }}
+                  </div>
+                  <div class="option-info">
+                    <span class="option-name">{{ customer.first_name }} {{ customer.last_name }}</span>
+                    <div class="option-details">
+                      @if (customer.email) {
+                        <span class="option-detail">
+                          <app-icon name="mail" [size]="10"></app-icon>
+                          {{ customer.email }}
+                        </span>
+                      }
+                      @if (customer.phone) {
+                        <span class="option-detail">
+                          <app-icon name="phone" [size]="10"></app-icon>
+                          {{ customer.phone }}
+                        </span>
+                      }
+                    </div>
+                  </div>
+                </button>
+              }
+            </div>
+          }
+        }
+      </div>
+
+      <!-- Notes Section -->
+      <div class="form-section">
+        <div class="section-header">
+          <div class="section-icon-badge notes-badge">
+            <app-icon name="file-text" [size]="14"></app-icon>
+          </div>
+          <span class="section-title">
+            <span class="title-text">Notas</span>
+            <span class="title-optional">(opcional)</span>
+          </span>
+        </div>
+        <textarea
+          class="notes-textarea"
+          rows="3"
+          placeholder="Agregar instrucciones especiales, preferencias del cliente..."
+          [value]="notes()"
+          (input)="notes.set($any($event.target).value)"
+        ></textarea>
+      </div>
+    </div>
+  }
+
+  <!-- Step 3: Confirmation -->
+  @if (currentStep() === 2) {
+    <div class="step-content fade-in">
+      <div class="confirmation-summary">
+        <!-- Service -->
+        <div class="confirm-section">
+          <div class="confirm-label">
+            <app-icon name="briefcase" [size]="14"></app-icon>
+            Servicio
+          </div>
+          <div class="confirm-value">{{ selectedService()?.name }}</div>
+          <div class="confirm-meta">
+            @if (selectedService()?.service_duration_minutes) {
+              <span class="summary-chip">
+                <app-icon name="clock" [size]="12"></app-icon>
+                {{ selectedService()?.service_duration_minutes }} min
+              </span>
+            }
+            @if (selectedService()?.base_price) {
+              <span class="summary-chip">
+                ${{ selectedService()?.base_price | number:'1.0-0' }}
+              </span>
+            }
+          </div>
+        </div>
+
+        <!-- Date & Time -->
+        <div class="confirm-section">
+          <div class="confirm-label">
+            <app-icon name="calendar" [size]="14"></app-icon>
+            Fecha y Hora
+          </div>
+          <div class="confirm-value">
+            {{ formatDate(prefilledDate()) }} &middot; {{ formatTime(prefilledTime()) }} → {{ formatTime(getEndTime()) }}
+          </div>
+        </div>
+
+        <!-- Customer -->
+        <div class="confirm-section">
+          <div class="confirm-label">
+            <app-icon name="user" [size]="14"></app-icon>
+            Cliente
+          </div>
+          <div class="confirm-customer">
+            <div class="customer-avatar">
+              {{ selectedCustomer()?.first_name?.charAt(0) }}{{ selectedCustomer()?.last_name?.charAt(0) }}
+            </div>
+            <div class="confirm-customer-info">
+              <span class="confirm-customer-name">{{ selectedCustomer()?.first_name }} {{ selectedCustomer()?.last_name }}</span>
+              @if (selectedCustomer()?.email) {
+                <span class="confirm-customer-detail">{{ selectedCustomer()?.email }}</span>
+              }
+              @if (selectedCustomer()?.phone) {
+                <span class="confirm-customer-detail">{{ selectedCustomer()?.phone }}</span>
+              }
+            </div>
+          </div>
+        </div>
+
+        <!-- Notes -->
+        @if (notes()) {
+          <div class="confirm-section">
+            <div class="confirm-label">
+              <app-icon name="file-text" [size]="14"></app-icon>
+              Notas
+            </div>
+            <div class="confirm-notes">{{ notes() }}</div>
+          </div>
+        }
+      </div>
+    </div>
+  }
+
+  <!-- Footer -->
+  <div slot="footer" class="modal-footer">
+    @if (currentStep() > 0) {
+      <app-button variant="ghost" size="sm" (click)="goBack()">
+        <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
+        Atrás
+      </app-button>
+    }
+    <div class="footer-spacer"></div>
+    @if (currentStep() === 1) {
+      <app-button
+        variant="primary"
+        size="sm"
+        [disabled]="!selectedCustomer()"
+        (click)="goToConfirmation()">
+        <app-icon slot="icon" name="arrow-right" [size]="16"></app-icon>
+        Continuar
+      </app-button>
+    }
+    @if (currentStep() === 2) {
+      <app-button
+        variant="primary"
+        size="sm"
+        [disabled]="submitting()"
+        [loading]="submitting()"
+        (click)="submit()">
+        <app-icon slot="icon" name="check" [size]="16"></app-icon>
+        Crear Reserva
+      </app-button>
+    }
+  </div>
+</app-modal>

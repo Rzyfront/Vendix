@@ -497,6 +497,35 @@
     }
 }
 
+// Booking
+.booking-description {
+    font-size: var(--fs-sm);
+    color: var(--color-text-secondary);
+    margin-bottom: 1.5rem;
+}
+
+.booking-confirmed {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--color-success-light, rgba(16, 185, 129, 0.1));
+    border: 1px solid var(--color-success, #10b981);
+    border-radius: var(--radius-md);
+    margin-bottom: 1rem;
+    font-size: var(--fs-sm);
+
+    i {
+        color: var(--color-success, #10b981);
+        font-size: var(--fs-base);
+    }
+
+    span {
+        color: var(--color-text-primary);
+        font-weight: var(--fw-medium);
+    }
+}
+
 // Summary
 .checkout-summary {
     position: sticky;

@@ -3,9 +3,13 @@ import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
-import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../../../shared/components/index';
+import {
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
+} from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
@@ -22,6 +26,7 @@ import { EChartsOption } from 'echarts';
   imports: [
     CommonModule,
     RouterModule,
+    CardComponent,
     ChartComponent,
     ResponsiveDataViewComponent,
     IconComponent,
@@ -30,17 +35,27 @@ import { EChartsOption } from 'echarts';
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
       <!-- Header -->
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+      >
         <div>
           <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/reports" class="hover:text-primary">Reportes</a>
+            <a routerLink="/admin/reports" class="hover:text-primary"
+              >Reportes</a
+            >
             <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/reports/inventory" class="hover:text-primary">Inventario</a>
+            <a routerLink="/admin/reports/inventory" class="hover:text-primary"
+              >Inventario</a
+            >
             <app-icon name="chevron-right" [size]="14"></app-icon>
             <span>Valoración</span>
           </div>
-          <h1 class="text-2xl font-bold text-text-primary">Valoración de Inventario</h1>
-          <p class="text-text-secondary mt-1">Valor del inventario por ubicación y categoría</p>
+          <h1 class="text-2xl font-bold text-text-primary">
+            Valoración de Inventario
+          </h1>
+          <p class="text-text-secondary mt-1">
+            Valor del inventario por ubicación y categoría
+          </p>
         </div>
         <vendix-export-button
           [loading]="exporting()"
@@ -50,19 +65,25 @@ import { EChartsOption } from 'echarts';
 
       <!-- Total Value Card -->
       @if (!loading()) {
-        <div class="bg-gradient-to-r from-green-500 to-green-600 rounded-xl p-6 text-white">
+        <div
+          class="bg-gradient-to-r from-green-500 to-green-600 rounded-xl p-6 text-white"
+        >
           <p class="text-green-100 text-sm">Valor Total del Inventario</p>
-          <p class="text-3xl font-bold mt-1">{{ formatCurrency(totalValue()) }}</p>
-          <p class="text-green-100 text-sm mt-2">{{ totalQuantity() }} unidades en {{ data().length }} ubicaciones</p>
+          <p class="text-3xl font-bold mt-1">
+            {{ formatCurrency(totalValue()) }}
+          </p>
+          <p class="text-green-100 text-sm mt-2">
+            {{ totalQuantity() }} unidades en {{ data().length }} ubicaciones
+          </p>
         </div>
       }
 
       <!-- Content Grid -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Pie Chart -->
-        <div class="bg-surface border border-border rounded-xl overflow-hidden">
-          <div class="p-4 border-b border-border">
-            <h3 class="font-semibold text-text-primary">Distribución por Ubicación</h3>
+        <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+          <div slot="header" class="flex flex-col">
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">Distribución por Ubicación</span>
           </div>
           <div class="p-4">
             @if (loading()) {
@@ -76,12 +97,12 @@ import { EChartsOption } from 'echarts';
               ></app-chart>
             }
           </div>
-        </div>
+        </app-card>
 
         <!-- Table -->
-        <div class="bg-surface border border-border rounded-xl overflow-hidden">
-          <div class="p-4 border-b border-border">
-            <h3 class="font-semibold text-text-primary">Detalle por Ubicación</h3>
+        <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+          <div slot="header" class="flex flex-col">
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">Detalle por Ubicación</span>
           </div>
           <div class="p-4">
             <app-responsive-data-view
@@ -93,7 +114,7 @@ import { EChartsOption } from 'echarts';
               emptyIcon="dollar-sign"
             ></app-responsive-data-view>
           </div>
-        </div>
+        </app-card>
       </div>
     </div>
   `,

@@ -1,0 +1,58 @@
+<div class="day-view">
+  <!-- Day header -->
+  <div class="day-view-header">
+    <span class="date-label">{{ dateLabel() }}</span>
+    @if (isToday()) {
+      <span class="today-badge">Hoy</span>
+    }
+  </div>
+
+  <!-- Time grid body -->
+  <div class="day-view-body">
+    <!-- Time labels column -->
+    <div class="time-gutter">
+      @for (slot of timeSlots; track slot) {
+        <div class="time-label">{{ formatTime(slot) }}</div>
+      }
+    </div>
+
+    <!-- Single day column -->
+    <div class="day-column" (click)="onColumnClick($event)">
+      <!-- Grid lines -->
+      @for (slot of timeSlots; track slot) {
+        <div class="time-row">
+          <span class="slot-hint">{{ formatTime(slot) }}</span>
+        </div>
+      }
+
+      <!-- Booking blocks -->
+      @for (booking of bookings(); track booking.id) {
+        <div
+          class="booking-block"
+          [class]="'status-' + booking.status"
+          [style.top.%]="getBlockTop(booking)"
+          [style.height.%]="getBlockHeight(booking)"
+          (click)="onBookingClick($event, booking)">
+          <div class="booking-block-header">
+            <span class="booking-time">{{ formatTimeRange(booking.start_time, booking.end_time) }}</span>
+            <span class="booking-status-badge" [style.background]="getStatusColor(booking.status)">
+              {{ statusLabels[booking.status] || booking.status }}
+            </span>
+          </div>
+          <span class="booking-title">{{ booking.product?.name }}</span>
+          <span class="booking-customer">
+            {{ booking.customer?.first_name }} {{ booking.customer?.last_name }}
+          </span>
+          @if (booking.booking_number) {
+            <span class="booking-number">#{{ booking.booking_number }}</span>
+          }
+        </div>
+      }
+
+      <!-- Current time indicator -->
+      @if (isToday() && currentTimePercent() >= 0) {
+        <div class="current-time-line" [style.top.%]="currentTimePercent()"></div>
+      }
+    </div>
+  </div>
+</div>

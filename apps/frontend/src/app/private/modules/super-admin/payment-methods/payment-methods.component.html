@@ -1,16 +1,16 @@
 <!-- Standard Module Layout -->
 <div class="flex flex-col gap-6">
-
   <!-- Stats Grid -->
-  <app-payment-method-stats [stats]="paymentMethodStats"></app-payment-method-stats>
+  <app-payment-method-stats
+    [stats]="paymentMethodStats"
+  ></app-payment-method-stats>
 
   <!-- Main Content Card -->
-  <div class="flex flex-col bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
-
+  <app-card [padding]="false" overflow="hidden">
     <!-- Table Header (Title, Description, Controls) -->
     <div
-      class="p-2 md:px-6 md:py-4 border-b border-border flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between bg-surface">
-
+      class="p-2 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
+    >
       <!-- Left: Title & Description -->
       <div class="flex-1 min-w-0">
         <h3 class="text-lg font-semibold text-text-primary">
@@ -22,31 +22,57 @@
       </div>
 
       <!-- Right: Controls (Search, Filters, Actions) -->
-      <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 w-full sm:w-auto">
+      <div
+        class="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 w-full sm:w-auto"
+      >
         <!-- Search -->
         <div class="w-full sm:w-60">
-          <app-inputsearch placeholder="Buscar métodos..." (searchChange)="onSearchChange($event)" size="sm">
+          <app-inputsearch
+            placeholder="Buscar métodos..."
+            (searchChange)="onSearchChange($event)"
+            size="sm"
+          >
           </app-inputsearch>
         </div>
 
         <!-- Filter Tipo -->
         <div class="w-full sm:w-48">
-          <app-selector placeholder="Todos los Tipos" [options]="paymentMethodTypes"
-            [formControl]="$any(filterForm.get('type'))" size="sm" variant="outline"></app-selector>
+          <app-selector
+            placeholder="Todos los Tipos"
+            [options]="paymentMethodTypes"
+            [formControl]="$any(filterForm.get('type'))"
+            size="sm"
+            variant="outline"
+          ></app-selector>
         </div>
 
         <!-- Filter Estado -->
         <div class="w-full sm:w-48">
-          <app-selector placeholder="Todos los Estados" [options]="activeStates"
-            [formControl]="$any(filterForm.get('is_active'))" size="sm" variant="outline"></app-selector>
+          <app-selector
+            placeholder="Todos los Estados"
+            [options]="activeStates"
+            [formControl]="$any(filterForm.get('is_active'))"
+            size="sm"
+            variant="outline"
+          ></app-selector>
         </div>
 
         <div class="flex gap-2 items-center sm:ml-auto">
-          <app-button variant="outline" size="sm" (clicked)="refreshPaymentMethods()" [disabled]="isLoading"
-            title="Actualizar">
+          <app-button
+            variant="outline"
+            size="sm"
+            (clicked)="refreshPaymentMethods()"
+            [disabled]="isLoading"
+            title="Actualizar"
+          >
             <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
           </app-button>
-          <app-button variant="primary" size="sm" (clicked)="createPaymentMethod()" title="Nuevo Método">
+          <app-button
+            variant="primary"
+            size="sm"
+            (clicked)="createPaymentMethod()"
+            title="Nuevo Método"
+          >
             <app-icon name="plus" [size]="16" slot="icon"></app-icon>
             <span class="hidden sm:inline">Nuevo Método</span>
             <span class="sm:hidden">Nuevo</span>
@@ -58,33 +84,65 @@
     <!-- Table Content Wrapper -->
     <div class="relative min-h-[400px] p-2 md:p-4">
       <!-- Loading Overlay -->
-      <div *ngIf="isLoading" class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
-        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      <div
+        *ngIf="isLoading"
+        class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+      >
+        <div
+          class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+        ></div>
       </div>
 
       <!-- Empty State -->
-      <div class="p-8 flex justify-center w-full" *ngIf="!isLoading && paymentMethods.length === 0">
-        <app-payment-method-empty-state [title]="getEmptyStateTitle()" [description]="getEmptyStateDescription()"
-          [showAdditionalActions]="true" (actionClick)="createPaymentMethod()" (refreshClick)="refreshPaymentMethods()"
-          (clearFiltersClick)="clearFilters()">
-        </app-payment-method-empty-state>
+      <div
+        class="p-8 flex justify-center w-full"
+        *ngIf="!isLoading && paymentMethods.length === 0"
+      >
+        <app-empty-state
+          icon="credit-card"
+          [title]="getEmptyStateTitle()"
+          [description]="getEmptyStateDescription()"
+          actionButtonText="Crear Metodo de Pago"
+          [showRefreshButton]="true"
+          [showClearFilters]="true"
+          (actionClick)="createPaymentMethod()"
+          (refreshClick)="refreshPaymentMethods()"
+          (clearFiltersClick)="clearFilters()"
+        >
+        </app-empty-state>
       </div>
 
       <!-- Payment Methods Table -->
       <!-- Payment Methods Table -->
-      <app-responsive-data-view *ngIf="!isLoading && paymentMethods.length > 0" [data]="paymentMethods"
-        [columns]="tableColumns" [actions]="tableActions" [cardConfig]="cardConfig" [loading]="isLoading"
-        [sortable]="true" [hoverable]="true" [striped]="true" size="md" (sort)="onSortChange($event)"
-        (rowClick)="editPaymentMethod($event)">
+      <app-responsive-data-view
+        *ngIf="!isLoading && paymentMethods.length > 0"
+        [data]="paymentMethods"
+        [columns]="tableColumns"
+        [actions]="tableActions"
+        [cardConfig]="cardConfig"
+        [loading]="isLoading"
+        [sortable]="true"
+        [hoverable]="true"
+        [striped]="true"
+        size="md"
+        (sort)="onSortChange($event)"
+        (rowClick)="editPaymentMethod($event)"
+      >
       </app-responsive-data-view>
     </div>
-  </div>
+  </app-card>
 
   <!-- Modals -->
-  <app-payment-method-create-modal [(isOpen)]="showCreateModal" [isSubmitting]="isCreatingPaymentMethod"
-    (onPaymentMethodCreated)="onPaymentMethodCreated($event)"></app-payment-method-create-modal>
+  <app-payment-method-create-modal
+    [(isOpen)]="showCreateModal"
+    [isSubmitting]="isCreatingPaymentMethod"
+    (onPaymentMethodCreated)="onPaymentMethodCreated($event)"
+  ></app-payment-method-create-modal>
 
-  <app-payment-method-edit-modal [(isOpen)]="showEditModal" [isSubmitting]="isUpdatingPaymentMethod"
+  <app-payment-method-edit-modal
+    [(isOpen)]="showEditModal"
+    [isSubmitting]="isUpdatingPaymentMethod"
     [paymentMethod]="currentPaymentMethod"
-    (onPaymentMethodUpdated)="onPaymentMethodUpdated($event)"></app-payment-method-edit-modal>
+    (onPaymentMethodUpdated)="onPaymentMethodUpdated($event)"
+  ></app-payment-method-edit-modal>
 </div>

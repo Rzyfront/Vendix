@@ -24,6 +24,7 @@ import { PayrollRun, PayrollItem } from '../../../interfaces/payroll.interface';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'vendix-payroll-run-detail',
@@ -78,19 +79,19 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
         <div class="mb-6 grid grid-cols-2 md:grid-cols-4 gap-3">
           <div class="p-3 bg-blue-50 rounded-lg border border-blue-100">
             <span class="text-xs text-blue-600 block">Total Devengado</span>
-            <span class="text-lg font-bold text-blue-800">\${{ formatNumber(payrollRun.total_earnings) }}</span>
+            <span class="text-lg font-bold text-blue-800">{{ formatNumber(payrollRun.total_earnings) }}</span>
           </div>
           <div class="p-3 bg-red-50 rounded-lg border border-red-100">
             <span class="text-xs text-red-600 block">Total Deducciones</span>
-            <span class="text-lg font-bold text-red-800">\${{ formatNumber(payrollRun.total_deductions) }}</span>
+            <span class="text-lg font-bold text-red-800">{{ formatNumber(payrollRun.total_deductions) }}</span>
           </div>
           <div class="p-3 bg-yellow-50 rounded-lg border border-yellow-100">
             <span class="text-xs text-yellow-600 block">Costo Empleador</span>
-            <span class="text-lg font-bold text-yellow-800">\${{ formatNumber(payrollRun.total_employer_costs) }}</span>
+            <span class="text-lg font-bold text-yellow-800">{{ formatNumber(payrollRun.total_employer_costs) }}</span>
           </div>
           <div class="p-3 bg-green-50 rounded-lg border border-green-100">
             <span class="text-xs text-green-600 block">Neto a Pagar</span>
-            <span class="text-lg font-bold text-green-800">\${{ formatNumber(payrollRun.total_net_pay) }}</span>
+            <span class="text-lg font-bold text-green-800">{{ formatNumber(payrollRun.total_net_pay) }}</span>
           </div>
         </div>
 
@@ -119,12 +120,12 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
                     <td class="py-2 px-3">
                       {{ item.employee ? item.employee.first_name + ' ' + item.employee.last_name : 'Empleado #' + item.employee_id }}
                     </td>
-                    <td class="py-2 px-3 text-right">\${{ formatNumber(item.base_salary) }}</td>
+                    <td class="py-2 px-3 text-right">{{ formatNumber(item.base_salary) }}</td>
                     <td class="py-2 px-3 text-center">{{ item.worked_days }}</td>
-                    <td class="py-2 px-3 text-right text-blue-600">\${{ formatNumber(item.total_earnings) }}</td>
-                    <td class="py-2 px-3 text-right text-red-600">\${{ formatNumber(item.total_deductions) }}</td>
-                    <td class="py-2 px-3 text-right text-yellow-600">\${{ formatNumber(item.total_employer_costs) }}</td>
-                    <td class="py-2 px-3 text-right font-semibold text-green-600">\${{ formatNumber(item.net_pay) }}</td>
+                    <td class="py-2 px-3 text-right text-blue-600">{{ formatNumber(item.total_earnings) }}</td>
+                    <td class="py-2 px-3 text-right text-red-600">{{ formatNumber(item.total_deductions) }}</td>
+                    <td class="py-2 px-3 text-right text-yellow-600">{{ formatNumber(item.total_employer_costs) }}</td>
+                    <td class="py-2 px-3 text-right font-semibold text-green-600">{{ formatNumber(item.net_pay) }}</td>
                     <td class="py-2 px-3 text-center">
                       <app-icon [name]="expandedItems[i] ? 'chevron-up' : 'chevron-down'" [size]="16"></app-icon>
                     </td>
@@ -138,7 +139,7 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
                           <h4 class="text-xs font-semibold text-blue-600 mb-2 uppercase">Devengados</h4>
                           <div *ngFor="let entry of getEntries(item.earnings)" class="flex justify-between text-xs py-0.5">
                             <span class="text-text-secondary">{{ entry[0] }}</span>
-                            <span>\${{ formatNumber(entry[1]) }}</span>
+                            <span>{{ formatNumber(entry[1]) }}</span>
                           </div>
                           <div *ngIf="getEntries(item.earnings).length === 0" class="text-xs text-text-secondary">Sin detalle</div>
                         </div>
@@ -147,7 +148,7 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
                           <h4 class="text-xs font-semibold text-red-600 mb-2 uppercase">Deducciones</h4>
                           <div *ngFor="let entry of getEntries(item.deductions)" class="flex justify-between text-xs py-0.5">
                             <span class="text-text-secondary">{{ entry[0] }}</span>
-                            <span>\${{ formatNumber(entry[1]) }}</span>
+                            <span>{{ formatNumber(entry[1]) }}</span>
                           </div>
                           <div *ngIf="getEntries(item.deductions).length === 0" class="text-xs text-text-secondary">Sin detalle</div>
                         </div>
@@ -156,7 +157,7 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
                           <h4 class="text-xs font-semibold text-yellow-600 mb-2 uppercase">Costos Empleador</h4>
                           <div *ngFor="let entry of getEntries(item.employer_costs)" class="flex justify-between text-xs py-0.5">
                             <span class="text-text-secondary">{{ entry[0] }}</span>
-                            <span>\${{ formatNumber(entry[1]) }}</span>
+                            <span>{{ formatNumber(entry[1]) }}</span>
                           </div>
                           <div *ngIf="getEntries(item.employer_costs).length === 0" class="text-xs text-text-secondary">Sin detalle</div>
                         </div>
@@ -181,26 +182,26 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
                 </div>
                 <div class="flex justify-between text-xs text-text-secondary">
                   <span>{{ item.worked_days }} días</span>
-                  <span class="font-semibold text-green-600 text-sm">\${{ formatNumber(item.net_pay) }}</span>
+                  <span class="font-semibold text-green-600 text-sm">{{ formatNumber(item.net_pay) }}</span>
                 </div>
               </div>
               <div *ngIf="expandedItems[i]" class="px-3 pb-3 border-t border-border pt-2 space-y-3">
                 <div class="grid grid-cols-2 gap-2 text-xs">
                   <div>
                     <span class="text-text-secondary block">Devengado</span>
-                    <span class="text-blue-600 font-medium">\${{ formatNumber(item.total_earnings) }}</span>
+                    <span class="text-blue-600 font-medium">{{ formatNumber(item.total_earnings) }}</span>
                   </div>
                   <div>
                     <span class="text-text-secondary block">Deducciones</span>
-                    <span class="text-red-600 font-medium">\${{ formatNumber(item.total_deductions) }}</span>
+                    <span class="text-red-600 font-medium">{{ formatNumber(item.total_deductions) }}</span>
                   </div>
                   <div>
                     <span class="text-text-secondary block">Costo Emp.</span>
-                    <span class="text-yellow-600 font-medium">\${{ formatNumber(item.total_employer_costs) }}</span>
+                    <span class="text-yellow-600 font-medium">{{ formatNumber(item.total_employer_costs) }}</span>
                   </div>
                   <div>
                     <span class="text-text-secondary block">Salario Base</span>
-                    <span class="font-medium">\${{ formatNumber(item.base_salary) }}</span>
+                    <span class="font-medium">{{ formatNumber(item.base_salary) }}</span>
                   </div>
                 </div>
                 <!-- Detailed breakdown -->
@@ -208,21 +209,21 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
                   <h4 class="text-xs font-semibold text-blue-600 mb-1">Devengados</h4>
                   <div *ngFor="let entry of getEntries(item.earnings)" class="flex justify-between text-xs py-0.5">
                     <span class="text-text-secondary">{{ entry[0] }}</span>
-                    <span>\${{ formatNumber(entry[1]) }}</span>
+                    <span>{{ formatNumber(entry[1]) }}</span>
                   </div>
                 </div>
                 <div *ngIf="getEntries(item.deductions).length > 0">
                   <h4 class="text-xs font-semibold text-red-600 mb-1">Deducciones</h4>
                   <div *ngFor="let entry of getEntries(item.deductions)" class="flex justify-between text-xs py-0.5">
                     <span class="text-text-secondary">{{ entry[0] }}</span>
-                    <span>\${{ formatNumber(entry[1]) }}</span>
+                    <span>{{ formatNumber(entry[1]) }}</span>
                   </div>
                 </div>
                 <div *ngIf="getEntries(item.employer_costs).length > 0">
                   <h4 class="text-xs font-semibold text-yellow-600 mb-1">Costos Empleador</h4>
                   <div *ngFor="let entry of getEntries(item.employer_costs)" class="flex justify-between text-xs py-0.5">
                     <span class="text-text-secondary">{{ entry[0] }}</span>
-                    <span>\${{ formatNumber(entry[1]) }}</span>
+                    <span>{{ formatNumber(entry[1]) }}</span>
                   </div>
                 </div>
               </div>
@@ -384,6 +385,7 @@ export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
   @Input() payrollRun: PayrollRun | null = null;
   @Output() isOpenChange = new EventEmitter<boolean>();
 
+  private currencyService = inject(CurrencyFormatService);
   loading$: Observable<boolean>;
   expandedItems: Record<number, boolean> = {};
 
@@ -436,7 +438,7 @@ export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
   }
 
   formatNumber(value: number): string {
-    return (value || 0).toLocaleString('es-CO');
+    return this.currencyService.format(Number(value) || 0);
   }
 
   // ── Fast-track ──────────────────────────────────────────

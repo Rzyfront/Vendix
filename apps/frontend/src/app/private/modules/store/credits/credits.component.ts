@@ -3,15 +3,26 @@ import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
+import { CardComponent } from '../../../../shared/components/card/card.component';
 import { InputsearchComponent } from '../../../../shared/components/inputsearch/inputsearch.component';
 import { ResponsiveDataViewComponent } from '../../../../shared/components/responsive-data-view/responsive-data-view.component';
 import { ButtonComponent } from '../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
 import { PaginationComponent } from '../../../../shared/components/pagination/pagination.component';
 import * as CreditsActions from './state/actions/credits.actions';
-import { selectCredits, selectCreditsLoading, selectStats, selectCreditsMeta } from './state/selectors/credits.selectors';
+import {
+  selectCredits,
+  selectCreditsLoading,
+  selectStats,
+  selectCreditsMeta,
+} from './state/selectors/credits.selectors';
 import { Credit } from './interfaces/credit.interface';
-import { TableColumn, TableAction, ItemListCardConfig } from '../../../../shared/components/responsive-data-view/responsive-data-view.component';
+import { CurrencyFormatService, CurrencyPipe } from '../../../../shared/pipes/currency';
+import {
+  TableColumn,
+  TableAction,
+  ItemListCardConfig,
+} from '../../../../shared/components/responsive-data-view/responsive-data-view.component';
 
 @Component({
   selector: 'app-credits',
@@ -20,11 +31,13 @@ import { TableColumn, TableAction, ItemListCardConfig } from '../../../../shared
     CommonModule,
     RouterModule,
     StatsComponent,
+    CardComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
     ButtonComponent,
     IconComponent,
     PaginationComponent,
+    CurrencyPipe,
   ],
   templateUrl: './credits.component.html',
   styleUrls: ['./credits.component.scss'],
@@ -32,6 +45,7 @@ import { TableColumn, TableAction, ItemListCardConfig } from '../../../../shared
 export class CreditsComponent implements OnInit {
   private store = inject(Store);
   private router = inject(Router);
+  private currencyService = inject(CurrencyFormatService);
 
   credits = this.store.selectSignal(selectCredits);
   loading = this.store.selectSignal(selectCreditsLoading);
@@ -43,26 +57,33 @@ export class CreditsComponent implements OnInit {
     {
       key: 'customer',
       label: 'Cliente',
-      transform: (val: any) => val ? `${val.first_name} ${val.last_name}` : '-',
+      transform: (val: any) =>
+        val ? `${val.first_name} ${val.last_name}` : '-',
     },
     {
       key: 'total_amount',
       label: 'Total',
-      transform: (val: any) => `$${Number(val).toLocaleString()}`,
+      transform: (val: any) => this.currencyService.format(Number(val) || 0),
     },
     {
       key: 'remaining_balance',
       label: 'Pendiente',
-      transform: (val: any) => `$${Number(val).toLocaleString()}`,
+      transform: (val: any) => this.currencyService.format(Number(val) || 0),
     },
     {
       key: 'installments',
       label: 'Próximo Vencimiento',
       transform: (val: any) => {
         if (!val || !val.length) return '-';
-        const next = val.find((i: any) => i.state === 'pending' || i.state === 'overdue');
+        const next = val.find(
+          (i: any) => i.state === 'pending' || i.state === 'overdue',
+        );
         if (!next) return '-';
-        return new Date(next.due_date).toLocaleDateString('es', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        return new Date(next.due_date).toLocaleDateString('es', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+        });
       },
     },
     {
@@ -97,7 +118,8 @@ export class CreditsComponent implements OnInit {
   card_config: ItemListCardConfig = {
     titleKey: 'credit_number',
     subtitleKey: 'customer',
-    subtitleTransform: (val: any) => val ? `${val.first_name} ${val.last_name}` : '-',
+    subtitleTransform: (val: any) =>
+      val ? `${val.first_name} ${val.last_name}` : '-',
     badgeKey: 'state',
     badgeConfig: {
       type: 'custom',
@@ -123,12 +145,16 @@ export class CreditsComponent implements OnInit {
       return labels[val] || val;
     },
     detailKeys: [
-      { key: 'total_amount', label: 'Total', transform: (v: any) => `$${Number(v).toLocaleString()}` },
+      {
+        key: 'total_amount',
+        label: 'Total',
+        transform: (v: any) => this.currencyService.format(Number(v) || 0),
+      },
     ],
     footerKey: 'remaining_balance',
     footerLabel: 'Pendiente',
     footerStyle: 'prominent',
-    footerTransform: (v: any) => `$${Number(v).toLocaleString()}`,
+    footerTransform: (v: any) => this.currencyService.format(Number(v) || 0),
   };
 
   actions: TableAction[] = [
@@ -136,7 +162,8 @@ export class CreditsComponent implements OnInit {
       label: 'Ver Detalle',
       icon: 'eye',
       variant: 'primary',
-      action: (item: Credit) => this.router.navigate(['/admin/orders/credits', item.id]),
+      action: (item: Credit) =>
+        this.router.navigate(['/admin/orders/credits', item.id]),
     },
   ];
 

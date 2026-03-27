@@ -600,6 +600,11 @@ export class ProductQueryDto {
   @IsOptional()
   @IsEnum(ProductType)
   product_type?: ProductType;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  requires_booking?: boolean;
 }
 
 // Product Variants DTOs

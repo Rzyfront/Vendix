@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { AIEngineConfigService } from './ai-engine.service';
+import { AILoggingService } from '../../../ai-engine/ai-logging.service';
 import { ResponseService } from '../../../common/responses/response.service';
 import { CreateAIConfigDto, UpdateAIConfigDto, AIConfigQueryDto } from './dto';
 import { RolesGuard } from '../../auth/guards/roles.guard';
@@ -25,6 +26,7 @@ import { UserRole } from '../../auth/enums/user-role.enum';
 export class AIEngineController {
   constructor(
     private readonly aiEngineConfigService: AIEngineConfigService,
+    private readonly aiLoggingService: AILoggingService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -56,6 +58,43 @@ export class AIEngineController {
   async getDashboardStats() {
     const stats = await this.aiEngineConfigService.getDashboardStats();
     return this.responseService.success(stats, 'Dashboard statistics retrieved successfully');
+  }
+
+  @Get('usage-stats')
+  @ApiOperation({ summary: 'Get AI usage statistics' })
+  @ApiResponse({ status: 200, description: 'Usage statistics retrieved' })
+  async getUsageStats(
+    @Query('app_key') appKey?: string,
+    @Query('date_from') dateFrom?: string,
+    @Query('date_to') dateTo?: string,
+    @Query('organization_id') orgId?: string,
+    @Query('store_id') storeId?: string,
+  ) {
+    const filter: any = {};
+    if (appKey) filter.app_key = appKey;
+    if (orgId) filter.organization_id = Number(orgId);
+    if (storeId) filter.store_id = Number(storeId);
+    if (dateFrom) filter.date_from = new Date(dateFrom);
+    if (dateTo) filter.date_to = new Date(dateTo);
+
+    const stats = await this.aiLoggingService.getUsageStats(filter);
+    return this.responseService.success(stats, 'AI usage statistics retrieved');
+  }
+
+  @Get('usage-stats/:orgId')
+  @ApiOperation({ summary: 'Get AI usage statistics for a specific tenant' })
+  @ApiResponse({ status: 200, description: 'Tenant usage statistics retrieved' })
+  async getUsageByTenant(
+    @Param('orgId') orgId: string,
+    @Query('date_from') dateFrom?: string,
+    @Query('date_to') dateTo?: string,
+  ) {
+    const stats = await this.aiLoggingService.getUsageByTenant(
+      Number(orgId),
+      dateFrom ? new Date(dateFrom) : undefined,
+      dateTo ? new Date(dateTo) : undefined,
+    );
+    return this.responseService.success(stats, 'Tenant AI usage statistics retrieved');
   }
 
   @Get(':id')

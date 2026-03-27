@@ -1,15 +1,17 @@
 <div class="w-full">
   <!-- Header -->
-  <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-              md:border md:border-border">
-
+  <app-card [responsive]="true" [padding]="false">
     <!-- Title & Actions -->
-    <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                md:mt-0 md:static md:bg-transparent md:px-4 md:py-4 md:border-b md:border-border">
-      <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
+    <div
+      class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-4 md:py-4 md:border-b md:border-border"
+    >
+      <div
+        class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+      >
         <div>
-          <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
-                     md:text-lg md:font-semibold md:text-text-primary">
+          <h2
+            class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
+          >
             Mapeo de Cuentas PUC
           </h2>
           <p class="text-xs text-gray-400 mt-0.5 md:text-sm">
@@ -17,12 +19,22 @@
           </p>
         </div>
         <div class="flex items-center gap-2">
-          <app-button variant="outline" size="sm" (clicked)="resetMappings()" [disabled]="!has_custom_mappings">
+          <app-button
+            variant="outline"
+            size="sm"
+            (clicked)="resetMappings()"
+            [disabled]="!has_custom_mappings"
+          >
             <app-icon name="refresh-cw" [size]="14" slot="icon"></app-icon>
             <span class="hidden sm:inline">Restablecer Defaults</span>
             <span class="sm:hidden">Reset</span>
           </app-button>
-          <app-button variant="primary" size="sm" (clicked)="saveMappings()" [disabled]="!has_changes">
+          <app-button
+            variant="primary"
+            size="sm"
+            (clicked)="saveMappings()"
+            [disabled]="!has_changes"
+          >
             <app-icon name="save" [size]="14" slot="icon"></app-icon>
             <span class="hidden sm:inline">Guardar Cambios</span>
             <span class="sm:hidden">Guardar</span>
@@ -34,25 +46,40 @@
     <!-- Content -->
     <div class="relative p-2 md:p-4">
       @if (loading$ | async) {
-        <div class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
-          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div
+          class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+        >
+          <div
+            class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
         </div>
       }
 
       @if (mapping_groups.length === 0 && !(loading$ | async)) {
-        <div class="flex flex-col items-center justify-center py-16 text-gray-400">
-          <app-icon name="link" [size]="48"></app-icon>
-          <p class="mt-4 text-base">No hay mapeos configurados</p>
-          <p class="text-sm">Los mapeos se generan automaticamente al configurar el Plan de Cuentas.</p>
-        </div>
+        <app-empty-state
+          icon="link"
+          title="No hay mapeos configurados"
+          description="Los mapeos se generan automaticamente al configurar el Plan de Cuentas."
+          [showActionButton]="false"
+          [showRefreshButton]="false"
+          [showClearFilters]="false"
+        ></app-empty-state>
       }
 
       @for (group of mapping_groups; track group.key) {
         <div class="mb-4 last:mb-0">
           <!-- Group Header -->
-          <div class="flex items-center gap-2 px-2 py-2 md:px-4 md:py-3 bg-gray-50 rounded-lg mb-1">
-            <app-icon [name]="group.icon" [size]="16" class="text-gray-500"></app-icon>
-            <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+          <div
+            class="flex items-center gap-2 px-2 py-2 md:px-4 md:py-3 bg-gray-50 rounded-lg mb-1"
+          >
+            <app-icon
+              [name]="group.icon"
+              [size]="16"
+              class="text-gray-500"
+            ></app-icon>
+            <h3
+              class="text-xs font-semibold text-gray-500 uppercase tracking-wider"
+            >
               {{ group.label }}
             </h3>
           </div>
@@ -60,19 +87,30 @@
           <!-- Mapping Rows -->
           @for (mapping of group.mappings; track mapping.mapping_key) {
             <!-- Mobile Card -->
-            <div class="md:hidden p-3 mx-2 my-1 bg-surface rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]">
+            <div
+              class="md:hidden p-3 mx-2 my-1 bg-surface rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]"
+            >
               <div class="flex flex-col gap-2">
                 <div class="flex items-center justify-between">
-                  <span class="text-[15px] font-bold text-text-primary">{{ getLabel(mapping.mapping_key) }}</span>
-                  <span class="source-badge" [ngClass]="{
-                    'bg-gray-100 text-gray-500': mapping.source === 'default',
-                    'bg-blue-50 text-blue-600': mapping.source === 'organization',
-                    'bg-emerald-50 text-emerald-600': mapping.source === 'store'
-                  }">
+                  <span class="text-[15px] font-bold text-text-primary">{{
+                    getLabel(mapping.mapping_key)
+                  }}</span>
+                  <span
+                    class="source-badge"
+                    [ngClass]="{
+                      'bg-gray-100 text-gray-500': mapping.source === 'default',
+                      'bg-blue-50 text-blue-600':
+                        mapping.source === 'organization',
+                      'bg-emerald-50 text-emerald-600':
+                        mapping.source === 'store',
+                    }"
+                  >
                     {{ getSourceLabel(mapping.source) }}
                   </span>
                 </div>
-                <div class="text-xs text-gray-400 font-mono">{{ mapping.account_code }} - {{ mapping.description }}</div>
+                <div class="text-xs text-gray-400 font-mono">
+                  {{ mapping.account_code }} - {{ mapping.description }}
+                </div>
                 <select
                   class="mapping-select"
                   [value]="getSelectedAccountId(mapping)"
@@ -80,14 +118,18 @@
                 >
                   <option value="">-- Seleccionar cuenta --</option>
                   @for (account of leaf_accounts; track account.id) {
-                    <option [value]="account.id">{{ account.code }} - {{ account.name }}</option>
+                    <option [value]="account.id">
+                      {{ account.code }} - {{ account.name }}
+                    </option>
                   }
                 </select>
               </div>
             </div>
 
             <!-- Desktop Row -->
-            <div class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-gray-50 transition-colors border-b border-border/50 last:border-b-0">
+            <div
+              class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-gray-50 transition-colors border-b border-border/50 last:border-b-0"
+            >
               <div class="col-span-3 text-sm font-medium text-text-primary">
                 {{ getLabel(mapping.mapping_key) }}
               </div>
@@ -98,11 +140,16 @@
                 {{ mapping.description }}
               </div>
               <div class="col-span-1 text-center">
-                <span class="source-badge" [ngClass]="{
-                  'bg-gray-100 text-gray-500': mapping.source === 'default',
-                  'bg-blue-50 text-blue-600': mapping.source === 'organization',
-                  'bg-emerald-50 text-emerald-600': mapping.source === 'store'
-                }">
+                <span
+                  class="source-badge"
+                  [ngClass]="{
+                    'bg-gray-100 text-gray-500': mapping.source === 'default',
+                    'bg-blue-50 text-blue-600':
+                      mapping.source === 'organization',
+                    'bg-emerald-50 text-emerald-600':
+                      mapping.source === 'store',
+                  }"
+                >
                   {{ getSourceLabel(mapping.source) }}
                 </span>
               </div>
@@ -114,7 +161,9 @@
                 >
                   <option value="">-- Seleccionar cuenta --</option>
                   @for (account of leaf_accounts; track account.id) {
-                    <option [value]="account.id">{{ account.code }} - {{ account.name }}</option>
+                    <option [value]="account.id">
+                      {{ account.code }} - {{ account.name }}
+                    </option>
                   }
                 </select>
               </div>
@@ -123,5 +172,5 @@
         </div>
       }
     </div>
-  </div>
+  </app-card>
 </div>

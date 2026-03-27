@@ -554,6 +554,7 @@ export class ProductsService {
       category_id,
       track_inventory,
       product_type,
+      requires_booking,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -589,6 +590,7 @@ export class ProductsService {
       }),
       ...(track_inventory !== undefined && { track_inventory }),
       ...(product_type && { product_type }),
+      ...(requires_booking !== undefined && { requires_booking }),
     };
 
     const [products, total] = await Promise.all([
@@ -736,11 +738,15 @@ export class ProductsService {
             final_price: this.calculateFinalPrice(product),
             sku: product.sku,
             cost_price: product.cost_price,
+            profit_margin: product.profit_margin,
             stock_quantity: product.stock_quantity,
             state: product.state,
             pricing_type: String(product.pricing_type),
+            product_type: product.product_type,
             track_inventory: product.track_inventory,
+            available_for_ecommerce: product.available_for_ecommerce,
             requires_batch_tracking: product.requires_batch_tracking,
+            requires_booking: product.requires_booking,
             image_url: signed_image_url || null,
             brand: product.brands,
             categories:
@@ -818,10 +824,14 @@ export class ProductsService {
           final_price: this.calculateFinalPrice(product),
           sku: product.sku,
           cost_price: product.cost_price,
+          profit_margin: product.profit_margin,
           state: product.state,
           pricing_type: String(product.pricing_type),
+          product_type: product.product_type,
           track_inventory: product.track_inventory,
+          available_for_ecommerce: product.available_for_ecommerce,
           requires_batch_tracking: product.requires_batch_tracking,
+          requires_booking: product.requires_booking,
           image_url: signed_image_url || null,
           brand: product.brands,
           categories:
@@ -978,9 +988,19 @@ export class ProductsService {
       final_price: this.calculateFinalPrice(product),
       sku: product.sku,
       cost_price: product.cost_price,
+      profit_margin: product.profit_margin,
       state: product.state,
       pricing_type: String(product.pricing_type),
+      product_type: product.product_type,
       track_inventory: product.track_inventory,
+      available_for_ecommerce: product.available_for_ecommerce,
+      // Service-specific fields
+      service_duration_minutes: product.service_duration_minutes,
+      service_modality: product.service_modality,
+      service_pricing_type: product.service_pricing_type,
+      requires_booking: product.requires_booking,
+      is_recurring: product.is_recurring,
+      service_instructions: product.service_instructions,
       image_url: await this.signProductImage(product),
       brand: product.brands,
       categories:

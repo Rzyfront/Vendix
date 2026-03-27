@@ -245,11 +245,46 @@ export const storeAdminRoutes: Routes = [
             ],
           },
           {
+            path: 'dispatch-notes',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/dispatch-notes/dispatch-notes.component'
+              ).then((c) => c.DispatchNotesComponent),
+          },
+          {
+            path: 'dispatch-notes/:id',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/dispatch-notes/pages/dispatch-note-detail-page/dispatch-note-detail-page.component'
+              ).then((c) => c.DispatchNoteDetailPageComponent),
+          },
+          {
             path: ':id',
             loadComponent: () =>
               import('../../private/modules/store/orders/pages/order-details/order-details-page.component').then(
                 (c) => c.OrderDetailsPageComponent,
               ),
+          },
+        ],
+      },
+      // Reservations Routes
+      {
+        path: 'reservations',
+        children: [
+          {
+            path: '',
+            pathMatch: 'full',
+            loadComponent: () =>
+              import('../../private/modules/store/reservations/reservations.component').then(
+                (c) => c.ReservationsComponent,
+              ),
+          },
+          {
+            path: 'schedules',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/reservations/components/schedule-management/schedule-management.component'
+              ).then((c) => c.ScheduleManagementComponent),
           },
         ],
       },

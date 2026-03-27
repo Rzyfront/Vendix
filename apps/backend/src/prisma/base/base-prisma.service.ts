@@ -55,6 +55,14 @@ export abstract class BasePrismaService implements OnModuleInit {
     return this.baseClient.$disconnect();
   }
 
+  $queryRawUnsafe<T = unknown>(query: string, ...values: any[]): Promise<T> {
+    return (this.baseClient as any).$queryRawUnsafe(query, ...values);
+  }
+
+  $executeRawUnsafe(query: string, ...values: any[]): Promise<number> {
+    return (this.baseClient as any).$executeRawUnsafe(query, ...values);
+  }
+
   /**
    * Ejecuta queries sin scope (útil para jobs, seeders, migraciones)
    */

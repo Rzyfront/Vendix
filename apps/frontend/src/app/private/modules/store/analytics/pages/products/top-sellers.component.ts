@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable, Subject, takeUntil } from 'rxjs';
 
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { ResponsiveDataViewComponent } from '../../../../../../shared/components/responsive-data-view/responsive-data-view.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
@@ -23,21 +24,35 @@ import { EChartsOption } from 'echarts';
   standalone: true,
   imports: [
     CommonModule,
+    CardComponent,
     ChartComponent,
     ResponsiveDataViewComponent,
     DateRangeFilterComponent,
   ],
   templateUrl: './top-sellers.component.html',
-  styles: [`:host { display: block; width: 100%; }`],
+  styles: [
+    `
+      :host {
+        display: block;
+        width: 100%;
+      }
+    `,
+  ],
 })
 export class TopSellersComponent implements OnInit, OnDestroy {
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
   private destroy$ = new Subject<void>();
 
-  topSellers$: Observable<TopSellingProduct[]> = this.store.select(ProductsSelectors.selectTopSellers);
-  loadingTopSellers$: Observable<boolean> = this.store.select(ProductsSelectors.selectLoadingTopSellers);
-  dateRange$: Observable<DateRangeFilter> = this.store.select(ProductsSelectors.selectDateRange);
+  topSellers$: Observable<TopSellingProduct[]> = this.store.select(
+    ProductsSelectors.selectTopSellers,
+  );
+  loadingTopSellers$: Observable<boolean> = this.store.select(
+    ProductsSelectors.selectLoadingTopSellers,
+  );
+  dateRange$: Observable<DateRangeFilter> = this.store.select(
+    ProductsSelectors.selectDateRange,
+  );
 
   topSellersChartOptions: EChartsOption = {};
 
@@ -45,9 +60,24 @@ export class TopSellersComponent implements OnInit, OnDestroy {
     { key: 'product_name', label: 'Producto' },
     { key: 'sku', label: 'SKU', width: '100px' },
     { key: 'units_sold', label: 'Unidades', align: 'right' },
-    { key: 'revenue', label: 'Ingresos', align: 'right', transform: (v) => this.currencyService.format(v) },
-    { key: 'average_price', label: 'Precio Promedio', align: 'right', transform: (v) => this.currencyService.format(v) },
-    { key: 'profit_margin', label: 'Margen', align: 'right', transform: (v) => v !== null ? `${v.toFixed(1)}%` : '-' },
+    {
+      key: 'revenue',
+      label: 'Ingresos',
+      align: 'right',
+      transform: (v) => this.currencyService.format(v),
+    },
+    {
+      key: 'average_price',
+      label: 'Precio Promedio',
+      align: 'right',
+      transform: (v) => this.currencyService.format(v),
+    },
+    {
+      key: 'profit_margin',
+      label: 'Margen',
+      align: 'right',
+      transform: (v) => (v !== null ? `${v.toFixed(1)}%` : '-'),
+    },
   ];
 
   cardConfig: ItemListCardConfig = {
@@ -56,8 +86,16 @@ export class TopSellersComponent implements OnInit, OnDestroy {
     avatarFallbackIcon: 'package',
     detailKeys: [
       { key: 'units_sold', label: 'Unidades' },
-      { key: 'average_price', label: 'Precio Prom.', transform: (v) => this.currencyService.format(v) },
-      { key: 'profit_margin', label: 'Margen', transform: (v) => v !== null ? `${v.toFixed(1)}%` : '-' },
+      {
+        key: 'average_price',
+        label: 'Precio Prom.',
+        transform: (v) => this.currencyService.format(v),
+      },
+      {
+        key: 'profit_margin',
+        label: 'Margen',
+        transform: (v) => (v !== null ? `${v.toFixed(1)}%` : '-'),
+      },
     ],
     footerKey: 'revenue',
     footerLabel: 'Ingresos',
@@ -69,11 +107,9 @@ export class TopSellersComponent implements OnInit, OnDestroy {
 
     this.store.dispatch(ProductsActions.loadTopSellers());
 
-    this.topSellers$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((topSellers) => {
-        this.updateChart(topSellers);
-      });
+    this.topSellers$.pipe(takeUntil(this.destroy$)).subscribe((topSellers) => {
+      this.updateChart(topSellers);
+    });
   }
 
   ngOnDestroy(): void {
@@ -89,12 +125,19 @@ export class TopSellersComponent implements OnInit, OnDestroy {
     if (!topSellers.length) return;
 
     const style = getComputedStyle(document.documentElement);
-    const primaryColor = style.getPropertyValue('--color-primary').trim() || '#3b82f6';
-    const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
-    const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+    const primaryColor =
+      style.getPropertyValue('--color-primary').trim() || '#3b82f6';
+    const borderColor =
+      style.getPropertyValue('--color-border').trim() || '#e5e7eb';
+    const textSecondary =
+      style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
     const reversed = [...topSellers].reverse();
-    const names = reversed.map((p) => p.product_name.length > 25 ? p.product_name.substring(0, 25) + '...' : p.product_name);
+    const names = reversed.map((p) =>
+      p.product_name.length > 25
+        ? p.product_name.substring(0, 25) + '...'
+        : p.product_name,
+    );
     const revenues = reversed.map((p) => p.revenue);
 
     this.topSellersChartOptions = {

@@ -1,18 +1,30 @@
 @if (loading()) {
   <div class="flex items-center justify-center min-h-[200px]">
-    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+    <div
+      class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+    ></div>
   </div>
 } @else if (credit()) {
   <div class="flex flex-col">
     <!-- Sticky Header -->
-    <div class="sticky top-0 z-30 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-border p-4 shadow-sm">
-      <a routerLink="/admin/orders/credits" class="inline-flex items-center gap-1 text-sm text-text-secondary hover:text-text-primary mb-2">
+    <div
+      class="sticky top-0 z-30 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-border p-4 shadow-sm"
+    >
+      <a
+        routerLink="/admin/orders/credits"
+        class="inline-flex items-center gap-1 text-sm text-text-secondary hover:text-text-primary mb-2"
+      >
         <app-icon name="arrow-left" [size]="16"></app-icon>
         Volver
       </a>
       <div class="flex items-center gap-3">
-        <h1 class="text-xl font-bold text-text-primary">Crédito {{ credit()!.credit_number }}</h1>
-        <span class="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold" [ngClass]="getStateBadgeClasses(credit()!.state)">
+        <h1 class="text-xl font-bold text-text-primary">
+          Crédito {{ credit()!.credit_number }}
+        </h1>
+        <span
+          class="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold"
+          [ngClass]="getStateBadgeClasses(credit()!.state)"
+        >
           {{ getStateLabel(credit()!.state) }}
         </span>
       </div>
@@ -21,83 +33,148 @@
     <div class="flex flex-col gap-4 p-4">
       <!-- Summary Cards -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div class="bg-surface border border-border rounded-xl p-4">
-          <span class="text-xs text-text-secondary uppercase tracking-wider">Total</span>
-          <p class="text-lg font-bold text-text-primary mt-1">${{ credit()!.total_amount | number:'1.0-0' }}</p>
-        </div>
-        <div class="bg-surface border border-border rounded-xl p-4">
-          <span class="text-xs text-text-secondary uppercase tracking-wider">Pagado</span>
-          <p class="text-lg font-bold text-emerald-600 mt-1">${{ credit()!.total_paid | number:'1.0-0' }}</p>
+        <app-card shadow="none" [responsivePadding]="true">
+          <span class="text-xs text-text-secondary uppercase tracking-wider"
+            >Total</span
+          >
+          <p class="text-lg font-bold text-text-primary mt-1">
+            {{ credit()!.total_amount | currency:0 }}
+          </p>
+        </app-card>
+        <app-card shadow="none" [responsivePadding]="true">
+          <span class="text-xs text-text-secondary uppercase tracking-wider"
+            >Pagado</span
+          >
+          <p class="text-lg font-bold text-emerald-600 mt-1">
+            {{ credit()!.total_paid | currency:0 }}
+          </p>
           <div class="h-1 bg-gray-200 rounded-full mt-2 overflow-hidden">
-            <div class="h-full bg-blue-500 rounded-full transition-all duration-300" [style.width.%]="getProgressPercentage()"></div>
+            <div
+              class="h-full bg-blue-500 rounded-full transition-all duration-300"
+              [style.width.%]="getProgressPercentage()"
+            ></div>
           </div>
-          <span class="text-xs text-text-secondary mt-1">{{ getProgressPercentage() }}%</span>
-        </div>
-        <div class="bg-surface border border-border rounded-xl p-4">
-          <span class="text-xs text-text-secondary uppercase tracking-wider">Pendiente</span>
-          <p class="text-lg font-bold text-red-600 mt-1">${{ credit()!.remaining_balance | number:'1.0-0' }}</p>
-        </div>
-        <div class="bg-surface border border-border rounded-xl p-4">
-          <span class="text-xs text-text-secondary uppercase tracking-wider">Tasa Interés</span>
-          <p class="text-lg font-bold text-text-primary mt-1">{{ credit()!.interest_rate }}%</p>
-        </div>
+          <span class="text-xs text-text-secondary mt-1"
+            >{{ getProgressPercentage() }}%</span
+          >
+        </app-card>
+        <app-card shadow="none" [responsivePadding]="true">
+          <span class="text-xs text-text-secondary uppercase tracking-wider"
+            >Pendiente</span
+          >
+          <p class="text-lg font-bold text-red-600 mt-1">
+            {{ credit()!.remaining_balance | currency:0 }}
+          </p>
+        </app-card>
+        <app-card shadow="none" [responsivePadding]="true">
+          <span class="text-xs text-text-secondary uppercase tracking-wider"
+            >Tasa Interés</span
+          >
+          <p class="text-lg font-bold text-text-primary mt-1">
+            {{ credit()!.interest_rate }}%
+          </p>
+        </app-card>
       </div>
 
       <!-- Credit Info -->
-      <div class="bg-surface border border-border rounded-xl p-4">
-        <h3 class="text-sm font-semibold text-text-primary mb-3">Información del Crédito</h3>
+      <app-card shadow="none" [responsivePadding]="true">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]">Información del Crédito</span>
         <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
           @if (credit()!.orders) {
             <div>
-              <span class="text-xs text-text-secondary uppercase tracking-wider">Orden</span>
-              <p class="text-sm font-semibold text-text-primary mt-0.5">#{{ credit()!.orders!.order_number }}</p>
+              <span class="text-xs text-text-secondary uppercase tracking-wider"
+                >Orden</span
+              >
+              <p class="text-sm font-semibold text-text-primary mt-0.5">
+                #{{ credit()!.orders!.order_number }}
+              </p>
             </div>
           }
           @if (credit()!.customer) {
             <div>
-              <span class="text-xs text-text-secondary uppercase tracking-wider">Cliente</span>
-              <p class="text-sm font-semibold text-text-primary mt-0.5">{{ credit()!.customer!.first_name }} {{ credit()!.customer!.last_name }}</p>
+              <span class="text-xs text-text-secondary uppercase tracking-wider"
+                >Cliente</span
+              >
+              <p class="text-sm font-semibold text-text-primary mt-0.5">
+                {{ credit()!.customer!.first_name }}
+                {{ credit()!.customer!.last_name }}
+              </p>
               @if (credit()!.customer!.phone) {
-                <p class="text-xs text-text-secondary">{{ credit()!.customer!.phone }}</p>
+                <p class="text-xs text-text-secondary">
+                  {{ credit()!.customer!.phone }}
+                </p>
               }
             </div>
           }
           <div>
-            <span class="text-xs text-text-secondary uppercase tracking-wider">Frecuencia</span>
-            <p class="text-sm font-semibold text-text-primary mt-0.5">{{ getFrequencyLabel(credit()!.frequency) }}</p>
+            <span class="text-xs text-text-secondary uppercase tracking-wider"
+              >Frecuencia</span
+            >
+            <p class="text-sm font-semibold text-text-primary mt-0.5">
+              {{ getFrequencyLabel(credit()!.frequency) }}
+            </p>
           </div>
           <div>
-            <span class="text-xs text-text-secondary uppercase tracking-wider">Fecha Inicio</span>
-            <p class="text-sm font-semibold text-text-primary mt-0.5">{{ credit()!.start_date | date:'dd/MM/yyyy' }}</p>
+            <span class="text-xs text-text-secondary uppercase tracking-wider"
+              >Fecha Inicio</span
+            >
+            <p class="text-sm font-semibold text-text-primary mt-0.5">
+              {{ credit()!.start_date | date: "dd/MM/yyyy" }}
+            </p>
           </div>
           <div>
-            <span class="text-xs text-text-secondary uppercase tracking-wider">Cuotas</span>
-            <p class="text-sm font-semibold text-text-primary mt-0.5">{{ credit()!.num_installments }}</p>
+            <span class="text-xs text-text-secondary uppercase tracking-wider"
+              >Cuotas</span
+            >
+            <p class="text-sm font-semibold text-text-primary mt-0.5">
+              {{ credit()!.num_installments }}
+            </p>
           </div>
           <div>
-            <span class="text-xs text-text-secondary uppercase tracking-wider">Valor Cuota</span>
-            <p class="text-sm font-semibold text-text-primary mt-0.5">${{ credit()!.installment_value | number:'1.2-2' }}</p>
+            <span class="text-xs text-text-secondary uppercase tracking-wider"
+              >Valor Cuota</span
+            >
+            <p class="text-sm font-semibold text-text-primary mt-0.5">
+              {{ credit()!.installment_value | currency }}
+            </p>
           </div>
         </div>
-      </div>
+      </app-card>
 
       <!-- Installments Timeline -->
       @if (credit()!.installments?.length) {
-        <div class="bg-surface border border-border rounded-xl p-4">
-          <h3 class="text-sm font-semibold text-text-primary mb-3">Cuotas</h3>
+        <app-card shadow="none" [responsivePadding]="true">
+          <span class="text-sm font-bold text-[var(--color-text-primary)]">Cuotas</span>
           <div class="flex flex-col gap-2">
             @for (inst of credit()!.installments; track inst.id) {
-              <div class="flex flex-wrap items-center gap-x-4 gap-y-1 p-3 border border-border rounded-lg text-sm"
-                   [class.opacity-60]="inst.state === 'paid' || inst.state === 'forgiven'">
-                <span class="font-semibold min-w-[80px]">Cuota #{{ inst.installment_number }}</span>
-                <span class="text-text-secondary min-w-[85px]">{{ inst.due_date | date:'dd/MM/yyyy' }}</span>
-                <span class="font-semibold min-w-[85px]">${{ inst.installment_value | number:'1.2-2' }}</span>
-                <span class="text-text-secondary min-w-[85px]">Pagado: ${{ inst.amount_paid | number:'1.2-2' }}</span>
-                <span class="min-w-[85px]">Resta: ${{ inst.remaining_balance | number:'1.2-2' }}</span>
-                <span class="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold" [ngClass]="getInstallmentBadgeClasses(inst.state)">
+              <div
+                class="flex flex-wrap items-center gap-x-4 gap-y-1 p-3 border border-border rounded-lg text-sm"
+                [class.opacity-60]="
+                  inst.state === 'paid' || inst.state === 'forgiven'
+                "
+              >
+                <span class="font-semibold min-w-[80px]"
+                  >Cuota #{{ inst.installment_number }}</span
+                >
+                <span class="text-text-secondary min-w-[85px]">{{
+                  inst.due_date | date: "dd/MM/yyyy"
+                }}</span>
+                <span class="font-semibold min-w-[85px]"
+                  >{{ inst.installment_value | currency }}</span
+                >
+                <span class="text-text-secondary min-w-[85px]"
+                  >Pagado: {{ inst.amount_paid | currency }}</span
+                >
+                <span class="min-w-[85px]"
+                  >Resta: {{ inst.remaining_balance | currency }}</span
+                >
+                <span
+                  class="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold"
+                  [ngClass]="getInstallmentBadgeClasses(inst.state)"
+                >
                   {{ getInstallmentStateLabel(inst.state) }}
                 </span>
-                @if (inst.state !== 'paid' && inst.state !== 'forgiven') {
+                @if (inst.state !== "paid" && inst.state !== "forgiven") {
                   <button
                     (click)="openPaymentModal(inst)"
                     class="ml-auto inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors"
@@ -109,44 +186,59 @@
               </div>
             }
           </div>
-        </div>
+        </app-card>
       }
 
       <!-- Payments History -->
       @if (getAllPayments().length) {
-        <div class="bg-surface border border-border rounded-xl p-4">
-          <h3 class="text-sm font-semibold text-text-primary mb-3">Historial de Pagos</h3>
+        <app-card shadow="none" [responsivePadding]="true">
+          <span class="text-sm font-bold text-[var(--color-text-primary)]">Historial de Pagos</span>
           <div class="flex flex-col gap-2">
             @for (payment of getAllPayments(); track payment.id) {
-              <div class="flex flex-wrap items-center gap-x-4 gap-y-1 py-2.5 border-b border-border last:border-b-0 text-sm">
-                <span class="font-semibold">${{ payment.amount_paid | number:'1.2-2' }}</span>
-                <span class="text-text-secondary">{{ payment.payment_date | date:'dd/MM/yyyy HH:mm' }}</span>
-                <span class="text-xs text-text-secondary">Cuota #{{ payment.installment_number }}</span>
+              <div
+                class="flex flex-wrap items-center gap-x-4 gap-y-1 py-2.5 border-b border-border last:border-b-0 text-sm"
+              >
+                <span class="font-semibold"
+                  >{{ payment.amount_paid | currency }}</span
+                >
+                <span class="text-text-secondary">{{
+                  payment.payment_date | date: "dd/MM/yyyy HH:mm"
+                }}</span>
+                <span class="text-xs text-text-secondary"
+                  >Cuota #{{ payment.installment_number }}</span
+                >
                 @if (payment.store_payment_methods) {
-                  <span class="text-text-secondary">{{ payment.store_payment_methods.display_name }}</span>
+                  <span class="text-text-secondary">{{
+                    payment.store_payment_methods.display_name
+                  }}</span>
                 }
                 @if (payment.notes) {
-                  <span class="text-xs text-text-secondary">{{ payment.notes }}</span>
+                  <span class="text-xs text-text-secondary">{{
+                    payment.notes
+                  }}</span>
                 }
               </div>
             }
           </div>
-        </div>
+        </app-card>
       }
 
       <!-- Notes -->
       @if (credit()!.notes) {
-        <div class="bg-surface border border-border rounded-xl p-4">
-          <h3 class="text-sm font-semibold text-text-primary mb-2">Notas</h3>
+        <app-card shadow="none" [responsivePadding]="true">
+          <span class="text-sm font-bold text-[var(--color-text-primary)]">Notas</span>
           <p class="text-sm text-text-secondary">{{ credit()!.notes }}</p>
-        </div>
+        </app-card>
       }
     </div>
 
     <!-- Payment Modal -->
     <app-modal
       [size]="'md'"
-      [title]="'Registrar Pago — Cuota #' + (selectedInstallment()?.installment_number || '')"
+      [title]="
+        'Registrar Pago — Cuota #' +
+        (selectedInstallment()?.installment_number || '')
+      "
       [isOpen]="showPaymentModal()"
       (closed)="closePaymentModal()"
     >
@@ -156,21 +248,30 @@
           <div class="bg-gray-50 rounded-xl p-4 space-y-2">
             <div class="flex justify-between text-sm">
               <span class="text-gray-500">Valor cuota</span>
-              <span class="font-semibold">{{ selectedInstallment()!.installment_value | currency }}</span>
+              <span class="font-semibold">{{
+                selectedInstallment()!.installment_value | currency
+              }}</span>
             </div>
             <div class="flex justify-between text-sm">
               <span class="text-gray-500">Ya pagado</span>
-              <span class="font-semibold text-emerald-600">{{ selectedInstallment()!.amount_paid | currency }}</span>
+              <span class="font-semibold text-emerald-600">{{
+                selectedInstallment()!.amount_paid | currency
+              }}</span>
             </div>
             <div class="flex justify-between text-sm">
               <span class="text-gray-500">Pendiente</span>
-              <span class="font-bold text-red-600">{{ selectedInstallment()!.remaining_balance | currency }}</span>
+              <span class="font-bold text-red-600">{{
+                selectedInstallment()!.remaining_balance | currency
+              }}</span>
             </div>
           </div>
 
           <!-- Amount Input -->
           <div>
-            <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">Monto a pagar</label>
+            <label
+              class="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5"
+              >Monto a pagar</label
+            >
             <input
               type="number"
               [(ngModel)]="paymentAmount"
@@ -184,7 +285,10 @@
 
           <!-- Payment Method -->
           <div>
-            <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">Método de pago</label>
+            <label
+              class="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5"
+              >Método de pago</label
+            >
             <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
               @for (method of paymentMethods(); track method.id) {
                 <button
@@ -192,8 +296,10 @@
                   (click)="paymentMethodId = method.id"
                   class="px-3 py-2.5 rounded-xl border text-xs font-semibold transition-all"
                   [ngClass]="{
-                    'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-200': paymentMethodId === method.id,
-                    'border-gray-200 bg-white text-gray-600 hover:border-gray-300': paymentMethodId !== method.id
+                    'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-200':
+                      paymentMethodId === method.id,
+                    'border-gray-200 bg-white text-gray-600 hover:border-gray-300':
+                      paymentMethodId !== method.id,
                   }"
                 >
                   {{ method.display_name }}
@@ -204,7 +310,10 @@
 
           <!-- Reference -->
           <div>
-            <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">Referencia (opcional)</label>
+            <label
+              class="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5"
+              >Referencia (opcional)</label
+            >
             <input
               type="text"
               [(ngModel)]="paymentReference"
@@ -215,7 +324,10 @@
 
           <!-- Notes -->
           <div>
-            <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">Notas (opcional)</label>
+            <label
+              class="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5"
+              >Notas (opcional)</label
+            >
             <textarea
               [(ngModel)]="paymentNotes"
               rows="2"
@@ -227,7 +339,10 @@
       }
 
       <!-- Footer fuera del @if para proyección correcta al slot -->
-      <div slot="footer" class="flex items-center justify-end gap-3 px-4 py-3 bg-gray-50 rounded-b-xl">
+      <div
+        slot="footer"
+        class="flex items-center justify-end gap-3 px-4 py-3 bg-gray-50 rounded-b-xl"
+      >
         @if (selectedInstallment()) {
           <button
             (click)="closePaymentModal()"
@@ -241,7 +356,9 @@
             class="px-5 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             @if (isProcessingPayment()) {
-              <div class="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+              <div
+                class="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"
+              ></div>
             }
             Registrar Pago
           </button>
@@ -250,7 +367,9 @@
     </app-modal>
   </div>
 } @else {
-  <div class="flex items-center justify-center min-h-[200px] text-text-secondary">
+  <div
+    class="flex items-center justify-center min-h-[200px] text-text-secondary"
+  >
     <p>Crédito no encontrado</p>
   </div>
 }

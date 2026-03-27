@@ -13,7 +13,6 @@ import {
   UserStatsComponent,
   UserCreateModalComponent,
   UserEditModalComponent,
-  UserEmptyStateComponent,
 } from './components/index';
 
 // Import components from shared
@@ -29,6 +28,8 @@ import {
   ResponsiveDataViewComponent,
   ItemListCardConfig,
   PaginationComponent,
+  EmptyStateComponent,
+  CardComponent,
 } from '../../../../shared/components/index';
 import {
   FormsModule,
@@ -47,13 +48,14 @@ import {
     UserStatsComponent,
     UserCreateModalComponent,
     UserEditModalComponent,
-    UserEmptyStateComponent,
+    EmptyStateComponent,
     ResponsiveDataViewComponent,
     InputsearchComponent,
     IconComponent,
     ButtonComponent,
     SelectorComponent,
     PaginationComponent,
+    CardComponent,
   ],
   templateUrl: './users.component.html',
   styleUrls: ['./users.component.css'],
@@ -163,7 +165,11 @@ export class UsersComponent implements OnInit, OnDestroy {
     badgeTransform: (value: UserState) => this.getStateDisplay(value).text,
     detailKeys: [
       { key: 'username', label: 'Usuario', icon: 'user' },
-      { key: 'created_at', label: 'Registro', transform: (v) => this.formatDate(v) },
+      {
+        key: 'created_at',
+        label: 'Registro',
+        transform: (v) => this.formatDate(v),
+      },
     ],
   };
 
@@ -208,7 +214,8 @@ export class UsersComponent implements OnInit, OnDestroy {
       search: filters.search || undefined,
       state: filters.state || undefined,
       organization_id: filters.organization_id || undefined,
-      include_non_production: filters.include_non_production === 'all' ? true : undefined,
+      include_non_production:
+        filters.include_non_production === 'all' ? true : undefined,
     };
 
     this.usersService
@@ -238,7 +245,8 @@ export class UsersComponent implements OnInit, OnDestroy {
   }
 
   loadUserStats(): void {
-    this.usersService.getUsersStats()
+    this.usersService
+      .getUsersStats()
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (stats: UserStats) => {
@@ -273,7 +281,8 @@ export class UsersComponent implements OnInit, OnDestroy {
     this.dialogService
       .confirm({
         title: 'Sincronizar Panel UI',
-        message: '¿Sincronizar las configuraciones de módulos visibles para todos los usuarios admin/owner? Se agregarán los módulos nuevos sin eliminar personalizaciones existentes.',
+        message:
+          '¿Sincronizar las configuraciones de módulos visibles para todos los usuarios admin/owner? Se agregarán los módulos nuevos sin eliminar personalizaciones existentes.',
         confirmText: 'Sincronizar',
         cancelText: 'Cancelar',
       })
@@ -360,14 +369,17 @@ export class UsersComponent implements OnInit, OnDestroy {
       })
       .then((confirmed) => {
         if (confirmed) {
-          const obs = action === 'archive'
-            ? this.usersService.archiveUser(user.id)
-            : this.usersService.reactivateUser(user.id);
+          const obs =
+            action === 'archive'
+              ? this.usersService.archiveUser(user.id)
+              : this.usersService.reactivateUser(user.id);
 
           obs.subscribe({
             next: () => {
               this.refreshUsers();
-              this.toastService.success(`Usuario ${action === 'archive' ? 'archivado' : 'reactivado'} exitosamente`);
+              this.toastService.success(
+                `Usuario ${action === 'archive' ? 'archivado' : 'reactivado'} exitosamente`,
+              );
             },
             error: (error) => {
               console.error(`Error ${action} user:`, error);

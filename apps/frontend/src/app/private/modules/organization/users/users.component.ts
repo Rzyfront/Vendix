@@ -14,7 +14,6 @@ import {
   UserCreateModalComponent,
   UserEditModalComponent,
   UserConfigModalComponent,
-  UserEmptyStateComponent,
 } from './components/index';
 
 // Import components from shared
@@ -30,6 +29,7 @@ import {
   InputsearchComponent,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  EmptyStateComponent,
 } from '../../../../shared/components/index';
 import {
   FormsModule,
@@ -57,7 +57,7 @@ interface StatItem {
     UserCreateModalComponent,
     UserEditModalComponent,
     UserConfigModalComponent,
-    UserEmptyStateComponent,
+    EmptyStateComponent,
     ResponsiveDataViewComponent,
     InputsearchComponent,
     StatsComponent,

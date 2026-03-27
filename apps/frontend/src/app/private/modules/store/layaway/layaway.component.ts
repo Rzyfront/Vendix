@@ -3,15 +3,26 @@ import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
+import { CardComponent } from '../../../../shared/components/card/card.component';
 import { InputsearchComponent } from '../../../../shared/components/inputsearch/inputsearch.component';
 import { ResponsiveDataViewComponent } from '../../../../shared/components/responsive-data-view/responsive-data-view.component';
 import { ButtonComponent } from '../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
 import { PaginationComponent } from '../../../../shared/components/pagination/pagination.component';
 import * as LayawayActions from './state/actions/layaway.actions';
-import { selectLayaways, selectLayawaysLoading, selectStats, selectLayawaysMeta } from './state/selectors/layaway.selectors';
+import {
+  selectLayaways,
+  selectLayawaysLoading,
+  selectStats,
+  selectLayawaysMeta,
+} from './state/selectors/layaway.selectors';
 import { LayawayPlan } from './interfaces/layaway.interface';
-import { TableColumn, TableAction, ItemListCardConfig } from '../../../../shared/components/responsive-data-view/responsive-data-view.component';
+import { CurrencyFormatService, CurrencyPipe } from '../../../../shared/pipes/currency';
+import {
+  TableColumn,
+  TableAction,
+  ItemListCardConfig,
+} from '../../../../shared/components/responsive-data-view/responsive-data-view.component';
 
 @Component({
   selector: 'app-layaway',
@@ -20,11 +31,13 @@ import { TableColumn, TableAction, ItemListCardConfig } from '../../../../shared
     CommonModule,
     RouterModule,
     StatsComponent,
+    CardComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
     ButtonComponent,
     IconComponent,
     PaginationComponent,
+    CurrencyPipe,
   ],
   templateUrl: './layaway.component.html',
   styleUrls: ['./layaway.component.scss'],
@@ -32,57 +45,59 @@ import { TableColumn, TableAction, ItemListCardConfig } from '../../../../shared
 export class LayawayComponent implements OnInit {
   private store = inject(Store);
   private router = inject(Router);
+  private currencyService = inject(CurrencyFormatService);
 
   layaways = this.store.selectSignal(selectLayaways);
   loading = this.store.selectSignal(selectLayawaysLoading);
   stats = this.store.selectSignal(selectStats);
   meta = this.store.selectSignal(selectLayawaysMeta);
 
-
-  stats_config = [
-    { title: 'Planes Activos', key: 'active', icon: 'clock', color: 'blue' },
-    { title: 'Completados', key: 'completed', icon: 'check-circle', color: 'emerald' },
-    { title: 'Vencidos', key: 'overdue', icon: 'alert-triangle', color: 'red' },
-    { title: 'Por Cobrar', key: 'total_receivable', icon: 'dollar-sign', color: 'purple', prefix: '$' },
-  ];
-
   columns: TableColumn[] = [
-    { key: 'plan_number', label: 'Plan #', sortable: true },
+    { key: 'plan_number', label: 'Plan #', sortable: true, priority: 1 },
     {
       key: 'customer',
       label: 'Cliente',
-      transform: (val: any) => val ? `${val.first_name} ${val.last_name}` : '-',
+      priority: 1,
+      transform: (val: any) =>
+        val ? `${val.first_name} ${val.last_name}` : '-',
     },
     {
       key: 'total_amount',
       label: 'Total',
-      transform: (val: any) => `$${Number(val).toLocaleString()}`,
+      priority: 2,
+      transform: (val: any) => this.currencyService.format(Number(val) || 0),
     },
     {
       key: 'paid_amount',
       label: 'Pagado',
+      priority: 3,
       transform: (val: any, row: any) => {
-        const pct = row.total_amount > 0 ? Math.round((Number(val) / Number(row.total_amount)) * 100) : 0;
-        return `$${Number(val).toLocaleString()} (${pct}%)`;
+        const pct =
+          row.total_amount > 0
+            ? Math.round((Number(val) / Number(row.total_amount)) * 100)
+            : 0;
+        return `${this.currencyService.format(Number(val) || 0)} (${pct}%)`;
       },
     },
     {
       key: 'remaining_amount',
       label: 'Pendiente',
-      transform: (val: any) => `$${Number(val).toLocaleString()}`,
+      priority: 2,
+      transform: (val: any) => this.currencyService.format(Number(val) || 0),
     },
     {
       key: 'state',
       label: 'Estado',
+      priority: 1,
       badge: true,
       badgeConfig: {
         type: 'custom',
         colorMap: {
-          active: 'blue',
-          completed: 'green',
-          cancelled: 'gray',
-          overdue: 'red',
-          defaulted: 'red',
+          active: '#3b82f6',
+          completed: '#22c55e',
+          cancelled: '#9ca3af',
+          overdue: '#ef4444',
+          defaulted: '#ef4444',
         },
       },
       transform: (val: string) => {
@@ -101,7 +116,8 @@ export class LayawayComponent implements OnInit {
   card_config: ItemListCardConfig = {
     titleKey: 'plan_number',
     subtitleKey: 'customer',
-    subtitleTransform: (val: any) => val ? `${val.first_name} ${val.last_name}` : '-',
+    subtitleTransform: (val: any) =>
+      val ? `${val.first_name} ${val.last_name}` : '-',
     badgeKey: 'state',
     badgeConfig: {
       type: 'custom',
@@ -125,9 +141,21 @@ export class LayawayComponent implements OnInit {
       return labels[val] || val;
     },
     detailKeys: [
-      { key: 'total_amount', label: 'Total', transform: (v: any) => `$${Number(v).toLocaleString()}` },
-      { key: 'remaining_amount', label: 'Pendiente', transform: (v: any) => `$${Number(v).toLocaleString()}` },
+      {
+        key: 'total_amount',
+        label: 'Total',
+        transform: (v: any) => this.currencyService.format(Number(v) || 0),
+      },
+      {
+        key: 'paid_amount',
+        label: 'Pagado',
+        transform: (v: any) => this.currencyService.format(Number(v) || 0),
+      },
     ],
+    footerKey: 'remaining_amount',
+    footerLabel: 'Pendiente',
+    footerStyle: 'prominent' as const,
+    footerTransform: (val: any) => this.currencyService.format(Number(val) || 0),
   };
 
   actions: TableAction[] = [
@@ -135,7 +163,8 @@ export class LayawayComponent implements OnInit {
       label: 'Ver Detalle',
       icon: 'eye',
       variant: 'primary',
-      action: (item: LayawayPlan) => this.router.navigate(['/admin/orders/layaway', item.id]),
+      action: (item: LayawayPlan) =>
+        this.router.navigate(['/admin/orders/layaway', item.id]),
     },
   ];
 

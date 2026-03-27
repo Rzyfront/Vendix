@@ -152,6 +152,21 @@ export const storeEcommercePublicRoutes: Routes = [
             '../../private/modules/ecommerce/pages/account/order-detail/order-detail.component'
           ).then((c) => c.OrderDetailComponent),
       },
+      {
+        path: 'book/:productId',
+        loadComponent: () =>
+          import(
+            '../../private/modules/ecommerce/pages/booking/booking.component'
+          ).then((c) => c.BookingComponent),
+      },
+      {
+        path: 'account/reservations',
+        canActivate: [AuthGuard],
+        loadComponent: () =>
+          import(
+            '../../private/modules/ecommerce/pages/my-reservations/my-reservations.component'
+          ).then((c) => c.MyReservationsComponent),
+      },
     ],
   },
 ];

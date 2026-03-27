@@ -6,17 +6,26 @@
         @if (!cartHasOnlyServices) {
         <div class="step" [class.active]="step >= 1" [class.completed]="step > 1">
             <span class="step-number">1</span>
-            <span class="step-label">Dirección</span>
+            <span class="step-label">Direccion</span>
         </div>
         <div class="step-line" [class.completed]="step > 1"></div>
         }
-        <div class="step" [class.active]="step >= 1" [class.completed]="cartHasOnlyServices ? step > 1 : step > 2">
-            <span class="step-number">{{ cartHasOnlyServices ? '1' : '2' }}</span>
+
+        @if (cartHasBookableServices) {
+        <div class="step" [class.active]="step >= bookingStep!" [class.completed]="step > bookingStep!">
+            <span class="step-number">{{ bookingStep }}</span>
+            <span class="step-label">Reserva</span>
+        </div>
+        <div class="step-line" [class.completed]="step > bookingStep!"></div>
+        }
+
+        <div class="step" [class.active]="step >= paymentStep" [class.completed]="step > paymentStep">
+            <span class="step-number">{{ paymentStep }}</span>
             <span class="step-label">Pago</span>
         </div>
-        <div class="step-line" [class.completed]="cartHasOnlyServices ? step > 1 : step > 2"></div>
-        <div class="step" [class.active]="cartHasOnlyServices ? step >= 2 : step >= 3">
-            <span class="step-number">{{ cartHasOnlyServices ? '2' : '3' }}</span>
+        <div class="step-line" [class.completed]="step > paymentStep"></div>
+        <div class="step" [class.active]="step >= confirmStep">
+            <span class="step-number">{{ confirmStep }}</span>
             <span class="step-label">Confirmar</span>
         </div>
     </div>
@@ -32,7 +41,7 @@
             <!-- Step 1: Address (hidden for service-only carts) -->
             @if (step === 1 && !cartHasOnlyServices) {
             <div class="checkout-section">
-                <h2>Dirección de Envío</h2>
+                <h2>Direccion de Envio</h2>
 
                 @if (addresses.length > 0) {
                 <div class="address-list">
@@ -60,7 +69,7 @@
                         </div>
                         <div class="address-info">
                             <i class="pi pi-plus"></i>
-                            <span>Agregar nueva dirección</span>
+                            <span>Agregar nueva direccion</span>
                         </div>
                     </div>
                 </div>
@@ -68,7 +77,7 @@
 
                 @if (use_new_address) {
                 <form [formGroup]="address_form" class="address-form">
-                    <app-input label="Dirección" formControlName="address_line1" placeholder="Calle y número"
+                    <app-input label="Direccion" formControlName="address_line1" placeholder="Calle y numero"
                         [control]="address_form.get('address_line1')" [required]="true"></app-input>
 
                     <app-input label="Apartamento, oficina, etc. (opcional)" formControlName="address_line2"
@@ -76,10 +85,10 @@
 
                     <div class="form-row">
                         <app-selector
-                            label="País"
+                            label="Pais"
                             formControlName="country_code"
                             [options]="countryOptions"
-                            placeholder="Selecciona un país"
+                            placeholder="Selecciona un pais"
                             [errorText]="getFieldError('country_code')"
                             [required]="true"
                         ></app-selector>
@@ -105,19 +114,19 @@
                             [required]="true"
                         ></app-selector>
 
-                        <app-input label="Código Postal" formControlName="postal_code"
-                            placeholder="Código postal"></app-input>
+                        <app-input label="Codigo Postal" formControlName="postal_code"
+                            placeholder="Codigo postal"></app-input>
                     </div>
 
-                    <app-input label="Teléfono" formControlName="phone_number" type="tel"
-                        placeholder="Teléfono de contacto" [control]="address_form.get('phone_number')"
+                    <app-input label="Telefono" formControlName="phone_number" type="tel"
+                        placeholder="Telefono de contacto" [control]="address_form.get('phone_number')"
                         [required]="true"></app-input>
 
                     <!-- Save address checkbox -->
                     <div class="save-address-option">
                         <label class="checkbox-label">
                             <input type="checkbox" [(ngModel)]="save_new_address" [ngModelOptions]="{standalone: true}">
-                            <span class="checkbox-text">Guardar esta dirección para futuras compras</span>
+                            <span class="checkbox-text">Guardar esta direccion para futuras compras</span>
                         </label>
                     </div>
                 </form>
@@ -125,11 +134,34 @@
             </div>
             }
 
-            <!-- Step 2: Payment (shown at step 1 for service-only carts, step 2 otherwise) -->
-            @if (cartHasOnlyServices ? step === 1 : step === 2) {
+            <!-- Booking Step: shown only when cart has bookable services -->
+            @if (bookingStep !== null && step === bookingStep) {
+            <div class="checkout-section">
+                <h2>Reserva de Horario</h2>
+                <p class="booking-description">Selecciona la fecha y horario para tus servicios.</p>
+
+                @for (item of bookableItems; track item.product_id) {
+                <app-booking-slot-picker
+                    [productId]="item.product_id"
+                    [productName]="item.product.name"
+                    [serviceDuration]="item.product.service_duration_minutes || 60"
+                    (slotSelected)="onBookingSlotSelected(item.product_id, $event)"
+                />
+                @if (hasBookingForProduct(item.product_id)) {
+                <div class="booking-confirmed">
+                    <i class="pi pi-check-circle"></i>
+                    <span>{{ getBookingSummary(item.product_id) }}</span>
+                </div>
+                }
+                }
+            </div>
+            }
+
+            <!-- Payment Step -->
+            @if (step === paymentStep) {
             <div class="checkout-section">
                 @if (!cartHasOnlyServices) {
-                <h2>Opciones de Envío</h2>
+                <h2>Opciones de Envio</h2>
                 }
                 @if (!cartHasOnlyServices && shipping_options.length > 0) {
                 <div class="payment-list" style="margin-bottom: 2rem;">
@@ -152,11 +184,11 @@
                 } @else if (!cartHasOnlyServices) {
                 <div class="error-message" style="margin-bottom: 2rem;">
                     <i class="pi pi-exclamation-triangle"></i>
-                    No hay opciones de envío disponibles para esta ubicación. Por favor revisa tu dirección.
+                    No hay opciones de envio disponibles para esta ubicacion. Por favor revisa tu direccion.
                 </div>
                 }
 
-                <h2>Método de Pago</h2>
+                <h2>Metodo de Pago</h2>
 
                 <div class="payment-list">
                     @for (method of payment_methods; track method.id) {
@@ -178,15 +210,15 @@
             </div>
             }
 
-            <!-- Step 3: Confirm (step 2 for service-only carts) -->
-            @if (cartHasOnlyServices ? step === 2 : step === 3) {
+            <!-- Confirm Step -->
+            @if (step === confirmStep) {
             <div class="checkout-section">
                 <h2>Confirmar Pedido</h2>
 
                 <div class="confirm-details">
                     @if (!cartHasOnlyServices) {
                     <div class="confirm-block">
-                        <h3>Dirección de Envío</h3>
+                        <h3>Direccion de Envio</h3>
                         @if (use_new_address) {
                         <p>{{ address_form.value.address_line1 }}</p>
                         @if (address_form.value.address_line2) {
@@ -195,7 +227,7 @@
                         <p>{{ getSelectedCityName() }}, {{ getSelectedDepartmentName() }}</p>
                         <p>{{ getSelectedCountryName() }}</p>
                         @if (address_form.value.postal_code) {
-                        <p>Código Postal: {{ address_form.value.postal_code }}</p>
+                        <p>Codigo Postal: {{ address_form.value.postal_code }}</p>
                         }
                         <p>Tel: {{ address_form.value.phone_number }}</p>
                         } @else {
@@ -213,8 +245,19 @@
                     </div>
                     }
 
+                    @if (cartHasBookableServices && bookingSelections.size > 0) {
                     <div class="confirm-block">
-                        <h3>Método de Pago</h3>
+                        <h3>Reservas</h3>
+                        @for (item of bookableItems; track item.product_id) {
+                        @if (hasBookingForProduct(item.product_id)) {
+                        <p><strong>{{ item.product.name }}:</strong> {{ getBookingSummary(item.product_id) }}</p>
+                        }
+                        }
+                    </div>
+                    }
+
+                    <div class="confirm-block">
+                        <h3>Metodo de Pago</h3>
                         @for (method of payment_methods; track method.id) {
                         @if (method.id === selected_payment_method_id) {
                         <p>{{ method.name }}</p>
@@ -251,12 +294,13 @@
                 </app-button>
                 }
 
-                @if (step < (cartHasOnlyServices ? 2 : 3)) {
-                <app-button variant="primary" (clicked)="nextStep()">
+                @if (step < confirmStep) {
+                <app-button variant="primary" (clicked)="nextStep()"
+                    [disabled]="bookingStep !== null && step === bookingStep && !allBookingSlotsSelected">
                     Continuar
                     <app-icon slot="icon" name="arrow-right" [size]="16"></app-icon>
                 </app-button>
-                } @else if (step >= (cartHasOnlyServices ? 2 : 3)) {
+                } @else if (step >= confirmStep) {
                 <app-button variant="primary" (clicked)="placeOrder()" [loading]="is_submitting" [disabled]="is_submitting">
                     @if (!is_submitting) {
                     <app-icon slot="icon" name="check" [size]="16"></app-icon>
@@ -291,7 +335,7 @@
                 </div>
                 @if (!cartHasOnlyServices) {
                 <div class="summary-row">
-                    <span>Envío</span>
+                    <span>Envio</span>
                     <span>{{ shipping_cost === 0 ? 'Gratis' : (shipping_cost | currency) }}</span>
                 </div>
                 }

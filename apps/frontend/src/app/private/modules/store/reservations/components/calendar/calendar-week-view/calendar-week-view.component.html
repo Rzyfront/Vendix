@@ -1,0 +1,51 @@
+<div class="week-view">
+  <!-- Header row with day names and dates -->
+  <div class="week-header">
+    <div class="time-gutter"></div>
+    @for (day of weekDays(); track day.date) {
+      <div class="day-header" [class.today]="day.isToday">
+        <span class="day-name">{{ day.name }}</span>
+        <span class="day-number">{{ day.dayNumber }}</span>
+      </div>
+    }
+  </div>
+
+  <!-- Time grid body -->
+  <div class="week-body">
+    <!-- Time labels column -->
+    <div class="time-gutter">
+      @for (slot of timeSlots; track slot) {
+        <div class="time-label">{{ formatTime(slot) }}</div>
+      }
+    </div>
+
+    <!-- Day columns -->
+    @for (day of weekDays(); track day.date) {
+      <div class="day-column" (click)="onColumnClick($event, day.date)">
+        <!-- Grid lines -->
+        @for (slot of timeSlots; track slot) {
+          <div class="time-row"></div>
+        }
+
+        <!-- Booking blocks -->
+        @for (booking of getBookingsForDate(day.date); track booking.id) {
+          <div
+            class="booking-block"
+            [class]="'status-' + booking.status"
+            [style.top.%]="getBlockTop(booking)"
+            [style.height.%]="getBlockHeight(booking)"
+            (click)="onBookingClick($event, booking)">
+            <span class="booking-time">{{ formatTime(booking.start_time) }}</span>
+            <span class="booking-title">{{ booking.product?.name }}</span>
+            <span class="booking-customer">{{ booking.customer?.first_name }}</span>
+          </div>
+        }
+
+        <!-- Current time indicator (only on today) -->
+        @if (day.isToday && currentTimePercent() >= 0) {
+          <div class="current-time-line" [style.top.%]="currentTimePercent()"></div>
+        }
+      </div>
+    }
+  </div>
+</div>

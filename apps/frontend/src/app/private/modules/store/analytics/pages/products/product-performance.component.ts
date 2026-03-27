@@ -4,16 +4,27 @@ import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable, Subject, combineLatest, takeUntil } from 'rxjs';
 
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
-import { FilterConfig, FilterValues } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
-import { CurrencyPipe, CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
+import {
+  FilterConfig,
+  FilterValues,
+} from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import {
+  CurrencyPipe,
+  CurrencyFormatService,
+} from '../../../../../../shared/pipes/currency/currency.pipe';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
-import { ProductsSummary, TopSellingProduct, ProductTrend } from '../../interfaces/products-analytics.interface';
+import {
+  ProductsSummary,
+  TopSellingProduct,
+  ProductTrend,
+} from '../../interfaces/products-analytics.interface';
 
 import * as ProductsActions from './state/products-analytics.actions';
 import * as ProductsSelectors from './state/products-analytics.selectors';
@@ -26,6 +37,7 @@ import { EChartsOption } from 'echarts';
   imports: [
     CommonModule,
     RouterLink,
+    CardComponent,
     StatsComponent,
     ChartComponent,
     IconComponent,
@@ -42,15 +54,33 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
 
   // Observables from store
-  summary$: Observable<ProductsSummary | null> = this.store.select(ProductsSelectors.selectSummary);
-  topSellers$: Observable<TopSellingProduct[]> = this.store.select(ProductsSelectors.selectTopSellers);
-  trends$: Observable<ProductTrend[]> = this.store.select(ProductsSelectors.selectTrends);
-  loading$: Observable<boolean> = this.store.select(ProductsSelectors.selectLoading);
-  loadingTopSellers$: Observable<boolean> = this.store.select(ProductsSelectors.selectLoadingTopSellers);
-  loadingTrends$: Observable<boolean> = this.store.select(ProductsSelectors.selectLoadingTrends);
-  exporting$: Observable<boolean> = this.store.select(ProductsSelectors.selectExporting);
-  dateRange$: Observable<DateRangeFilter> = this.store.select(ProductsSelectors.selectDateRange);
-  granularity$: Observable<string> = this.store.select(ProductsSelectors.selectGranularity);
+  summary$: Observable<ProductsSummary | null> = this.store.select(
+    ProductsSelectors.selectSummary,
+  );
+  topSellers$: Observable<TopSellingProduct[]> = this.store.select(
+    ProductsSelectors.selectTopSellers,
+  );
+  trends$: Observable<ProductTrend[]> = this.store.select(
+    ProductsSelectors.selectTrends,
+  );
+  loading$: Observable<boolean> = this.store.select(
+    ProductsSelectors.selectLoading,
+  );
+  loadingTopSellers$: Observable<boolean> = this.store.select(
+    ProductsSelectors.selectLoadingTopSellers,
+  );
+  loadingTrends$: Observable<boolean> = this.store.select(
+    ProductsSelectors.selectLoadingTrends,
+  );
+  exporting$: Observable<boolean> = this.store.select(
+    ProductsSelectors.selectExporting,
+  );
+  dateRange$: Observable<DateRangeFilter> = this.store.select(
+    ProductsSelectors.selectDateRange,
+  );
+  granularity$: Observable<string> = this.store.select(
+    ProductsSelectors.selectGranularity,
+  );
 
   // Chart options
   topSellersChartOptions: EChartsOption = {};
@@ -115,11 +145,9 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
       });
 
     // Subscribe to top sellers to build chart
-    this.topSellers$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((topSellers) => {
-        this.updateTopSellersChart(topSellers);
-      });
+    this.topSellers$.pipe(takeUntil(this.destroy$)).subscribe((topSellers) => {
+      this.updateTopSellersChart(topSellers);
+    });
   }
 
   ngOnDestroy(): void {
@@ -134,29 +162,38 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
     const granularity = values['granularity'] as string;
 
     const currentRange = this.filterValues;
-    if (dateFrom !== currentRange['date_from'] || dateTo !== currentRange['date_to']) {
-      this.store.dispatch(ProductsActions.setDateRange({
-        dateRange: {
-          start_date: dateFrom || '',
-          end_date: dateTo || '',
-          preset: 'custom',
-        },
-      }));
+    if (
+      dateFrom !== currentRange['date_from'] ||
+      dateTo !== currentRange['date_to']
+    ) {
+      this.store.dispatch(
+        ProductsActions.setDateRange({
+          dateRange: {
+            start_date: dateFrom || '',
+            end_date: dateTo || '',
+            preset: 'custom',
+          },
+        }),
+      );
     }
 
     if (granularity !== currentRange['granularity']) {
-      this.store.dispatch(ProductsActions.setGranularity({ granularity: granularity || 'day' }));
+      this.store.dispatch(
+        ProductsActions.setGranularity({ granularity: granularity || 'day' }),
+      );
     }
   }
 
   onClearAllFilters(): void {
-    this.store.dispatch(ProductsActions.setDateRange({
-      dateRange: {
-        start_date: this.getDefaultStartDate(),
-        end_date: this.getDefaultEndDate(),
-        preset: 'thisMonth',
-      },
-    }));
+    this.store.dispatch(
+      ProductsActions.setDateRange({
+        dateRange: {
+          start_date: this.getDefaultStartDate(),
+          end_date: this.getDefaultEndDate(),
+          preset: 'thisMonth',
+        },
+      }),
+    );
     this.store.dispatch(ProductsActions.setGranularity({ granularity: 'day' }));
   }
 
@@ -185,10 +222,14 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
 
     const style = getComputedStyle(document.documentElement);
     const purpleColor = '#8b5cf6';
-    const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
-    const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+    const borderColor =
+      style.getPropertyValue('--color-border').trim() || '#e5e7eb';
+    const textSecondary =
+      style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
-    const labels = trends.map((t) => this.formatPeriodLabel(t.period, granularity));
+    const labels = trends.map((t) =>
+      this.formatPeriodLabel(t.period, granularity),
+    );
     const units = trends.map((t) => t.units_sold);
 
     this.unitsTrendChartOptions = {
@@ -227,7 +268,10 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
           areaStyle: {
             color: {
               type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
               colorStops: [
                 { offset: 0, color: `${purpleColor}4D` },
                 { offset: 1, color: `${purpleColor}0D` },
@@ -245,14 +289,21 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
     if (!topSellers.length) return;
 
     const style = getComputedStyle(document.documentElement);
-    const primaryColor = style.getPropertyValue('--color-primary').trim() || '#3b82f6';
-    const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
-    const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+    const primaryColor =
+      style.getPropertyValue('--color-primary').trim() || '#3b82f6';
+    const borderColor =
+      style.getPropertyValue('--color-border').trim() || '#e5e7eb';
+    const textSecondary =
+      style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
     // Top 5 by units (reversed for horizontal bar chart — top item at top)
     const top5 = topSellers.slice(0, 5);
     const reversed = [...top5].reverse();
-    const names = reversed.map((p) => p.product_name.length > 25 ? p.product_name.substring(0, 25) + '...' : p.product_name);
+    const names = reversed.map((p) =>
+      p.product_name.length > 25
+        ? p.product_name.substring(0, 25) + '...'
+        : p.product_name,
+    );
     const units = reversed.map((p) => p.units_sold);
 
     this.topSellersChartOptions = {

@@ -4,15 +4,25 @@ import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable, Subject, combineLatest, takeUntil } from 'rxjs';
 
+import { CardComponent } from '../../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
-import { FilterConfig, FilterValues } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
-import { CurrencyPipe, CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import {
+  FilterConfig,
+  FilterValues,
+} from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import {
+  CurrencyPipe,
+  CurrencyFormatService,
+} from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
-import { OverviewSummary, OverviewTrend } from '../../../interfaces/overview-analytics.interface';
+import {
+  OverviewSummary,
+  OverviewTrend,
+} from '../../../interfaces/overview-analytics.interface';
 
 import * as OverviewActions from '../state/overview-summary.actions';
 import * as OverviewSelectors from '../state/overview-summary.selectors';
@@ -25,6 +35,7 @@ import { EChartsOption } from 'echarts';
   imports: [
     CommonModule,
     RouterLink,
+    CardComponent,
     StatsComponent,
     ChartComponent,
     IconComponent,
@@ -40,12 +51,24 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
 
   // Observables from store
-  summary$: Observable<OverviewSummary | null> = this.store.select(OverviewSelectors.selectSummary);
-  trends$: Observable<OverviewTrend[]> = this.store.select(OverviewSelectors.selectTrends);
-  loading$: Observable<boolean> = this.store.select(OverviewSelectors.selectLoading);
-  loadingTrends$: Observable<boolean> = this.store.select(OverviewSelectors.selectLoadingTrends);
-  dateRange$: Observable<DateRangeFilter> = this.store.select(OverviewSelectors.selectDateRange);
-  granularity$: Observable<string> = this.store.select(OverviewSelectors.selectGranularity);
+  summary$: Observable<OverviewSummary | null> = this.store.select(
+    OverviewSelectors.selectSummary,
+  );
+  trends$: Observable<OverviewTrend[]> = this.store.select(
+    OverviewSelectors.selectTrends,
+  );
+  loading$: Observable<boolean> = this.store.select(
+    OverviewSelectors.selectLoading,
+  );
+  loadingTrends$: Observable<boolean> = this.store.select(
+    OverviewSelectors.selectLoadingTrends,
+  );
+  dateRange$: Observable<DateRangeFilter> = this.store.select(
+    OverviewSelectors.selectDateRange,
+  );
+  granularity$: Observable<string> = this.store.select(
+    OverviewSelectors.selectGranularity,
+  );
 
   // Chart options
   gaugeChartOptions: EChartsOption = {};
@@ -102,14 +125,12 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
       });
 
     // Cache summary for template helpers
-    this.summary$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((summary) => {
-        this.currentSummary = summary;
-        if (summary) {
-          this.updateGaugeChart(summary.breakeven_ratio);
-        }
-      });
+    this.summary$.pipe(takeUntil(this.destroy$)).subscribe((summary) => {
+      this.currentSummary = summary;
+      if (summary) {
+        this.updateGaugeChart(summary.breakeven_ratio);
+      }
+    });
 
     // Subscribe to trends to build comparative chart
     combineLatest([this.trends$, this.granularity$])
@@ -131,29 +152,38 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
     const granularity = values['granularity'] as string;
 
     const currentRange = this.filterValues;
-    if (dateFrom !== currentRange['date_from'] || dateTo !== currentRange['date_to']) {
-      this.store.dispatch(OverviewActions.setDateRange({
-        dateRange: {
-          start_date: dateFrom || '',
-          end_date: dateTo || '',
-          preset: 'custom',
-        },
-      }));
+    if (
+      dateFrom !== currentRange['date_from'] ||
+      dateTo !== currentRange['date_to']
+    ) {
+      this.store.dispatch(
+        OverviewActions.setDateRange({
+          dateRange: {
+            start_date: dateFrom || '',
+            end_date: dateTo || '',
+            preset: 'custom',
+          },
+        }),
+      );
     }
 
     if (granularity !== currentRange['granularity']) {
-      this.store.dispatch(OverviewActions.setGranularity({ granularity: granularity || 'day' }));
+      this.store.dispatch(
+        OverviewActions.setGranularity({ granularity: granularity || 'day' }),
+      );
     }
   }
 
   onClearAllFilters(): void {
-    this.store.dispatch(OverviewActions.setDateRange({
-      dateRange: {
-        start_date: this.getDefaultStartDate(),
-        end_date: this.getDefaultEndDate(),
-        preset: 'thisMonth',
-      },
-    }));
+    this.store.dispatch(
+      OverviewActions.setDateRange({
+        dateRange: {
+          start_date: this.getDefaultStartDate(),
+          end_date: this.getDefaultEndDate(),
+          preset: 'thisMonth',
+        },
+      }),
+    );
     this.store.dispatch(OverviewActions.setGranularity({ granularity: 'day' }));
   }
 
@@ -189,7 +219,8 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
   }
 
   getBreakevenStatusText(ratio?: number): string {
-    if (!ratio) return 'Registra ingresos y gastos para ver el estado de tu negocio.';
+    if (!ratio)
+      return 'Registra ingresos y gastos para ver el estado de tu negocio.';
     if (ratio < 70) {
       return `Tu negocio opera con un margen saludable. Solo el ${ratio.toFixed(1)}% de tus ingresos se destina a cubrir gastos.`;
     }
@@ -224,9 +255,9 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
             lineStyle: {
               width: 20,
               color: [
-                [0.467, '#22c55e'],  // 0-70%: green
-                [0.6, '#eab308'],    // 70-90%: yellow
-                [1, '#ef4444'],      // 90-150%: red
+                [0.467, '#22c55e'], // 0-70%: green
+                [0.6, '#eab308'], // 70-90%: yellow
+                [1, '#ef4444'], // 90-150%: red
               ],
             },
           },
@@ -254,14 +285,21 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
     };
   }
 
-  private updateComparativeChart(trends: OverviewTrend[], granularity: string): void {
+  private updateComparativeChart(
+    trends: OverviewTrend[],
+    granularity: string,
+  ): void {
     if (!trends.length) return;
 
     const style = getComputedStyle(document.documentElement);
-    const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
-    const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+    const borderColor =
+      style.getPropertyValue('--color-border').trim() || '#e5e7eb';
+    const textSecondary =
+      style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
-    const labels = trends.map((t) => this.formatPeriodLabel(t.period, granularity));
+    const labels = trends.map((t) =>
+      this.formatPeriodLabel(t.period, granularity),
+    );
 
     this.comparativeChartOptions = {
       tooltip: {
@@ -311,7 +349,10 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
           areaStyle: {
             color: {
               type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
               colorStops: [
                 { offset: 0, color: '#22c55e4D' },
                 { offset: 1, color: '#22c55e0D' },
@@ -329,7 +370,10 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
           areaStyle: {
             color: {
               type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
               colorStops: [
                 { offset: 0, color: '#ef44444D' },
                 { offset: 1, color: '#ef44440D' },
@@ -347,7 +391,10 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
           areaStyle: {
             color: {
               type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
               colorStops: [
                 { offset: 0, color: '#f59e0b4D' },
                 { offset: 1, color: '#f59e0b0D' },
@@ -365,7 +412,10 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
           areaStyle: {
             color: {
               type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
               colorStops: [
                 { offset: 0, color: '#3b82f64D' },
                 { offset: 1, color: '#3b82f60D' },
@@ -383,7 +433,10 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
           areaStyle: {
             color: {
               type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
               colorStops: [
                 { offset: 0, color: '#8b5cf64D' },
                 { offset: 1, color: '#8b5cf60D' },

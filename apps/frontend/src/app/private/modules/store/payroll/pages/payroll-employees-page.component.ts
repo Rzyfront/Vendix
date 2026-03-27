@@ -34,7 +34,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   ],
   template: `
     <div class="w-full">
-      <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <vendix-payroll-stats view="employees"></vendix-payroll-stats>
       </div>
 

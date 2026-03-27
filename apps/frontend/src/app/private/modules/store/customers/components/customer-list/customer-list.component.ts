@@ -1,6 +1,14 @@
-import { Component, EventEmitter, Input, Output, inject, OnInit } from '@angular/core';
+import {
+  Component,
+  EventEmitter,
+  Input,
+  Output,
+  inject,
+  OnInit,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import {
   ResponsiveDataViewComponent,
   InputsearchComponent,
@@ -23,6 +31,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
   standalone: true,
   imports: [
     CommonModule,
+    CardComponent,
     ResponsiveDataViewComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
@@ -33,13 +42,18 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
   ],
   template: `
     <!-- Customer List Container - Mobile First -->
-    <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border">
-
+    <app-card [responsive]="true" [padding]="false">
       <!-- Search Section: sticky below stats on mobile -->
-      <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
-        <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
+      <div
+        class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+      >
+        <div
+          class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+        >
           <!-- Title -->
-          <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
+          <h2
+            class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
+          >
             Todos los Clientes ({{ totalItems }})
           </h2>
 
@@ -77,53 +91,59 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
       </div>
 
       <!-- Loading State -->
-      <div *ngIf="loading" class="p-4 md:p-6 text-center">
-        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-        <p class="mt-2 text-text-secondary">Cargando clientes...</p>
-      </div>
+      @if (loading) {
+        <div class="p-6 text-center">
+          <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <p class="mt-2 text-sm text-text-secondary">Cargando clientes...</p>
+        </div>
+      }
 
       <!-- Empty State -->
-      <div *ngIf="!loading && customers.length === 0" class="p-12 text-center text-gray-500">
-        <app-icon name="users" [size]="48" class="mx-auto mb-4 text-gray-300"></app-icon>
-        <h3 class="text-lg font-medium text-gray-900">No se encontraron clientes</h3>
-        <p class="mt-1">Comienza creando un nuevo cliente.</p>
-        <div class="mt-6 flex justify-center">
-          <app-button variant="primary" (clicked)="create.emit()">
-            <app-icon slot="icon" name="plus" [size]="16"></app-icon>
-            Agregar Cliente
-          </app-button>
+      @if (!loading && customers.length === 0) {
+        <div class="p-12 text-center text-gray-500">
+          <app-icon name="users" [size]="48" class="mx-auto mb-4 text-gray-300"></app-icon>
+          <h3 class="text-lg font-medium text-gray-900">No se encontraron clientes</h3>
+          <p class="mt-1 text-sm">Comienza creando un nuevo cliente.</p>
+          <div class="mt-6 flex justify-center">
+            <app-button variant="primary" (clicked)="create.emit()">
+              <app-icon slot="icon" name="plus" [size]="16"></app-icon>
+              Agregar Cliente
+            </app-button>
+          </div>
         </div>
-      </div>
+      }
 
-      <!-- Responsive Data View -->
-      <div *ngIf="!loading && customers.length > 0" class="px-2 pb-2 pt-1 md:p-4">
-        <app-responsive-data-view
-          [data]="customers"
-          [columns]="columns"
-          [cardConfig]="cardConfig"
-          [actions]="actions"
-          [loading]="loading"
-          [hoverable]="true"
-          [striped]="true"
-          [emptyMessage]="'No se encontraron clientes'"
-          [emptyIcon]="'users'"
-          tableSize="md"
-        ></app-responsive-data-view>
+      <!-- Data Table + Pagination -->
+      @if (!loading && customers.length > 0) {
+        <div class="px-2 pb-2 pt-1 md:p-4">
+          <app-responsive-data-view
+            [data]="customers"
+            [columns]="columns"
+            [cardConfig]="cardConfig"
+            [actions]="actions"
+            [loading]="loading"
+            [hoverable]="true"
+            [striped]="true"
+            [emptyMessage]="'No se encontraron clientes'"
+            [emptyIcon]="'users'"
+            tableSize="md"
+          ></app-responsive-data-view>
 
-        <!-- Pagination section -->
-        <div class="mt-4 border-t border-border pt-4">
-          <app-pagination
-            *ngIf="totalItems > 0"
-            [currentPage]="page"
-            [total]="totalItems"
-            [limit]="limit"
-            [totalPages]="totalPages"
-            infoStyle="none"
-            (pageChange)="onPageChangeAction($event)"
-          ></app-pagination>
+          @if (totalItems > 0) {
+            <div class="mt-4 border-t border-border pt-4">
+              <app-pagination
+                [currentPage]="page"
+                [total]="totalItems"
+                [limit]="limit"
+                [totalPages]="totalPages"
+                infoStyle="none"
+                (pageChange)="onPageChangeAction($event)"
+              ></app-pagination>
+            </div>
+          }
         </div>
-      </div>
-    </div>
+      }
+    </app-card>
   `,
 })
 export class CustomerListComponent implements OnInit {
@@ -172,7 +192,12 @@ export class CustomerListComponent implements OnInit {
   // Dropdown actions
   dropdownActions: DropdownAction[] = [
     { label: 'Carga Masiva', icon: 'upload', action: 'bulk-upload' },
-    { label: 'Nuevo Cliente', icon: 'plus', action: 'create', variant: 'primary' },
+    {
+      label: 'Nuevo Cliente',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   columns: TableColumn[] = [

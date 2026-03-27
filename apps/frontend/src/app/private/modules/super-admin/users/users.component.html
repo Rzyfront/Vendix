@@ -3,10 +3,11 @@
   <app-user-stats [stats]="userStats"></app-user-stats>
 
   <!-- Main Content Card -->
-  <div class="flex flex-col bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
+  <app-card [padding]="false" overflow="hidden">
     <!-- Header (Title & Controls) -->
     <div
-      class="p-2 md:px-6 md:py-4 border-b border-border flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between bg-surface">
+      class="p-2 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
+    >
       <!-- Left Side: Title & Info -->
       <div class="flex-1 min-w-0">
         <h3 class="text-lg font-semibold text-text-primary">
@@ -18,19 +19,28 @@
       </div>
 
       <!-- Right Side: Controls -->
-      <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+      <div
+        class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+      >
         <!-- Search -->
         <div class="w-full sm:w-60">
-          <app-inputsearch placeholder="Buscar usuarios..." [debounceTime]="400" (searchChange)="onSearchChange($event)"
-            size="sm" fullWidth="true"></app-inputsearch>
+          <app-inputsearch
+            placeholder="Buscar usuarios..."
+            [debounceTime]="400"
+            (searchChange)="onSearchChange($event)"
+            size="sm"
+            fullWidth="true"
+          ></app-inputsearch>
         </div>
 
         <!-- Filter Selector (State) -->
         <div class="w-full sm:w-48">
           <form [formGroup]="filterForm">
-            <select formControlName="state"
+            <select
+              formControlName="state"
               class="w-full px-3 py-1.5 border border-border rounded-md bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm h-[38px]"
-              [disabled]="isLoading">
+              [disabled]="isLoading"
+            >
               <option *ngFor="let state of userStates" [value]="state.value">
                 {{ state.label }}
               </option>
@@ -40,22 +50,43 @@
 
         <!-- Filter Modo Org -->
         <div class="w-full sm:w-48">
-          <app-selector [options]="orgModes" [formControl]="$any(filterForm.get('include_non_production'))" size="sm"
-            variant="outline"></app-selector>
+          <app-selector
+            [options]="orgModes"
+            [formControl]="$any(filterForm.get('include_non_production'))"
+            size="sm"
+            variant="outline"
+          ></app-selector>
         </div>
 
         <!-- Actions -->
         <div class="flex gap-2 items-center sm:ml-auto">
-          <app-button variant="outline" size="sm" (clicked)="syncPanelUI()" [disabled]="isLoading" title="Sincronizar módulos visibles de usuarios admin">
+          <app-button
+            variant="outline"
+            size="sm"
+            (clicked)="syncPanelUI()"
+            [disabled]="isLoading"
+            title="Sincronizar módulos visibles de usuarios admin"
+          >
             <app-icon name="shield-check" [size]="16" slot="icon"></app-icon>
             <span class="hidden sm:inline ml-1">Sync Panel UI</span>
           </app-button>
 
-          <app-button variant="outline" size="sm" (clicked)="refreshUsers()" [disabled]="isLoading" title="Actualizar">
+          <app-button
+            variant="outline"
+            size="sm"
+            (clicked)="refreshUsers()"
+            [disabled]="isLoading"
+            title="Actualizar"
+          >
             <app-icon name="refresh-cw" [size]="16" slot="icon"></app-icon>
           </app-button>
 
-          <app-button variant="primary" size="sm" (clicked)="createUser()" iconName="plus">
+          <app-button
+            variant="primary"
+            size="sm"
+            (clicked)="createUser()"
+            iconName="plus"
+          >
             <span class="hidden sm:inline">Nuevo Usuario</span>
             <span class="sm:hidden">Nuevo</span>
           </app-button>
@@ -66,8 +97,13 @@
     <!-- Table Content -->
     <div class="relative min-h-[400px] p-2 md:p-4">
       <!-- Loading Overlay -->
-      <div *ngIf="isLoading" class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
-        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      <div
+        *ngIf="isLoading"
+        class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+      >
+        <div
+          class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+        ></div>
       </div>
 
       <!-- Table Section -->
@@ -79,13 +115,21 @@
         [loading]="isLoading"
         [emptyMessage]="getEmptyStateTitle()"
         (rowClick)="editUser($event)"
-        (sort)="onSortChange($event.column, $event.direction)">
-        
+        (sort)="onSortChange($event.column, $event.direction)"
+      >
         <!-- Empty State internal slot (standard practice) -->
-        <div class="p-8 flex justify-center w-full" *ngIf="!isLoading && users.length === 0">
-          <app-user-empty-state [title]="getEmptyStateTitle()" [description]="getEmptyStateDescription()"
-            (actionClick)="createUser()">
-          </app-user-empty-state>
+        <div
+          class="p-8 flex justify-center w-full"
+          *ngIf="!isLoading && users.length === 0"
+        >
+          <app-empty-state
+            icon="users"
+            [title]="getEmptyStateTitle()"
+            [description]="getEmptyStateDescription()"
+            actionButtonText="Crear Usuario"
+            (actionClick)="createUser()"
+          >
+          </app-empty-state>
         </div>
       </app-responsive-data-view>
 
@@ -99,11 +143,18 @@
         (pageChange)="onPageChange($event)"
       />
     </div>
+  </app-card>
 
-    <!-- Create User Modal -->
-    <app-user-create-modal [(isOpen)]="showCreateModal" (onUserCreated)="onUserCreated()"></app-user-create-modal>
+  <!-- Create User Modal -->
+  <app-user-create-modal
+    [(isOpen)]="showCreateModal"
+    (onUserCreated)="onUserCreated()"
+  ></app-user-create-modal>
 
-    <!-- Edit User Modal -->
-    <app-user-edit-modal [(isOpen)]="showEditModal" [user]="currentUser"
-      (onUserUpdated)="onUserUpdated()"></app-user-edit-modal>
-  </div>
+  <!-- Edit User Modal -->
+  <app-user-edit-modal
+    [(isOpen)]="showEditModal"
+    [user]="currentUser"
+    (onUserUpdated)="onUserUpdated()"
+  ></app-user-edit-modal>
+</div>

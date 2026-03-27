@@ -137,4 +137,7 @@ export class CreateOrderDto {
   @ValidateNested({ each: true })
   @Type(() => CreateOrderItemDto)
   items: CreateOrderItemDto[];
+
+  @IsOptional()
+  skip_schedule_validation?: boolean;
 }

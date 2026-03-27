@@ -2,11 +2,12 @@ import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 
 @Component({
   selector: 'vendix-purchase-summary',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent],
+  imports: [CommonModule, RouterModule, IconComponent, CardComponent],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
       <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
@@ -15,11 +16,23 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
         <span>Compras</span>
       </div>
       <h1 class="text-2xl font-bold text-text-primary">Resumen de Compras</h1>
-      <div class="bg-surface border border-border rounded-xl p-8 text-center">
-        <app-icon name="shopping-cart" [size]="48" class="text-text-tertiary mx-auto mb-4"></app-icon>
-        <h3 class="text-lg font-semibold text-text-primary">Próximamente</h3>
-        <p class="text-text-secondary mt-2">El reporte de compras estará disponible pronto.</p>
-      </div>
+      <app-card
+        shadow="none"
+        [responsivePadding]="true"
+        customClasses="text-center"
+      >
+        <app-icon
+          name="shopping-cart"
+          [size]="48"
+          class="text-text-tertiary mx-auto mb-4"
+        ></app-icon>
+        <span class="text-sm font-bold text-[var(--color-text-primary)]"
+          >Próximamente</span
+        >
+        <span class="text-xs text-[var(--color-text-secondary)]"
+          >El reporte de compras estará disponible pronto.</span
+        >
+      </app-card>
     </div>
   `,
 })

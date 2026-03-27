@@ -69,7 +69,7 @@ import {
               formControlName="acquisition_cost"
               [control]="form.get('acquisition_cost')"
               [required]="true"
-              type="number"
+              [currency]="true"
               placeholder="0"
             ></app-input>
           </div>

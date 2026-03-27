@@ -1,7 +1,19 @@
-import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  OnDestroy,
+  inject,
+  signal,
+  computed,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
-import { ReactiveFormsModule, FormsModule, FormBuilder, Validators } from '@angular/forms';
+import {
+  ReactiveFormsModule,
+  FormsModule,
+  FormBuilder,
+  Validators,
+} from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
 
 import { AccountingService } from '../../../services/accounting.service';
@@ -15,6 +27,7 @@ import {
 import {
   ModalComponent,
   ButtonComponent,
+  CardComponent,
   InputComponent,
   SelectorComponent,
   TextareaComponent,
@@ -30,6 +43,7 @@ import {
   ScrollableTab,
   BadgeVariant,
 } from '../../../../../../../shared/components/index';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'vendix-session-detail',
@@ -40,6 +54,7 @@ import {
     FormsModule,
     ModalComponent,
     ButtonComponent,
+    CardComponent,
     InputComponent,
     SelectorComponent,
     TextareaComponent,
@@ -58,6 +73,7 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
   private fb = inject(FormBuilder);
   private accounting_service = inject(AccountingService);
   private toast_service = inject(ToastService);
+  private currencyService = inject(CurrencyFormatService);
 
   // ── State ──────────────────────────────────────────────────────
   session = signal<ConsolidationSession | null>(null);
@@ -165,9 +181,11 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
 
   ic_card_config: ItemListCardConfig = {
     titleKey: 'from_store',
-    titleTransform: (item: any) => `${item.from_store?.name || '-'} → ${item.to_store?.name || '-'}`,
+    titleTransform: (item: any) =>
+      `${item.from_store?.name || '-'} → ${item.to_store?.name || '-'}`,
     subtitleKey: 'account',
-    subtitleTransform: (item: any) => item.account ? `${item.account.code} - ${item.account.name}` : '-',
+    subtitleTransform: (item: any) =>
+      item.account ? `${item.account.code} - ${item.account.name}` : '-',
     badgeKey: 'eliminated',
     badgeConfig: {
       type: 'status',
@@ -194,7 +212,8 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
       icon: 'x-circle',
       variant: 'danger',
       action: (row: IntercompanyTransaction) => this.onEliminateIC(row),
-      show: (row: IntercompanyTransaction) => !row.eliminated && this.session()?.status === 'in_progress',
+      show: (row: IntercompanyTransaction) =>
+        !row.eliminated && this.session()?.status === 'in_progress',
     },
   ];
 
@@ -316,7 +335,11 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (res) => this.session.set(res.data),
-        error: () => this.toast_service.show({ variant: 'error', description: 'Error cargando sesion' }),
+        error: () =>
+          this.toast_service.show({
+            variant: 'error',
+            description: 'Error cargando sesion',
+          }),
       });
   }
 
@@ -365,7 +388,14 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (res) => {
           const flatten = (accs: ChartAccount[]): ChartAccount[] =>
-            accs.reduce((arr, a) => [...arr, a, ...(a.children ? flatten(a.children) : [])], [] as ChartAccount[]);
+            accs.reduce(
+              (arr, a) => [
+                ...arr,
+                a,
+                ...(a.children ? flatten(a.children) : []),
+              ],
+              [] as ChartAccount[],
+            );
           this.accounts.set(flatten(res.data || []));
         },
       });
@@ -391,11 +421,17 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
         next: (res) => {
           this.session.set(res.data);
           this.action_loading.set(false);
-          this.toast_service.show({ variant: 'success', description: 'Sesion iniciada' });
+          this.toast_service.show({
+            variant: 'success',
+            description: 'Sesion iniciada',
+          });
         },
         error: () => {
           this.action_loading.set(false);
-          this.toast_service.show({ variant: 'error', description: 'Error iniciando sesion' });
+          this.toast_service.show({
+            variant: 'error',
+            description: 'Error iniciando sesion',
+          });
         },
       });
   }
@@ -411,11 +447,17 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
         next: (res) => {
           this.session.set(res.data);
           this.action_loading.set(false);
-          this.toast_service.show({ variant: 'success', description: 'Sesion completada' });
+          this.toast_service.show({
+            variant: 'success',
+            description: 'Sesion completada',
+          });
         },
         error: () => {
           this.action_loading.set(false);
-          this.toast_service.show({ variant: 'error', description: 'Error completando sesion' });
+          this.toast_service.show({
+            variant: 'error',
+            description: 'Error completando sesion',
+          });
         },
       });
   }
@@ -431,11 +473,17 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
         next: (res) => {
           this.session.set(res.data);
           this.action_loading.set(false);
-          this.toast_service.show({ variant: 'success', description: 'Sesion cancelada' });
+          this.toast_service.show({
+            variant: 'success',
+            description: 'Sesion cancelada',
+          });
         },
         error: () => {
           this.action_loading.set(false);
-          this.toast_service.show({ variant: 'error', description: 'Error cancelando sesion' });
+          this.toast_service.show({
+            variant: 'error',
+            description: 'Error cancelando sesion',
+          });
         },
       });
   }
@@ -452,11 +500,17 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
         next: (res) => {
           this.ic_transactions.set(res.data || []);
           this.ic_loading.set(false);
-          this.toast_service.show({ variant: 'success', description: 'Deteccion completada' });
+          this.toast_service.show({
+            variant: 'success',
+            description: 'Deteccion completada',
+          });
         },
         error: () => {
           this.ic_loading.set(false);
-          this.toast_service.show({ variant: 'error', description: 'Error detectando transacciones' });
+          this.toast_service.show({
+            variant: 'error',
+            description: 'Error detectando transacciones',
+          });
         },
       });
   }
@@ -471,11 +525,17 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
       .subscribe({
         next: () => {
           this.loadICTransactions(id);
-          this.toast_service.show({ variant: 'success', description: 'Todas las transacciones eliminadas' });
+          this.toast_service.show({
+            variant: 'success',
+            description: 'Todas las transacciones eliminadas',
+          });
         },
         error: () => {
           this.ic_loading.set(false);
-          this.toast_service.show({ variant: 'error', description: 'Error eliminando transacciones' });
+          this.toast_service.show({
+            variant: 'error',
+            description: 'Error eliminando transacciones',
+          });
         },
       });
   }
@@ -489,11 +549,17 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
         next: () => {
           const session_id = this.session()?.id;
           if (session_id) this.loadICTransactions(session_id);
-          this.toast_service.show({ variant: 'success', description: 'Transaccion eliminada' });
+          this.toast_service.show({
+            variant: 'success',
+            description: 'Transaccion eliminada',
+          });
         },
         error: () => {
           this.ic_loading.set(false);
-          this.toast_service.show({ variant: 'error', description: 'Error eliminando transaccion' });
+          this.toast_service.show({
+            variant: 'error',
+            description: 'Error eliminando transaccion',
+          });
         },
       });
   }
@@ -505,7 +571,8 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
     if (!session_id) return;
 
     this.adj_submitting.set(true);
-    const { account_id, type, debit_amount, credit_amount, description } = this.adj_form.getRawValue();
+    const { account_id, type, debit_amount, credit_amount, description } =
+      this.adj_form.getRawValue();
 
     this.accounting_service
       .addConsolidationAdjustment(session_id, {
@@ -521,12 +588,22 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
           this.adjustments.update((arr) => [...arr, res.data]);
           this.adj_submitting.set(false);
           this.is_adjustment_modal_open = false;
-          this.adj_form.reset({ type: 'elimination', debit_amount: 0, credit_amount: 0 });
-          this.toast_service.show({ variant: 'success', description: 'Ajuste agregado' });
+          this.adj_form.reset({
+            type: 'elimination',
+            debit_amount: 0,
+            credit_amount: 0,
+          });
+          this.toast_service.show({
+            variant: 'success',
+            description: 'Ajuste agregado',
+          });
         },
         error: () => {
           this.adj_submitting.set(false);
-          this.toast_service.show({ variant: 'error', description: 'Error agregando ajuste' });
+          this.toast_service.show({
+            variant: 'error',
+            description: 'Error agregando ajuste',
+          });
         },
       });
   }
@@ -540,11 +617,17 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
         next: () => {
           this.adjustments.update((arr) => arr.filter((a) => a.id !== adj.id));
           this.adj_loading.set(false);
-          this.toast_service.show({ variant: 'success', description: 'Ajuste eliminado' });
+          this.toast_service.show({
+            variant: 'success',
+            description: 'Ajuste eliminado',
+          });
         },
         error: () => {
           this.adj_loading.set(false);
-          this.toast_service.show({ variant: 'error', description: 'Error eliminando ajuste' });
+          this.toast_service.show({
+            variant: 'error',
+            description: 'Error eliminando ajuste',
+          });
         },
       });
   }
@@ -570,7 +653,10 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
         },
         error: () => {
           this.auto_eliminate_loading.set(false);
-          this.toast_service.show({ variant: 'error', description: 'Error en auto-eliminacion' });
+          this.toast_service.show({
+            variant: 'error',
+            description: 'Error en auto-eliminacion',
+          });
         },
       });
   }
@@ -604,7 +690,10 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
         },
         error: () => {
           this.drilldown_loading.set(false);
-          this.toast_service.show({ variant: 'error', description: 'Error cargando transacciones' });
+          this.toast_service.show({
+            variant: 'error',
+            description: 'Error cargando transacciones',
+          });
         },
       });
   }
@@ -624,11 +713,17 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
           if (url) {
             window.open(url, '_blank');
           }
-          this.toast_service.show({ variant: 'success', description: 'Reporte exportado exitosamente' });
+          this.toast_service.show({
+            variant: 'success',
+            description: 'Reporte exportado exitosamente',
+          });
         },
         error: () => {
           this.export_loading.set(false);
-          this.toast_service.show({ variant: 'error', description: 'Error exportando reporte' });
+          this.toast_service.show({
+            variant: 'error',
+            description: 'Error exportando reporte',
+          });
         },
       });
   }
@@ -655,7 +750,8 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
         obs$ = this.accounting_service.getConsolidatedBalanceSheet(session_id);
         break;
       case 'income-statement':
-        obs$ = this.accounting_service.getConsolidatedIncomeStatement(session_id);
+        obs$ =
+          this.accounting_service.getConsolidatedIncomeStatement(session_id);
         break;
       case 'eliminations':
         obs$ = this.accounting_service.getEliminationDetail(session_id);
@@ -672,7 +768,10 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
       },
       error: () => {
         this.report_loading.set(false);
-        this.toast_service.show({ variant: 'error', description: 'Error cargando reporte' });
+        this.toast_service.show({
+          variant: 'error',
+          description: 'Error cargando reporte',
+        });
       },
     });
   }
@@ -712,7 +811,6 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
   }
 
   formatCurrency(val: any): string {
-    const num = Number(val) || 0;
-    return `$${num.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return this.currencyService.format(Number(val) || 0);
   }
 }

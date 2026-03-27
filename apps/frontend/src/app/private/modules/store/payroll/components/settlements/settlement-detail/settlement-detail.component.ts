@@ -9,6 +9,7 @@ import { ToastService } from '../../../../../../../shared/components/toast/toast
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'app-settlement-detail',
@@ -80,7 +81,7 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
           </div>
           <div>
             <span class="text-xs text-text-secondary block">Salario Base</span>
-            <span class="text-sm font-medium">\${{ formatNumber(settlement.base_salary) }}</span>
+            <span class="text-sm font-medium">{{ formatNumber(settlement.base_salary) }}</span>
           </div>
         </div>
 
@@ -92,27 +93,27 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
               <tbody>
                 <tr class="border-b border-border">
                   <td class="py-2 px-3 text-text-secondary">Cesantias</td>
-                  <td class="py-2 px-3 text-right font-medium">\${{ formatNumber(settlement.severance) }}</td>
+                  <td class="py-2 px-3 text-right font-medium">{{ formatNumber(settlement.severance) }}</td>
                 </tr>
                 <tr class="border-b border-border">
                   <td class="py-2 px-3 text-text-secondary">Intereses sobre Cesantias</td>
-                  <td class="py-2 px-3 text-right font-medium">\${{ formatNumber(settlement.severance_interest) }}</td>
+                  <td class="py-2 px-3 text-right font-medium">{{ formatNumber(settlement.severance_interest) }}</td>
                 </tr>
                 <tr class="border-b border-border">
                   <td class="py-2 px-3 text-text-secondary">Prima de Servicios</td>
-                  <td class="py-2 px-3 text-right font-medium">\${{ formatNumber(settlement.bonus) }}</td>
+                  <td class="py-2 px-3 text-right font-medium">{{ formatNumber(settlement.bonus) }}</td>
                 </tr>
                 <tr class="border-b border-border">
                   <td class="py-2 px-3 text-text-secondary">Vacaciones</td>
-                  <td class="py-2 px-3 text-right font-medium">\${{ formatNumber(settlement.vacation) }}</td>
+                  <td class="py-2 px-3 text-right font-medium">{{ formatNumber(settlement.vacation) }}</td>
                 </tr>
                 <tr class="border-b border-border">
                   <td class="py-2 px-3 text-text-secondary">Salario Pendiente</td>
-                  <td class="py-2 px-3 text-right font-medium">\${{ formatNumber(settlement.pending_salary) }}</td>
+                  <td class="py-2 px-3 text-right font-medium">{{ formatNumber(settlement.pending_salary) }}</td>
                 </tr>
                 <tr *ngIf="settlement.indemnification > 0">
                   <td class="py-2 px-3 text-text-secondary">Indemnizacion</td>
-                  <td class="py-2 px-3 text-right font-medium text-blue-600">\${{ formatNumber(settlement.indemnification) }}</td>
+                  <td class="py-2 px-3 text-right font-medium text-blue-600">{{ formatNumber(settlement.indemnification) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -127,15 +128,15 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
               <tbody>
                 <tr class="border-b border-border">
                   <td class="py-2 px-3 text-text-secondary">Salud</td>
-                  <td class="py-2 px-3 text-right font-medium text-red-600">\${{ formatNumber(settlement.health_deduction) }}</td>
+                  <td class="py-2 px-3 text-right font-medium text-red-600">{{ formatNumber(settlement.health_deduction) }}</td>
                 </tr>
                 <tr class="border-b border-border">
                   <td class="py-2 px-3 text-text-secondary">Pension</td>
-                  <td class="py-2 px-3 text-right font-medium text-red-600">\${{ formatNumber(settlement.pension_deduction) }}</td>
+                  <td class="py-2 px-3 text-right font-medium text-red-600">{{ formatNumber(settlement.pension_deduction) }}</td>
                 </tr>
                 <tr *ngIf="settlement.other_deductions > 0">
                   <td class="py-2 px-3 text-text-secondary">Otras Deducciones</td>
-                  <td class="py-2 px-3 text-right font-medium text-red-600">\${{ formatNumber(settlement.other_deductions) }}</td>
+                  <td class="py-2 px-3 text-right font-medium text-red-600">{{ formatNumber(settlement.other_deductions) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -146,15 +147,15 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
         <div class="mb-6 grid grid-cols-1 md:grid-cols-3 gap-3">
           <div class="p-3 bg-blue-50 rounded-lg border border-blue-100">
             <span class="text-xs text-blue-600 block">Total Bruto</span>
-            <span class="text-lg font-bold text-blue-800">\${{ formatNumber(settlement.gross_settlement) }}</span>
+            <span class="text-lg font-bold text-blue-800">{{ formatNumber(settlement.gross_settlement) }}</span>
           </div>
           <div class="p-3 bg-red-50 rounded-lg border border-red-100">
             <span class="text-xs text-red-600 block">Total Deducciones</span>
-            <span class="text-lg font-bold text-red-800">\${{ formatNumber(settlement.total_deductions) }}</span>
+            <span class="text-lg font-bold text-red-800">{{ formatNumber(settlement.total_deductions) }}</span>
           </div>
           <div class="p-3 bg-green-50 rounded-lg border border-green-100">
             <span class="text-xs text-green-600 block">NETO A PAGAR</span>
-            <span class="text-xl font-bold text-green-800">\${{ formatNumber(settlement.net_settlement) }}</span>
+            <span class="text-xl font-bold text-green-800">{{ formatNumber(settlement.net_settlement) }}</span>
           </div>
         </div>
 
@@ -251,6 +252,7 @@ export class SettlementDetailComponent implements OnDestroy {
 
   private payrollService = inject(PayrollService);
   private toastService = inject(ToastService);
+  private currencyService = inject(CurrencyFormatService);
   private destroy$ = new Subject<void>();
 
   actionLoading = false;
@@ -262,7 +264,7 @@ export class SettlementDetailComponent implements OnDestroy {
   }
 
   formatNumber(value: number): string {
-    return (value || 0).toLocaleString('es-CO');
+    return this.currencyService.format(Number(value) || 0);
   }
 
   onRecalculate(): void {

@@ -12,6 +12,8 @@ metadata:
   auto_invoke: "Displaying data lists, implementing responsive tables, creating mobile card views"
 ---
 
+> **Tip**: Antes de usar TableComponent, ItemListComponent o ResponsiveDataViewComponent, consulta su README en `apps/frontend/src/app/shared/components/{table,item-list,responsive-data-view}/README.md` para conocer sus inputs, outputs y patrones de uso.
+
 ## When to Use
 
 - Displaying lists of records (customers, products, orders, etc.)

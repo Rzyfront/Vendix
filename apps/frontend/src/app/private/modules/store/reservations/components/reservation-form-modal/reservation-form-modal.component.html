@@ -1,0 +1,231 @@
+<app-modal
+  [isOpen]="isOpen"
+  (isOpenChange)="isOpenChange.emit($event)"
+  (cancel)="onCancel()"
+  [size]="'md'"
+  title="Nueva Reserva"
+  subtitle="Crea una nueva reserva para un servicio"
+>
+  <!-- Step indicator -->
+  <div class="flex items-center justify-center gap-2 mb-6">
+    @for (step of [1, 2, 3]; track step) {
+      <div class="flex items-center gap-2">
+        <div
+          class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors"
+          [class.bg-primary]="currentStep >= step"
+          [class.text-white]="currentStep >= step"
+          [class.bg-gray-200]="currentStep < step"
+          [class.text-gray-500]="currentStep < step"
+        >
+          {{ step }}
+        </div>
+        @if (step < 3) {
+          <div
+            class="w-8 h-0.5 transition-colors"
+            [class.bg-primary]="currentStep > step"
+            [class.bg-gray-200]="currentStep <= step"
+          ></div>
+        }
+      </div>
+    }
+  </div>
+
+  <form [formGroup]="form">
+    <!-- Step 1: Servicio y Fecha -->
+    @if (currentStep === 1) {
+      <div class="space-y-4">
+        <h3 class="text-sm font-semibold text-text-primary mb-3">Selecciona servicio y fecha</h3>
+
+        <app-selector
+          formControlName="product_id"
+          label="Servicio"
+          placeholder="Selecciona un servicio"
+          [options]="serviceProducts"
+          [required]="true"
+        ></app-selector>
+
+        <app-input
+          formControlName="date"
+          label="Fecha"
+          type="date"
+          [required]="true"
+          [error]="getFieldError('date')"
+          (blur)="onFieldBlur('date')"
+          customWrapperClass="mt-0"
+        ></app-input>
+
+        <app-selector
+          formControlName="channel"
+          label="Canal"
+          placeholder="Selecciona un canal"
+          [options]="channelOptions"
+        ></app-selector>
+      </div>
+    }
+
+    <!-- Step 2: Horario -->
+    @if (currentStep === 2) {
+      <div class="space-y-4">
+        <h3 class="text-sm font-semibold text-text-primary mb-3">Selecciona un horario</h3>
+
+        @if (loadingSlots) {
+          <div class="p-6 text-center">
+            <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+            <p class="mt-2 text-sm text-text-secondary">Cargando horarios disponibles...</p>
+          </div>
+        }
+
+        @if (!loadingSlots && availableSlots.length === 0) {
+          <div class="p-6 text-center text-gray-500">
+            <app-icon name="calendar" [size]="32" class="mx-auto mb-2 text-gray-300"></app-icon>
+            <p class="text-sm">No hay horarios disponibles para esta fecha.</p>
+            <p class="text-xs mt-1">Intenta con otra fecha o servicio.</p>
+          </div>
+        }
+
+        @if (!loadingSlots && availableSlots.length > 0) {
+          <div class="grid grid-cols-3 gap-2 max-h-[240px] overflow-y-auto">
+            @for (slot of availableSlots; track slot.start_time) {
+              <button
+                type="button"
+                class="p-3 rounded-lg border text-center text-sm transition-colors cursor-pointer"
+                [class.border-primary]="selectedSlot === slot"
+                [class.bg-primary/5]="selectedSlot === slot"
+                [class.text-primary]="selectedSlot === slot"
+                [class.font-semibold]="selectedSlot === slot"
+                [class.border-border]="selectedSlot !== slot"
+                [class.hover:border-primary/50]="selectedSlot !== slot"
+                (click)="selectSlot(slot)"
+              >
+                <div class="font-medium">{{ slot.start_time.substring(0, 5) }}</div>
+                <div class="text-xs text-text-secondary mt-0.5">
+                  {{ slot.available }} disponible{{ slot.available > 1 ? 's' : '' }}
+                </div>
+              </button>
+            }
+          </div>
+        }
+
+        <!-- Manual time input as fallback -->
+        <div class="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-border">
+          <app-input
+            formControlName="start_time"
+            label="Hora inicio"
+            type="text"
+            placeholder="HH:mm"
+            [required]="true"
+            [error]="getFieldError('start_time')"
+            (blur)="onFieldBlur('start_time')"
+            customWrapperClass="mt-0"
+          ></app-input>
+
+          <app-input
+            formControlName="end_time"
+            label="Hora fin"
+            type="text"
+            placeholder="HH:mm"
+            [required]="true"
+            [error]="getFieldError('end_time')"
+            (blur)="onFieldBlur('end_time')"
+            customWrapperClass="mt-0"
+          ></app-input>
+        </div>
+      </div>
+    }
+
+    <!-- Step 3: Cliente y Notas -->
+    @if (currentStep === 3) {
+      <div class="space-y-4">
+        <h3 class="text-sm font-semibold text-text-primary mb-3">Datos del cliente</h3>
+
+        <div>
+          <label class="block text-sm font-medium mb-1.5">Cliente *</label>
+          @if (selectedCustomer) {
+            <div class="flex items-center gap-2 px-3 py-2 rounded-lg border border-primary bg-primary/5 text-sm">
+              <app-icon name="user" [size]="16"></app-icon>
+              <span class="font-medium">{{ selectedCustomer.first_name }} {{ selectedCustomer.last_name }}</span>
+              @if (selectedCustomer.email) {
+                <span class="text-text-secondary text-xs">{{ selectedCustomer.email }}</span>
+              }
+              <button type="button" class="ml-auto text-text-secondary hover:text-text-primary" (click)="clearCustomer()">
+                <app-icon name="x" [size]="14"></app-icon>
+              </button>
+            </div>
+          } @else {
+            <input
+              type="text"
+              class="w-full px-3 py-2 border border-border rounded-lg text-sm bg-surface outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+              placeholder="Buscar por nombre, email o teléfono..."
+              [value]="customerSearch"
+              (input)="onCustomerSearch($any($event.target).value)"
+            />
+            @if (searchingCustomers) {
+              <div class="flex justify-center py-2">
+                <app-spinner size="sm" color="primary"></app-spinner>
+              </div>
+            }
+            @if (customers.length > 0) {
+              <div class="border border-border rounded-lg mt-1 max-h-[200px] overflow-y-auto">
+                @for (customer of customers; track customer.id) {
+                  <button
+                    type="button"
+                    class="flex items-center gap-2.5 w-full px-3 py-2.5 text-left hover:bg-surface-hover border-b border-border last:border-b-0"
+                    (click)="selectCustomer(customer)"
+                  >
+                    <app-icon name="user" [size]="16"></app-icon>
+                    <div class="flex flex-col">
+                      <span class="font-medium text-sm">{{ customer.first_name }} {{ customer.last_name }}</span>
+                      <span class="text-xs text-text-secondary">{{ customer.email || customer.phone }}</span>
+                    </div>
+                  </button>
+                }
+              </div>
+            }
+          }
+        </div>
+
+        <app-textarea
+          formControlName="notes"
+          label="Notas (opcional)"
+          placeholder="Notas adicionales para la reserva..."
+        ></app-textarea>
+      </div>
+    }
+  </form>
+
+  <!-- Footer -->
+  <div slot="footer" class="flex justify-between gap-3">
+    <div>
+      @if (currentStep > 1) {
+        <app-button variant="ghost" (clicked)="prevStep()">
+          Anterior
+        </app-button>
+      }
+    </div>
+
+    <div class="flex gap-3">
+      <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
+
+      @if (currentStep < totalSteps) {
+        <app-button
+          variant="primary"
+          [disabled]="!canGoNext"
+          (clicked)="nextStep()"
+        >
+          Siguiente
+        </app-button>
+      }
+
+      @if (currentStep === totalSteps) {
+        <app-button
+          variant="primary"
+          [disabled]="form.invalid || loading"
+          [loading]="loading"
+          (clicked)="onSubmit()"
+        >
+          Crear Reserva
+        </app-button>
+      }
+    </div>
+  </div>
+</app-modal>

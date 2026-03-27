@@ -11,6 +11,7 @@ import {
 import { closeFiscalPeriod } from '../../state/actions/accounting.actions';
 import { FiscalPeriodCreateComponent } from './fiscal-period-create/fiscal-period-create.component';
 import {
+  CardComponent,
   StatsComponent,
   ResponsiveDataViewComponent,
   OptionsDropdownComponent,
@@ -32,6 +33,7 @@ interface PeriodStats {
   standalone: true,
   imports: [
     CommonModule,
+    CardComponent,
     StatsComponent,
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
@@ -39,9 +41,10 @@ interface PeriodStats {
   ],
   template: `
     <div class="w-full">
-
       <!-- Stats: Sticky on mobile, static on desktop -->
-      <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         @if (stats$ | async; as stats) {
           <app-stats
             title="Total Periodos"
@@ -79,15 +82,19 @@ interface PeriodStats {
       </div>
 
       <!-- Unified Container: Header + Data -->
-      <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-                  md:border md:border-border">
-
+      <app-card [responsive]="true" [padding]="false">
         <!-- Header -->
-        <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                    md:mt-0 md:static md:bg-transparent md:px-4 md:py-4 md:border-b md:border-border">
-          <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-            <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
-                       md:text-lg md:font-semibold md:text-text-primary">
+        <div
+          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                    md:mt-0 md:static md:bg-transparent md:px-4 md:py-4 md:border-b md:border-border"
+        >
+          <div
+            class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+          >
+            <h2
+              class="text-[13px] font-bold text-gray-600 tracking-wide
+                       md:text-lg md:font-semibold md:text-text-primary"
+            >
               Periodos Fiscales ({{ (periods$ | async)?.length || 0 }})
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
@@ -112,7 +119,7 @@ interface PeriodStats {
             emptyIcon="calendar"
           ></app-responsive-data-view>
         </div>
-      </div>
+      </app-card>
 
       <!-- Create Modal -->
       <vendix-fiscal-period-create
@@ -139,7 +146,12 @@ export class FiscalPeriodsComponent implements OnInit {
   is_create_modal_open = false;
 
   dropdown_actions: DropdownAction[] = [
-    { label: 'Nuevo Periodo', icon: 'plus', action: 'create', variant: 'primary' },
+    {
+      label: 'Nuevo Periodo',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   columns: TableColumn[] = [
@@ -200,13 +212,15 @@ export class FiscalPeriodsComponent implements OnInit {
         key: 'start_date',
         label: 'Inicio',
         icon: 'calendar',
-        transform: (val: any) => (val ? new Date(val).toLocaleDateString() : '-'),
+        transform: (val: any) =>
+          val ? new Date(val).toLocaleDateString() : '-',
       },
       {
         key: 'end_date',
         label: 'Fin',
         icon: 'calendar',
-        transform: (val: any) => (val ? new Date(val).toLocaleDateString() : '-'),
+        transform: (val: any) =>
+          val ? new Date(val).toLocaleDateString() : '-',
       },
     ],
   };

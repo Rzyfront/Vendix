@@ -1,6 +1,12 @@
 import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { debounceTime, distinctUntilChanged, Subject, takeUntil, finalize } from 'rxjs';
+import {
+  debounceTime,
+  distinctUntilChanged,
+  Subject,
+  takeUntil,
+  finalize,
+} from 'rxjs';
 import {
   AuditLog,
   AuditStats,
@@ -12,7 +18,6 @@ import {
 import { AuditService } from './services/audit.service';
 import {
   AuditStatsComponent,
-  AuditEmptyStateComponent,
   AuditDetailsModalComponent,
 } from './components/index';
 
@@ -28,6 +33,8 @@ import {
   ResponsiveDataViewComponent,
   ItemListCardConfig,
   PaginationComponent,
+  EmptyStateComponent,
+  CardComponent,
 } from '../../../../shared/components/index';
 import {
   FormsModule,
@@ -44,7 +51,7 @@ import {
     FormsModule,
     ReactiveFormsModule,
     AuditStatsComponent,
-    AuditEmptyStateComponent,
+    EmptyStateComponent,
     AuditDetailsModalComponent,
     ResponsiveDataViewComponent,
     InputsearchComponent,
@@ -52,6 +59,7 @@ import {
     ButtonComponent,
     SelectorComponent,
     PaginationComponent,
+    CardComponent,
   ],
   templateUrl: './audit.component.html',
 })
@@ -97,9 +105,9 @@ export class AuditComponent implements OnInit, OnDestroy {
           CREATE: '#10b981', // green-500
           UPDATE: '#3b82f6', // blue-500
           DELETE: '#ef4444', // red-500
-          LOGIN: '#34d399',  // emerald-400
+          LOGIN: '#34d399', // emerald-400
           LOGOUT: '#6b7280', // gray-500
-          READ: '#f59e0b',   // amber-500
+          READ: '#f59e0b', // amber-500
           PERMISSION_CHANGE: '#8b5cf6', // violet-500
         },
       },
@@ -182,16 +190,24 @@ export class AuditComponent implements OnInit, OnDestroy {
         CREATE: '#10b981', // green-500
         UPDATE: '#3b82f6', // blue-500
         DELETE: '#ef4444', // red-500
-        LOGIN: '#34d399',  // emerald-400
+        LOGIN: '#34d399', // emerald-400
         LOGOUT: '#6b7280', // gray-500
-        READ: '#f59e0b',   // amber-500
+        READ: '#f59e0b', // amber-500
         PERMISSION_CHANGE: '#8b5cf6', // violet-500
       },
     },
     badgeTransform: (value: AuditAction) => this.getActionLabel(value),
     detailKeys: [
-      { key: 'resource', label: 'Recurso', transform: (v) => this.getResourceDisplay(v) },
-      { key: 'created_at', label: 'Fecha', transform: (v) => this.formatDate(v) },
+      {
+        key: 'resource',
+        label: 'Recurso',
+        transform: (v) => this.getResourceDisplay(v),
+      },
+      {
+        key: 'created_at',
+        label: 'Fecha',
+        transform: (v) => this.formatDate(v),
+      },
     ],
   };
 
@@ -220,7 +236,7 @@ export class AuditComponent implements OnInit, OnDestroy {
     // Loading state from service
     this.auditService.isLoading$
       .pipe(takeUntil(this.destroy$))
-      .subscribe(loading => this.isLoading.set(loading));
+      .subscribe((loading) => this.isLoading.set(loading));
   }
 
   ngOnDestroy(): void {
@@ -239,28 +255,32 @@ export class AuditComponent implements OnInit, OnDestroy {
       toDate: filters.toDate || undefined,
     };
 
-    this.auditService.getAuditLogs(query)
+    this.auditService
+      .getAuditLogs(query)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response: AuditLogsResponse) => {
           this.auditLogs.set(response.logs || []);
           this.pagination.total = response.total || 0;
-          this.pagination.totalPages = Math.ceil(this.pagination.total / this.pagination.limit);
+          this.pagination.totalPages = Math.ceil(
+            this.pagination.total / this.pagination.limit,
+          );
         },
         error: () => {
           this.auditLogs.set([]);
           this.toastService.error('Error al cargar logs');
-        }
+        },
       });
   }
 
   loadAuditStats(): void {
     const filters = this.filterForm.value;
-    this.auditService.getAuditStats(filters.fromDate, filters.toDate)
+    this.auditService
+      .getAuditStats(filters.fromDate, filters.toDate)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (stats) => this.auditStats.set(stats),
-        error: () => this.toastService.error('Error al cargar estadísticas')
+        error: () => this.toastService.error('Error al cargar estadísticas'),
       });
   }
 
@@ -333,7 +353,9 @@ export class AuditComponent implements OnInit, OnDestroy {
   }
 
   getEmptyStateTitle(): string {
-    return this.hasActiveFilters() ? 'Sin resultados para la búsqueda' : 'No hay registros de auditoría';
+    return this.hasActiveFilters()
+      ? 'Sin resultados para la búsqueda'
+      : 'No hay registros de auditoría';
   }
 
   getEmptyStateDescription(): string {

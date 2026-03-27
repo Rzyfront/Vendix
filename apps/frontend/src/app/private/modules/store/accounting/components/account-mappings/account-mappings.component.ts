@@ -3,7 +3,10 @@ import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 
-import { AccountMapping, ChartAccount } from '../../interfaces/accounting.interface';
+import {
+  AccountMapping,
+  ChartAccount,
+} from '../../interfaces/accounting.interface';
 import {
   selectAccountMappings,
   selectAccountMappingsLoading,
@@ -17,6 +20,8 @@ import {
 } from '../../state/actions/accounting.actions';
 import {
   ButtonComponent,
+  CardComponent,
+  EmptyStateComponent,
   IconComponent,
 } from '../../../../../../shared/components/index';
 
@@ -34,7 +39,8 @@ const MAPPING_LABELS: Record<string, string> = {
   'invoice.validated.vat_payable': 'IVA por Pagar',
   'payment.received.cash': 'Caja (Efectivo)',
   'payment.received.bank': 'Banco (Transferencia / Tarjeta)',
-  'payment.received.accounts_receivable': 'Cuentas por Cobrar (recaudo factura)',
+  'payment.received.accounts_receivable':
+    'Cuentas por Cobrar (recaudo factura)',
   'payment.received.revenue': 'Ingresos por Ventas (venta directa)',
   'payment.received.vat_payable': 'IVA por Pagar (venta directa)',
   'expense.approved.expense': 'Gastos Diversos',
@@ -58,7 +64,8 @@ const MAPPING_LABELS: Record<string, string> = {
   'purchase_order.received.accounts_payable': 'Proveedores',
   'inventory.adjusted.inventory': 'Inventario (Ajuste)',
   'inventory.adjusted.shrinkage': 'Faltantes de Inventario',
-  'credit_sale.created.accounts_receivable': 'Cuentas por Cobrar (Venta a Credito)',
+  'credit_sale.created.accounts_receivable':
+    'Cuentas por Cobrar (Venta a Credito)',
   'credit_sale.created.revenue': 'Ingresos (Venta a Credito)',
   'credit_sale.created.vat_payable': 'IVA por Pagar (Venta a Credito)',
   'payment.received.sales_discount': 'Descuentos en Ventas (POS)',
@@ -70,14 +77,16 @@ const MAPPING_LABELS: Record<string, string> = {
   'layaway.payment.cash': 'Caja (Cuota Separe)',
   'layaway.payment.bank': 'Banco (Cuota Separe)',
   'layaway.payment.customer_advance': 'Anticipos de Clientes (Separe)',
-  'layaway.completed.customer_advance': 'Anticipos de Clientes (Separe Completado)',
+  'layaway.completed.customer_advance':
+    'Anticipos de Clientes (Separe Completado)',
   'layaway.completed.revenue': 'Ingresos por Ventas (Separe Completado)',
   // Fixed Assets - Depreciation
   'depreciation.monthly.depreciation_expense': 'Gasto por Depreciacion',
   'depreciation.monthly.accumulated_depreciation': 'Depreciacion Acumulada',
   // Fixed Assets - Disposal
   'disposal.fixed_asset.asset_cost': 'Propiedad Planta y Equipo',
-  'disposal.fixed_asset.accumulated_depreciation': 'Depreciacion Acumulada (Baja)',
+  'disposal.fixed_asset.accumulated_depreciation':
+    'Depreciacion Acumulada (Baja)',
   'disposal.fixed_asset.loss': 'Perdida en Baja de Activos',
   'disposal.fixed_asset.gain': 'Utilidad en Venta de Activos',
   'disposal.fixed_asset.cash': 'Caja (Venta Activo)',
@@ -96,32 +105,104 @@ const MAPPING_LABELS: Record<string, string> = {
   'settlement.paid.bank': 'Bancos (Pago Liquidacion)',
 };
 
-const GROUP_DEFINITIONS: Array<{ key: string; label: string; icon: string; prefixes: string[] }> = [
-  { key: 'invoicing', label: 'Facturacion', icon: 'file-text', prefixes: ['invoice.validated.'] },
-  { key: 'payments', label: 'Pagos', icon: 'credit-card', prefixes: ['payment.received.'] },
-  { key: 'expenses', label: 'Gastos', icon: 'trending-down', prefixes: ['expense.approved.', 'expense.paid.'] },
-  { key: 'payroll', label: 'Nomina', icon: 'users', prefixes: ['payroll.approved.', 'payroll.paid.'] },
-  { key: 'credit_sales', label: 'Ventas a Credito', icon: 'file-plus', prefixes: ['credit_sale.created.'] },
-  { key: 'inventory', label: 'Inventario', icon: 'package', prefixes: ['order.completed.', 'refund.completed.', 'purchase_order.received.', 'purchase_order.payment.', 'inventory.adjusted.'] },
-  { key: 'layaway', label: 'Plan Separe', icon: 'clock', prefixes: ['layaway.payment.', 'layaway.completed.'] },
-  { key: 'fixed_assets', label: 'Activos Fijos', icon: 'hard-drive', prefixes: ['depreciation.monthly.', 'disposal.fixed_asset.'] },
-  { key: 'withholding', label: 'Retencion en la Fuente', icon: 'percent', prefixes: ['withholding.applied.'] },
-  { key: 'settlements', label: 'Liquidaciones', icon: 'user-minus', prefixes: ['settlement.paid.'] },
+const GROUP_DEFINITIONS: Array<{
+  key: string;
+  label: string;
+  icon: string;
+  prefixes: string[];
+}> = [
+  {
+    key: 'invoicing',
+    label: 'Facturacion',
+    icon: 'file-text',
+    prefixes: ['invoice.validated.'],
+  },
+  {
+    key: 'payments',
+    label: 'Pagos',
+    icon: 'credit-card',
+    prefixes: ['payment.received.'],
+  },
+  {
+    key: 'expenses',
+    label: 'Gastos',
+    icon: 'trending-down',
+    prefixes: ['expense.approved.', 'expense.paid.'],
+  },
+  {
+    key: 'payroll',
+    label: 'Nomina',
+    icon: 'users',
+    prefixes: ['payroll.approved.', 'payroll.paid.'],
+  },
+  {
+    key: 'credit_sales',
+    label: 'Ventas a Credito',
+    icon: 'file-plus',
+    prefixes: ['credit_sale.created.'],
+  },
+  {
+    key: 'inventory',
+    label: 'Inventario',
+    icon: 'package',
+    prefixes: [
+      'order.completed.',
+      'refund.completed.',
+      'purchase_order.received.',
+      'purchase_order.payment.',
+      'inventory.adjusted.',
+    ],
+  },
+  {
+    key: 'layaway',
+    label: 'Plan Separe',
+    icon: 'clock',
+    prefixes: ['layaway.payment.', 'layaway.completed.'],
+  },
+  {
+    key: 'fixed_assets',
+    label: 'Activos Fijos',
+    icon: 'hard-drive',
+    prefixes: ['depreciation.monthly.', 'disposal.fixed_asset.'],
+  },
+  {
+    key: 'withholding',
+    label: 'Retencion en la Fuente',
+    icon: 'percent',
+    prefixes: ['withholding.applied.'],
+  },
+  {
+    key: 'settlements',
+    label: 'Liquidaciones',
+    icon: 'user-minus',
+    prefixes: ['settlement.paid.'],
+  },
 ];
 
 @Component({
   selector: 'vendix-account-mappings',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, IconComponent],
+  imports: [
+    CommonModule,
+    ButtonComponent,
+    CardComponent,
+    IconComponent,
+    EmptyStateComponent,
+  ],
   templateUrl: './account-mappings.component.html',
   styleUrls: ['./account-mappings.component.scss'],
 })
 export class AccountMappingsComponent implements OnInit {
   private store = inject(Store);
 
-  mappings$: Observable<AccountMapping[]> = this.store.select(selectAccountMappings);
-  loading$: Observable<boolean> = this.store.select(selectAccountMappingsLoading);
-  leaf_accounts$: Observable<ChartAccount[]> = this.store.select(selectLeafAccounts);
+  mappings$: Observable<AccountMapping[]> = this.store.select(
+    selectAccountMappings,
+  );
+  loading$: Observable<boolean> = this.store.select(
+    selectAccountMappingsLoading,
+  );
+  leaf_accounts$: Observable<ChartAccount[]> =
+    this.store.select(selectLeafAccounts);
 
   mapping_groups: MappingGroup[] = [];
   leaf_accounts: ChartAccount[] = [];
@@ -177,15 +258,21 @@ export class AccountMappingsComponent implements OnInit {
 
   saveMappings(): void {
     if (!this.has_changes) return;
-    const mappings = Array.from(this.changed_mappings.entries()).map(([mapping_key, account_id]) => ({
-      mapping_key,
-      account_id,
-    }));
+    const mappings = Array.from(this.changed_mappings.entries()).map(
+      ([mapping_key, account_id]) => ({
+        mapping_key,
+        account_id,
+      }),
+    );
     this.store.dispatch(saveAccountMappings({ mappings }));
   }
 
   resetMappings(): void {
-    if (confirm('Esto restablecera todas las cuentas a los valores predeterminados del PUC. Desea continuar?')) {
+    if (
+      confirm(
+        'Esto restablecera todas las cuentas a los valores predeterminados del PUC. Desea continuar?',
+      )
+    ) {
       this.store.dispatch(resetAccountMappings({}));
     }
   }

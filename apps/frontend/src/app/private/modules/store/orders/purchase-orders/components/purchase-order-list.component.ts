@@ -25,6 +25,8 @@ import {
   ButtonComponent,
   IconComponent,
   PaginationComponent,
+  EmptyStateComponent,
+  CardComponent,
 } from '../../../../../../shared/components/index';
 
 import { PurchaseOrdersService } from '../../../inventory/services';
@@ -33,8 +35,6 @@ import {
   PurchaseOrder,
   PurchaseOrderStatus,
 } from '../../../inventory/interfaces';
-
-import { PurchaseOrderEmptyStateComponent } from './purchase-order-empty-state';
 import { PurchaseOrderStats } from './purchase-order-stats.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
@@ -47,10 +47,11 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
     ResponsiveDataViewComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
-    PurchaseOrderEmptyStateComponent,
+    EmptyStateComponent,
     ButtonComponent,
     IconComponent,
     PaginationComponent,
+    CardComponent,
   ],
   templateUrl: './purchase-order-list.component.html',
   styleUrls: ['./purchase-order-list.component.scss'],
@@ -100,7 +101,12 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
 
   // Dropdown actions
   dropdownActions: DropdownAction[] = [
-    { label: 'Nueva Orden', icon: 'plus', action: 'create', variant: 'primary' },
+    {
+      label: 'Nueva Orden',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   // Table configuration
@@ -209,17 +215,18 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
       {
         key: 'expected_date',
         label: 'Entrega',
-        transform: (val: any) => val ? new Date(val).toLocaleDateString() : '-'
-      }
-    ]
+        transform: (val: any) =>
+          val ? new Date(val).toLocaleDateString() : '-',
+      },
+    ],
   };
 
   constructor(
     private purchaseOrdersService: PurchaseOrdersService,
     private suppliersService: SuppliersService,
     private dialogService: DialogService,
-    private toastService: ToastService
-  ) { }
+    private toastService: ToastService,
+  ) {}
 
   ngOnInit(): void {
     this.loadOrders();
@@ -253,7 +260,10 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
         next: (response: any) => {
           const orders = response.data || response;
           this.orders = Array.isArray(orders) ? orders : [];
-          this.totalItems = response.meta?.pagination?.total ?? response.meta?.total ?? this.orders.length;
+          this.totalItems =
+            response.meta?.pagination?.total ??
+            response.meta?.total ??
+            this.orders.length;
 
           // Enrich orders with supplier names
           this.enrichOrdersWithSuppliers();
@@ -266,7 +276,7 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
         error: (error: any) => {
           console.error('Error loading purchase orders:', error);
           this.toastService.error(
-            'Error al cargar las órdenes de compra. Por favor intenta nuevamente.'
+            'Error al cargar las órdenes de compra. Por favor intenta nuevamente.',
           );
           this.loading = false;
         },
@@ -302,7 +312,9 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
         };
       }
       // Fallback to supplier map if needed
-      const supplier = this.suppliers.find((s: any) => s.id === order.supplier_id);
+      const supplier = this.suppliers.find(
+        (s: any) => s.id === order.supplier_id,
+      );
       return {
         ...order,
         supplierName: supplier?.name || 'N/A',
@@ -314,19 +326,19 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
   private calculateAndEmitStats(): void {
     const stats: PurchaseOrderStats = {
       total: this.orders.length,
-      pending: this.orders.filter(
-        (o) => ['draft', 'submitted', 'approved', 'ordered', 'partial'].includes(o.status)
+      pending: this.orders.filter((o) =>
+        ['draft', 'submitted', 'approved', 'ordered', 'partial'].includes(
+          o.status,
+        ),
       ).length,
       received: this.orders.filter((o) => o.status === 'received').length,
-      total_value: this.orders.reduce(
-        (sum, o) => {
-          const amount = typeof o.total_amount === 'string'
+      total_value: this.orders.reduce((sum, o) => {
+        const amount =
+          typeof o.total_amount === 'string'
             ? parseFloat(o.total_amount)
-            : (o.total_amount || 0);
-          return sum + amount;
-        },
-        0
-      ),
+            : o.total_amount || 0;
+        return sum + amount;
+      }, 0),
     };
     this.statsUpdated.emit(stats);
   }
@@ -417,7 +429,7 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
           error: (error: any) => {
             console.error('Error cancelling purchase order:', error);
             this.toastService.error(
-              'Error al cancelar la orden. Por favor intenta nuevamente.'
+              'Error al cancelar la orden. Por favor intenta nuevamente.',
             );
           },
         });
@@ -426,7 +438,7 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
 
   // Helper methods
   formatCurrency(value: any): string {
-    const numValue = typeof value === 'string' ? parseFloat(value) : (value || 0);
+    const numValue = typeof value === 'string' ? parseFloat(value) : value || 0;
     return this.currencyService.format(numValue);
   }
 

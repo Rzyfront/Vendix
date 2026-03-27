@@ -2,9 +2,13 @@ import { Component, inject, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
+import { CardComponent } from '../../../../../shared/components/card/card.component';
 import { InputsearchComponent } from '../../../../../shared/components/inputsearch/inputsearch.component';
 import { ResponsiveDataViewComponent } from '../../../../../shared/components/responsive-data-view/responsive-data-view.component';
-import { TableColumn, TableAction } from '../../../../../shared/components/table/table.component';
+import {
+  TableColumn,
+  TableAction,
+} from '../../../../../shared/components/table/table.component';
 import { ItemListCardConfig } from '../../../../../shared/components/item-list/item-list.interfaces';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
@@ -16,7 +20,12 @@ import {
   selectCouponsLoading,
   selectStats,
 } from './state/selectors/coupon.selectors';
-import { Coupon, CouponStats, CreateCouponRequest } from './interfaces/coupon.interface';
+import {
+  Coupon,
+  CouponStats,
+  CreateCouponRequest,
+} from './interfaces/coupon.interface';
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-coupons',
@@ -24,6 +33,7 @@ import { Coupon, CouponStats, CreateCouponRequest } from './interfaces/coupon.in
   imports: [
     CommonModule,
     StatsComponent,
+    CardComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
     ButtonComponent,
@@ -34,7 +44,7 @@ import { Coupon, CouponStats, CreateCouponRequest } from './interfaces/coupon.in
     <div class="w-full">
       <!-- Stats Cards -->
       <div
-        class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
           title="Total Cupones"
@@ -71,10 +81,7 @@ import { Coupon, CouponStats, CreateCouponRequest } from './interfaces/coupon.in
       </div>
 
       <!-- Data Table -->
-      <div
-        class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-               md:border md:border-border"
-      >
+      <app-card [responsive]="true" [padding]="false">
         <!-- Search Section (inside card) -->
         <div
           class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
@@ -112,7 +119,9 @@ import { Coupon, CouponStats, CreateCouponRequest } from './interfaces/coupon.in
         <!-- Loading State -->
         @if (loading()) {
           <div class="p-4 md:p-6 text-center">
-            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
             <p class="mt-2 text-text-secondary">Cargando cupones...</p>
           </div>
         }
@@ -131,7 +140,7 @@ import { Coupon, CouponStats, CreateCouponRequest } from './interfaces/coupon.in
             />
           </div>
         }
-      </div>
+      </app-card>
     </div>
 
     <!-- Modal -->
@@ -155,6 +164,7 @@ import { Coupon, CouponStats, CreateCouponRequest } from './interfaces/coupon.in
 export class CouponsComponent implements OnInit {
   private store = inject(Store);
   private dialogService = inject(DialogService);
+  private currencyService = inject(CurrencyFormatService);
 
   coupons = this.store.selectSignal(selectCoupons);
   loading = this.store.selectSignal(selectCouponsLoading);
@@ -178,7 +188,7 @@ export class CouponsComponent implements OnInit {
       transform: (_val: any, row: any) =>
         row.discount_type === 'PERCENTAGE'
           ? `${Number(row.discount_value)}%`
-          : `$${Number(row.discount_value).toLocaleString()}`,
+          : this.currencyService.format(Number(row.discount_value) || 0),
     },
     {
       key: 'current_uses',
@@ -189,8 +199,7 @@ export class CouponsComponent implements OnInit {
     {
       key: 'valid_until',
       label: 'Válido hasta',
-      transform: (val: any) =>
-        new Date(val).toLocaleDateString('es-CO'),
+      transform: (val: any) => new Date(val).toLocaleDateString('es-CO'),
     },
     {
       key: 'is_active',
@@ -223,7 +232,7 @@ export class CouponsComponent implements OnInit {
     footerTransform: (_val: any, item: any) =>
       item.discount_type === 'PERCENTAGE'
         ? `${Number(item.discount_value)}%`
-        : `$${Number(item.discount_value).toLocaleString()}`,
+        : this.currencyService.format(Number(item.discount_value) || 0),
     detailKeys: [
       {
         key: 'discount_type',
@@ -308,6 +317,6 @@ export class CouponsComponent implements OnInit {
   }
 
   formatCurrency(value: number): string {
-    return '$' + value.toLocaleString('es-CO', { minimumFractionDigits: 0 });
+    return this.currencyService.format(value || 0);
   }
 }

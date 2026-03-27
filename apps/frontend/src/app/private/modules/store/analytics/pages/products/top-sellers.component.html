@@ -1,8 +1,14 @@
 <div class="space-y-6 w-full max-w-[1600px] mx-auto md:py-4">
   <!-- Filter Bar -->
-  <div class="sticky top-0 z-10 bg-background px-2 py-1.5 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
-    <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-      <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
+  <div
+    class="sticky top-0 z-10 bg-background px-2 py-1.5 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+  >
+    <div
+      class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+    >
+      <h2
+        class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
+      >
         Productos Más Vendidos
       </h2>
 
@@ -16,29 +22,44 @@
   </div>
 
   <!-- Chart -->
-  <div class="bg-surface border border-border rounded-xl overflow-hidden">
-    <div class="p-4 border-b border-border">
-      <h3 class="font-semibold text-text-primary">Top 10 por Ingresos</h3>
-      <p class="text-sm text-text-secondary">Productos con mayor facturación en el período</p>
+  <app-card
+    shadow="none"
+    [padding]="false"
+    overflow="hidden"
+    [showHeader]="true"
+  >
+    <div slot="header" class="flex flex-col">
+      <span class="text-sm font-bold text-[var(--color-text-primary)]"
+        >Top 10 por Ingresos</span
+      >
+      <span class="text-xs text-[var(--color-text-secondary)]"
+        >Productos con mayor facturación en el período</span
+      >
     </div>
     <div class="p-4">
       @if (loadingTopSellers$ | async) {
         <div class="h-80 flex items-center justify-center">
-          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <div
+            class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
         </div>
       } @else {
-        <app-chart
-          [options]="topSellersChartOptions"
-          size="large"
-        ></app-chart>
+        <app-chart [options]="topSellersChartOptions" size="large"></app-chart>
       }
     </div>
-  </div>
+  </app-card>
 
   <!-- Top Sellers Table -->
-  <div class="bg-surface border border-border rounded-xl overflow-hidden">
-    <div class="p-4 border-b border-border">
-      <h3 class="font-semibold text-text-primary">Detalle de Más Vendidos</h3>
+  <app-card
+    shadow="none"
+    [padding]="false"
+    overflow="hidden"
+    [showHeader]="true"
+  >
+    <div slot="header" class="flex flex-col">
+      <span class="text-sm font-bold text-[var(--color-text-primary)]"
+        >Detalle de Más Vendidos</span
+      >
     </div>
 
     <div class="p-4">
@@ -51,5 +72,5 @@
         emptyIcon="trophy"
       ></app-responsive-data-view>
     </div>
-  </div>
+  </app-card>
 </div>

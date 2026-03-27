@@ -11,6 +11,8 @@ metadata:
   auto_invoke: "Creating Angular Forms"
 ---
 
+> **Tip**: Antes de usar InputComponent o ToggleComponent, consulta sus READMEs en `apps/frontend/src/app/shared/components/{input,toggle}/README.md` para conocer sus inputs, outputs y variantes disponibles.
+
 ## When to Use
 
 Use this skill when:

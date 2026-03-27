@@ -507,6 +507,100 @@ export async function seedPermissionsAndRoles(
       method: 'PATCH',
     },
 
+    // Reservas
+    {
+      name: 'store:reservations:create',
+      description: 'Crear reserva',
+      path: '/api/store/reservations',
+      method: 'POST',
+    },
+    {
+      name: 'store:reservations:read',
+      description: 'Ver reservas',
+      path: '/api/store/reservations',
+      method: 'GET',
+    },
+    {
+      name: 'store:reservations:read:one',
+      description: 'Ver detalle de reserva',
+      path: '/api/store/reservations/:id',
+      method: 'GET',
+    },
+    {
+      name: 'store:reservations:update',
+      description: 'Actualizar reserva',
+      path: '/api/store/reservations/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:reservations:delete',
+      description: 'Eliminar reserva',
+      path: '/api/store/reservations/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:reservations:schedules:manage',
+      description: 'Gestionar horarios de servicio',
+      path: '/api/store/reservations/schedules/service/:productId',
+      method: 'PUT',
+    },
+
+    // Dispatch Notes (Remisiones)
+    {
+      name: 'store:dispatch_notes:create',
+      description: 'Create dispatch note',
+      path: '/api/store/dispatch-notes',
+      method: 'POST',
+    },
+    {
+      name: 'store:dispatch_notes:read',
+      description: 'Read dispatch notes',
+      path: '/api/store/dispatch-notes',
+      method: 'GET',
+    },
+    {
+      name: 'store:dispatch_notes:read:one',
+      description: 'Read specific dispatch note',
+      path: '/api/store/dispatch-notes/:id',
+      method: 'GET',
+    },
+    {
+      name: 'store:dispatch_notes:update',
+      description: 'Update dispatch note',
+      path: '/api/store/dispatch-notes/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:dispatch_notes:delete',
+      description: 'Delete dispatch note',
+      path: '/api/store/dispatch-notes/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:dispatch_notes:confirm',
+      description: 'Confirm dispatch note',
+      path: '/api/store/dispatch-notes/:id/confirm',
+      method: 'POST',
+    },
+    {
+      name: 'store:dispatch_notes:deliver',
+      description: 'Deliver dispatch note',
+      path: '/api/store/dispatch-notes/:id/deliver',
+      method: 'POST',
+    },
+    {
+      name: 'store:dispatch_notes:void',
+      description: 'Void dispatch note',
+      path: '/api/store/dispatch-notes/:id/void',
+      method: 'POST',
+    },
+    {
+      name: 'store:dispatch_notes:invoice',
+      description: 'Invoice dispatch note',
+      path: '/api/store/dispatch-notes/:id/invoice',
+      method: 'POST',
+    },
+
     // Categorías
     {
       name: 'store:categories:create',
@@ -574,6 +668,44 @@ export async function seedPermissionsAndRoles(
       name: 'store:coupons:validate',
       description: 'Validar cupón',
       path: '/api/store/coupons/validate',
+      method: 'POST',
+    },
+
+    // Reseñas
+    {
+      name: 'store:reviews:read',
+      description: 'Leer reseñas',
+      path: '/api/store/reviews',
+      method: 'GET',
+    },
+    {
+      name: 'store:reviews:read:stats',
+      description: 'Ver estadísticas de reseñas',
+      path: '/api/store/reviews/stats',
+      method: 'GET',
+    },
+    {
+      name: 'store:reviews:read:one',
+      description: 'Leer reseña específica',
+      path: '/api/store/reviews/:id',
+      method: 'GET',
+    },
+    {
+      name: 'store:reviews:moderate',
+      description: 'Moderar reseñas (aprobar/rechazar/ocultar)',
+      path: '/api/store/reviews/:id/approve',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:reviews:delete',
+      description: 'Eliminar reseña',
+      path: '/api/store/reviews/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:reviews:respond',
+      description: 'Responder a reseñas',
+      path: '/api/store/reviews/:id/response',
       method: 'POST',
     },
 
@@ -2108,7 +2240,16 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:addresses:read') ||
       p.name.includes('store:taxes:read') ||
       p.name.includes('store:cash_registers:read') ||
-      p.name.includes('store:cash_registers:reports'),
+      p.name.includes('store:cash_registers:reports') ||
+      p.name.includes('store:reservations:create') ||
+      p.name.includes('store:reservations:read') ||
+      p.name.includes('store:reservations:read:one') ||
+      p.name.includes('store:reservations:update') ||
+      p.name.includes('store:dispatch_notes:create') ||
+      p.name.includes('store:dispatch_notes:read') ||
+      p.name.includes('store:dispatch_notes:read:one') ||
+      p.name.includes('store:reviews:read') ||
+      p.name.includes('store:reviews:moderate'),
   );
 
   for (const permission of supervisorPermissions) {
@@ -2143,7 +2284,13 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:cash_registers:read') ||
       p.name.includes('store:cash_registers:open_session') ||
       p.name.includes('store:cash_registers:close_session') ||
-      p.name.includes('store:cash_registers:movements'),
+      p.name.includes('store:cash_registers:movements') ||
+      p.name.includes('store:reservations:read') ||
+      p.name.includes('store:reservations:read:one') ||
+      p.name.includes('store:dispatch_notes:create') ||
+      p.name.includes('store:dispatch_notes:read') ||
+      p.name.includes('store:dispatch_notes:read:one') ||
+      p.name.includes('store:reviews:read'),
   );
 
   for (const permission of employeePermissions) {

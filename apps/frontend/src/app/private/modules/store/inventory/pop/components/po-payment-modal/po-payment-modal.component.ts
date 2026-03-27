@@ -14,6 +14,7 @@ import { ModalComponent } from '../../../../../../../shared/components/modal/mod
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { PurchaseOrdersService } from '../../../services';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'app-po-payment-modal',
@@ -132,6 +133,7 @@ import { ToastService } from '../../../../../../../shared/components/toast/toast
 export class PoPaymentModalComponent {
   private purchaseOrdersService = inject(PurchaseOrdersService);
   private toastService = inject(ToastService);
+  private currencyService = inject(CurrencyFormatService);
 
   readonly isOpen = input<boolean>(false);
   readonly orderId = input<number | null>(null);
@@ -181,7 +183,7 @@ export class PoPaymentModalComponent {
   }
 
   formatCurrency(value: number): string {
-    return '$' + Number(value || 0).toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    return this.currencyService.format(Number(value) || 0);
   }
 
   submit(): void {

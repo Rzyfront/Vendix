@@ -62,53 +62,46 @@ const QUICK_LINKS: QuickLink[] = [
     OptionsDropdownComponent,
   ],
   template: `
-    <div class="w-full space-y-4 md:space-y-6">
+    <div class="w-full space-y-4">
       <!-- 4 Stats Cards -->
-      @if (loading()) {
-        <div class="stats-container !mb-0">
-          @for (i of [1, 2, 3, 4]; track i) {
-            <div class="bg-surface rounded-xl p-4 animate-pulse shadow-[0_2px_8px_rgba(0,0,0,0.07)]">
-              <div class="h-3 bg-gray-200 rounded w-1/2 mb-3"></div>
-              <div class="h-7 bg-gray-200 rounded w-3/4"></div>
-            </div>
-          }
-        </div>
-      } @else {
-        <div class="stats-container !mb-0">
-          <app-stats
-            title="Ingresos"
-            [value]="formatCurrency(summary()?.total_revenue || 0)"
-            [smallText]="getGrowthText(summary()?.revenue_growth)"
-            iconName="dollar-sign"
-            iconBgColor="bg-primary/10"
-            iconColor="text-primary"
-          />
-          <app-stats
-            title="Órdenes"
-            [value]="summary()?.total_orders || 0"
-            [smallText]="getGrowthText(summary()?.orders_growth)"
-            iconName="shopping-cart"
-            iconBgColor="bg-secondary/10"
-            iconColor="text-secondary"
-          />
-          <app-stats
-            title="Ticket Prom."
-            [value]="formatCurrency(summary()?.average_order_value || 0)"
-            [smallText]="(summary()?.total_units_sold || 0) + ' uds. vendidas'"
-            iconName="receipt"
-            iconBgColor="bg-accent/10"
-            iconColor="text-accent"
-          />
-          <app-stats
-            title="Clientes"
-            [value]="summary()?.total_customers || 0"
-            smallText="clientes únicos"
-            iconName="users"
-            iconBgColor="bg-warning/10"
-            iconColor="text-warning"
-          />
-        </div>
-      }
+      <div class="stats-container">
+        <app-stats
+          title="Ingresos"
+          [value]="formatCurrency(summary()?.total_revenue || 0)"
+          [smallText]="getGrowthText(summary()?.revenue_growth)"
+          iconName="dollar-sign"
+          iconBgColor="bg-primary/10"
+          iconColor="text-primary"
+          [loading]="loading()"
+        />
+        <app-stats
+          title="Órdenes"
+          [value]="summary()?.total_orders || 0"
+          [smallText]="getGrowthText(summary()?.orders_growth)"
+          iconName="shopping-cart"
+          iconBgColor="bg-secondary/10"
+          iconColor="text-secondary"
+          [loading]="loading()"
+        />
+        <app-stats
+          title="Ticket Prom."
+          [value]="formatCurrency(summary()?.average_order_value || 0)"
+          [smallText]="(summary()?.total_units_sold || 0) + ' uds. vendidas'"
+          iconName="receipt"
+          iconBgColor="bg-accent/10"
+          iconColor="text-accent"
+          [loading]="loading()"
+        />
+        <app-stats
+          title="Clientes"
+          [value]="summary()?.total_customers || 0"
+          smallText="clientes únicos"
+          iconName="users"
+          iconBgColor="bg-warning/10"
+          iconColor="text-warning"
+          [loading]="loading()"
+        />
+      </div>
 
       <!-- Charts: Trend (2/3) + Channels (1/3) -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">

@@ -3,8 +3,12 @@ import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
-import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../../../shared/components/index';
+import {
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
+} from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
@@ -18,6 +22,7 @@ import { StockLevelReport } from '../../interfaces/inventory-analytics.interface
   imports: [
     CommonModule,
     RouterModule,
+    CardComponent,
     ResponsiveDataViewComponent,
     IconComponent,
     ExportButtonComponent,
@@ -25,17 +30,27 @@ import { StockLevelReport } from '../../interfaces/inventory-analytics.interface
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
       <!-- Header -->
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+      >
         <div>
           <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/reports" class="hover:text-primary">Reportes</a>
+            <a routerLink="/admin/reports" class="hover:text-primary"
+              >Reportes</a
+            >
             <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/reports/inventory" class="hover:text-primary">Inventario</a>
+            <a routerLink="/admin/reports/inventory" class="hover:text-primary"
+              >Inventario</a
+            >
             <app-icon name="chevron-right" [size]="14"></app-icon>
             <span>Stock Bajo</span>
           </div>
-          <h1 class="text-2xl font-bold text-text-primary">Alertas de Stock Bajo</h1>
-          <p class="text-text-secondary mt-1">Productos que necesitan reabastecimiento</p>
+          <h1 class="text-2xl font-bold text-text-primary">
+            Alertas de Stock Bajo
+          </h1>
+          <p class="text-text-secondary mt-1">
+            Productos que necesitan reabastecimiento
+          </p>
         </div>
         <vendix-export-button
           [loading]="exporting()"
@@ -45,8 +60,14 @@ import { StockLevelReport } from '../../interfaces/inventory-analytics.interface
 
       <!-- Alert Banner -->
       @if (!loading() && data().length > 0) {
-        <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4 flex items-start gap-3">
-          <app-icon name="alert-triangle" [size]="20" class="text-yellow-600 flex-shrink-0 mt-0.5"></app-icon>
+        <div
+          class="bg-yellow-50 border border-yellow-200 rounded-xl p-4 flex items-start gap-3"
+        >
+          <app-icon
+            name="alert-triangle"
+            [size]="20"
+            class="text-yellow-600 flex-shrink-0 mt-0.5"
+          ></app-icon>
           <div>
             <h4 class="font-semibold text-yellow-800">Atención Requerida</h4>
             <p class="text-sm text-yellow-700">
@@ -58,14 +79,23 @@ import { StockLevelReport } from '../../interfaces/inventory-analytics.interface
       }
 
       <!-- Main Content -->
-      <div class="bg-surface border border-border rounded-xl overflow-hidden">
-        <div class="p-4 border-b border-border flex justify-between items-center">
-          <h3 class="font-semibold text-text-primary">
-            Productos con Stock Bajo
-            <span class="text-text-secondary font-normal text-sm ml-2">
-              ({{ data().length }} alertas)
+      <app-card
+        shadow="none"
+        [padding]="false"
+        overflow="hidden"
+        [showHeader]="true"
+      >
+        <div slot="header" class="flex items-center justify-between">
+          <div class="flex flex-col">
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">
+              Productos con Stock Bajo
+              <span
+                class="text-xs text-[var(--color-text-secondary)] font-normal ml-2"
+              >
+                ({{ data().length }} alertas)
+              </span>
             </span>
-          </h3>
+          </div>
           <a
             routerLink="/admin/inventory/pop"
             class="text-sm text-primary hover:underline flex items-center gap-1"
@@ -85,7 +115,7 @@ import { StockLevelReport } from '../../interfaces/inventory-analytics.interface
             emptyIcon="check-circle"
           ></app-responsive-data-view>
         </div>
-      </div>
+      </app-card>
     </div>
   `,
 })
@@ -132,7 +162,8 @@ export class LowStockComponent implements OnInit, OnDestroy {
       align: 'right',
       priority: 2,
       width: '120px',
-      transform: (val) => (val !== null && val !== undefined ? `${val} días` : '-'),
+      transform: (val) =>
+        val !== null && val !== undefined ? `${val} días` : '-',
     },
     {
       key: 'status',

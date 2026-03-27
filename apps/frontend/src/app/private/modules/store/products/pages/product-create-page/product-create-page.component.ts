@@ -1539,7 +1539,7 @@ export class ProductCreatePageComponent implements OnInit {
 
     const request$ =
       this.isEditMode() && this.productId
-        ? this.productsService.updateProduct(this.productId, productData as any) // Cast to any to avoid strict UpdateDto mismatch if needed, or fix DTO
+        ? this.productsService.updateProduct(this.productId, productData)
         : this.productsService.createProduct(productData);
 
     request$.subscribe({

@@ -1,0 +1,25 @@
+<div class="month-grid">
+  <div class="weekday-header">
+    @for (day of weekDays; track day) {
+      <div class="weekday">{{ day }}</div>
+    }
+  </div>
+  <div class="days-grid">
+    @for (cell of calendarCells(); track cell.date) {
+      <button
+        class="day-cell"
+        [class.today]="cell.isToday"
+        [class.other-month]="!cell.isCurrentMonth"
+        [class.has-bookings]="cell.bookingCount > 0"
+        (click)="dateClicked.emit(cell.date)">
+        <span class="day-number">{{ cell.dayNumber }}</span>
+        @if (cell.bookingCount > 0) {
+          <div class="booking-indicator">
+            <span class="density-dot" [class]="cell.densityClass"></span>
+            <span class="booking-count">{{ cell.bookingCount }}</span>
+          </div>
+        }
+      </button>
+    }
+  </div>
+</div>

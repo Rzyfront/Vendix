@@ -4,6 +4,9 @@ import {
   Output,
   EventEmitter,
   forwardRef,
+  inject,
+  ViewChild,
+  ElementRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
@@ -13,6 +16,7 @@ import {
 } from '@angular/forms';
 
 import { FormStyleVariant } from '../../types/form.types';
+import { CurrencyFormatService } from '../../pipes/currency/currency.pipe';
 
 export type InputType =
   | 'text'
@@ -83,8 +87,10 @@ export type InputSize = 'sm' | 'md' | 'lg';
 
         <!-- Input field -->
         <input
+          #inputRef
           [id]="inputId"
           [type]="actualInputType"
+          [attr.inputmode]="currency ? 'decimal' : null"
           [placeholder]="placeholder"
           [disabled]="disabled"
           [readonly]="readonly"
@@ -97,6 +103,8 @@ export type InputSize = 'sm' | 'md' | 'lg';
           (input)="onInput($event)"
           (blur)="onBlur()"
           (focus)="onFocus()"
+          (keydown)="onKeydown($event)"
+          (paste)="onPaste($event)"
         />
 
         <!-- Password visibility toggle -->
@@ -274,6 +282,9 @@ export class InputComponent implements ControlValueAccessor {
   @Input() customInputClass = ''; // Clases adicionales para el input
   @Input() customClasses = ''; // Retrocompatibilidad
   @Input() tooltipText?: string; // Texto para el tooltip de ayuda (muestra ícono automáticamente)
+  @Input() currency = false; // Enable currency formatting mode
+  @Input() currencyDecimals?: number; // Override decimal places
+  @Input() allowNegative = false; // Allow negative values in currency mode
 
   @Output() inputChange = new EventEmitter<string>();
   @Output() inputFocus = new EventEmitter<void>();
@@ -284,15 +295,28 @@ export class InputComponent implements ControlValueAccessor {
   inputId = `input-${Math.random().toString(36).substr(2, 9)}`;
   showPassword = false;
 
+  @ViewChild('inputRef') inputRef!: ElementRef<HTMLInputElement>;
+
+  private currencyService = inject(CurrencyFormatService);
+  private currencyRawValue: number | null = null;
+  private isCurrencyFocused = false;
+
   // ControlValueAccessor implementation
-  private onChange = (value: string) => { };
+  private onChange = (value: any) => { };
   private onTouched = () => { };
 
-  writeValue(value: string): void {
-    this.value = value || '';
+  writeValue(value: any): void {
+    if (this.currency) {
+      this.currencyRawValue = value != null ? Number(value) : null;
+      if (!this.isCurrencyFocused) {
+        this.value = this.currencyFormatForDisplay(this.currencyRawValue);
+      }
+    } else {
+      this.value = value || '';
+    }
   }
 
-  registerOnChange(fn: (value: string) => void): void {
+  registerOnChange(fn: (value: any) => void): void {
     this.onChange = fn;
   }
 
@@ -482,6 +506,24 @@ export class InputComponent implements ControlValueAccessor {
 
   onInput(event: Event): void {
     const target = event.target as HTMLInputElement;
+
+    if (this.currency) {
+      const cursorPos = target.selectionStart ?? 0;
+      const oldValue = target.value;
+      const sanitized = this.currencySanitize(oldValue);
+      const formatted = this.currencyFormatLive(sanitized);
+      const newCursorPos = this.currencyAdjustCursor(oldValue, formatted, cursorPos);
+
+      this.value = formatted;
+      target.value = formatted;
+      target.setSelectionRange(newCursorPos, newCursorPos);
+
+      this.currencyRawValue = this.currencyParse(sanitized);
+      this.onChange(this.currencyRawValue);
+      this.inputChange.emit(formatted);
+      return;
+    }
+
     if (this.type === 'tel') {
       target.value = target.value.replace(/[^\d+#*\s()-]/g, '');
     }
@@ -491,11 +533,22 @@ export class InputComponent implements ControlValueAccessor {
   }
 
   onBlur(): void {
+    if (this.currency) {
+      this.isCurrencyFocused = false;
+      const formatted = this.currencyFormatForDisplay(this.currencyRawValue);
+      this.value = formatted;
+      if (this.inputRef?.nativeElement) {
+        this.inputRef.nativeElement.value = formatted;
+      }
+    }
     this.onTouched();
     this.inputBlur.emit();
   }
 
   onFocus(): void {
+    if (this.currency) {
+      this.isCurrencyFocused = true;
+    }
     this.inputFocus.emit();
   }
 
@@ -507,6 +560,9 @@ export class InputComponent implements ControlValueAccessor {
 
   // Password visibility toggle
   get actualInputType(): InputType {
+    if (this.currency) {
+      return 'text';
+    }
     if (this.type === 'password' && this.showPassword) {
       return 'text';
     }
@@ -517,5 +573,186 @@ export class InputComponent implements ControlValueAccessor {
     if (!this.disabled) {
       this.showPassword = !this.showPassword;
     }
+  }
+
+  // =========================================================================
+  // Currency formatting methods
+  // =========================================================================
+
+  onKeydown(event: KeyboardEvent): void {
+    if (!this.currency) return;
+
+    const { decimal } = this.currencyGetSeparators();
+
+    // Always allow: navigation, selection, clipboard
+    const allowedKeys = [
+      'Backspace', 'Delete', 'Tab', 'Escape', 'Enter',
+      'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+      'Home', 'End',
+    ];
+    if (allowedKeys.includes(event.key)) return;
+    if (event.ctrlKey || event.metaKey) return;
+
+    // Allow digits (no restriction during typing — decimals enforced on blur)
+    if (event.key >= '0' && event.key <= '9') return;
+
+    // Allow minus at position 0 if allowed
+    if (event.key === '-' && this.allowNegative) {
+      const input = event.target as HTMLInputElement;
+      if ((input.selectionStart ?? 0) === 0 && !input.value.includes('-')) return;
+    }
+
+    const { thousands } = this.currencyGetSeparators();
+
+    // Thousands separator key → allow (will be stripped by sanitize)
+    if (event.key === thousands) return;
+
+    // Decimal separator: allow '.' or ',' if it's NOT the thousands separator and no decimal exists yet
+    if (event.key === '.' || event.key === ',') {
+      if (event.key !== thousands) {
+        const input = event.target as HTMLInputElement;
+        if (!input.value.includes(decimal)) return;
+      }
+    }
+
+    event.preventDefault();
+  }
+
+  onPaste(event: ClipboardEvent): void {
+    if (!this.currency) return;
+    event.preventDefault();
+    const pasted = event.clipboardData?.getData('text') || '';
+    const input = event.target as HTMLInputElement;
+    const start = input.selectionStart ?? 0;
+    const end = input.selectionEnd ?? 0;
+    const current = input.value;
+
+    // Insert pasted text and process through sanitize/format
+    const merged = current.slice(0, start) + pasted + current.slice(end);
+    const sanitized = this.currencySanitize(merged);
+    const formatted = this.currencyFormatLive(sanitized);
+
+    this.value = formatted;
+    input.value = formatted;
+    this.currencyRawValue = this.currencyParse(sanitized);
+    this.onChange(this.currencyRawValue);
+    this.inputChange.emit(formatted);
+  }
+
+  private currencyGetSeparators(): { thousands: string; decimal: string } {
+    const style = this.currencyService.currencyFormatStyle();
+    switch (style) {
+      case 'dot_comma':   return { thousands: '.', decimal: ',' };
+      case 'space_comma': return { thousands: '\u00A0', decimal: ',' };
+      case 'comma_dot':
+      default:            return { thousands: ',', decimal: '.' };
+    }
+  }
+
+  private currencyGetDecimals(): number {
+    return this.currencyDecimals ?? this.currencyService.currencyDecimals();
+  }
+
+  private currencyFormatForDisplay(value: number | null): string {
+    if (value === null || value === undefined) return '';
+    const { thousands, decimal } = this.currencyGetSeparators();
+    const decimals = this.currencyGetDecimals();
+    const isNegative = value < 0;
+    const absValue = Math.abs(value);
+    const fixed = absValue.toFixed(decimals);
+    const [intPart, decPart] = fixed.split('.');
+    const withThousands = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, thousands);
+    let result = decimals > 0 ? `${withThousands}${decimal}${decPart}` : withThousands;
+    if (isNegative) result = '-' + result;
+    return result;
+  }
+
+  private currencyFormatLive(sanitized: string): string {
+    if (!sanitized || sanitized === '-') return sanitized;
+    const { thousands, decimal } = this.currencyGetSeparators();
+    const isNegative = sanitized.startsWith('-');
+    let value = isNegative ? sanitized.slice(1) : sanitized;
+
+    const decIndex = value.indexOf(decimal);
+    let intPart: string;
+    let decPart: string | null = null;
+
+    if (decIndex !== -1) {
+      intPart = value.slice(0, decIndex);
+      decPart = value.slice(decIndex + 1);
+    } else {
+      intPart = value;
+    }
+
+    intPart = intPart.replace(/^0+(?=\d)/, '');
+    if (intPart === '') intPart = '0';
+    intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, thousands);
+
+    let result = intPart;
+    if (decPart !== null) {
+      result += decimal + decPart;
+    }
+    if (isNegative) result = '-' + result;
+    return result;
+  }
+
+  private currencyParse(displayValue: string): number | null {
+    if (!displayValue || displayValue.trim() === '' || displayValue === '-') return null;
+    const { thousands, decimal } = this.currencyGetSeparators();
+    let cleaned = displayValue;
+    const thousandsRegex = new RegExp(this.escapeRegex(thousands), 'g');
+    cleaned = cleaned.replace(thousandsRegex, '');
+    if (decimal !== '.') {
+      cleaned = cleaned.replace(decimal, '.');
+    }
+    const num = parseFloat(cleaned);
+    return isNaN(num) ? null : num;
+  }
+
+  private currencySanitize(value: string): string {
+    const { thousands, decimal } = this.currencyGetSeparators();
+    let result = '';
+    let hasDecimal = false;
+
+    for (let i = 0; i < value.length; i++) {
+      const ch = value[i];
+      if (ch >= '0' && ch <= '9') {
+        result += ch;
+      } else if (ch === '-' && i === 0 && this.allowNegative) {
+        result += ch;
+      } else if (ch === thousands || ch === '\u00A0') {
+        // Thousands separator → skip (added automatically by formatLive)
+        continue;
+      } else if ((ch === decimal || ch === '.' || ch === ',') && !hasDecimal) {
+        // Any remaining '.' or ',' that isn't the thousands separator → decimal
+        result += decimal;
+        hasDecimal = true;
+      }
+    }
+    return result;
+  }
+
+  private currencyAdjustCursor(oldValue: string, newValue: string, oldCursor: number): number {
+    const { thousands } = this.currencyGetSeparators();
+    let contentCharsBefore = 0;
+    for (let i = 0; i < oldCursor; i++) {
+      if (oldValue[i] !== thousands && oldValue[i] !== '\u00A0') {
+        contentCharsBefore++;
+      }
+    }
+    let newCursor = 0;
+    let counted = 0;
+    for (let i = 0; i < newValue.length; i++) {
+      if (counted >= contentCharsBefore) break;
+      newCursor = i + 1;
+      if (newValue[i] !== thousands && newValue[i] !== '\u00A0') {
+        counted++;
+      }
+    }
+    return newCursor;
+  }
+
+  private escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 }
