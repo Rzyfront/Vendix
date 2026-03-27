@@ -1,15 +1,31 @@
 <div class="options-dropdown-container" #dropdownContainer>
-  <!-- Trigger Button -->
+  <!-- Actions Trigger (Left) -->
   <button
-    #triggerButton
+    *ngIf="hasActions"
+    #actionsTriggerButton
     type="button"
-    class="options-dropdown-trigger"
-    (click)="toggleDropdown()"
-    [attr.aria-expanded]="isOpen"
+    class="options-dropdown-trigger actions-trigger"
+    (click)="toggleActionsDropdown()"
+    [attr.aria-expanded]="isActionsOpen"
     [attr.aria-haspopup]="true"
   >
-    <app-icon [name]="triggerIcon" [size]="18"></app-icon>
-    <span class="trigger-label-text">{{ triggerLabel }}</span>
+    <app-icon name="zap" [size]="16"></app-icon>
+    <span class="trigger-label-text">Acciones</span>
+    <app-icon name="chevron-down" [size]="14" class="chevron-icon"></app-icon>
+  </button>
+
+  <!-- Filters Trigger (Right) -->
+  <button
+    *ngIf="hasFilters"
+    #filtersTriggerButton
+    type="button"
+    class="options-dropdown-trigger filters-trigger"
+    (click)="toggleFiltersDropdown()"
+    [attr.aria-expanded]="isFiltersOpen"
+    [attr.aria-haspopup]="true"
+  >
+    <app-icon name="filter" [size]="16"></app-icon>
+    <span class="trigger-label-text">Filtros</span>
     <span
       *ngIf="activeFiltersCount > 0"
       class="filter-count-badge"
@@ -20,15 +36,42 @@
     <app-icon name="chevron-down" [size]="14" class="chevron-icon"></app-icon>
   </button>
 
-  <!-- Dropdown Content -->
+  <!-- Actions Dropdown Content -->
   <div
-    *ngIf="isOpen"
-    class="options-dropdown-content"
+    *ngIf="isActionsOpen && hasActions"
+    class="options-dropdown-content actions-dropdown"
     [class.mobile-fixed]="isMobileOrTablet"
     (click)="$event.stopPropagation()"
   >
     <div class="dropdown-header">
-      <h3 class="dropdown-title">{{ title }}</h3>
+      <h3 class="dropdown-title">Acciones</h3>
+    </div>
+
+    <div class="actions-list">
+      <button
+        *ngFor="let action of actions"
+        class="action-item"
+        [class.action-primary]="action.variant === 'primary'"
+        [class.action-destructive]="action.variant === 'destructive'"
+        [disabled]="action.disabled || false"
+        (click)="onActionClick(action.action)"
+        type="button"
+      >
+        <app-icon [name]="action.icon" [size]="16"></app-icon>
+        <span>{{ action.label }}</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Filters Dropdown Content -->
+  <div
+    *ngIf="isFiltersOpen && hasFilters"
+    class="options-dropdown-content filters-dropdown"
+    [class.mobile-fixed]="isMobileOrTablet"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="dropdown-header">
+      <h3 class="dropdown-title">Filtros</h3>
       <button
         *ngIf="activeFiltersCount > 0"
         class="clear-all-btn"
@@ -36,12 +79,12 @@
         type="button"
       >
         <app-icon name="x" [size]="14"></app-icon>
-        Limpiar todos
+        Limpiar
       </button>
     </div>
 
-    <!-- Filters Section -->
-    <div *ngIf="filters.length > 0" class="filters-body">
+    <!-- Filters Body -->
+    <div class="filters-body">
       <ng-container *ngFor="let filter of filters">
         <div class="filter-section">
           <div class="filter-section-header">
@@ -97,27 +140,6 @@
           </div>
         </div>
       </ng-container>
-    </div>
-
-    <!-- Actions Section -->
-    <div *ngIf="actions.length > 0" class="actions-section">
-      <div class="actions-header">
-        <span class="actions-title">Acciones</span>
-      </div>
-      <div class="actions-list">
-        <button
-          *ngFor="let action of actions"
-          class="action-item"
-          [class.action-primary]="action.variant === 'primary'"
-          [class.action-destructive]="action.variant === 'destructive'"
-          [disabled]="action.disabled || false"
-          (click)="onActionClick(action.action)"
-          type="button"
-        >
-          <app-icon [name]="action.icon" [size]="16"></app-icon>
-          <span>{{ action.label }}</span>
-        </button>
-      </div>
     </div>
   </div>
 </div>
