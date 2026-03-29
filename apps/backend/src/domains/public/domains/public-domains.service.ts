@@ -177,7 +177,7 @@ export class PublicDomainsService {
     if (generalSettings?.currency) {
       currencyDetails = await this.globalPrisma.currencies.findUnique({
         where: { code: generalSettings.currency },
-        select: { code: true, name: true, symbol: true, decimal_places: true, position: true, state: true },
+        select: { code: true, name: true, symbol: true, decimal_places: true, position: true, format_style: true, state: true },
       });
     }
 

@@ -1,5 +1,6 @@
-# Core dumps
+# Core dumps (files only, not directories)
 core
+!core/
 *.core
 
 # Node
