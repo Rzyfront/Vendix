@@ -542,7 +542,7 @@
 
                                 <!-- Status Badges -->
                                 <div class="absolute top-3 left-3 flex flex-col gap-2">
-                                    <div *ngIf="activeImageIndex === 0"
+                                    <div *ngIf="activeImageIndex === mainImageIndex"
                                         class="px-2 py-1 bg-primary-600/90 text-white text-[10px] font-bold uppercase rounded-md tracking-wider shadow-sm backdrop-blur-sm">
                                         Principal
                                     </div>
@@ -579,8 +579,12 @@
                                 [class.ring-2]="activeImageIndex === i" [class.ring-primary]="activeImageIndex === i"
                                 class="relative flex-none w-16 h-16 bg-white rounded-lg overflow-hidden border border-gray-200 cursor-pointer shadow-sm transition-all hover:border-primary-300">
                                 <img [src]="url" class="w-full h-full object-cover" (error)="onImageError($event)">
-                                <div *ngIf="i === 0" class="absolute top-0 left-0 w-3 h-3 bg-primary-500 rounded-br-md">
-                                </div>
+                                <!-- Star button to mark as main -->
+                                <button type="button" (click)="setMainImage(i); $event.stopPropagation()"
+                                    [class]="i === mainImageIndex ? '!text-yellow-400' : 'text-gray-400 hover:text-yellow-300'"
+                                    class="absolute top-0 right-0 w-6 h-6 flex items-center justify-center bg-black/40 hover:bg-black/60 rounded-bl-md transition-colors">
+                                    <app-icon name="star" size="12"></app-icon>
+                                </button>
                             </div>
 
                             <!-- Small Plus Button (only if < 5) -->

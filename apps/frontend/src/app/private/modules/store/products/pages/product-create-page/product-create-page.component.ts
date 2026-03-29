@@ -357,6 +357,7 @@ export class ProductCreatePageComponent implements OnInit {
   imageUrls: string[] = [];
   imageIds: (number | null)[] = []; // Parallel array: DB image ID (null for new/unsaved images)
   activeImageIndex = 0;
+  mainImageIndex = 0;
   isStockDetailsOpen = false;
   isReleasingReservations = false;
   categoryOptions: MultiSelectorOption[] = [];
@@ -1395,12 +1396,24 @@ export class ProductCreatePageComponent implements OnInit {
 
     this.imageUrls.splice(index, 1);
     this.imageIds.splice(index, 1);
-    if (this.activeImageIndex >= this.imageUrls.length) {
+    // Adjust mainImageIndex first since activeImageIndex may depend on it
+    if (index === this.mainImageIndex) {
+      this.mainImageIndex = Math.max(0, index - 1);
+      this.activeImageIndex = this.mainImageIndex;
+    } else if (index < this.mainImageIndex) {
+      this.mainImageIndex--;
+      this.activeImageIndex--;
+    } else if (this.activeImageIndex >= this.imageUrls.length) {
       this.activeImageIndex = Math.max(0, this.imageUrls.length - 1);
     }
   }
 
   setActiveImage(index: number): void {
+    this.activeImageIndex = index;
+  }
+
+  setMainImage(index: number): void {
+    this.mainImageIndex = index;
     this.activeImageIndex = index;
   }
 
@@ -1460,7 +1473,7 @@ export class ProductCreatePageComponent implements OnInit {
     const images: CreateProductImageDto[] = this.imageUrls.map(
       (url, index) => ({
         image_url: url,
-        is_main: index === 0,
+        is_main: index === this.mainImageIndex,
       }),
     );
 
