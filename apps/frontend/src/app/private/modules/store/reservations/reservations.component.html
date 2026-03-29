@@ -89,8 +89,8 @@
 
   <!-- Main Content Grid -->
   <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6">
-    <!-- Left: Calendar or List (8 cols) -->
-    <div class="lg:col-span-8">
+    <!-- Left: Calendar or List -->
+    <div [class]="activeView === 'calendar' ? 'lg:col-span-8' : 'lg:col-span-12'">
       @if (activeView === 'calendar') {
         <app-card shadow="sm" customClasses="overflow-hidden">
           <app-calendar-container
@@ -150,7 +150,8 @@
       }
     </div>
 
-    <!-- Right: Sidebar (4 cols) -->
+    <!-- Right: Sidebar (4 cols) — only in calendar mode -->
+    @if (activeView === 'calendar') {
     <div class="lg:col-span-4 flex flex-col gap-4">
       <app-today-reservations-panel
         [bookings]="todayBookings()"
@@ -165,6 +166,7 @@
         (exportReport)="onExportReport()"
       />
     </div>
+    }
   </div>
 
   <!-- Create Reservation Modal -->

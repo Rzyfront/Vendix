@@ -9,10 +9,11 @@ import { ProductVariantService } from './services/product-variant.service';
 import { ResponseModule } from '@common/responses/response.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
+import { S3Module } from '@common/services/s3.module';
 import { AccessValidationService } from '@common/services/access-validation.service';
 
 @Module({
-  imports: [ResponseModule, InventoryModule, PrismaModule],
+  imports: [ResponseModule, InventoryModule, PrismaModule, S3Module],
   controllers: [ProductsController, ProductsBulkController, ProductsBulkImageController],
   providers: [
     ProductsService,

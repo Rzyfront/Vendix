@@ -11,12 +11,14 @@ import { seedDefaultTemplates } from './seeds/default-templates.seed';
 import { seedPermissionsAndRoles } from './seeds/permissions-roles.seed';
 import { seedDefaultAccountMappings } from './seeds/default-account-mappings.seed';
 import { seedDefaultPayrollRules } from './seeds/default-payroll-rules.seed';
+import { seedAIEngineApps } from './seeds/ai-engine-apps.seed';
 
 const seeds = [
   { name: 'Default Templates', fn: seedDefaultTemplates },
   { name: 'Permissions & Roles', fn: seedPermissionsAndRoles },
   { name: 'Default Account Mappings', fn: seedDefaultAccountMappings },
   { name: 'Default Payroll Rules', fn: seedDefaultPayrollRules },
+  { name: 'AI Engine Applications', fn: seedAIEngineApps },
 ];
 
 async function main() {

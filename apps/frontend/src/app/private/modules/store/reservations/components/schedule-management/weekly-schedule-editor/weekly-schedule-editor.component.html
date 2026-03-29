@@ -4,13 +4,13 @@
   <!-- Quick actions -->
   <div class="quick-actions">
     <app-button variant="outline" size="xsm" (clicked)="applyPreset('weekdays-9-6')">
-      <app-icon name="briefcase" [size]="13"/> Lun-Vie 9-6
+      <app-icon name="briefcase" [size]="13" slot="icon"/> Lun-Vie 9-6
     </app-button>
     <app-button variant="outline" size="xsm" (clicked)="applyPreset('weekdays-8-5')">
-      <app-icon name="sunrise" [size]="13"/> Lun-Vie 8-5
+      <app-icon name="sunrise" [size]="13" slot="icon"/> Lun-Vie 8-5
     </app-button>
     <app-button variant="outline" size="xsm" (clicked)="copyToAll()">
-      <app-icon name="copy" [size]="13"/> Copiar a todos
+      <app-icon name="copy" [size]="13" slot="icon"/> Copiar a todos
     </app-button>
   </div>
 
@@ -76,7 +76,7 @@
               <!-- Stop propagation wrapper -->
               <div (click)="$event.stopPropagation()">
                 <app-button variant="primary" size="xsm" (clicked)="stopEditing(i)">
-                  <app-icon name="check" [size]="14"/>
+                  <app-icon name="check" [size]="14" slot="icon"/>
                 </app-button>
               </div>
             </div>
@@ -93,7 +93,7 @@
   <!-- Save button -->
   <div class="save-row">
     <app-button variant="primary" size="sm" [loading]="saving()" (clicked)="save()">
-      <app-icon name="save" [size]="15"/> Guardar Horario
+      <app-icon name="save" [size]="15" slot="icon"/> Guardar Horario
     </app-button>
   </div>
 }

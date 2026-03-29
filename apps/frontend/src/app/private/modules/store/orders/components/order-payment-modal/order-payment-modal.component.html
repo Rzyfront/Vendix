@@ -306,8 +306,8 @@
 
   <!-- Footer -->
   <div slot="footer" class="payment-footer">
-    <div class="flex gap-3">
-      <app-button variant="outline" (clicked)="onModalClosed()" class="flex-1">
+    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 12px; width: 100%;">
+      <app-button variant="outline-danger" [fullWidth]="true" (clicked)="onModalClosed()">
         Cancelar
       </app-button>
       <app-button
@@ -317,7 +317,6 @@
         [loading]="isProcessing()"
         [showTextWhileLoading]="true"
         (clicked)="confirmPayment()"
-        customClasses="flex-[2]"
       >
         <app-icon slot="icon" name="check-circle" [size]="20"></app-icon>
         {{ isProcessing() ? 'Procesando...' : isCreditOrder() ? 'Registrar Abono' : 'Confirmar Pago' }}

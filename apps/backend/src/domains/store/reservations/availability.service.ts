@@ -215,6 +215,7 @@ export class AvailabilityService {
     start_time: string,
     end_time: string,
     provider_id?: number,
+    exclude_booking_id?: number,
   ): Promise<boolean> {
     // Obtener booking_mode del producto
     const product = await this.prisma.products.findFirst({
@@ -231,11 +232,11 @@ export class AvailabilityService {
 
     if (provider_id) {
       // Verificar solo este provider
-      return this.isProviderAvailableForSlot(provider_id, product_id, date, start_time, end_time);
+      return this.isProviderAvailableForSlot(provider_id, product_id, date, start_time, end_time, exclude_booking_id);
     }
 
     // Verificar si ALGUN provider esta disponible
-    const availableProviders = await this.getAvailableProvidersForSlot(product_id, date, start_time, end_time);
+    const availableProviders = await this.getAvailableProvidersForSlot(product_id, date, start_time, end_time, exclude_booking_id);
     return availableProviders.length > 0;
   }
 
@@ -247,6 +248,7 @@ export class AvailabilityService {
     date: string,
     start_time: string,
     end_time: string,
+    exclude_booking_id?: number,
   ): Promise<AvailableProvider[]> {
     const targetDate = new Date(date);
     const dayOfWeek = targetDate.getUTCDay();
@@ -289,16 +291,18 @@ export class AvailabilityService {
         continue;
       }
 
-      // Verificar si ya tiene booking en este slot
-      const booked = await this.prisma.bookings.count({
-        where: {
-          provider_id: provider.id,
-          date: targetDate,
-          start_time,
-          end_time,
-          status: { notIn: [booking_status_enum.cancelled] },
-        },
-      });
+      // Verificar si ya tiene booking que se superponga con este slot
+      const where: any = {
+        provider_id: provider.id,
+        date: targetDate,
+        start_time: { lt: end_time },
+        end_time: { gt: start_time },
+        status: { notIn: [booking_status_enum.cancelled] },
+      };
+      if (exclude_booking_id) {
+        where.id = { not: exclude_booking_id };
+      }
+      const booked = await this.prisma.bookings.count({ where });
 
       if (booked === 0) {
         available.push({
@@ -367,6 +371,7 @@ export class AvailabilityService {
     date: string,
     start_time: string,
     end_time: string,
+    exclude_booking_id?: number,
   ): Promise<boolean> {
     const targetDate = new Date(date);
     const dayOfWeek = targetDate.getUTCDay();
@@ -403,16 +408,18 @@ export class AvailabilityService {
       return false;
     }
 
-    // Verificar si ya tiene booking
-    const booked = await this.prisma.bookings.count({
-      where: {
-        provider_id,
-        date: targetDate,
-        start_time,
-        end_time,
-        status: { notIn: [booking_status_enum.cancelled] },
-      },
-    });
+    // Verificar si ya tiene booking que se superponga
+    const where: any = {
+      provider_id,
+      date: targetDate,
+      start_time: { lt: end_time },
+      end_time: { gt: start_time },
+      status: { notIn: [booking_status_enum.cancelled] },
+    };
+    if (exclude_booking_id) {
+      where.id = { not: exclude_booking_id };
+    }
+    const booked = await this.prisma.bookings.count({ where });
 
     return booked === 0;
   }

@@ -26,6 +26,15 @@ import {
   EmptyStateComponent,
   SelectorComponent,
   TextareaComponent,
+  ResponsiveDataViewComponent,
+  ModalComponent,
+  ScrollableTabsComponent,
+} from '../../../../../../shared/components';
+import type {
+  TableColumn,
+  TableAction,
+  ItemListCardConfig,
+  StickyHeaderActionButton,
 } from '../../../../../../shared/components';
 import { WeeklyScheduleEditorComponent } from './weekly-schedule-editor/weekly-schedule-editor.component';
 import { ExceptionsManagerComponent } from './exceptions-manager/exceptions-manager.component';
@@ -60,8 +69,11 @@ interface BookableService {
     ToggleComponent,
     BadgeComponent,
     EmptyStateComponent,
+    ModalComponent,
     SelectorComponent,
     TextareaComponent,
+    ResponsiveDataViewComponent,
+    ScrollableTabsComponent,
     WeeklyScheduleEditorComponent,
     ExceptionsManagerComponent,
   ],
@@ -73,6 +85,10 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
   private toastService = inject(ToastService);
   private router = inject(Router);
   private destroy$ = new Subject<void>();
+
+  // Detail modal
+  isDetailModalOpen = signal(false);
+  activeTab = signal('services');
 
   // Data
   providers = signal<ServiceProvider[]>([]);
@@ -110,11 +126,89 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
   // Service management
   managingServices = signal(false);
   savingServices = signal(false);
+  serviceSearchQuery = signal('');
+  filteredServices = computed(() => {
+    const query = this.serviceSearchQuery().toLowerCase();
+    const all = this.allServices();
+    if (!query) return all;
+    return all.filter(s => (s.name || '').toLowerCase().includes(query));
+  });
 
   // Bio editing
   editingBio = signal(false);
   bioValue = signal('');
   savingBio = signal(false);
+
+  // Modal tabs
+  readonly detailTabs = [
+    { id: 'services', label: 'Servicios' },
+    { id: 'schedule', label: 'Horario' },
+    { id: 'exceptions', label: 'Excepciones' },
+  ];
+
+  // Provider table columns
+  providerColumns: TableColumn[] = [
+    {
+      key: 'display_name',
+      label: 'Nombre',
+      priority: 0,
+      transform: (val: any, item?: any) =>
+        val || `${item?.employee?.first_name || ''} ${item?.employee?.last_name || ''}`.trim(),
+    },
+    { key: 'employee.position', label: 'Cargo', priority: 1, transform: (val: any) => val || 'Sin cargo' },
+    {
+      key: 'is_active',
+      label: 'Estado',
+      priority: 0,
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        colorMap: { true: '#10b981', false: '#9ca3af' },
+      },
+      transform: (val: any) => (val ? 'Activo' : 'Inactivo'),
+    },
+    {
+      key: 'services',
+      label: 'Servicios',
+      priority: 2,
+      transform: (val: any) =>
+        val?.length ? `${val.length} servicio${val.length > 1 ? 's' : ''}` : 'Sin servicios',
+    },
+  ];
+
+  // Provider card config (mobile)
+  providerCardConfig: ItemListCardConfig = {
+    titleKey: 'display_name',
+    titleTransform: (item: any) =>
+      item.display_name || `${item.employee?.first_name || ''} ${item.employee?.last_name || ''}`.trim(),
+    subtitleKey: 'employee.position',
+    subtitleTransform: (item: any) => item.employee?.position || 'Sin cargo',
+    avatarFallbackIcon: 'user',
+    badgeKey: 'is_active',
+    badgeConfig: {
+      type: 'custom',
+      colorMap: { true: '#10b981', false: '#9ca3af' },
+    },
+    footerKey: 'services',
+    footerTransform: (val: any) =>
+      val?.length ? `${val.length} servicio${val.length > 1 ? 's' : ''}` : 'Sin servicios',
+  };
+
+  // Provider row actions
+  providerActions: TableAction[] = [
+    {
+      label: 'Configurar',
+      icon: 'settings',
+      variant: 'primary',
+      action: (item: any) => this.selectProvider(item),
+    },
+    {
+      label: ((item: any) => (item.is_active ? 'Desactivar' : 'Activar')) as any,
+      icon: 'toggle-right',
+      variant: 'ghost',
+      action: (item: any) => this.toggleActive(item),
+    },
+  ];
 
   ngOnInit(): void {
     this.loadProviders();
@@ -127,6 +221,12 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
 
   goBack(): void {
     this.router.navigate(['/admin/reservations']);
+  }
+
+  closeDetailModal(): void {
+    this.isDetailModalOpen.set(false);
+    this.selectedProvider.set(null);
+    this.activeTab.set('services');
   }
 
   loadProviders(): void {
@@ -151,7 +251,8 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
   selectProvider(provider: ServiceProvider): void {
     this.managingServices.set(false);
     this.editingBio.set(false);
-    this.loading.set(true);
+    this.activeTab.set('services');
+    this.isDetailModalOpen.set(true);
     this.reservationsService
       .getProvider(provider.id)
       .pipe(
@@ -161,7 +262,6 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (full) => {
           this.selectedProvider.set(full);
-          // Update the provider in the list too
           const list = this.providers().map((p) => (p.id === full.id ? full : p));
           this.providers.set(list);
         },
@@ -219,7 +319,9 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (updated) => {
-          this.selectedProvider.set(updated);
+          if (this.selectedProvider()?.id === updated.id) {
+            this.selectedProvider.set(updated);
+          }
           const list = this.providers().map((p) =>
             p.id === updated.id ? updated : p,
           );
@@ -242,7 +344,6 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
 
     obs$.pipe(takeUntil(this.destroy$)).subscribe({
       next: () => {
-        // Reload provider detail to get updated services
         this.reservationsService
           .getProvider(provider.id)
           .pipe(takeUntil(this.destroy$))

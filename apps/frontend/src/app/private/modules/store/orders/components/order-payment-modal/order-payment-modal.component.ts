@@ -223,7 +223,8 @@ export class OrderPaymentModalComponent {
     };
 
     if (this.isCreditOrder()) {
-      dto.amount = this.customAmount() > 0 ? this.customAmount() : this.remainingBalance();
+      const balance = this.remainingBalance() || this.order()?.grand_total || 0;
+      dto.amount = this.customAmount() > 0 ? this.customAmount() : balance;
       if (this.selectedInstallmentId()) {
         dto.installment_id = this.selectedInstallmentId()!;
       }

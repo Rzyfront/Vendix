@@ -1,209 +1,218 @@
 <div class="w-full">
-  <!-- Header -->
-  <div class="flex flex-col gap-3 mb-6 md:flex-row md:items-center">
-    <!-- Title section -->
-    <div class="flex items-center gap-3 flex-1 min-w-0">
-      <button type="button" class="p-2 rounded-lg hover:bg-gray-100 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center" (click)="backAction.emit()">
-        <app-icon name="arrow-left" [size]="20"></app-icon>
-      </button>
-      <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2 flex-wrap">
-          <h1 class="text-lg md:text-xl font-bold text-text-primary truncate">
-            Remisión {{ dispatch_note.dispatch_number }}
-          </h1>
-          <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold shrink-0"
-                [ngClass]="getStatusClasses(dispatch_note.status)">
-            {{ getStatusLabel(dispatch_note.status) }}
-          </span>
-        </div>
-        <p class="text-sm text-text-secondary mt-0.5">
-          Creada el {{ formatDate(dispatch_note.created_at) }}
-        </p>
-      </div>
+  <!-- Sticky Header -->
+  <app-sticky-header
+    [title]="headerTitle()"
+    [subtitle]="headerSubtitle()"
+    icon="file-text"
+    [showBackButton]="true"
+    backRoute="/admin/orders/dispatch-notes"
+    [badgeText]="headerBadgeText()"
+    [badgeColor]="headerBadgeColor()"
+    [actions]="headerActions()"
+    (actionClicked)="onHeaderAction($event)"
+  />
+
+  <!-- Main Content -->
+  <div class="max-w-[1600px] mx-auto flex flex-col gap-4 md:gap-5">
+
+    <!-- Stats Cards -->
+    <div class="stats-container sticky top-0 z-20 bg-[var(--color-background)] md:static md:bg-transparent">
+      <app-stats
+        title="Total"
+        [value]="formatCurrency(dispatch_note().grand_total)"
+        smallText="Valor bruto de la remision"
+        iconName="dollar-sign"
+        iconBgColor="bg-primary/10"
+        iconColor="text-primary"
+      />
+      <app-stats
+        title="Items"
+        [value]="(dispatch_note().dispatch_note_items?.length || 0).toString()"
+        smallText="Productos incluidos"
+        iconName="package"
+        iconBgColor="bg-blue-100"
+        iconColor="text-blue-500"
+      />
+      <app-stats
+        title="Estado"
+        [value]="headerBadgeText()"
+        smallText="Estado actual"
+        iconName="info"
+        [iconBgColor]="statsIconColors().bg"
+        [iconColor]="statsIconColors().text"
+      />
+      <app-stats
+        title="Entrega"
+        [value]="formatDate(dispatch_note().agreed_delivery_date)"
+        smallText="Fecha acordada"
+        iconName="calendar"
+        iconBgColor="bg-amber-100"
+        iconColor="text-amber-500"
+      />
     </div>
 
-    <!-- Action buttons: horizontal scroll on mobile -->
-    <div class="flex items-center gap-2 overflow-x-auto pb-1 -mb-1 md:overflow-visible md:pb-0 md:mb-0 pl-[52px] md:pl-0">
-      <app-button *ngIf="can_confirm" variant="primary" size="sm" class="min-h-[44px]" (clicked)="confirmAction.emit(dispatch_note)">
-        <app-icon slot="icon" name="check" [size]="16"></app-icon>
-        Confirmar
-      </app-button>
-      <app-button *ngIf="can_deliver" variant="primary" size="sm" class="min-h-[44px]" (clicked)="deliverAction.emit(dispatch_note)">
-        <app-icon slot="icon" name="truck" [size]="16"></app-icon>
-        Entregar
-      </app-button>
-      <app-button *ngIf="can_invoice" variant="primary" size="sm" class="min-h-[44px]" (clicked)="invoiceAction.emit(dispatch_note)">
-        <app-icon slot="icon" name="file-plus" [size]="16"></app-icon>
-        Facturar
-      </app-button>
-      <app-button *ngIf="can_print" variant="outline" size="sm" class="min-h-[44px]" (clicked)="printAction.emit(dispatch_note)">
-        <app-icon slot="icon" name="printer" [size]="16"></app-icon>
-        Imprimir
-      </app-button>
-      <app-button *ngIf="can_void" variant="danger" size="sm" class="min-h-[44px]" (clicked)="voidAction.emit(dispatch_note)">
-        <app-icon slot="icon" name="x-circle" [size]="16"></app-icon>
-        Anular
-      </app-button>
-    </div>
-  </div>
+    <!-- Two-column Layout -->
+    <div class="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-3 lg:gap-5">
 
-  <!-- Info Cards -->
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-    <!-- Customer Info -->
-    <div class="bg-surface rounded-xl border border-border p-5">
-      <h3 class="text-xs font-bold text-text-secondary uppercase tracking-wide mb-3">Cliente</h3>
-      <p class="text-sm font-semibold text-text-primary">{{ dispatch_note.customer_name }}</p>
-      <p *ngIf="dispatch_note.customer_tax_id" class="text-sm text-text-secondary mt-1">
-        NIT/CC: {{ dispatch_note.customer_tax_id }}
-      </p>
-      <p *ngIf="dispatch_note.customer_address" class="text-sm text-text-secondary mt-1">
-        {{ dispatch_note.customer_address }}
-      </p>
-    </div>
+      <!-- LEFT COLUMN: Main Content -->
+      <div class="flex flex-col gap-3">
 
-    <!-- Document Info -->
-    <div class="bg-surface rounded-xl border border-border p-5">
-      <h3 class="text-xs font-bold text-text-secondary uppercase tracking-wide mb-3">Documento</h3>
-      <div class="space-y-2">
-        <div class="flex justify-between text-sm">
-          <span class="text-text-secondary">Fecha Emision</span>
-          <span class="text-text-primary font-medium">{{ formatDate(dispatch_note.emission_date) }}</span>
-        </div>
-        <div class="flex justify-between text-sm">
-          <span class="text-text-secondary">Entrega Acordada</span>
-          <span class="text-text-primary font-medium">{{ formatDate(dispatch_note.agreed_delivery_date) }}</span>
-        </div>
-        <div *ngIf="dispatch_note.actual_delivery_date" class="flex justify-between text-sm">
-          <span class="text-text-secondary">Entrega Real</span>
-          <span class="text-text-primary font-medium">{{ formatDate(dispatch_note.actual_delivery_date) }}</span>
-        </div>
-        <div *ngIf="dispatch_note.sales_order" class="flex justify-between text-sm">
-          <span class="text-text-secondary">Orden de Venta</span>
-          <span class="text-text-primary font-medium">{{ dispatch_note.sales_order?.order_number || '-' }}</span>
-        </div>
-        <div *ngIf="dispatch_note.invoice" class="flex justify-between text-sm">
-          <span class="text-text-secondary">Factura</span>
-          <span class="text-text-primary font-medium">{{ dispatch_note.invoice?.invoice_number || '-' }}</span>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Items Table -->
-  <div class="bg-surface rounded-xl border border-border mb-6 overflow-hidden">
-    <div class="px-5 py-4 border-b border-border">
-      <h3 class="text-sm font-semibold text-text-primary">Items ({{ dispatch_note.dispatch_note_items?.length || 0 }})</h3>
-    </div>
-    <div class="overflow-x-auto">
-      <table class="w-full">
-        <thead>
-          <tr class="bg-background">
-            <th class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase">#</th>
-            <th class="px-4 py-3 text-left text-xs font-semibold text-text-secondary uppercase">Producto</th>
-            <th class="px-4 py-3 text-center text-xs font-semibold text-text-secondary uppercase">Cant. Pedida</th>
-            <th class="px-4 py-3 text-center text-xs font-semibold text-text-secondary uppercase">Cant. Despachada</th>
-            <th class="px-4 py-3 text-right text-xs font-semibold text-text-secondary uppercase">Precio Unit.</th>
-            <th class="px-4 py-3 text-right text-xs font-semibold text-text-secondary uppercase">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr *ngFor="let item of dispatch_note.dispatch_note_items; let i = index"
-            class="border-b border-border last:border-b-0 hover:bg-background/50">
-            <td class="px-4 py-3 text-sm text-text-secondary">{{ i + 1 }}</td>
-            <td class="px-4 py-3">
-              <p class="text-sm font-medium text-text-primary">
-                {{ item.product?.name || item.product?.product_name || 'Producto #' + item.product_id }}
-              </p>
-              <p *ngIf="item.product_variant?.sku" class="text-xs text-text-secondary">
-                SKU: {{ item.product_variant.sku }}
-              </p>
-              <p *ngIf="item.lot_serial" class="text-xs text-text-secondary">
-                Lote: {{ item.lot_serial }}
-              </p>
-            </td>
-            <td class="px-4 py-3 text-sm text-text-primary text-center">{{ item.ordered_quantity }}</td>
-            <td class="px-4 py-3 text-sm text-text-primary text-center font-semibold">{{ item.dispatched_quantity }}</td>
-            <td class="px-4 py-3 text-sm text-text-primary text-right font-mono">
-              {{ item.unit_price != null ? formatCurrency(item.unit_price) : '-' }}
-            </td>
-            <td class="px-4 py-3 text-sm text-text-primary text-right font-mono font-semibold">
-              {{ item.total_price != null ? formatCurrency(item.total_price) : '-' }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Totals -->
-    <div class="border-t border-border px-5 py-4">
-      <div class="flex justify-end">
-        <div class="w-64 space-y-2">
-          <div class="flex justify-between text-sm">
-            <span class="text-text-secondary">Subtotal</span>
-            <span class="font-mono text-text-primary">{{ formatCurrency(dispatch_note.subtotal_amount) }}</span>
+        <!-- Items Card -->
+        <app-card [showHeader]="true" [padding]="false">
+          <div slot="header" class="flex items-center gap-2 w-full">
+            <app-icon name="package" [size]="16" class="text-[var(--color-text-secondary)]"></app-icon>
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">
+              Items ({{ dispatch_note().dispatch_note_items?.length || 0 }})
+            </span>
           </div>
-          <div *ngIf="dispatch_note.discount_amount > 0" class="flex justify-between text-sm">
-            <span class="text-text-secondary">Descuento</span>
-            <span class="font-mono text-green-600">-{{ formatCurrency(dispatch_note.discount_amount) }}</span>
-          </div>
-          <div class="flex justify-between text-sm">
-            <span class="text-text-secondary">IVA</span>
-            <span class="font-mono text-text-primary">{{ formatCurrency(dispatch_note.tax_amount) }}</span>
-          </div>
-          <div class="flex justify-between pt-2 border-t border-border text-base font-bold">
-            <span class="text-text-primary">Total</span>
-            <span class="font-mono text-text-primary">{{ formatCurrency(dispatch_note.grand_total) }}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
 
-  <!-- Notes -->
-  <div *ngIf="dispatch_note.notes || dispatch_note.internal_notes" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-    <div *ngIf="dispatch_note.notes" class="bg-surface rounded-xl border border-border p-5">
-      <h3 class="text-xs font-bold text-text-secondary uppercase tracking-wide mb-2">Notas</h3>
-      <p class="text-sm text-text-primary whitespace-pre-wrap">{{ dispatch_note.notes }}</p>
-    </div>
-    <div *ngIf="dispatch_note.internal_notes" class="bg-surface rounded-xl border border-border p-5">
-      <h3 class="text-xs font-bold text-text-secondary uppercase tracking-wide mb-2">Notas Internas</h3>
-      <p class="text-sm text-text-primary whitespace-pre-wrap">{{ dispatch_note.internal_notes }}</p>
-    </div>
-  </div>
+          <app-responsive-data-view
+            [data]="computedItems()"
+            [columns]="columns"
+            [cardConfig]="cardConfig"
+            [loading]="false"
+            emptyMessage="No hay items"
+            tableSize="sm"
+            [compact]="true"
+          />
 
-  <!-- Void Reason -->
-  <div *ngIf="dispatch_note.void_reason" class="bg-red-50 rounded-xl border border-red-200 p-5 mb-6">
-    <h3 class="text-xs font-bold text-red-600 uppercase tracking-wide mb-2">Razon de Anulacion</h3>
-    <p class="text-sm text-red-700">{{ dispatch_note.void_reason }}</p>
-  </div>
+          <!-- Totals -->
+          <div class="border-t border-[var(--color-border)] px-4 sm:px-6 py-4">
+            <div class="flex justify-end">
+              <div class="w-64 space-y-2">
+                <div class="flex justify-between text-sm">
+                  <span class="text-[var(--color-text-secondary)]">Subtotal</span>
+                  <span class="font-mono text-[var(--color-text-primary)]">{{ formatCurrency(dispatch_note().subtotal_amount) }}</span>
+                </div>
+                @if (dispatch_note().discount_amount > 0) {
+                  <div class="flex justify-between text-sm">
+                    <span class="text-[var(--color-text-secondary)]">Descuento</span>
+                    <span class="font-mono text-green-600">-{{ formatCurrency(dispatch_note().discount_amount) }}</span>
+                  </div>
+                }
+                <div class="flex justify-between text-sm">
+                  <span class="text-[var(--color-text-secondary)]">IVA</span>
+                  <span class="font-mono text-[var(--color-text-primary)]">{{ formatCurrency(dispatch_note().tax_amount) }}</span>
+                </div>
+                <div class="flex justify-between pt-2 border-t border-[var(--color-border)] text-base font-bold">
+                  <span class="text-[var(--color-text-primary)]">Total</span>
+                  <span class="font-mono text-[var(--color-text-primary)]">{{ formatCurrency(dispatch_note().grand_total) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </app-card>
 
-  <!-- Audit Trail -->
-  <div class="bg-surface rounded-xl border border-border p-5">
-    <h3 class="text-xs font-bold text-text-secondary uppercase tracking-wide mb-3">Historial</h3>
-    <div class="space-y-3">
-      <div class="flex items-center gap-3 text-sm">
-        <div class="w-2 h-2 rounded-full bg-gray-400"></div>
-        <span class="text-text-secondary">Creada por</span>
-        <span class="font-medium text-text-primary">{{ getUserName(dispatch_note.created_by_user) }}</span>
-        <span class="text-text-secondary text-xs">{{ formatDateTime(dispatch_note.created_at) }}</span>
+        <!-- Notes Card -->
+        @if (dispatch_note().notes || dispatch_note().internal_notes) {
+          <app-card [showHeader]="true" [responsivePadding]="true">
+            <div slot="header" class="flex items-center gap-2 w-full">
+              <app-icon name="message-square" [size]="16" class="text-[var(--color-text-secondary)]"></app-icon>
+              <span class="text-sm font-bold text-[var(--color-text-primary)]">Notas</span>
+            </div>
+
+            <div class="space-y-4">
+              @if (dispatch_note().notes) {
+                <div>
+                  <p class="text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide mb-1">Notas</p>
+                  <p class="text-sm text-[var(--color-text-primary)] whitespace-pre-wrap">{{ dispatch_note().notes }}</p>
+                </div>
+              }
+              @if (dispatch_note().internal_notes) {
+                <div>
+                  <p class="text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide mb-1">Notas Internas</p>
+                  <p class="text-sm text-[var(--color-text-primary)] whitespace-pre-wrap">{{ dispatch_note().internal_notes }}</p>
+                </div>
+              }
+            </div>
+          </app-card>
+        }
+
+        <!-- Void Reason -->
+        @if (dispatch_note().void_reason) {
+          <div class="bg-red-50 rounded-xl border border-red-200 p-4 sm:p-5">
+            <div class="flex items-center gap-2 mb-2">
+              <app-icon name="alert-triangle" [size]="16" class="text-red-600"></app-icon>
+              <span class="text-xs font-bold text-red-600 uppercase tracking-wide">Razon de Anulacion</span>
+            </div>
+            <p class="text-sm text-red-700">{{ dispatch_note().void_reason }}</p>
+          </div>
+        }
       </div>
-      <div *ngIf="dispatch_note.confirmed_at" class="flex items-center gap-3 text-sm">
-        <div class="w-2 h-2 rounded-full bg-blue-500"></div>
-        <span class="text-text-secondary">Confirmada por</span>
-        <span class="font-medium text-text-primary">{{ getUserName(dispatch_note.confirmed_by_user) }}</span>
-        <span class="text-text-secondary text-xs">{{ formatDateTime(dispatch_note.confirmed_at) }}</span>
-      </div>
-      <div *ngIf="dispatch_note.delivered_at" class="flex items-center gap-3 text-sm">
-        <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
-        <span class="text-text-secondary">Entregada por</span>
-        <span class="font-medium text-text-primary">{{ getUserName(dispatch_note.delivered_by_user) }}</span>
-        <span class="text-text-secondary text-xs">{{ formatDateTime(dispatch_note.delivered_at) }}</span>
-      </div>
-      <div *ngIf="dispatch_note.voided_at" class="flex items-center gap-3 text-sm">
-        <div class="w-2 h-2 rounded-full bg-red-500"></div>
-        <span class="text-text-secondary">Anulada por</span>
-        <span class="font-medium text-text-primary">{{ getUserName(dispatch_note.voided_by_user) }}</span>
-        <span class="text-text-secondary text-xs">{{ formatDateTime(dispatch_note.voided_at) }}</span>
+
+      <!-- RIGHT COLUMN: Sidebar -->
+      <div class="flex flex-col gap-3">
+
+        <!-- Customer Info Card -->
+        <app-card [showHeader]="true" [responsivePadding]="true">
+          <div slot="header" class="flex items-center gap-2 w-full">
+            <app-icon name="user" [size]="16" class="text-[var(--color-text-secondary)]"></app-icon>
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">Cliente</span>
+          </div>
+
+          <div class="space-y-2">
+            <p class="text-sm font-semibold text-[var(--color-text-primary)]">{{ dispatch_note().customer_name }}</p>
+            @if (dispatch_note().customer_tax_id) {
+              <p class="text-sm text-[var(--color-text-secondary)]">NIT/CC: {{ dispatch_note().customer_tax_id }}</p>
+            }
+            @if (dispatch_note().customer_address) {
+              <p class="text-sm text-[var(--color-text-secondary)]">{{ dispatch_note().customer_address }}</p>
+            }
+          </div>
+        </app-card>
+
+        <!-- Document Info Card -->
+        <app-card [showHeader]="true" [responsivePadding]="true">
+          <div slot="header" class="flex items-center gap-2 w-full">
+            <app-icon name="file-text" [size]="16" class="text-[var(--color-text-secondary)]"></app-icon>
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">Documento</span>
+          </div>
+
+          <div class="space-y-2.5">
+            <div class="flex justify-between text-sm">
+              <span class="text-[var(--color-text-secondary)]">Fecha Emision</span>
+              <span class="text-[var(--color-text-primary)] font-medium">{{ formatDate(dispatch_note().emission_date) }}</span>
+            </div>
+            <div class="flex justify-between text-sm">
+              <span class="text-[var(--color-text-secondary)]">Entrega Acordada</span>
+              <span class="text-[var(--color-text-primary)] font-medium">{{ formatDate(dispatch_note().agreed_delivery_date) }}</span>
+            </div>
+            @if (dispatch_note().actual_delivery_date) {
+              <div class="flex justify-between text-sm">
+                <span class="text-[var(--color-text-secondary)]">Entrega Real</span>
+                <span class="text-[var(--color-text-primary)] font-medium">{{ formatDate(dispatch_note().actual_delivery_date) }}</span>
+              </div>
+            }
+            @if (dispatch_note().sales_order) {
+              <div class="flex justify-between text-sm">
+                <span class="text-[var(--color-text-secondary)]">Orden de Venta</span>
+                <span class="text-[var(--color-text-primary)] font-medium">{{ dispatch_note().sales_order?.order_number || '-' }}</span>
+              </div>
+            }
+            @if (dispatch_note().invoice) {
+              <div class="flex justify-between text-sm">
+                <span class="text-[var(--color-text-secondary)]">Factura</span>
+                <span class="text-[var(--color-text-primary)] font-medium">{{ dispatch_note().invoice?.invoice_number || '-' }}</span>
+              </div>
+            }
+            @if (dispatch_note().dispatch_location) {
+              <div class="flex justify-between text-sm">
+                <span class="text-[var(--color-text-secondary)]">Ubicacion</span>
+                <span class="text-[var(--color-text-primary)] font-medium">{{ dispatch_note().dispatch_location?.name || '-' }}</span>
+              </div>
+            }
+          </div>
+        </app-card>
+
+        <!-- Timeline Card -->
+        <app-card [showHeader]="true" [responsivePadding]="true">
+          <div slot="header" class="flex items-center gap-2 w-full">
+            <app-icon name="clock" [size]="16" class="text-[var(--color-text-secondary)]"></app-icon>
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">Historial</span>
+          </div>
+
+          <app-timeline [steps]="timelineSteps()" [collapsible]="false" />
+        </app-card>
       </div>
     </div>
   </div>

@@ -92,7 +92,7 @@ export class DispatchNotesComponent implements OnInit, OnDestroy {
   }
 
   onViewDetail(dispatch_note: DispatchNote): void {
-    this.router.navigate(['/admin/dispatch-notes', dispatch_note.id]);
+    this.router.navigate(['/admin/orders/dispatch-notes', dispatch_note.id]);
   }
 
   openCreateModal(): void {

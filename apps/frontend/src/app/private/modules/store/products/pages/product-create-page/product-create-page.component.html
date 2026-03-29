@@ -231,7 +231,7 @@
                     </div>
 
                     <!-- Grid 2x2: Estado, Stock, Variantes, Inventario -->
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 md:auto-rows-fr gap-4">
                         <!-- Row 1, Col 1: Estado -->
                         <app-input-buttons
                             label="Estado"
@@ -242,11 +242,11 @@
                         </app-input-buttons>
 
                         <!-- Row 1, Col 2: Stock (condicional) -->
-                        <div class="animate-fadeIn">
+                        <div class="animate-fadeIn h-full flex flex-col">
                             @if (productForm.get('track_inventory')?.value) {
                                 @if (hasVariants) {
                                     <!-- Stock basado en variantes -->
-                                    <div class="flex items-center gap-2 px-3 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800 min-h-[42px]">
+                                    <div class="flex items-center gap-2 px-3 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800 min-h-[42px] flex-1">
                                         <app-icon name="layers" size="16" class="text-blue-600 shrink-0"></app-icon>
                                         <span class="font-medium text-xs">Stock basado en variantes</span>
                                         @if (isEditMode()) {
@@ -278,7 +278,7 @@
                                 }
                             } @else {
                                 <!-- Producto bajo pedido -->
-                                <div class="flex items-center gap-2 px-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 min-h-[42px]">
+                                <div class="flex items-center gap-2 px-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 min-h-[42px] flex-1">
                                     <app-icon name="info" size="16" class="text-amber-600 shrink-0"></app-icon>
                                     <span class="font-medium text-xs">Producto bajo pedido — siempre disponible</span>
                                 </div>
@@ -300,7 +300,7 @@
                                 : 'Producto bajo pedido — siempre disponible para venta'">
                         </app-setting-toggle>
                         } @else {
-                        <div class="flex items-center gap-2 p-3 bg-purple-50 rounded-lg border border-purple-100">
+                        <div class="flex items-center gap-2 px-3 bg-purple-50 rounded-xl border border-purple-200 h-full min-h-[42px]">
                             <app-icon name="briefcase" size="16" class="text-purple-600"></app-icon>
                             <span class="text-sm text-purple-700 font-medium">Servicio — siempre disponible</span>
                         </div>
@@ -515,9 +515,9 @@
             </div>
 
             <!-- Right Column: Images & Stock (Desktop only) -->
-            <div class="hidden lg:flex flex-col gap-4 md:gap-6 h-full">
+            <div class="hidden lg:flex flex-col gap-4 md:gap-6">
                 <!-- Images Section (Desktop) -->
-                <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm flex-1 flex flex-col">
+                <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm flex flex-col">
                     <div class="flex items-center gap-2 mb-4">
                         <app-icon name="image" size="18" class="text-primary-600"></app-icon>
                         <h2 class="text-base font-bold text-gray-900">Imágenes del Producto</h2>
@@ -628,7 +628,7 @@
                 </section>
 
                 <!-- Stock Section (Desktop) -->
-                <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm flex-1 flex flex-col">
+                <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm flex flex-col">
                     <!-- Header -->
                     <div class="flex items-center gap-2 mb-4">
                         <app-icon name="archive" size="18" class="text-primary-600"></app-icon>

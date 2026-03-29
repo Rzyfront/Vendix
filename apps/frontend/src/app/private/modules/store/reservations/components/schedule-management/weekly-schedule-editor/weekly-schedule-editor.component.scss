@@ -126,7 +126,7 @@
   }
 
   &.editing {
-    background: rgba(99, 102, 241, 0.15);
+    background: color-mix(in srgb, var(--color-primary) 15%, transparent);
     border: 1px dashed var(--color-primary);
   }
 }

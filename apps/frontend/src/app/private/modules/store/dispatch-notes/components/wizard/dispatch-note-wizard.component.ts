@@ -1,12 +1,17 @@
 import {
   Component,
   ChangeDetectionStrategy,
+  HostListener,
   inject,
   input,
   output,
   signal,
+  computed,
+  OnInit,
+  OnDestroy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { switchMap, of } from 'rxjs';
 
 import {
   ModalComponent,
@@ -15,7 +20,10 @@ import {
   StepsLineComponent,
   ToastService,
 } from '../../../../../../shared/components';
-import { DispatchNoteWizardService } from '../../services/dispatch-note-wizard.service';
+import {
+  DispatchNoteWizardService,
+  type WizardCreateAction,
+} from '../../services/dispatch-note-wizard.service';
 import { DispatchNotesService } from '../../services/dispatch-notes.service';
 import { DispatchNotePrintService } from '../../services/dispatch-note-print.service';
 import type {
@@ -51,7 +59,7 @@ import { ReviewStepComponent } from './review-step.component';
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Nueva Remision"
-      size="xl-mid"
+      size="lg"
       [showCloseButton]="true"
     >
       <!-- Steps Header -->
@@ -66,16 +74,24 @@ import { ReviewStepComponent } from './review-step.component';
         <!-- Step hint line -->
         <p class="text-xs text-[var(--color-text-muted)] mt-1.5 mb-0.5">
           @switch (wizardService.currentStep()) {
-            @case (0) { Selecciona el cliente para la remision }
-            @case (1) { Agrega los productos a despachar }
-            @case (2) { Configura fechas, ubicacion y notas }
-            @case (3) { Revisa y confirma la remision }
+            @case (0) {
+              Selecciona el cliente para la remision
+            }
+            @case (1) {
+              Agrega los productos a despachar
+            }
+            @case (2) {
+              Configura fechas, ubicacion y notas
+            }
+            @case (3) {
+              Revisa y confirma la remision
+            }
           }
         </p>
       </div>
 
       <!-- Step Content -->
-      <div class="p-4 max-h-[65vh] overflow-y-auto">
+      <div class="p-4 max-h-[50vh] overflow-y-auto">
         @switch (wizardService.currentStep()) {
           @case (0) {
             <app-dispatch-wizard-customer-step />
@@ -90,6 +106,7 @@ import { ReviewStepComponent } from './review-step.component';
             <app-dispatch-wizard-review-step
               [created]="isCreated()"
               [createdNote]="createdNote()"
+              [completedAction]="wizardService.createAction()"
               (goToStep)="wizardService.goToStep($event)"
               (viewDetail)="onViewDetail($event)"
               (createAnother)="onCreateAnother()"
@@ -107,8 +124,11 @@ import { ReviewStepComponent } from './review-step.component';
         >
           <!-- Left: Back button -->
           @if (wizardService.currentStep() > 0 && !isCreated()) {
-            <app-button variant="outline" (clicked)="wizardService.previousStep()">
-              <app-icon name="arrow-left" [size]="16"></app-icon>
+            <app-button
+              variant="outline"
+              (clicked)="wizardService.previousStep()"
+            >
+              <app-icon name="arrow-left" [size]="16" slot="icon"></app-icon>
               Anterior
             </app-button>
           } @else {
@@ -123,17 +143,82 @@ import { ReviewStepComponent } from './review-step.component';
               [disabled]="!wizardService.canProceed()"
             >
               Siguiente
-              <app-icon name="arrow-right" [size]="16"></app-icon>
+              <app-icon name="arrow-right" [size]="16" slot="icon"></app-icon>
             </app-button>
           } @else if (!isCreated()) {
-            <app-button
-              variant="primary"
-              (clicked)="onCreate()"
-              [disabled]="!wizardService.canProceed() || isSubmitting()"
-              [loading]="isSubmitting()"
-            >
-              Crear Remision
-            </app-button>
+            <div class="relative flex items-center">
+              <app-button
+                variant="primary"
+                (clicked)="onCreate()"
+                [disabled]="!wizardService.canProceed() || isSubmitting()"
+                [loading]="isSubmitting()"
+                [showTextWhileLoading]="true"
+                customClasses="!rounded-r-none"
+              >
+                {{ createActionLabel() }}
+              </app-button>
+              <button
+                type="button"
+                data-action-menu
+                class="h-10 sm:h-11 px-2 bg-[var(--color-primary)] text-[var(--color-text-on-primary)]
+                       rounded-r-xl border-l border-white/20
+                       hover:bg-[var(--color-primary)]/80 transition-colors
+                       disabled:opacity-50 disabled:cursor-not-allowed
+                       flex items-center justify-center"
+                [disabled]="isSubmitting()"
+                (click)="toggleActionMenu($event)"
+              >
+                <app-icon name="chevron-down" [size]="14"></app-icon>
+              </button>
+
+              @if (showActionMenu()) {
+                <div
+                  data-action-menu
+                  class="absolute bottom-full right-0 mb-1.5 w-52 rounded-xl border border-[var(--color-border)]
+                         bg-[var(--color-surface)] shadow-lg z-10 py-1 overflow-hidden"
+                >
+                  <button
+                    type="button"
+                    class="w-full text-left px-3.5 py-2.5 text-sm transition-colors flex items-center gap-2"
+                    [class]="
+                      wizardService.createAction() === 'draft'
+                        ? 'bg-[var(--color-primary-light)] font-semibold text-[var(--color-primary)]'
+                        : 'hover:bg-[var(--color-background)] text-[var(--color-text-primary)]'
+                    "
+                    (click)="selectAction('draft')"
+                  >
+                    <app-icon name="file-text" [size]="15"></app-icon>
+                    Crear (Borrador)
+                  </button>
+                  <button
+                    type="button"
+                    class="w-full text-left px-3.5 py-2.5 text-sm transition-colors flex items-center gap-2"
+                    [class]="
+                      wizardService.createAction() === 'confirm'
+                        ? 'bg-[var(--color-primary-light)] font-semibold text-[var(--color-primary)]'
+                        : 'hover:bg-[var(--color-background)] text-[var(--color-text-primary)]'
+                    "
+                    (click)="selectAction('confirm')"
+                  >
+                    <app-icon name="check-circle" [size]="15"></app-icon>
+                    Crear y Confirmar
+                  </button>
+                  <button
+                    type="button"
+                    class="w-full text-left px-3.5 py-2.5 text-sm transition-colors flex items-center gap-2"
+                    [class]="
+                      wizardService.createAction() === 'invoice'
+                        ? 'bg-[var(--color-primary-light)] font-semibold text-[var(--color-primary)]'
+                        : 'hover:bg-[var(--color-background)] text-[var(--color-text-primary)]'
+                    "
+                    (click)="selectAction('invoice')"
+                  >
+                    <app-icon name="file-check" [size]="15"></app-icon>
+                    Crear y Facturar
+                  </button>
+                </div>
+              }
+            </div>
           }
         </div>
       </div>
@@ -157,6 +242,17 @@ export class DispatchNoteWizardComponent {
   readonly isSubmitting = signal(false);
   readonly isCreated = signal(false);
   readonly createdNote = signal<DispatchNote | null>(null);
+  readonly showActionMenu = signal(false);
+  readonly createActionLabel = computed(() => {
+    switch (this.wizardService.createAction()) {
+      case 'confirm':
+        return 'Crear y Confirmar';
+      case 'invoice':
+        return 'Crear y Facturar';
+      default:
+        return 'Crear Remision';
+    }
+  });
 
   onStepClicked(index: number): void {
     // Only allow going back, not forward
@@ -207,22 +303,114 @@ export class DispatchNoteWizardComponent {
       items: dtoItems,
     };
 
-    this.dispatchNotesService.create(dto).subscribe({
-      next: (note) => {
-        this.isSubmitting.set(false);
-        this.isCreated.set(true);
-        this.createdNote.set(note);
-        this.toast.success('Remision creada exitosamente');
-        this.created.emit(note);
-      },
-      error: (err) => {
-        this.isSubmitting.set(false);
-        this.toast.error(err?.message || 'Error al crear la remision');
-      },
-    });
+    const action = this.wizardService.createAction();
+
+    const create$ = this.dispatchNotesService.create(dto);
+
+    if (action === 'draft') {
+      // draft: solo crear
+      create$.subscribe({
+        next: (note) => this._onCreateSuccess(note, 'draft'),
+        error: (err) => this._onCreateError(err),
+      });
+    } else if (action === 'confirm') {
+      // confirm: crear -> confirmar
+      create$
+        .pipe(
+          switchMap((note) =>
+            this.dispatchNotesService
+              .confirm(note.id)
+              .pipe(
+                switchMap((confirmed) =>
+                  of({ note: confirmed, partial: 'confirm' as const }),
+                ),
+              ),
+          ),
+        )
+        .subscribe({
+          next: ({ note, partial }) => this._onCreateSuccess(note, partial),
+          error: (err) => this._onCreateError(err, 'confirm'),
+        });
+    } else {
+      // invoice: crear -> confirmar -> entregar -> facturar
+      create$
+        .pipe(
+          switchMap((note) =>
+            this.dispatchNotesService.confirm(note.id).pipe(
+              switchMap((confirmed) =>
+                this.dispatchNotesService.deliver(confirmed.id).pipe(
+                  switchMap((delivered) =>
+                    this.dispatchNotesService.invoice(delivered.id).pipe(
+                      switchMap((invoiced) =>
+                        of({
+                          note: invoiced,
+                          partial: 'invoice' as const,
+                        }),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        )
+        .subscribe({
+          next: ({ note, partial }) => this._onCreateSuccess(note, partial),
+          error: (err) => this._onCreateError(err, 'invoice'),
+        });
+    }
+  }
+
+  private _onCreateSuccess(
+    note: DispatchNote,
+    action: WizardCreateAction | 'confirm' | 'invoice',
+  ): void {
+    this.isSubmitting.set(false);
+    this.isCreated.set(true);
+    this.createdNote.set(note);
+    this.created.emit(note);
+
+    const messages: Record<string, string> = {
+      draft: 'Remision creada exitosamente',
+      confirm: 'Remision creada y confirmada',
+      invoice: 'Remision facturada',
+    };
+    this.toast.success(messages[action] ?? 'Remision creada exitosamente');
+  }
+
+  private _onCreateError(err: unknown, reachedAction?: string): void {
+    this.isSubmitting.set(false);
+    const messages: Record<string, string> = {
+      confirm: 'Remision creada, pero falló la confirmacion',
+      invoice: 'Remision creada y confirmada, pero falló la entrega',
+    };
+    const msg = reachedAction
+      ? messages[reachedAction]
+      : (err as Error)?.message || 'Error al crear la remision';
+    this.toast.error(msg);
+  }
+
+  toggleActionMenu(event: Event): void {
+    event.stopPropagation();
+    this.showActionMenu.update((v) => !v);
+  }
+
+  selectAction(action: WizardCreateAction): void {
+    this.wizardService.setCreateAction(action);
+    this.showActionMenu.set(false);
+  }
+
+  @HostListener('document:click', ['$event'])
+  onDocumentClick(event: Event): void {
+    const target = event.target as HTMLElement;
+    const button = target.closest('[data-action-menu]');
+    if (!button) {
+      this.showActionMenu.set(false);
+    }
   }
 
   onClose(): void {
+    this.showActionMenu.set(false);
     this.wizardService.reset();
     this.isCreated.set(false);
     this.createdNote.set(null);
@@ -230,6 +418,7 @@ export class DispatchNoteWizardComponent {
   }
 
   onCreateAnother(): void {
+    this.showActionMenu.set(false);
     this.wizardService.reset();
     this.isCreated.set(false);
     this.createdNote.set(null);

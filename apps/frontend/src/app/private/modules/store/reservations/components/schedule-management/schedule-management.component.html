@@ -1,5 +1,4 @@
-<!-- No padding on root — sticky header rule -->
-<div>
+<div class="w-full">
   <!-- Sticky Header -->
   <app-sticky-header
     title="Equipo de Servicio"
@@ -9,237 +8,153 @@
     backRoute="/admin/reservations"
   />
 
-  @if (loading() && providers().length === 0) {
-    <div class="flex items-center justify-center p-16">
-      <app-spinner size="md" [center]="true"></app-spinner>
-    </div>
-  } @else {
-    <!-- Content with padding -->
-    <div class="p-4 md:p-6">
-      <div class="max-w-[1600px] mx-auto">
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6">
-
-          <!-- LEFT: Sidebar (lg:col-span-3) -->
-          <div class="lg:col-span-3 flex flex-col gap-3">
-
-            <!-- Search -->
+  <!-- Provider List -->
+  <div class="md:space-y-4">
+    <app-card [responsive]="true" [padding]="false" customClasses="md:min-h-[400px]">
+      <!-- Sticky search header -->
+      <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
+        <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
+          <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
+            Proveedores
+            @if (providers().length > 0) {
+              <span class="text-text-secondary font-normal">({{ filteredProviders().length }})</span>
+            }
+          </h2>
+          <div class="flex items-center gap-2 w-full md:w-auto">
             <app-inputsearch
-              placeholder="Buscar proveedor..."
+              class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
               size="sm"
+              placeholder="Buscar proveedor..."
               (searchChange)="searchQuery.set($event)"
             />
-
-            <!-- Provider list -->
-            <div class="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-x-visible pb-2 lg:pb-0 -mx-1 px-1">
-              @for (provider of filteredProviders(); track provider.id) {
-                <button
-                  type="button"
-                  class="provider-card"
-                  [class.selected]="selectedProvider()?.id === provider.id"
-                  (click)="selectProvider(provider)"
-                  [attr.aria-label]="'Seleccionar ' + getProviderDisplayName(provider)">
-
-                  <div class="provider-avatar" [class.active]="provider.is_active">
-                    {{ getInitials(provider) }}
-                  </div>
-                  <div class="provider-info">
-                    <span class="provider-name">{{ getProviderDisplayName(provider) }}</span>
-                    <span class="provider-meta">{{ provider.employee?.position || 'Sin cargo' }}</span>
-                  </div>
-                  <app-badge [variant]="provider.is_active ? 'success' : 'neutral'" size="xsm">
-                    {{ provider.is_active ? 'Activo' : 'Inactivo' }}
-                  </app-badge>
-                </button>
-              }
-            </div>
-
-            <!-- Empty state for no providers -->
-            @if (filteredProviders().length === 0 && !loading()) {
-              <app-empty-state
-                icon="users"
-                title="Sin proveedores"
-                description="Agrega empleados como proveedores de servicio"
-                [showActionButton]="true"
-                actionButtonText="Agregar Proveedor"
-                actionButtonIcon="plus"
-                (actionClick)="startAddProvider()"
-              />
-            }
-
-            <!-- Add provider button -->
-            @if (filteredProviders().length > 0 && !showAddForm()) {
-              <app-button
-                variant="outline"
-                size="sm"
-                [fullWidth]="true"
-                (clicked)="startAddProvider()">
-                <app-icon name="plus" [size]="14"/> Agregar Proveedor
-              </app-button>
-            }
-
-            <!-- Add provider form -->
-            @if (showAddForm()) {
-              <app-card shadow="sm">
-                <app-selector
-                  label="Empleado"
-                  placeholder="Seleccionar empleado..."
-                  [options]="employeeOptions()"
-                  (valueChange)="selectedEmployeeId.set($event)"
-                  size="sm"
-                />
-                <div class="flex justify-end gap-2 mt-3">
-                  <app-button variant="ghost" size="sm" (clicked)="showAddForm.set(false)">Cancelar</app-button>
-                  <app-button variant="primary" size="sm" [disabled]="!selectedEmployeeId() || addingProvider()" [loading]="addingProvider()" (clicked)="addProvider()">Agregar</app-button>
-                </div>
-              </app-card>
-            }
-          </div>
-
-          <!-- RIGHT: Editor Panel (lg:col-span-9) -->
-          <div class="lg:col-span-9 space-y-4">
-            @if (selectedProvider(); as p) {
-
-              <!-- Profile Card -->
-              <app-card shadow="sm" [responsivePadding]="true">
-                <div class="flex items-center gap-4">
-                  <div class="provider-avatar large" [class.active]="p.is_active">
-                    {{ getInitials(p) }}
-                  </div>
-                  <div class="flex-1 min-w-0">
-                    <h2 class="text-lg font-bold text-[var(--color-text-primary)] truncate">
-                      {{ getProviderDisplayName(p) }}
-                    </h2>
-                    <p class="text-sm text-[var(--color-text-secondary)]">{{ p.employee?.position || 'Sin cargo asignado' }}</p>
-                  </div>
-                  <app-toggle
-                    [checked]="p.is_active"
-                    label=""
-                    [ariaLabel]="p.is_active ? 'Desactivar proveedor' : 'Activar proveedor'"
-                    (toggled)="toggleActive(p)"
-                  />
-                </div>
-
-                <!-- Bio -->
-                <div class="mt-4">
-                  @if (editingBio()) {
-                    <app-textarea
-                      label="Descripcion"
-                      placeholder="Descripcion del proveedor..."
-                      [rows]="2"
-                      [ngModel]="bioValue()"
-                      (valueChange)="bioValue.set($event)"
-                    />
-                    <div class="flex justify-end gap-2 mt-2">
-                      <app-button variant="ghost" size="sm" (clicked)="editingBio.set(false)">Cancelar</app-button>
-                      <app-button variant="primary" size="sm" [loading]="savingBio()" (clicked)="saveBio()">Guardar</app-button>
-                    </div>
-                  } @else {
-                    <button type="button" class="bio-text" (click)="startEditBio()" aria-label="Editar descripcion">
-                      {{ p.bio || 'Click para agregar descripcion...' }}
-                    </button>
-                  }
-                </div>
-
-                <!-- Stats -->
-                <div class="grid grid-cols-3 gap-3 mt-4 pt-4 border-t border-[var(--color-border)]">
-                  <div class="stat-item">
-                    <app-icon name="briefcase" [size]="14"/>
-                    <span>{{ getServiceCount(p) }} servicios</span>
-                  </div>
-                  <div class="stat-item">
-                    <app-icon name="clock" [size]="14"/>
-                    <span>{{ getWeeklyHours(p) }}h/sem</span>
-                  </div>
-                  <div class="stat-item">
-                    <app-icon name="calendar-x" [size]="14"/>
-                    <span>{{ p.exceptions?.length || 0 }} excepciones</span>
-                  </div>
-                </div>
-              </app-card>
-
-              <!-- Services Card -->
-              <app-card shadow="sm" [responsivePadding]="true">
-                <div class="flex items-center justify-between mb-4">
-                  <div class="flex items-center gap-2">
-                    <app-icon name="briefcase" [size]="18" class="text-[var(--color-primary)]"/>
-                    <h3 class="text-sm font-bold text-[var(--color-text-primary)]">Servicios Asignados</h3>
-                  </div>
-                  <app-button variant="ghost" size="sm" (clicked)="managingServices.set(!managingServices())">
-                    {{ managingServices() ? 'Cerrar' : 'Gestionar' }}
-                  </app-button>
-                </div>
-
-                @if (managingServices()) {
-                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    @for (service of allServices(); track service.id) {
-                      <label class="service-check-card" [class.assigned]="isServiceAssigned(service.id)">
-                        <input type="checkbox" class="sr-only"
-                          [checked]="isServiceAssigned(service.id)"
-                          (change)="toggleServiceAssignment(service.id, !isServiceAssigned(service.id))">
-                        <div class="flex-1 min-w-0">
-                          <span class="text-sm font-medium text-[var(--color-text-primary)]">{{ service.name }}</span>
-                          @if (service.service_duration_minutes) {
-                            <span class="text-xs text-[var(--color-text-muted)]"> · {{ service.service_duration_minutes }} min</span>
-                          }
-                        </div>
-                        <app-icon
-                          [name]="isServiceAssigned(service.id) ? 'check-circle' : 'circle'"
-                          [size]="18"
-                          [class]="isServiceAssigned(service.id) ? 'text-emerald-500' : 'text-[var(--color-text-muted)]'"
-                        />
-                      </label>
-                    }
-                  </div>
-                } @else {
-                  @if (p.services && p.services!.length > 0) {
-                    <div class="flex flex-wrap gap-2">
-                      @for (ps of p.services; track ps.id) {
-                        <app-badge variant="primary" size="sm">
-                          {{ ps.product?.name }}
-                          @if (ps.product?.service_duration_minutes) {
-                            · {{ ps.product?.service_duration_minutes }}min
-                          }
-                        </app-badge>
-                      }
-                    </div>
-                  } @else {
-                    <app-empty-state
-                      icon="briefcase"
-                      title="Sin servicios"
-                      description="Asigna servicios a este proveedor"
-                      actionButtonText="Gestionar"
-                      (actionClick)="managingServices.set(true)"
-                    />
-                  }
-                }
-              </app-card>
-
-              <!-- Schedule Card -->
-              <app-card shadow="sm" [responsivePadding]="true">
-                <div class="flex items-center gap-2 mb-4">
-                  <app-icon name="clock" [size]="18" class="text-[var(--color-primary)]"/>
-                  <h3 class="text-sm font-bold text-[var(--color-text-primary)]">Horario Semanal</h3>
-                </div>
-                <app-weekly-schedule-editor [providerId]="p.id"/>
-              </app-card>
-
-              <!-- Exceptions Card -->
-              <app-card shadow="sm" [responsivePadding]="true">
-                <app-exceptions-manager [providerId]="p.id"/>
-              </app-card>
-
-            } @else {
-              <!-- No provider selected -->
-              <app-empty-state
-                icon="user-circle"
-                title="Selecciona un proveedor"
-                description="Elige un proveedor del panel izquierdo para configurar sus servicios y horarios"
-                [showActionButton]="false"
-              />
-            }
+            <app-button
+              variant="outline"
+              size="sm"
+              customClasses="w-9 h-9 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
+              (clicked)="startAddProvider()"
+              title="Agregar Proveedor"
+            >
+              <app-icon name="plus" [size]="18" slot="icon"></app-icon>
+            </app-button>
           </div>
         </div>
       </div>
-    </div>
-  }
+
+      <!-- Provider data view -->
+      <app-responsive-data-view
+        [data]="filteredProviders()"
+        [columns]="providerColumns"
+        [cardConfig]="providerCardConfig"
+        [actions]="providerActions"
+        [loading]="loading()"
+        emptyIcon="users"
+        emptyTitle="Sin proveedores"
+        emptyDescription="Agrega empleados como proveedores de servicio"
+        emptyActionText="Agregar Proveedor"
+        [showEmptyAction]="true"
+        (emptyActionClick)="startAddProvider()"
+        (rowClick)="selectProvider($event)"
+      />
+
+      <!-- Add Provider Form (inline collapse) -->
+      @if (showAddForm()) {
+        <div class="px-4 pb-4 md:px-6 md:pb-6 border-t border-border pt-4">
+          <h3 class="text-sm font-semibold text-text-primary mb-3">Agregar Nuevo Proveedor</h3>
+          <app-selector
+            label="Empleado"
+            placeholder="Seleccionar empleado..."
+            [options]="employeeOptions()"
+            (valueChange)="selectedEmployeeId.set($event)"
+            size="sm"
+          />
+          <div class="flex justify-end gap-2 mt-3">
+            <app-button variant="ghost" size="sm" (clicked)="showAddForm.set(false)">Cancelar</app-button>
+            <app-button variant="primary" size="sm" [disabled]="!selectedEmployeeId() || addingProvider()" [loading]="addingProvider()" (clicked)="addProvider()">Agregar</app-button>
+          </div>
+        </div>
+      }
+    </app-card>
+  </div>
+
+  <!-- Provider Detail MODAL -->
+  <app-modal
+    [isOpen]="isDetailModalOpen()"
+    (closed)="closeDetailModal()"
+    [title]="selectedProvider() ? getProviderDisplayName(selectedProvider()!) : ''"
+    [subtitle]="selectedProvider()?.employee?.position || 'Configuracion del proveedor'"
+    size="lg"
+  >
+    @if (selectedProvider(); as p) {
+      <!-- Provider header inside modal -->
+      <div class="flex items-center justify-between mb-4 pb-3 border-b border-[var(--color-border)]">
+        <div class="flex items-center gap-3">
+          <div class="provider-avatar" [class.active]="p.is_active">
+            {{ getInitials(p) }}
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <app-badge [variant]="p.is_active ? 'success' : 'neutral'" size="xsm">
+                {{ p.is_active ? 'Activo' : 'Inactivo' }}
+              </app-badge>
+              <span class="text-xs text-[var(--color-text-muted)]">{{ getServiceCount(p) }} servicios · {{ getWeeklyHours(p) }}h/sem</span>
+            </div>
+          </div>
+        </div>
+        <app-toggle
+          [checked]="p.is_active"
+          [ariaLabel]="p.is_active ? 'Desactivar' : 'Activar'"
+          (toggled)="toggleActive(p)"
+        />
+      </div>
+
+      <!-- Tabs -->
+      <app-scrollable-tabs
+        [tabs]="detailTabs"
+        [activeTab]="activeTab()"
+        size="sm"
+        (tabChange)="activeTab.set($event); serviceSearchQuery.set('')"
+      />
+
+      <div class="mt-4">
+        <!-- Tab: Servicios -->
+        @if (activeTab() === 'services') {
+          <div class="space-y-3">
+            <app-inputsearch
+              size="sm"
+              placeholder="Buscar servicio..."
+              (searchChange)="serviceSearchQuery.set($event)"
+            />
+            @for (service of filteredServices(); track service.id) {
+              <div class="flex items-center justify-between py-2 px-3 rounded-lg border border-[var(--color-border)] hover:border-[var(--color-primary)] transition-colors">
+                <div class="flex-1 min-w-0">
+                  <span class="text-sm font-medium text-[var(--color-text-primary)]">{{ service.name }}</span>
+                  @if (service.service_duration_minutes) {
+                    <span class="text-xs text-[var(--color-text-muted)] ml-1">· {{ service.service_duration_minutes }} min</span>
+                  }
+                </div>
+                <app-toggle
+                  [checked]="isServiceAssigned(service.id)"
+                  [ariaLabel]="'Asignar ' + service.name"
+                  (toggled)="toggleServiceAssignment(service.id, !isServiceAssigned(service.id))"
+                />
+              </div>
+            }
+            @if (allServices().length === 0) {
+              <p class="text-sm text-[var(--color-text-muted)] text-center py-4">No hay servicios con reserva configurados</p>
+            }
+          </div>
+        }
+
+        <!-- Tab: Horario -->
+        @if (activeTab() === 'schedule') {
+          <app-weekly-schedule-editor [providerId]="p.id"/>
+        }
+
+        <!-- Tab: Excepciones -->
+        @if (activeTab() === 'exceptions') {
+          <app-exceptions-manager [providerId]="p.id"/>
+        }
+      </div>
+    }
+  </app-modal>
 </div>

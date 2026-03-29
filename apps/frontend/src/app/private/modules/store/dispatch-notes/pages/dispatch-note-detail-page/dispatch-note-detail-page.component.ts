@@ -1,6 +1,5 @@
 import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
@@ -16,67 +15,68 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
   selector: 'app-dispatch-note-detail-page',
   standalone: true,
   imports: [
-    CommonModule,
     DispatchNoteDetailComponent,
     DeliverModalComponent,
     VoidModalComponent,
     InvoiceModalComponent,
   ],
   template: `
-    <div class="w-full">
+    <div class="min-h-screen" style="background-color: var(--color-background)">
       <!-- Loading State -->
-      <div *ngIf="is_loading()" class="p-8 text-center">
-        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-        <p class="mt-2 text-text-secondary">Cargando remision...</p>
-      </div>
+      @if (is_loading()) {
+        <div class="p-8 text-center">
+          <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <p class="mt-2 text-text-secondary">Cargando remision...</p>
+        </div>
+      }
 
       <!-- Detail Component -->
-      <app-dispatch-note-detail
-        *ngIf="!is_loading() && dispatch_note()"
-        [dispatch_note]="dispatch_note()!"
-        (confirmAction)="handleConfirm($event)"
-        (deliverAction)="openDeliverModal($event)"
-        (voidAction)="openVoidModal($event)"
-        (invoiceAction)="openInvoiceModal($event)"
-        (printAction)="handlePrint($event)"
-        (backAction)="handleBack()"
-      ></app-dispatch-note-detail>
+      @if (!is_loading() && dispatch_note()) {
+        <app-dispatch-note-detail
+          [dispatch_note]="dispatch_note()!"
+          (confirmAction)="handleConfirm($event)"
+          (deliverAction)="openDeliverModal($event)"
+          (voidAction)="openVoidModal($event)"
+          (invoiceAction)="openInvoiceModal($event)"
+          (printAction)="handlePrint($event)"
+        ></app-dispatch-note-detail>
+      }
 
       <!-- Not Found State -->
-      <div *ngIf="!is_loading() && !dispatch_note()" class="p-8 text-center">
-        <p class="text-text-secondary">No se encontro la remision.</p>
-      </div>
+      @if (!is_loading() && !dispatch_note()) {
+        <div class="p-8 text-center">
+          <p class="text-text-secondary">No se encontro la remision.</p>
+        </div>
+      }
 
       <!-- Lifecycle Modals -->
-      <app-deliver-modal
-        *ngIf="dispatch_note()"
-        [isOpen]="showDeliverModal()"
-        (isOpenChange)="showDeliverModal.set($event)"
-        [dispatchNote]="dispatch_note()!"
-        (delivered)="handleDeliver($event)"
-      ></app-deliver-modal>
+      @if (dispatch_note()) {
+        <app-deliver-modal
+          [isOpen]="showDeliverModal()"
+          (isOpenChange)="showDeliverModal.set($event)"
+          [dispatchNote]="dispatch_note()!"
+          (delivered)="handleDeliver($event)"
+        ></app-deliver-modal>
 
-      <app-void-modal
-        *ngIf="dispatch_note()"
-        [isOpen]="showVoidModal()"
-        (isOpenChange)="showVoidModal.set($event)"
-        [dispatchNote]="dispatch_note()!"
-        (voided)="handleVoid($event)"
-      ></app-void-modal>
+        <app-void-modal
+          [isOpen]="showVoidModal()"
+          (isOpenChange)="showVoidModal.set($event)"
+          [dispatchNote]="dispatch_note()!"
+          (voided)="handleVoid($event)"
+        ></app-void-modal>
 
-      <app-invoice-modal
-        *ngIf="dispatch_note()"
-        [isOpen]="showInvoiceModal()"
-        (isOpenChange)="showInvoiceModal.set($event)"
-        [dispatchNote]="dispatch_note()!"
-        (invoiced)="handleInvoice()"
-      ></app-invoice-modal>
+        <app-invoice-modal
+          [isOpen]="showInvoiceModal()"
+          (isOpenChange)="showInvoiceModal.set($event)"
+          [dispatchNote]="dispatch_note()!"
+          (invoiced)="handleInvoice()"
+        ></app-invoice-modal>
+      }
     </div>
   `,
 })
 export class DispatchNoteDetailPageComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
-  private router = inject(Router);
   private dispatchNotesService = inject(DispatchNotesService);
   private printService = inject(DispatchNotePrintService);
   private toastService = inject(ToastService);
@@ -200,9 +200,5 @@ export class DispatchNoteDetailPageComponent implements OnInit, OnDestroy {
 
   handlePrint(dn: DispatchNote): void {
     this.printService.printDispatchNote(dn);
-  }
-
-  handleBack(): void {
-    this.router.navigate(['/admin/dispatch-notes']);
   }
 }

@@ -3,6 +3,7 @@ import {
   AIProvider,
   AIProviderConfig,
   AIMessage,
+  AIMessageContentPart,
   AIRequestOptions,
   AIResponse,
   AIStreamChunk,

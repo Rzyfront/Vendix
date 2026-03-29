@@ -15,6 +15,7 @@ import { seedTestOrders } from './seeds/test-orders.seed';
 import { seedHelpArticles } from './seeds/help-articles.seed';
 import { seedDefaultPayrollRules } from './seeds/default-payroll-rules.seed';
 import { seedIcaMunicipalRates } from './seeds/ica-municipal-rates.seed';
+import { seedAIEngineApps } from './seeds/ai-engine-apps.seed';
 
 /**
  * Seed modules registry
@@ -118,6 +119,11 @@ const seedModules = [
     name: 'ICA Municipal Rates',
     fn: seedIcaMunicipalRates,
     description: 'ICA tax rates for Colombian municipalities',
+  },
+  {
+    name: 'AI Engine Applications',
+    fn: seedAIEngineApps,
+    description: 'Default AI application definitions (invoice OCR, etc.)',
   },
 ];
 
@@ -223,3 +229,4 @@ export * from './seeds/test-orders.seed';
 export * from './seeds/help-articles.seed';
 export * from './seeds/default-payroll-rules.seed';
 export * from './seeds/ica-municipal-rates.seed';
+export * from './seeds/ai-engine-apps.seed';

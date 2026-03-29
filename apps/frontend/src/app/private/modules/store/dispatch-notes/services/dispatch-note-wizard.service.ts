@@ -48,6 +48,8 @@ export interface WizardTotals {
   grandTotal: number;
 }
 
+export type WizardCreateAction = 'draft' | 'confirm' | 'invoice';
+
 // ============================================================================
 // SERVICE
 // ============================================================================
@@ -65,6 +67,7 @@ export class DispatchNoteWizardService {
     emission_date: new Date().toISOString().split('T')[0],
     currency: 'COP',
   });
+  readonly createAction = signal<WizardCreateAction>('draft');
 
   // --- Computed: totals ---
   readonly totals = computed<WizardTotals>(() => {
@@ -185,11 +188,16 @@ export class DispatchNoteWizardService {
     this.details.set({ ...this.details(), ...details });
   }
 
+  setCreateAction(action: WizardCreateAction): void {
+    this.createAction.set(action);
+  }
+
   // --- Reset ---
   reset(): void {
     this.currentStep.set(0);
     this.customer.set(null);
     this.items.set([]);
+    this.createAction.set('draft');
     this.details.set({
       emission_date: new Date().toISOString().split('T')[0],
       currency: 'COP',

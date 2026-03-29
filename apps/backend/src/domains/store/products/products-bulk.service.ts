@@ -4,10 +4,13 @@ import {
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
+import { v4 as uuidv4 } from 'uuid';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ProductsService } from './products.service';
 import { ProductVariantService } from './services/product-variant.service';
 import { AccessValidationService } from '@common/services/access-validation.service';
+import { S3Service } from '@common/services/s3.service';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { LocationsService } from '../inventory/locations/locations.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -18,9 +21,12 @@ import {
   BulkUploadItemResultDto,
   BulkValidationResultDto,
   BulkUploadTemplateDto,
+  BulkProductAnalysisResultDto,
+  BulkProductAnalysisItemDto,
 } from './dto';
 import { generateSlug } from '@common/utils/slug.util';
 import { toTitleCase } from '@common/utils/format.util';
+import { Prisma } from '@prisma/client';
 import * as XLSX from 'xlsx';
 
 @Injectable()
@@ -48,6 +54,34 @@ export class ProductsBulkService {
     Tipo: 'product_type',
   };
 
+  private readonly HEADER_TRANSLATIONS: Record<string, string> = {
+    nombre: 'name',
+    sku: 'sku',
+    'precio base': 'base_price',
+    'precio venta': 'base_price',
+    costo: 'cost_price',
+    'precio compra': 'cost_price',
+    margen: 'profit_margin',
+    'cantidad inicial': 'stock_quantity',
+    descripción: 'description',
+    descripcion: 'description',
+    categorías: 'category_ids',
+    categorias: 'category_ids',
+    marca: 'brand_id',
+    'en oferta': 'is_on_sale',
+    'precio oferta': 'sale_price',
+    peso: 'weight',
+    'disponible ecommerce': 'available_for_ecommerce',
+    estado: 'state',
+    'codigo bodega': 'warehouse_code',
+    'código bodega': 'warehouse_code',
+    'nombre bodega': 'warehouse_name',
+    tipo: 'product_type',
+    type: 'product_type',
+    'tipo producto': 'product_type',
+    'product type': 'product_type',
+  };
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly productsService: ProductsService,
@@ -55,7 +89,396 @@ export class ProductsBulkService {
     private readonly accessValidationService: AccessValidationService,
     private readonly stockLevelManager: StockLevelManager,
     private readonly locationsService: LocationsService,
+    private readonly s3Service: S3Service,
   ) {}
+
+  /**
+   * Parsea archivo (Excel o CSV) a array de productos usando mapeo de español
+   */
+  parseFile(buffer: Buffer): any[] {
+    try {
+      const workbook = XLSX.read(buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+
+      // Convertir a JSON array de arrays (header: 1) para inspeccionar encabezados
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+      if (jsonData.length < 2) {
+        throw new BadRequestException(
+          'El archivo debe contener al menos una fila de encabezados y una fila de datos',
+        );
+      }
+
+      // Procesar encabezados
+      const rawHeaders = jsonData[0] as string[];
+      const headerMap: Record<number, string> = {};
+
+      rawHeaders.forEach((h, index) => {
+        if (!h) return;
+        const normalized = h.toString().trim().toLowerCase();
+        // Buscar traducción
+        const dtoKey = this.HEADER_TRANSLATIONS[normalized];
+        if (dtoKey) {
+          headerMap[index] = dtoKey;
+        }
+      });
+
+      const products: any[] = [];
+
+      for (let i = 1; i < jsonData.length; i++) {
+        const row = jsonData[i] as any[];
+        if (!row || row.length === 0) continue;
+
+        const product: Record<string, any> = {};
+        let hasData = false;
+
+        row.forEach((cellValue, index) => {
+          const key = headerMap[index];
+          if (key) {
+            // Normalizar valores vacíos
+            const val =
+              cellValue === undefined || cellValue === null ? '' : cellValue;
+
+            // Si es numérico en DTO, intentar convertir
+            if (
+              [
+                'base_price',
+                'cost_price',
+                'stock_quantity',
+                'weight',
+                'sale_price',
+                'profit_margin',
+              ].includes(key)
+            ) {
+              const num = parseFloat(val);
+              product[key] = isNaN(num) ? 0 : num;
+            } else if (['brand_id'].includes(key)) {
+              // Enteros opcionales: vacío → null (no 0, no "")
+              const strVal = val.toString().trim();
+              if (strVal === '') {
+                product[key] = null;
+              } else {
+                const num = parseInt(strVal, 10);
+                product[key] = isNaN(num) ? val : num;
+              }
+            } else {
+              product[key] = val;
+            }
+
+            if (val !== '') hasData = true;
+          }
+        });
+
+        if (hasData && (product['name'] || product['sku'])) {
+          products.push(product);
+        }
+      }
+
+      return products;
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException(
+        'Error al procesar el archivo: ' + error.message,
+      );
+    }
+  }
+
+  /**
+   * Analiza un archivo Excel/CSV sin procesar los productos.
+   * Retorna un análisis detallado por producto con status ready/warning/error.
+   * Almacena el archivo en S3 temporal para posterior procesamiento.
+   */
+  async analyzeProducts(
+    fileBuffer: Buffer,
+    storeId: number,
+  ): Promise<BulkProductAnalysisResultDto> {
+    // 1. Parse file
+    let products: any[];
+    try {
+      products = this.parseFile(fileBuffer);
+    } catch (error) {
+      throw new VendixHttpException(ErrorCodes.BULK_PROD_FILE_INVALID);
+    }
+
+    if (!products || products.length === 0) {
+      throw new VendixHttpException(ErrorCodes.BULK_PROD_EMPTY_FILE);
+    }
+
+    if (products.length > this.MAX_BATCH_SIZE) {
+      throw new VendixHttpException(ErrorCodes.BULK_PROD_LIMIT_EXCEEDED);
+    }
+
+    // 2. Pre-fetch existing products by SKU for this store
+    const existingProducts = await this.prisma.products.findMany({
+      where: { store_id: storeId, state: { not: 'archived' } },
+      select: { id: true, sku: true, name: true },
+    });
+    const skuMap = new Map<string, { id: number; name: string }>();
+    for (const p of existingProducts) {
+      if (p.sku) skuMap.set(p.sku.toLowerCase(), { id: p.id, name: p.name });
+    }
+
+    // 3. Pre-fetch existing brands
+    const existingBrands = await this.prisma.brands.findMany({
+      select: { id: true, name: true },
+    });
+    const brandMap = new Map<string, number>();
+    for (const b of existingBrands) {
+      brandMap.set(b.name.toLowerCase(), b.id);
+    }
+
+    // 4. Pre-fetch existing categories for this store
+    const existingCategories = await this.prisma.categories.findMany({
+      where: { store_id: storeId },
+      select: { id: true, name: true, slug: true },
+    });
+    const categoryMap = new Map<string, number>();
+    for (const c of existingCategories) {
+      categoryMap.set(c.name.toLowerCase(), c.id);
+      categoryMap.set(c.slug, c.id);
+    }
+
+    // 5. Track duplicate SKUs in batch
+    const seenSkus = new Map<string, number>(); // sku -> first row number
+
+    // 6. Analyze each product
+    const analysisItems: BulkProductAnalysisItemDto[] = [];
+    let ready = 0;
+    let withWarnings = 0;
+    let withErrors = 0;
+
+    for (let i = 0; i < products.length; i++) {
+      const product = products[i];
+      const item: BulkProductAnalysisItemDto = {
+        row_number: i + 2, // +2 because row 1 is header, data starts at row 2
+        name: product.name || '',
+        sku: product.sku || '',
+        product_type: 'physical',
+        base_price: parseFloat(product.base_price) || 0,
+        cost_price: parseFloat(product.cost_price) || 0,
+        stock_quantity: parseFloat(product.stock_quantity) || 0,
+        brand_name: undefined,
+        brand_will_create: false,
+        category_names: [],
+        categories_will_create: [],
+        warehouse_code: product.warehouse_code || undefined,
+        warehouse_name: product.warehouse_name || undefined,
+        action: 'create',
+        existing_product_id: undefined,
+        status: 'ready',
+        warnings: [],
+        errors: [],
+      };
+
+      // Determine product type
+      if (product.product_type) {
+        const t = product.product_type.toString().toLowerCase().trim();
+        if (t === 'servicio' || t === 'service') {
+          item.product_type = 'service';
+        }
+      }
+
+      // Validate required fields
+      if (!item.name) {
+        item.errors.push('Nombre es requerido');
+      }
+      if (!item.sku) {
+        item.errors.push('SKU es requerido');
+      }
+      if (item.base_price < 0) {
+        item.errors.push('Precio de venta no puede ser negativo');
+      }
+
+      // Check margin -> price calculation
+      let margin = parseFloat(product.profit_margin) || 0;
+      if (margin > 0 && margin < 1) margin = margin * 100;
+      if (margin > 0 && item.cost_price > 0) {
+        item.base_price = item.cost_price * (1 + margin / 100);
+      }
+
+      // Check for no price at all
+      if (item.base_price === 0 && item.cost_price === 0 && margin === 0) {
+        item.warnings.push(
+          'No se especificó precio de venta ni costo con margen',
+        );
+      }
+
+      // Check duplicate SKU in batch
+      if (item.sku) {
+        const skuLower = item.sku.toLowerCase();
+        if (seenSkus.has(skuLower)) {
+          item.warnings.push(
+            `SKU duplicado en el archivo (primera aparición en fila ${seenSkus.get(skuLower)})`,
+          );
+        } else {
+          seenSkus.set(skuLower, item.row_number);
+        }
+
+        // Check if SKU exists in store
+        const existing = skuMap.get(skuLower);
+        if (existing) {
+          item.action = 'update';
+          item.existing_product_id = existing.id;
+        }
+      }
+
+      // Resolve brand (dry-run - no creation)
+      if (product.brand_id) {
+        const brandVal = product.brand_id.toString().trim();
+        if (/^\d+$/.test(brandVal)) {
+          // Numeric ID - check if exists
+          const brandId = parseInt(brandVal, 10);
+          const found = existingBrands.find((b) => b.id === brandId);
+          if (found) {
+            item.brand_name = found.name;
+          } else {
+            item.warnings.push(
+              `Marca con ID ${brandId} no encontrada, se ignorará`,
+            );
+          }
+        } else if (brandVal) {
+          item.brand_name = brandVal;
+          const exists = brandMap.has(brandVal.toLowerCase());
+          if (!exists) {
+            item.brand_will_create = true;
+            item.warnings.push(
+              `Se creará la marca "${brandVal}" automáticamente`,
+            );
+          }
+        }
+      }
+
+      // Resolve categories (dry-run - no creation)
+      if (product.category_ids) {
+        let rawCategories: string[] = [];
+        if (typeof product.category_ids === 'string') {
+          rawCategories = product.category_ids
+            .split(',')
+            .map((c: string) => c.trim())
+            .filter(Boolean);
+        } else if (Array.isArray(product.category_ids)) {
+          rawCategories = product.category_ids
+            .map((c: any) => c.toString().trim())
+            .filter(Boolean);
+        }
+
+        const catNames: string[] = [];
+        const catsToCreate: string[] = [];
+
+        for (const cat of rawCategories) {
+          if (/^\d+$/.test(cat)) {
+            const catId = parseInt(cat, 10);
+            const found = existingCategories.find((c) => c.id === catId);
+            if (found) {
+              catNames.push(found.name);
+            } else {
+              item.warnings.push(
+                `Categoría con ID ${catId} no encontrada, se ignorará`,
+              );
+            }
+          } else {
+            catNames.push(cat);
+            if (!categoryMap.has(cat.toLowerCase())) {
+              catsToCreate.push(cat);
+            }
+          }
+        }
+
+        item.category_names = catNames;
+        item.categories_will_create = catsToCreate;
+        if (catsToCreate.length > 0) {
+          item.warnings.push(
+            `Se crearán ${catsToCreate.length} categoría(s) automáticamente: ${catsToCreate.join(', ')}`,
+          );
+        }
+      }
+
+      // Service with stock warning
+      if (item.product_type === 'service' && item.stock_quantity > 0) {
+        item.warnings.push(
+          'Los servicios no manejan stock. Se ignorará la cantidad.',
+        );
+      }
+
+      // Determine final status
+      if (item.errors.length > 0) {
+        item.status = 'error';
+        withErrors++;
+      } else if (item.warnings.length > 0) {
+        item.status = 'warning';
+        withWarnings++;
+      } else {
+        item.status = 'ready';
+        ready++;
+      }
+
+      analysisItems.push(item);
+    }
+
+    // 7. Store file in S3 temp
+    const sessionId = uuidv4();
+    const s3Key = `tmp/bulk-products/${storeId}/${sessionId}.xlsx`;
+    await this.s3Service.uploadFile(
+      fileBuffer,
+      s3Key,
+      'application/octet-stream',
+    );
+
+    // 8. Return analysis result
+    return {
+      session_id: sessionId,
+      total_products: products.length,
+      ready,
+      with_warnings: withWarnings,
+      with_errors: withErrors,
+      products: analysisItems,
+    };
+  }
+
+  /**
+   * Procesa la carga masiva desde una sesión de análisis previa.
+   * Descarga el archivo temporal de S3, lo procesa y limpia.
+   */
+  async uploadProductsFromSession(
+    sessionId: string,
+    storeId: number,
+    user: any,
+  ): Promise<BulkUploadResultDto> {
+    const s3Key = `tmp/bulk-products/${storeId}/${sessionId}.xlsx`;
+
+    let fileBuffer: Buffer;
+    try {
+      fileBuffer = await this.s3Service.downloadImage(s3Key);
+    } catch (error) {
+      throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
+    }
+
+    try {
+      const products = this.parseFile(fileBuffer);
+      const result = await this.uploadProducts({ products }, user);
+      return result;
+    } finally {
+      // Clean up temp file
+      try {
+        await this.s3Service.deleteFile(s3Key);
+      } catch (e) {
+        // Silent cleanup failure
+      }
+    }
+  }
+
+  /**
+   * Cancela una sesión de análisis y limpia el archivo temporal.
+   */
+  async cancelSession(sessionId: string, storeId: number): Promise<void> {
+    const s3Key = `tmp/bulk-products/${storeId}/${sessionId}.xlsx`;
+    try {
+      await this.s3Service.deleteFile(s3Key);
+    } catch (e) {
+      // File may not exist, silently ignore
+    }
+  }
 
   /**
    * Genera la plantilla de carga masiva en formato Excel (.xlsx)
@@ -275,11 +698,37 @@ export class ProductsBulkService {
 
         successful++;
       } catch (error) {
+        let userMessage = 'Error procesando el producto';
+        let errorCode: string | undefined;
+
+        // Map known errors to user-friendly messages
+        if (error instanceof VendixHttpException) {
+          userMessage = error.message || userMessage;
+          errorCode = error.errorCode;
+        } else if (error instanceof BadRequestException) {
+          userMessage = error.message;
+        } else if (error?.code === 'P2002') {
+          userMessage = 'Ya existe un producto con este SKU o datos duplicados';
+          errorCode = 'BULK_PROD_VALIDATE_001';
+        } else if (error?.code === 'P2003') {
+          userMessage = 'Referencia inválida (marca, categoría u otro campo relacionado)';
+          errorCode = 'BULK_PROD_VALIDATE_001';
+        } else if (error instanceof Prisma.PrismaClientValidationError) {
+          userMessage = 'Uno de los valores proporcionados tiene un formato inválido. Verifique campos como marca, categoría o peso.';
+          errorCode = 'BULK_PROD_VALIDATE_001';
+        } else if (error?.message?.includes('brand_id')) {
+          userMessage = 'El valor de marca es inválido';
+          errorCode = 'BULK_PROD_VALIDATE_001';
+        } else if (error?.message?.includes('Invalid value provided')) {
+          userMessage = 'Uno de los valores proporcionados tiene un formato inválido';
+          errorCode = 'BULK_PROD_VALIDATE_001';
+        }
+
         results.push({
           product: null,
           status: 'error',
-          message: error.message,
-          error: error.constructor.name,
+          message: userMessage,
+          error_code: errorCode,
         });
         failed++;
       }
@@ -290,6 +739,7 @@ export class ProductsBulkService {
       total_processed: products.length,
       successful,
       failed,
+      skipped: 0,
       results,
     };
   }
@@ -300,16 +750,16 @@ export class ProductsBulkService {
    */
   private async preprocessProductData(product: any, storeId: number) {
     // Procesar Marca (Brand)
-    if (product.brand_id) {
+    if (product.brand_id !== undefined && product.brand_id !== null) {
       if (typeof product.brand_id === 'string') {
-        const brandName = (product.brand_id as string).trim();
-        if (/^\d+$/.test(brandName)) {
+        const brandName = product.brand_id.trim();
+        if (!brandName) {
+          delete product.brand_id;
+        } else if (/^\d+$/.test(brandName)) {
           product.brand_id = parseInt(brandName, 10);
-        } else if (brandName) {
+        } else {
           const brandId = await this.findOrCreateBrand(brandName, storeId);
           product.brand_id = brandId;
-        } else {
-          delete product.brand_id;
         }
       }
     }
@@ -566,12 +1016,12 @@ export class ProductsBulkService {
       description: product.description,
       slug: product.slug || generateSlug(product.name),
       store_id: storeId,
-      brand_id: product.brand_id,
+      brand_id: product.brand_id && typeof product.brand_id === 'number' ? product.brand_id : undefined,
       category_ids: product.category_ids,
       stock_quantity: product.stock_quantity,
       cost_price: product.cost_price,
       profit_margin: product.profit_margin,
-      weight: product.weight,
+      weight: product.weight && typeof product.weight === 'number' ? product.weight : undefined,
       is_on_sale: product['is_on_sale'],
       sale_price: product['sale_price'],
       state: product.state,
@@ -587,12 +1037,12 @@ export class ProductsBulkService {
       base_price: product.base_price,
       sku: product.sku,
       description: product.description,
-      brand_id: product.brand_id,
+      brand_id: product.brand_id && typeof product.brand_id === 'number' ? product.brand_id : undefined,
       category_ids: product.category_ids,
       stock_quantity: product.stock_quantity,
       cost_price: product.cost_price,
       profit_margin: product.profit_margin,
-      weight: product.weight,
+      weight: product.weight && typeof product.weight === 'number' ? product.weight : undefined,
       is_on_sale: product['is_on_sale'],
       sale_price: product['sale_price'],
       state: product.state,

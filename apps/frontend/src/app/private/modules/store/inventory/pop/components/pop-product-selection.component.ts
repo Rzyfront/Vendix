@@ -18,17 +18,31 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 import { PopCartService } from '../services/pop-cart.service';
 import { ProductsService } from '../../../products/services/products.service';
 import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
-import { PopProductConfigModalComponent, PopProductConfigResult } from './pop-product-config-modal.component';
+import {
+  PopProductConfigModalComponent,
+  PopProductConfigResult,
+} from './pop-product-config-modal.component';
 
 @Component({
   selector: 'app-pop-product-selection',
   standalone: true,
-  imports: [CommonModule, IconComponent, InputsearchComponent, OptionsDropdownComponent, PopBulkDataModalComponent, PopProductConfigModalComponent],
+  imports: [
+    CommonModule,
+    IconComponent,
+    InputsearchComponent,
+    OptionsDropdownComponent,
+    PopBulkDataModalComponent,
+    PopProductConfigModalComponent,
+  ],
   schemas: [NO_ERRORS_SCHEMA],
   template: `
-    <div class="h-full flex flex-col bg-surface rounded-card shadow-card border border-border">
+    <div
+      class="h-full flex flex-col bg-surface rounded-card shadow-card border border-border"
+    >
       <!-- Products Header - Outside overflow container -->
-      <div class="products-header flex-none px-4 lg:px-6 py-3 lg:py-4 border-b border-border bg-surface rounded-t-card">
+      <div
+        class="products-header flex-none px-4 lg:px-6 py-3 lg:py-4 border-b border-border bg-surface rounded-t-card"
+      >
         <!-- Desktop Header -->
         <div class="hidden lg:flex justify-between items-center gap-4">
           <div class="flex-1 min-w-0">
@@ -137,9 +151,13 @@ import { PopProductConfigModalComponent, PopProductConfigResult } from './pop-pr
                 class="absolute inset-0 flex items-center justify-center text-muted-foreground/30 group-hover:text-primary/30 transition-colors"
               >
                 <div
-                    class="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center"
+                  class="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center"
                 >
-                    <app-icon name="image" [size]="24" class="text-primary/60"></app-icon>
+                  <app-icon
+                    name="image"
+                    [size]="24"
+                    class="text-primary/60"
+                  ></app-icon>
                 </div>
               </div>
 
@@ -151,14 +169,17 @@ import { PopProductConfigModalComponent, PopProductConfigResult } from './pop-pr
                     'bg-green-100/90 text-green-700':
                       product.stock_quantity > 10,
                     'bg-amber-100/90 text-amber-700':
-                      product.stock_quantity <= 10 && product.stock_quantity > 0,
-                    'bg-red-100/90 text-red-700': product.stock_quantity === 0
+                      product.stock_quantity <= 10 &&
+                      product.stock_quantity > 0,
+                    'bg-red-100/90 text-red-700': product.stock_quantity === 0,
                   }"
                 >
                   {{ product.stock_quantity }}
                 </div>
               } @else {
-                <div class="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold shadow-sm backdrop-blur-sm bg-blue-100/90 text-blue-700">
+                <div
+                  class="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold shadow-sm backdrop-blur-sm bg-blue-100/90 text-blue-700"
+                >
                   Disponible
                 </div>
               }
@@ -174,7 +195,9 @@ import { PopProductConfigModalComponent, PopProductConfigResult } from './pop-pr
               </h3>
               <div class="flex items-center justify-between mt-auto">
                 <div class="flex items-center gap-1 min-w-0">
-                  <span class="text-xs text-text-secondary font-mono truncate max-w-[60%]">
+                  <span
+                    class="text-xs text-text-secondary font-mono truncate max-w-[60%]"
+                  >
                     {{ product.sku }}
                   </span>
                   <span
@@ -195,18 +218,18 @@ import { PopProductConfigModalComponent, PopProductConfigResult } from './pop-pr
         </div>
       </div>
     </div>
-    
+
     <app-pop-bulk-data-modal
-        [isOpen]="bulkModalOpen"
-        (close)="bulkModalOpen = false"
-        (dataLoaded)="onBulkDataLoaded($event)"
+      [isOpen]="bulkModalOpen"
+      (close)="bulkModalOpen = false"
+      (dataLoaded)="onBulkDataLoaded($event)"
     ></app-pop-bulk-data-modal>
 
     <app-pop-product-config-modal
-        [isOpen]="configModalOpen"
-        [product]="configModalProduct"
-        (confirmed)="onProductConfigConfirmed($event)"
-        (closed)="configModalOpen = false"
+      [isOpen]="configModalOpen"
+      [product]="configModalProduct"
+      (confirmed)="onProductConfigConfirmed($event)"
+      (closed)="configModalOpen = false"
     ></app-pop-product-config-modal>
   `,
   styles: [
@@ -262,10 +285,16 @@ export class PopProductSelectionComponent implements OnInit, OnDestroy {
   // Dropdown actions configuration
   dropdownActions: DropdownAction[] = [
     {
+      label: 'Escanear factura',
+      icon: 'scan-line',
+      action: 'scan-invoice',
+      variant: 'primary',
+    },
+    {
       label: 'Nuevo producto',
       icon: 'plus',
       action: 'new-product',
-      variant: 'primary',
+      variant: 'outline',
     },
     {
       label: 'Carga masiva',
@@ -282,6 +311,7 @@ export class PopProductSelectionComponent implements OnInit, OnDestroy {
     product: any;
     quantity: number;
   }>();
+  @Output() scanInvoice = new EventEmitter<void>();
 
   private destroy$ = new Subject<void>();
   private searchSubject$ = new Subject<string>();
@@ -289,8 +319,8 @@ export class PopProductSelectionComponent implements OnInit, OnDestroy {
   constructor(
     private productsService: ProductsService,
     private cartService: PopCartService,
-    private toastService: ToastService
-  ) { }
+    private toastService: ToastService,
+  ) {}
 
   ngOnInit(): void {
     this.setupSearchSubscription();
@@ -359,19 +389,9 @@ export class PopProductSelectionComponent implements OnInit, OnDestroy {
       requires_batch_tracking: product.requires_batch_tracking || false,
     };
 
-    // If product has variants or requires batch tracking, open config modal
-    const hasVariants = product.product_variants?.length > 0;
-    const needsConfig = hasVariants || product.requires_batch_tracking;
-
-    if (needsConfig) {
-      this.configModalProduct = popProduct;
-      this.configModalOpen = true;
-      this.addingToCart.delete(product.id);
-      return;
-    }
-
-    this.cartService.addItem(popProduct, 1);
-    this.toastService.success(`${product.name} agregado al carrito`);
+    // POP always opens config modal (unlike POS, speed is not critical)
+    this.configModalProduct = popProduct;
+    this.configModalOpen = true;
     this.addingToCart.delete(product.id);
   }
 
@@ -385,33 +405,52 @@ export class PopProductSelectionComponent implements OnInit, OnDestroy {
 
     if (result.variants?.length) {
       // Multi-variant: add one cart item per selected variant
-      result.variants.forEach(variant => {
-        this.cartService.addToCart({
-          product,
-          variant,
-          quantity: 1,
-          unit_cost: variant.cost_price ? Number(variant.cost_price) : result.unit_cost,
-          lot_info: result.lot_info,
-        }).subscribe();
+      result.variants.forEach((variant) => {
+        this.cartService
+          .addToCart({
+            product,
+            variant,
+            quantity: 1,
+            unit_cost: variant.cost_price
+              ? Number(variant.cost_price)
+              : result.unit_cost,
+            lot_info: result.lot_info,
+          })
+          .subscribe();
       });
 
       const count = result.variants.length;
       this.toastService.success(
         count === 1
           ? `${product.name} agregado al carrito`
-          : `${count} variantes de ${product.name} agregadas al carrito`
+          : `${count} variantes de ${product.name} agregadas al carrito`,
       );
     } else {
       // Single item (no variants)
-      this.cartService.addToCart({
-        product,
-        variant: result.variant,
-        quantity: result.quantity,
-        unit_cost: result.unit_cost,
-        lot_info: result.lot_info,
-      }).subscribe();
+      this.cartService
+        .addToCart({
+          product,
+          variant: result.variant,
+          quantity: result.quantity,
+          unit_cost: result.unit_cost,
+          lot_info: result.lot_info,
+        })
+        .subscribe();
 
       this.toastService.success(`${product.name} agregado al carrito`);
+    }
+
+    // Update product in filteredProducts to reflect newly created variants
+    if (result.variants?.length && this.configModalProduct) {
+      const productIndex = this.filteredProducts.findIndex(
+        (p: any) => p.id === this.configModalProduct.id,
+      );
+      if (productIndex >= 0) {
+        this.filteredProducts[productIndex] = {
+          ...this.filteredProducts[productIndex],
+          product_variants: result.variants,
+        };
+      }
     }
 
     this.configModalOpen = false;
@@ -426,12 +465,27 @@ export class PopProductSelectionComponent implements OnInit, OnDestroy {
     return product.id;
   }
 
+  updateProductVariants(productId: number, variants: any[]): void {
+    const productIndex = this.filteredProducts.findIndex(
+      (p: any) => p.id === productId,
+    );
+    if (productIndex >= 0) {
+      this.filteredProducts[productIndex] = {
+        ...this.filteredProducts[productIndex],
+        product_variants: variants,
+      };
+    }
+  }
+
   onBulkDataLoaded(data: any[]): void {
     this.bulkDataLoaded.emit(data);
   }
 
   onDropdownAction(action: string): void {
     switch (action) {
+      case 'scan-invoice':
+        this.scanInvoice.emit();
+        break;
       case 'new-product':
         this.requestManualAdd.emit();
         break;

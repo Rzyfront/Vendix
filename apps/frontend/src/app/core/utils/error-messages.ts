@@ -87,6 +87,13 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PROD_SVC_001: 'Los servicios no pueden tener peso, dimensiones ni inventario fisico.',
   PROD_SVC_002: 'No se puede cambiar el tipo de un producto existente.',
 
+  // Bulk Products
+  BULK_PROD_FILE_INVALID: 'El archivo subido no es valido o esta corrupto.',
+  BULK_PROD_EMPTY_FILE: 'El archivo no contiene filas de datos.',
+  BULK_PROD_LIMIT_EXCEEDED: 'Se excedio el limite maximo de productos por carga.',
+  BULK_PROD_SESSION_EXPIRED: 'La sesion de analisis expiro. Suba el archivo nuevamente.',
+  BULK_PROD_VALIDATE_001: 'Uno de los valores tiene un formato invalido. Verifique campos como marca o categoria.',
+
   // Orders
   ORD_FIND_001: 'Orden no encontrada.',
   ORD_CREATE_001: 'Error al crear la orden.',

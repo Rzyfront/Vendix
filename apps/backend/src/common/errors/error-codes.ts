@@ -1418,6 +1418,52 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Product has reached maximum image limit',
   },
+  BULK_PROD_FILE_INVALID: {
+    code: 'BULK_PROD_FILE_INVALID',
+    httpStatus: 400,
+    devMessage: 'Excel/CSV file is invalid or corrupt',
+  },
+  BULK_PROD_EMPTY_FILE: {
+    code: 'BULK_PROD_EMPTY_FILE',
+    httpStatus: 400,
+    devMessage: 'File contains no data rows',
+  },
+  BULK_PROD_LIMIT_EXCEEDED: {
+    code: 'BULK_PROD_LIMIT_EXCEEDED',
+    httpStatus: 400,
+    devMessage: 'File exceeds maximum product limit (1000)',
+  },
+  BULK_PROD_SESSION_EXPIRED: {
+    code: 'BULK_PROD_SESSION_EXPIRED',
+    httpStatus: 404,
+    devMessage: 'Analysis session not found or expired',
+  },
+  BULK_PROD_VALIDATE_001: {
+    code: 'BULK_PROD_VALIDATE_001',
+    httpStatus: 422,
+    devMessage: 'Invalid field type in bulk product data',
+  },
+  // Invoice Scanner
+  INV_SCAN_AI_FAIL: {
+    code: 'INV_SCAN_AI_FAIL',
+    httpStatus: 502,
+    devMessage: 'AI invoice OCR processing failed',
+  },
+  INV_SCAN_PARSE_FAIL: {
+    code: 'INV_SCAN_PARSE_FAIL',
+    httpStatus: 422,
+    devMessage: 'Failed to parse AI OCR response as valid JSON',
+  },
+  INV_SCAN_NO_FILE: {
+    code: 'INV_SCAN_NO_FILE',
+    httpStatus: 400,
+    devMessage: 'No invoice file provided',
+  },
+  INV_SCAN_INVALID_FILE: {
+    code: 'INV_SCAN_INVALID_FILE',
+    httpStatus: 400,
+    devMessage: 'Invalid file type — only images and PDFs are accepted',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export type ErrorCodeKey = keyof typeof ErrorCodes;

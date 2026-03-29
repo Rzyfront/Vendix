@@ -575,6 +575,22 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     return type === 'simple' ? 'Simple' : 'Compuesto';
   });
 
+  readonly totalInterestAmount = computed(() => {
+    const installments = this.order()?.order_installments;
+    if (!installments?.length) {
+      const twi = Number(this.order()?.total_with_interest) || 0;
+      const gt = Number(this.order()?.grand_total) || 0;
+      return twi > gt ? Math.round((twi - gt) * 100) / 100 : 0;
+    }
+    return Math.round(installments.reduce((sum: number, i: any) => sum + (Number(i.interest_amount) || 0), 0) * 100) / 100;
+  });
+
+  readonly effectiveInterestPercent = computed(() => {
+    const principal = Number(this.order()?.grand_total) || 0;
+    if (principal <= 0 || this.totalInterestAmount() <= 0) return 0;
+    return Math.round((this.totalInterestAmount() / principal) * 10000) / 100;
+  });
+
   // ── Sticky Header Configuration ───────────────────────────
 
   readonly headerTitle = computed(() => {

@@ -15,6 +15,9 @@
             <app-icon [name]="editing() ? 'x' : 'pencil'" [size]="16"></app-icon>
           </button>
         }
+        <button class="icon-btn" (click)="closed.emit()" title="Cerrar">
+          <app-icon name="x" [size]="16"></app-icon>
+        </button>
       </div>
     </div>
 
@@ -249,6 +252,7 @@
           </span>
           <button class="btn-footer ghost" (click)="closed.emit()">Cerrar</button>
         } @else if (f.status === 'pending') {
+          <button class="btn-footer ghost" (click)="closed.emit()">Cerrar</button>
           <button class="btn-footer danger-outline" (click)="cancelled.emit(f)">
             <app-icon name="x" [size]="15"></app-icon>
             Cancelar
@@ -264,6 +268,7 @@
             Confirmar
           </button>
         } @else if (f.status === 'confirmed') {
+          <button class="btn-footer ghost" (click)="closed.emit()">Cerrar</button>
           <button class="btn-footer danger-outline" (click)="cancelled.emit(f)">
             <app-icon name="x" [size]="15"></app-icon>
             Cancelar

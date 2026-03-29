@@ -125,8 +125,9 @@ function calculateSimpleInterestSchedule(
 }
 
 /**
- * Compound interest (French amortization): PMT = P × [r(1+r)^n] / [(1+r)^n - 1]
- * Fixed payment amount, but capital/interest split varies per installment.
+ * Compound interest (capitalization): FV = P × (1+r)^n
+ * Interest capitalizes each period, then total is divided into equal installments.
+ * This results in MORE total interest than simple interest.
  */
 function calculateCompoundInterestSchedule(
   total_amount: number,
@@ -139,30 +140,40 @@ function calculateCompoundInterestSchedule(
   const periods_per_year = getPeriodsPerYear(frequency);
   const periodic_rate = annual_rate / periods_per_year;
 
-  // PMT formula: M = P * [r(1+r)^n] / [(1+r)^n - 1]
-  const factor = Math.pow(1 + periodic_rate, num_installments);
-  const fixed_payment = Math.round((total_amount * (periodic_rate * factor) / (factor - 1)) * 100) / 100;
+  // FV = P × (1 + r)^n — interest capitalizes each period
+  const total_with_interest = Math.round(total_amount * Math.pow(1 + periodic_rate, num_installments) * 100) / 100;
+  const total_interest = Math.round((total_with_interest - total_amount) * 100) / 100;
 
-  let remaining_principal = total_amount;
+  // Equal installments dividing the compounded total
+  const base_installment = Math.floor((total_with_interest / num_installments) * 100) / 100;
+  const base_capital = Math.floor((total_amount / num_installments) * 100) / 100;
+  const base_interest = Math.floor((total_interest / num_installments) * 100) / 100;
+
+  let remaining_capital = total_amount;
+  let remaining_total = total_with_interest;
 
   for (let i = 1; i <= num_installments; i++) {
-    const interest_portion = Math.round(remaining_principal * periodic_rate * 100) / 100;
     const is_last = i === num_installments;
-    const capital_portion = is_last
-      ? Math.round(remaining_principal * 100) / 100
-      : Math.round((fixed_payment - interest_portion) * 100) / 100;
-    const payment = is_last
-      ? Math.round((capital_portion + interest_portion) * 100) / 100
-      : fixed_payment;
 
-    remaining_principal = Math.round((remaining_principal - capital_portion) * 100) / 100;
+    const capital_value = is_last
+      ? Math.round(remaining_capital * 100) / 100
+      : base_capital;
+    const interest_value = is_last
+      ? Math.round((remaining_total - remaining_capital) * 100) / 100
+      : base_interest;
+    const installment_value = is_last
+      ? Math.round(remaining_total * 100) / 100
+      : base_installment;
+
+    remaining_capital = Math.round((remaining_capital - capital_value) * 100) / 100;
+    remaining_total = Math.round((remaining_total - installment_value) * 100) / 100;
 
     schedule.push({
       installment_number: i,
-      installment_value: payment,
-      capital_value: capital_portion,
-      interest_value: interest_portion,
-      remaining_balance: Math.max(remaining_principal, 0),
+      installment_value: installment_value,
+      capital_value: capital_value,
+      interest_value: interest_value,
+      remaining_balance: Math.max(remaining_capital, 0),
       due_date: addFrequency(first_installment_date, frequency, i - 1),
     });
   }

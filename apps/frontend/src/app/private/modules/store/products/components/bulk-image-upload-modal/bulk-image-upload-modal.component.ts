@@ -145,6 +145,10 @@ import {
                   <div class="min-w-0">
                     <p class="font-semibold text-indigo-900 text-xs">Plantilla Ejemplo</p>
                     <p class="text-[10px] text-indigo-600 truncate">ZIP con instrucciones y carpetas de ejemplo</p>
+                    <div class="flex items-center text-[10px] font-bold text-indigo-600 group-hover:text-indigo-800 mt-1">
+                      <app-icon name="download" [size]="12" class="mr-1"></app-icon>
+                      DESCARGAR ZIP
+                    </div>
                   </div>
                 </div>
                 <div
@@ -157,6 +161,10 @@ import {
                   <div class="min-w-0">
                     <p class="font-semibold text-green-900 text-xs">SKUs de tu Tienda</p>
                     <p class="text-[10px] text-green-600 truncate">Carpetas con los SKUs reales de tus productos</p>
+                    <div class="flex items-center text-[10px] font-bold text-green-600 group-hover:text-green-800 mt-1">
+                      <app-icon name="download" [size]="12" class="mr-1"></app-icon>
+                      DESCARGAR ZIP
+                    </div>
                   </div>
                 </div>
               </div>

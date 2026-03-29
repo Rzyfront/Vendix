@@ -3,6 +3,7 @@ import {
   AIProvider,
   AIProviderConfig,
   AIMessage,
+  AIMessageContentPart,
   AIRequestOptions,
   AIResponse,
   AIStreamChunk,
@@ -19,14 +20,50 @@ export class AnthropicCompatibleProvider implements AIProvider {
     });
   }
 
+  private transformContentForAnthropic(content: string | AIMessageContentPart[]): string | any[] {
+    if (typeof content === 'string') {
+      return content;
+    }
+    return content.map((part) => {
+      if (part.type === 'text') {
+        return { type: 'text', text: part.text };
+      }
+      if (part.type === 'image_url' && part.image_url) {
+        const url = part.image_url.url;
+        if (url.startsWith('data:')) {
+          const match = url.match(/^data:([^;]+);base64,(.+)$/);
+          if (match) {
+            return {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: match[1],
+                data: match[2],
+              },
+            };
+          }
+        }
+        return {
+          type: 'image',
+          source: {
+            type: 'url',
+            url,
+          },
+        };
+      }
+      return part;
+    });
+  }
+
   async chat(
     messages: AIMessage[],
     options?: AIRequestOptions,
   ): Promise<AIResponse> {
     try {
+      const systemMsg = messages.find((m) => m.role === 'system');
       const systemPrompt =
         options?.systemPrompt ||
-        messages.find((m) => m.role === 'system')?.content;
+        (systemMsg ? (typeof systemMsg.content === 'string' ? systemMsg.content : undefined) : undefined);
       const userMessages = messages.filter((m) => m.role !== 'system');
 
       const response = await this.client.messages.create({
@@ -34,7 +71,7 @@ export class AnthropicCompatibleProvider implements AIProvider {
         ...(systemPrompt && { system: systemPrompt }),
         messages: userMessages.map((m) => ({
           role: m.role as 'user' | 'assistant',
-          content: m.content,
+          content: this.transformContentForAnthropic(m.content) as any,
         })),
         max_tokens:
           options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
@@ -128,9 +165,10 @@ export class AnthropicCompatibleProvider implements AIProvider {
     options?: AIRequestOptions,
   ): AsyncGenerator<AIStreamChunk> {
     try {
+      const systemMsgStream = messages.find((m) => m.role === 'system');
       const systemPrompt =
         options?.systemPrompt ||
-        messages.find((m) => m.role === 'system')?.content;
+        (systemMsgStream ? (typeof systemMsgStream.content === 'string' ? systemMsgStream.content : undefined) : undefined);
       const userMessages = messages.filter((m) => m.role !== 'system');
 
       const stream = this.client.messages.stream({
@@ -138,7 +176,7 @@ export class AnthropicCompatibleProvider implements AIProvider {
         ...(systemPrompt && { system: systemPrompt }),
         messages: userMessages.map((m) => ({
           role: m.role as 'user' | 'assistant',
-          content: m.content,
+          content: this.transformContentForAnthropic(m.content) as any,
         })),
         max_tokens:
           options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,

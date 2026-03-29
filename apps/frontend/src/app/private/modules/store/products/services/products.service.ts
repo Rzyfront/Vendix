@@ -16,6 +16,7 @@ import {
   ProductStats,
 } from '../interfaces';
 import { BulkImageAnalysisResult, BulkImageUploadResult } from '../interfaces/bulk-image-analysis.interface';
+import { BulkProductAnalysisResult, BulkProductUploadResult } from '../interfaces/bulk-product-analysis.interface';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -448,6 +449,43 @@ export class ProductsService {
         map((response) => response.data),
         catchError(this.handleError),
       );
+  }
+
+  // Carga Masiva de Productos (Análisis y Sesión)
+  analyzeBulkProducts(file: File): Observable<BulkProductAnalysisResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.http
+      .post<ApiResponse<BulkProductAnalysisResult>>(
+        `${this.apiUrl}/store/products/bulk/analyze`,
+        formData,
+      )
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
+  uploadBulkProductsFromSession(
+    sessionId: string,
+  ): Observable<BulkProductUploadResult> {
+    return this.http
+      .post<ApiResponse<BulkProductUploadResult>>(
+        `${this.apiUrl}/store/products/bulk/upload-session`,
+        { session_id: sessionId },
+      )
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
+  cancelBulkProductSession(sessionId: string): Observable<void> {
+    return this.http
+      .delete<void>(
+        `${this.apiUrl}/store/products/bulk/session/${sessionId}`,
+      )
+      .pipe(catchError(this.handleError));
   }
 
   // Promociones del producto

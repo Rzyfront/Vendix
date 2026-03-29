@@ -2037,6 +2037,32 @@ export class PosPaymentInterfaceComponent
     return this.creditInstallmentsPreview.reduce((sum, inst) => sum + inst.amount, 0);
   }
 
+  getAnnualRate(): number {
+    const raw = this.creditInterestRate || 0;
+    return raw > 1 ? raw : raw * 100;
+  }
+
+  getPeriodicRate(): number {
+    const annual = this.getAnnualRate();
+    const divisors: Record<string, number> = { weekly: 52, biweekly: 26, monthly: 12 };
+    return Math.round((annual / (divisors[this.creditFrequency] || 12)) * 100) / 100;
+  }
+
+  getPeriodicLabel(): string {
+    const labels: Record<string, string> = { weekly: 'semanal', biweekly: 'quincenal', monthly: 'mensual' };
+    return labels[this.creditFrequency] || 'mensual';
+  }
+
+  getInterestAmount(): number {
+    if (this.creditInstallmentsPreview.length === 0) return 0;
+    return Math.round((this.getTotalInstallments() - this.creditRemainingBalance) * 100) / 100;
+  }
+
+  getEffectivePercent(): number {
+    if (this.creditRemainingBalance <= 0) return 0;
+    return Math.round((this.getInterestAmount() / this.creditRemainingBalance) * 10000) / 100;
+  }
+
   selectCreditInitialPaymentMethod(method: PaymentMethod): void {
     this.creditInitialPaymentMethod = method;
   }
@@ -2072,19 +2098,18 @@ export class PosPaymentInterfaceComponent
         };
       });
     } else if (interestType === 'compound') {
-      // Compound interest (French amortization): PMT = P × [r(1+r)^n] / [(1+r)^n - 1]
+      // Compound interest (capitalization): FV = P × (1+r)^n
+      // Interest capitalizes each period, then total divided into equal installments
       const r = annualRate / (periodsPerYear[this.creditFrequency] || 12);
-      const factor = Math.pow(1 + r, n);
-      const pmt = Math.round((amountToFinance * (r * factor) / (factor - 1)) * 100) / 100;
-      let remaining = amountToFinance;
+      const totalWithInterest = Math.round(amountToFinance * Math.pow(1 + r, n) * 100) / 100;
+      const baseAmount = Math.round((totalWithInterest / n) * 100) / 100;
       this.creditInstallmentsPreview = Array.from({ length: n }, (_, i) => {
         const due = new Date(startDate);
         due.setDate(due.getDate() + freqDays[this.creditFrequency] * i);
-        const interest = Math.round(remaining * r * 100) / 100;
-        const capital = i === n - 1 ? Math.round(remaining * 100) / 100 : Math.round((pmt - interest) * 100) / 100;
-        const payment = i === n - 1 ? Math.round((capital + interest) * 100) / 100 : pmt;
-        remaining = Math.round((remaining - capital) * 100) / 100;
-        return { amount: payment, due_date: due.toISOString().split('T')[0] };
+        return {
+          amount: i === n - 1 ? Math.round((totalWithInterest - baseAmount * (n - 1)) * 100) / 100 : baseAmount,
+          due_date: due.toISOString().split('T')[0],
+        };
       });
     } else {
       // Simple interest: I = P × r × n, distributed equally

@@ -5,68 +5,56 @@
     <h3>Excepciones y Dias Especiales</h3>
   </div>
   <app-button variant="outline" size="sm" (clicked)="showForm.set(!showForm())">
-    <app-icon [name]="showForm() ? 'x' : 'plus'" [size]="14"/>
+    <app-icon [name]="showForm() ? 'x' : 'plus'" [size]="14" slot="icon"/>
     {{ showForm() ? 'Cancelar' : 'Agregar' }}
   </app-button>
 </div>
 
 <!-- Inline form (collapsible) -->
 @if (showForm()) {
-  <div class="exception-form">
-    <div class="form-grid">
-      <div class="form-field">
+  <div class="exception-form space-y-3">
+    <app-input
+      type="date"
+      label="Fecha"
+      size="sm"
+      [ngModel]="formDate()"
+      (inputChange)="formDate.set($event)"
+      customWrapperClass="!mt-0"
+    />
+    <app-toggle
+      [checked]="formIsUnavailable()"
+      label="No disponible todo el dia"
+      (toggled)="formIsUnavailable.set($event)"
+    />
+    @if (!formIsUnavailable()) {
+      <div class="grid grid-cols-2 gap-3">
         <app-input
-          type="date"
-          label="Fecha"
+          type="time"
+          label="Hora inicio"
           size="sm"
-          [ngModel]="formDate()"
-          (inputChange)="formDate.set($event)"
+          [ngModel]="formStartTime()"
+          (inputChange)="formStartTime.set($event)"
+          customWrapperClass="!mt-0"
+        />
+        <app-input
+          type="time"
+          label="Hora fin"
+          size="sm"
+          [ngModel]="formEndTime()"
+          (inputChange)="formEndTime.set($event)"
           customWrapperClass="!mt-0"
         />
       </div>
-      <div class="form-field flex items-end pb-1">
-        <app-toggle
-          [checked]="formIsUnavailable()"
-          label="No disponible todo el dia"
-          (toggled)="formIsUnavailable.set($event)"
-        />
-      </div>
-    </div>
-    @if (!formIsUnavailable()) {
-      <div class="form-grid">
-        <div class="form-field">
-          <app-input
-            type="time"
-            label="Hora inicio"
-            size="sm"
-            [ngModel]="formStartTime()"
-            (inputChange)="formStartTime.set($event)"
-            customWrapperClass="!mt-0"
-          />
-        </div>
-        <div class="form-field">
-          <app-input
-            type="time"
-            label="Hora fin"
-            size="sm"
-            [ngModel]="formEndTime()"
-            (inputChange)="formEndTime.set($event)"
-            customWrapperClass="!mt-0"
-          />
-        </div>
-      </div>
     }
-    <div class="form-field form-field--wide">
-      <app-input
-        label="Motivo (opcional)"
-        placeholder="Vacaciones, cita medica..."
-        size="sm"
-        [ngModel]="formReason()"
-        (inputChange)="formReason.set($event)"
-        customWrapperClass="!mt-0"
-      />
-    </div>
-    <div class="form-actions">
+    <app-input
+      label="Motivo (opcional)"
+      placeholder="Vacaciones, cita medica..."
+      size="sm"
+      [ngModel]="formReason()"
+      (inputChange)="formReason.set($event)"
+      customWrapperClass="!mt-0"
+    />
+    <div class="flex justify-end gap-2">
       <app-button variant="ghost" size="sm" (clicked)="showForm.set(false)">Cancelar</app-button>
       <app-button variant="primary" size="sm" [disabled]="!formDate()" [loading]="saving()" (clicked)="createException()">Guardar</app-button>
     </div>
@@ -94,7 +82,7 @@
           <span class="exception-reason">{{ ex.reason }}</span>
         }
         <app-button variant="ghost" size="xsm" (clicked)="deleteException(ex.id)" aria-label="Eliminar excepcion">
-          <app-icon name="trash-2" [size]="14"/>
+          <app-icon name="trash-2" [size]="14" slot="icon"/>
         </app-button>
       </div>
     }

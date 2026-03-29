@@ -1,16 +1,16 @@
-import * as XLSX from 'xlsx';
 import {
   Controller,
   Post,
   Body,
   Get,
+  Delete,
+  Param,
   UseGuards,
   Req,
   UseInterceptors,
   UploadedFile,
   ParseFilePipe,
   MaxFileSizeValidator,
-  FileTypeValidator,
   BadRequestException,
   Query,
   Res,
@@ -22,6 +22,7 @@ import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
+import { RequestContextService } from '@common/context/request-context.service';
 import {
   BulkProductUploadDto,
   BulkValidationResultDto,
@@ -32,34 +33,6 @@ import {
 @Controller('store/products/bulk')
 @UseGuards(PermissionsGuard)
 export class ProductsBulkController {
-  private readonly HEADER_TRANSLATIONS: Record<string, string> = {
-    nombre: 'name',
-    sku: 'sku',
-    'precio base': 'base_price',
-    'precio venta': 'base_price',
-    costo: 'cost_price',
-    'precio compra': 'cost_price',
-    margen: 'profit_margin',
-    'cantidad inicial': 'stock_quantity',
-    descripción: 'description',
-    descripcion: 'description',
-    categorías: 'category_ids',
-    categorias: 'category_ids',
-    marca: 'brand_id',
-    'en oferta': 'is_on_sale',
-    'precio oferta': 'sale_price',
-    peso: 'weight',
-    'disponible ecommerce': 'available_for_ecommerce',
-    estado: 'state',
-    'codigo bodega': 'warehouse_code',
-    'código bodega': 'warehouse_code',
-    'nombre bodega': 'warehouse_name',
-    tipo: 'product_type',
-    type: 'product_type',
-    'tipo producto': 'product_type',
-    'product type': 'product_type',
-  };
-
   constructor(
     private readonly productsBulkService: ProductsBulkService,
     private readonly responseService: ResponseService,
@@ -162,7 +135,7 @@ export class ProductsBulkController {
 
       // Intentar parsear como Excel primero (ya que soporta ambos si se usa XLSX lib correctamente)
       // La librería XLSX puede leer CSVs también si se pasa el buffer.
-      products = this.parseFile(file.buffer);
+      products = this.productsBulkService.parseFile(file.buffer);
 
       // Validar productos
       const validationResult =
@@ -203,84 +176,86 @@ export class ProductsBulkController {
   }
 
   /**
-   * Parsea archivo (Excel o CSV) a array de productos usando mapeo de español
+   * Analiza archivo Excel/CSV sin procesar (dry-run)
    */
-  private parseFile(buffer: Buffer): any[] {
-    try {
-      const workbook = XLSX.read(buffer, { type: 'buffer' });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
+  @Post('analyze')
+  @Permissions('store:products:create')
+  @UseInterceptors(FileInterceptor('file'))
+  async analyzeProducts(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB
+        ],
+      }),
+    )
+    file: any,
+  ) {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+    if (!storeId) {
+      throw new BadRequestException('No se pudo determinar la tienda actual');
+    }
 
-      // Convertir a JSON array de arrays (header: 1) para inspeccionar encabezados
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+    const result = await this.productsBulkService.analyzeProducts(
+      file.buffer,
+      storeId,
+    );
 
-      if (jsonData.length < 2) {
-        throw new BadRequestException(
-          'El archivo debe contener al menos una fila de encabezados y una fila de datos',
-        );
-      }
+    return this.responseService.success(result, 'Análisis completado');
+  }
 
-      // Procesar encabezados
-      const rawHeaders = jsonData[0] as string[];
-      const headerMap: Record<number, string> = {};
+  /**
+   * Procesa carga masiva desde sesión de análisis
+   */
+  @Post('upload-session')
+  @Permissions('store:products:create')
+  async uploadFromSession(
+    @Body() body: { session_id: string },
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+    if (!storeId) {
+      throw new BadRequestException('No se pudo determinar la tienda actual');
+    }
+    if (!body.session_id) {
+      throw new BadRequestException('session_id es requerido');
+    }
 
-      rawHeaders.forEach((h, index) => {
-        if (!h) return;
-        const normalized = h.toString().trim().toLowerCase();
-        // Buscar traducción
-        const dtoKey = this.HEADER_TRANSLATIONS[normalized];
-        if (dtoKey) {
-          headerMap[index] = dtoKey;
-        }
-      });
+    const result = await this.productsBulkService.uploadProductsFromSession(
+      body.session_id,
+      storeId,
+      req.user,
+    );
 
-      const products: any[] = [];
-
-      for (let i = 1; i < jsonData.length; i++) {
-        const row = jsonData[i] as any[];
-        if (!row || row.length === 0) continue;
-
-        const product: Record<string, any> = {};
-        let hasData = false;
-
-        row.forEach((cellValue, index) => {
-          const key = headerMap[index];
-          if (key) {
-            // Normalizar valores vacíos
-            const val =
-              cellValue === undefined || cellValue === null ? '' : cellValue;
-
-            // Si es numérico en DTO, intentar convertir
-            if (
-              [
-                'base_price',
-                'cost_price',
-                'stock_quantity',
-                'weight',
-                'sale_price',
-                'profit_margin',
-              ].includes(key)
-            ) {
-              const num = parseFloat(val);
-              product[key] = isNaN(num) ? 0 : num;
-            } else {
-              product[key] = val;
-            }
-
-            if (val !== '') hasData = true;
-          }
-        });
-
-        if (hasData && (product['name'] || product['sku'])) {
-          products.push(product);
-        }
-      }
-
-      return products;
-    } catch (error) {
-      throw new BadRequestException(
-        'Error al procesar el archivo: ' + error.message,
+    if (result.failed > 0) {
+      return this.responseService.created(
+        result,
+        'Carga masiva completada con algunos errores',
       );
     }
+
+    return this.responseService.created(
+      result,
+      'Carga masiva completada exitosamente',
+    );
+  }
+
+  /**
+   * Cancela sesión de análisis
+   */
+  @Delete('session/:id')
+  @Permissions('store:products:create')
+  async cancelSession(@Param('id') sessionId: string) {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+    if (!storeId) {
+      throw new BadRequestException('No se pudo determinar la tienda actual');
+    }
+
+    await this.productsBulkService.cancelSession(sessionId, storeId);
+
+    return this.responseService.success(null, 'Sesión cancelada');
   }
 }

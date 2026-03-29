@@ -1,4 +1,4 @@
-<div class="min-h-screen" style="background-color: var(--color-background)">
+<div>
   <!-- Loading State -->
   @if (isLoading()) {
     <div class="flex justify-center items-center h-64">
@@ -86,7 +86,7 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
               <!-- Profile Info -->
               <div class="md:col-span-2 flex items-start gap-3 sm:gap-4">
-                <div class="w-10 h-10 sm:w-14 sm:h-14 bg-primary/10 text-primary rounded-lg sm:rounded-xl flex items-center justify-center text-base sm:text-xl font-bold border border-primary/5 flex-shrink-0">
+                <div class="w-10 h-10 sm:w-12 sm:h-12 bg-primary/10 text-primary rounded-lg sm:rounded-xl flex items-center justify-center text-base sm:text-lg font-bold border border-primary/5 flex-shrink-0 aspect-square">
                   {{ orderData.users?.first_name?.charAt(0) || "C" }}
                 </div>
                 <div class="space-y-0.5 sm:space-y-1 min-w-0">
@@ -649,9 +649,15 @@
                 </div>
                 @if (order()?.interest_rate) {
                   <div class="flex justify-between items-center text-xs">
-                    <span class="text-text-secondary">Interés</span>
-                    <span class="text-text-secondary">{{ interestTypeLabel() }} ({{ (order()?.interest_rate || 0) * 100 }}%)</span>
+                    <span class="text-text-secondary">Tasa anual</span>
+                    <span class="font-semibold text-gray-700">{{ (order()?.interest_rate || 0) * 100 }}% {{ interestTypeLabel() }}</span>
                   </div>
+                  @if (totalInterestAmount() > 0) {
+                    <div class="flex justify-between items-center text-xs">
+                      <span class="text-text-secondary">Interés total</span>
+                      <span class="font-semibold text-red-500">+ {{ totalInterestAmount() | currency }} ({{ effectiveInterestPercent() }}%)</span>
+                    </div>
+                  }
                 }
                 <!-- Progress Bar -->
                 <div class="space-y-1">

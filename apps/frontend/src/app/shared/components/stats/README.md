@@ -25,6 +25,10 @@ Tarjeta de estadistica reutilizable con icono, titulo, valor y texto secundario.
 | `clickable`   | `boolean`          | `false`           | Efecto hover y cursor pointer  |
 | `loading`     | `boolean`          | `false`           | Muestra estado de carga        |
 
+## Reglas Obligatorias
+
+- **`smallText` es OBLIGATORIO** — Toda instancia de `app-stats` debe incluir `smallText`. Puede ser un valor calculado (ej: "+15% vs mes anterior") o informativo (ej: "Productos incluidos", "Fecha acordada"). Nunca dejar una stat card sin `smallText`.
+
 ## Importante
 
 - `value` acepta `string` o `number` — ideal para formateo externo de monedas/fechas

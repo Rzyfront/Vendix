@@ -13,19 +13,23 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { PurchaseOrdersService } from './purchase-orders.service';
+import { InvoiceScannerService } from './invoice-scanner.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
+import { ConfirmScannedInvoiceDto } from './dto/scan-invoice.dto';
 import { ResponseService } from '@common/responses/response.service';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
 
 @Controller('store/orders/purchase-orders')
 @UseGuards(PermissionsGuard)
 export class PurchaseOrdersController {
   constructor(
     private readonly purchaseOrdersService: PurchaseOrdersService,
+    private readonly invoiceScannerService: InvoiceScannerService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -154,6 +158,68 @@ export class PurchaseOrdersController {
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al obtener las órdenes de compra del proveedor',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  // ===== Invoice Scanner routes =====
+
+  @Post('scan')
+  @Permissions('store:orders:purchase_orders:create')
+  @UseInterceptors(FileInterceptor('file'))
+  async scanInvoice(@UploadedFile() file: Express.Multer.File) {
+    try {
+      if (!file) {
+        throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
+      }
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+      if (!allowedTypes.includes(file.mimetype)) {
+        throw new VendixHttpException(ErrorCodes.INV_SCAN_INVALID_FILE);
+      }
+      const result = await this.invoiceScannerService.scanInvoice(file);
+      return this.responseService.success(result, 'Factura escaneada exitosamente');
+    } catch (error) {
+      if (error instanceof VendixHttpException) throw error;
+      return this.responseService.error(
+        error.message || 'Error al escanear la factura',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Post('scan/match')
+  @Permissions('store:orders:purchase_orders:create')
+  async matchProducts(@Body() scanResult: any) {
+    try {
+      const result = await this.invoiceScannerService.matchProducts(scanResult);
+      return this.responseService.success(result, 'Coincidencias de productos encontradas');
+    } catch (error) {
+      if (error instanceof VendixHttpException) throw error;
+      return this.responseService.error(
+        error.message || 'Error al buscar coincidencias de productos',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Post('scan/confirm')
+  @Permissions('store:orders:purchase_orders:create')
+  @UseInterceptors(FileInterceptor('file'))
+  async confirmScannedInvoice(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() confirmDto: ConfirmScannedInvoiceDto,
+  ) {
+    try {
+      const result = await this.invoiceScannerService.confirmAndCreatePO(confirmDto, file);
+      return this.responseService.created(result, 'Orden de compra creada desde factura escaneada');
+    } catch (error) {
+      if (error instanceof VendixHttpException) throw error;
+      return this.responseService.error(
+        error.message || 'Error al confirmar la factura escaneada',
         error.response?.message || error.message,
         error.status || 400,
       );

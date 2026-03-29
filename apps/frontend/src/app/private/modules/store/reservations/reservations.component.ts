@@ -348,6 +348,7 @@ export class ReservationsComponent implements OnInit, OnDestroy {
           this.loadBookings();
           this.loadStats();
           this.loadTodayBookings();
+          this.calendarRefreshTrigger++;
         },
         error: () => {
           this.toastService.error('Error al reagendar la reserva. El horario no esta disponible.');
@@ -398,7 +399,8 @@ export class ReservationsComponent implements OnInit, OnDestroy {
 
   onViewAllToday(): void {
     this.activeView = 'list';
-    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     this.dateFrom = today;
     this.dateTo = today;
     this.page = 1;

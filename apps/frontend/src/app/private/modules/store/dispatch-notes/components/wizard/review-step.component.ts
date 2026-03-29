@@ -13,7 +13,7 @@ import {
   ButtonComponent,
 } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { DispatchNoteWizardService } from '../../services/dispatch-note-wizard.service';
+import { DispatchNoteWizardService, WizardCreateAction } from '../../services/dispatch-note-wizard.service';
 import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
 
 @Component({
@@ -189,7 +189,7 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
 
           <div>
             <h3 class="text-lg font-bold text-[var(--color-text-primary)]">
-              Remision creada
+              {{ successTitle }}
             </h3>
             @if (createdNote()) {
               <p class="text-2xl font-bold text-[var(--color-primary)] mt-1">
@@ -206,7 +206,7 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
               Crear otra
             </app-button>
             <app-button variant="primary" size="sm" (clicked)="printNote.emit(createdNote()!)">
-              <app-icon name="printer" [size]="14"></app-icon>
+              <app-icon name="printer" [size]="14" slot="icon"></app-icon>
               Imprimir
             </app-button>
           </div>
@@ -236,10 +236,19 @@ export class ReviewStepComponent {
   // Inputs
   readonly created = input<boolean>(false);
   readonly createdNote = input<DispatchNote | null>(null);
+  readonly completedAction = input<WizardCreateAction>('draft');
 
   // Outputs
   readonly goToStep = output<number>();
   readonly viewDetail = output<number>();
   readonly createAnother = output<void>();
   readonly printNote = output<DispatchNote>();
+
+  get successTitle(): string {
+    switch (this.completedAction()) {
+      case 'confirm': return 'Remision creada y confirmada';
+      case 'invoice': return 'Remision facturada';
+      default: return 'Remision creada';
+    }
+  }
 }

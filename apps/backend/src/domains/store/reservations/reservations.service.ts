@@ -477,13 +477,14 @@ export class ReservationsService {
       );
     }
 
-    // Validar disponibilidad del nuevo slot
+    // Validar disponibilidad del nuevo slot (excluyendo la reserva actual)
     const isAvailable = await this.availabilityService.isSlotAvailable(
       booking.product_id,
       dto.date,
       dto.start_time,
       dto.end_time,
       booking.provider_id ?? undefined,
+      booking.id,
     );
 
     if (!isAvailable) {

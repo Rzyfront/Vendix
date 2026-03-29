@@ -1,8 +1,17 @@
 export type SdkType = 'openai_compatible' | 'anthropic_compatible';
 
+export interface AIMessageContentPart {
+  type: 'text' | 'image_url';
+  text?: string;
+  image_url?: {
+    url: string;
+    detail?: 'auto' | 'low' | 'high';
+  };
+}
+
 export interface AIMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string;
+  content: string | AIMessageContentPart[];
   tool_calls?: AIToolCall[];
   tool_call_id?: string;
 }
