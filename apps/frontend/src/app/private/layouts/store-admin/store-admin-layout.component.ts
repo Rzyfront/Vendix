@@ -196,11 +196,6 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy, AfterViewIn
           route: '/admin/orders/layaway',
         },
         {
-          label: 'Ventas a Crédito',
-          icon: 'circle',
-          route: '/admin/orders/credits',
-        },
-        {
           label: 'Reservas',
           icon: 'calendar-clock',
           route: '/admin/reservations',

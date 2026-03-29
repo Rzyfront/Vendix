@@ -153,11 +153,6 @@ const APP_MODULES = {
           description: 'Planes de pago a cuotas con reserva de productos',
         },
         {
-          key: 'orders_credits',
-          label: 'Créditos',
-          description: 'Ventas a crédito con cronograma de cuotas e intereses',
-        },
-        {
           key: 'orders_reservations',
           label: 'Reservas',
           description: 'Gestión de reservas y agendamiento de servicios',

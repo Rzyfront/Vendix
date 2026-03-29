@@ -4,6 +4,7 @@ import {
   IsString,
   IsOptional,
   IsEnum,
+  IsBoolean,
   Matches,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -41,4 +42,13 @@ export class CreateBookingDto {
   @IsInt()
   @Type(() => Number)
   order_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  provider_id?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  skip_availability_check?: boolean;
 }

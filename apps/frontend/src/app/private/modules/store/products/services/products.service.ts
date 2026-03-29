@@ -15,6 +15,7 @@ import {
   PaginatedResponse,
   ProductStats,
 } from '../interfaces';
+import { BulkImageAnalysisResult, BulkImageUploadResult } from '../interfaces/bulk-image-analysis.interface';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -415,6 +416,34 @@ export class ProductsService {
       .post<
         ApiResponse<any>
       >(`${this.apiUrl}/store/products/bulk-images/upload`, formData)
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
+  analyzeBulkImages(file: File): Observable<BulkImageAnalysisResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.http
+      .post<ApiResponse<BulkImageAnalysisResult>>(
+        `${this.apiUrl}/store/products/bulk-images/analyze`,
+        formData,
+      )
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
+  uploadBulkImagesFromSession(
+    sessionId: string,
+  ): Observable<BulkImageUploadResult> {
+    return this.http
+      .post<ApiResponse<BulkImageUploadResult>>(
+        `${this.apiUrl}/store/products/bulk-images/upload-session`,
+        { session_id: sessionId },
+      )
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),

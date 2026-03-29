@@ -278,7 +278,14 @@ export class OrdersService {
         },
         addresses_orders_billing_address_idToaddresses: true,
         addresses_orders_shipping_address_idToaddresses: true,
-        payments: true,
+        payments: {
+          include: {
+            store_payment_method: {
+              include: { system_payment_method: true },
+            },
+          },
+          orderBy: { created_at: 'asc' },
+        },
         shipping_method: {
           select: {
             id: true,
@@ -307,12 +314,8 @@ export class OrdersService {
             avatar_url: true,
           },
         },
-        credits: {
-          include: {
-            installments: {
-              orderBy: { installment_number: 'asc' },
-            },
-          },
+        order_installments: {
+          orderBy: { installment_number: 'asc' },
         },
       },
     });

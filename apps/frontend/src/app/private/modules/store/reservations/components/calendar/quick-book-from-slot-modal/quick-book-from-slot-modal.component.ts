@@ -56,6 +56,12 @@ export class QuickBookFromSlotModalComponent {
     return !this.serviceSearch() && this.services().length > 5;
   });
 
+  // Provider selection
+  providers = signal<any[]>([]);
+  selectedProvider = signal<any>(null);
+  loadingProviders = signal(false);
+  skipAvailability = signal(false);
+
   customerSearch = signal('');
   customers = signal<any[]>([]);
   selectedCustomer = signal<any>(null);
@@ -98,6 +104,9 @@ export class QuickBookFromSlotModalComponent {
     this.selectedCustomer.set(null);
     this.serviceSearch.set('');
     this.notes.set('');
+    this.providers.set([]);
+    this.selectedProvider.set(null);
+    this.skipAvailability.set(false);
     this.loadServices();
   }
 
@@ -124,7 +133,24 @@ export class QuickBookFromSlotModalComponent {
 
   selectService(service: any): void {
     this.selectedService.set(service);
+    this.loadProviders(service.id);
     this.currentStep.set(1);
+  }
+
+  private loadProviders(productId: number): void {
+    this.loadingProviders.set(true);
+    this.reservationsService.getProvidersForService(productId)
+      .subscribe({
+        next: (providers) => {
+          this.providers.set(providers);
+          this.loadingProviders.set(false);
+        },
+        error: () => this.loadingProviders.set(false),
+      });
+  }
+
+  selectProvider(provider: any): void {
+    this.selectedProvider.set(provider);
   }
 
   onCustomerSearch(query: string): void {
@@ -213,14 +239,17 @@ export class QuickBookFromSlotModalComponent {
       end_time: this.getEndTime(),
       notes: this.notes() || undefined,
       channel: 'pos',
+      provider_id: this.selectedProvider()?.id || undefined,
+      skip_availability_check: this.skipAvailability() || undefined,
     }).subscribe({
       next: () => {
         this.toastService.success('Reserva creada exitosamente');
         this.submitting.set(false);
         this.created.emit();
       },
-      error: () => {
-        this.toastService.error('Error al crear la reserva');
+      error: (err) => {
+        const msg = err?.error?.message?.message || err?.error?.message || 'Error al crear la reserva';
+        this.toastService.error(msg);
         this.submitting.set(false);
       },
     });

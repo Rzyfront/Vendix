@@ -1,0 +1,295 @@
+<app-modal [isOpen]="isOpen()" (closed)="closed.emit()" (opened)="onOpen()" title="" size="md">
+  @if (booking(); as b) {
+    <!-- Status accent bar -->
+    <div class="accent-bar" [style.background]="statusAccent()"></div>
+
+    <!-- Header -->
+    <div class="modal-header">
+      <div class="header-left">
+        <span class="booking-number">#{{ b.booking_number }}</span>
+        <span class="status-badge" [ngClass]="statusColor()">{{ statusLabel() }}</span>
+      </div>
+      <div class="header-actions">
+        @if (!isTerminal() && !rescheduling()) {
+          <button class="icon-btn" (click)="toggleEdit()" [title]="editing() ? 'Cancelar edición' : 'Editar notas'">
+            <app-icon [name]="editing() ? 'x' : 'pencil'" [size]="16"></app-icon>
+          </button>
+        }
+      </div>
+    </div>
+
+    @if (!rescheduling()) {
+      <!-- Info grid - compact 2 columns -->
+      <div class="info-grid">
+        <!-- Customer card -->
+        <div class="info-card">
+          <div class="info-card-icon">
+            <app-icon name="user" [size]="18"></app-icon>
+          </div>
+          <div class="info-card-content">
+            <span class="info-label">Cliente</span>
+            <span class="info-value">{{ b.customer?.first_name }} {{ b.customer?.last_name }}</span>
+            @if (b.customer?.phone) {
+              <span class="info-meta">{{ b.customer?.phone }}</span>
+            }
+          </div>
+        </div>
+
+        <!-- Service card -->
+        <div class="info-card">
+          <div class="info-card-icon">
+            @if (b.product?.image_url) {
+              <img [src]="b.product?.image_url" [alt]="b.product?.name" class="service-img">
+            } @else {
+              <app-icon name="briefcase" [size]="18"></app-icon>
+            }
+          </div>
+          <div class="info-card-content">
+            <span class="info-label">Servicio</span>
+            <span class="info-value">{{ b.product?.name }}</span>
+            <span class="info-meta">
+              @if (b.product?.service_duration_minutes) { {{ b.product?.service_duration_minutes }} min }
+              @if (b.product?.service_duration_minutes && b.product?.base_price) { · }
+              @if (b.product?.base_price) { {{ b.product?.base_price | currency }} }
+            </span>
+          </div>
+        </div>
+
+        <!-- Date & Time card -->
+        <div class="info-card">
+          <div class="info-card-icon accent" [style.color]="statusAccent()">
+            <app-icon name="calendar" [size]="18"></app-icon>
+          </div>
+          <div class="info-card-content">
+            <span class="info-label">Fecha y hora</span>
+            <span class="info-value">{{ formatDate(b.date) }}</span>
+            <span class="info-time">
+              <app-icon name="clock" [size]="13"></app-icon>
+              {{ formatTime(b.start_time) }} — {{ formatTime(b.end_time) }}
+              <span class="duration-badge">{{ getDurationMinutes() }} min</span>
+            </span>
+          </div>
+        </div>
+
+        <!-- Provider card -->
+        @if (b.provider) {
+          <div class="info-card">
+            <div class="info-card-icon">
+              <app-icon name="user-circle" [size]="18"></app-icon>
+            </div>
+            <div class="info-card-content">
+              <span class="info-label">Proveedor</span>
+              <span class="info-value">{{ b.provider.display_name || (b.provider.employee?.first_name + ' ' + b.provider.employee?.last_name) }}</span>
+            </div>
+          </div>
+        }
+
+        <!-- Channel + Meta card -->
+        <div class="info-card">
+          <div class="info-card-icon">
+            <app-icon [name]="channelIcon()" [size]="18"></app-icon>
+          </div>
+          <div class="info-card-content">
+            <span class="info-label">Canal</span>
+            <span class="info-value">{{ channelLabel() }}</span>
+            @if (b.order) {
+              <span class="info-meta order-link">
+                <app-icon name="shopping-bag" [size]="12"></app-icon>
+                Orden #{{ b.order.order_number }}
+              </span>
+            }
+          </div>
+        </div>
+      </div>
+
+      <!-- Notes section -->
+      <div class="notes-section">
+        @if (editing()) {
+          <!-- Edit mode -->
+          <div class="notes-grid">
+            <div class="note-field">
+              <label class="note-label">
+                <app-icon name="file-text" [size]="13"></app-icon>
+                Notas del cliente
+              </label>
+              <textarea
+                class="notes-textarea"
+                [ngModel]="notesValue()"
+                (ngModelChange)="notesValue.set($event)"
+                placeholder="Notas visibles para el equipo..."
+                rows="2"
+              ></textarea>
+            </div>
+            <div class="note-field">
+              <label class="note-label">
+                <app-icon name="lock" [size]="13"></app-icon>
+                Notas internas
+              </label>
+              <textarea
+                class="notes-textarea"
+                [ngModel]="internalNotesValue()"
+                (ngModelChange)="internalNotesValue.set($event)"
+                placeholder="Notas internas del equipo..."
+                rows="2"
+              ></textarea>
+            </div>
+          </div>
+          <div class="notes-actions">
+            <button class="btn-ghost-sm" (click)="toggleEdit()">Cancelar</button>
+            <button class="btn-primary-sm" [disabled]="savingNotes()" (click)="saveNotes()">
+              @if (savingNotes()) { Guardando... } @else { Guardar notas }
+            </button>
+          </div>
+        } @else {
+          <!-- View mode -->
+          @if (b.notes || b.internal_notes) {
+            <div class="notes-view">
+              @if (b.notes) {
+                <div class="note-item">
+                  <app-icon name="file-text" [size]="13" class="text-[var(--color-text-muted)]"></app-icon>
+                  <span>{{ b.notes }}</span>
+                </div>
+              }
+              @if (b.internal_notes) {
+                <div class="note-item internal">
+                  <app-icon name="lock" [size]="13" class="text-[var(--color-text-muted)]"></app-icon>
+                  <span>{{ b.internal_notes }}</span>
+                </div>
+              }
+            </div>
+          }
+        }
+      </div>
+
+      <!-- Meta footer -->
+      <div class="meta-row">
+        @if (b.created_by) {
+          <span>
+            <app-icon name="user-check" [size]="12"></app-icon>
+            {{ b.created_by.first_name }} {{ b.created_by.last_name }}
+          </span>
+        }
+        <span>{{ b.created_at | date:'dd/MM/yy HH:mm' }}</span>
+      </div>
+    } @else {
+      <!-- Inline Reschedule View -->
+      <div class="reschedule-section">
+        <div class="reschedule-header">
+          <app-icon name="calendar-clock" [size]="18" class="text-[var(--color-primary)]"></app-icon>
+          <div>
+            <h4 class="reschedule-title">Reagendar reserva</h4>
+            <p class="reschedule-subtitle">{{ b.product?.name }} · {{ b.customer?.first_name }} {{ b.customer?.last_name }}</p>
+          </div>
+        </div>
+
+        <div class="current-schedule">
+          <span class="current-label">Horario actual</span>
+          <span class="current-value">{{ formatDate(b.date) }} · {{ formatTime(b.start_time) }} - {{ formatTime(b.end_time) }}</span>
+        </div>
+
+        <!-- Date selector -->
+        <label class="section-label">Nueva fecha</label>
+        <div class="date-selector">
+          @for (date of dates(); track date) {
+            <button
+              class="date-chip"
+              [class.selected]="selectedDate() === date"
+              (click)="selectDate(date)">
+              {{ formatDateShort(date) }}
+            </button>
+          }
+        </div>
+
+        <!-- Time slots -->
+        <label class="section-label">Horario disponible</label>
+        @if (loadingSlots()) {
+          <div class="loading-center">
+            <app-spinner size="sm" color="primary"></app-spinner>
+          </div>
+        } @else if (slots().length === 0) {
+          <p class="empty-slots">No hay horarios disponibles para esta fecha</p>
+        } @else {
+          <div class="slots-grid">
+            @for (slot of slots(); track slot.start_time) {
+              <button
+                class="slot-chip"
+                [class.selected]="selectedSlot() === slot"
+                (click)="selectSlot(slot)">
+                {{ formatTime(slot.start_time) }}
+              </button>
+            }
+          </div>
+        }
+      </div>
+    }
+
+  }
+
+  <!-- Footer (outside @if to ensure slot projection works) -->
+  @if (booking(); as f) {
+    <ng-container ngProjectAs="[slot=footer]">
+      <div slot="footer" class="modal-footer">
+        @if (rescheduling()) {
+          <button class="btn-footer ghost" (click)="cancelReschedule()">
+            <app-icon name="arrow-left" [size]="15"></app-icon>
+            Volver
+          </button>
+          <button class="btn-footer primary" [disabled]="!selectedSlot() || submittingReschedule()" (click)="submitReschedule()">
+            @if (submittingReschedule()) {
+              <app-spinner size="sm" color="white"></app-spinner>
+            } @else {
+              <app-icon name="calendar-check" [size]="15"></app-icon>
+              Confirmar reagendamiento
+            }
+          </button>
+        } @else if (isTerminal()) {
+          <span class="terminal-label">
+            <app-icon name="check-circle" [size]="14"></app-icon>
+            Reserva finalizada
+          </span>
+          <button class="btn-footer ghost" (click)="closed.emit()">Cerrar</button>
+        } @else if (f.status === 'pending') {
+          <button class="btn-footer danger-outline" (click)="cancelled.emit(f)">
+            <app-icon name="x" [size]="15"></app-icon>
+            Cancelar
+          </button>
+          @if (canReschedule()) {
+            <button class="btn-footer ghost" (click)="startReschedule()">
+              <app-icon name="calendar-clock" [size]="15"></app-icon>
+              Reagendar
+            </button>
+          }
+          <button class="btn-footer primary" (click)="confirmed.emit(f)">
+            <app-icon name="check" [size]="15"></app-icon>
+            Confirmar
+          </button>
+        } @else if (f.status === 'confirmed') {
+          <button class="btn-footer danger-outline" (click)="cancelled.emit(f)">
+            <app-icon name="x" [size]="15"></app-icon>
+            Cancelar
+          </button>
+          <button class="btn-footer warning-outline" (click)="noShow.emit(f)">
+            <app-icon name="user-x" [size]="15"></app-icon>
+            No show
+          </button>
+          @if (canReschedule()) {
+            <button class="btn-footer ghost" (click)="startReschedule()">
+              <app-icon name="calendar-clock" [size]="15"></app-icon>
+              Reagendar
+            </button>
+          }
+          <button class="btn-footer primary" (click)="started.emit(f)">
+            <app-icon name="play" [size]="15"></app-icon>
+            Iniciar
+          </button>
+        } @else if (f.status === 'in_progress') {
+          <button class="btn-footer ghost" (click)="closed.emit()">Cerrar</button>
+          <button class="btn-footer success" (click)="completed.emit(f)">
+            <app-icon name="check-circle" [size]="15"></app-icon>
+            Completar
+          </button>
+        }
+      </div>
+    </ng-container>
+  }
+</app-modal>

@@ -43,6 +43,12 @@
           <span class="booking-customer">
             {{ booking.customer?.first_name }} {{ booking.customer?.last_name }}
           </span>
+          @if (booking.provider) {
+            <span class="booking-provider">
+              <app-icon name="user-circle" [size]="11"></app-icon>
+              {{ booking.provider.display_name || booking.provider.employee?.first_name }}
+            </span>
+          }
           @if (booking.booking_number) {
             <span class="booking-number">#{{ booking.booking_number }}</span>
           }

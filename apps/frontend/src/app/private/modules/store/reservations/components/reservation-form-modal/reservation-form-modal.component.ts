@@ -12,7 +12,7 @@ import {
   SpinnerComponent,
 } from '../../../../../../shared/components';
 import { ReservationsService } from '../../services/reservations.service';
-import { CreateBookingDto, AvailabilitySlot } from '../../interfaces/reservation.interface';
+import { CreateBookingDto, AvailabilitySlot, ServiceProvider } from '../../interfaces/reservation.interface';
 import { Subject, takeUntil, finalize, debounceTime, switchMap, of } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
 
@@ -39,7 +39,7 @@ export class ReservationFormModalComponent implements OnChanges, OnDestroy {
   private reservationsService = inject(ReservationsService);
 
   @Input() isOpen = false;
-  @Input() serviceProducts: { value: any; label: string }[] = [];
+  @Input() serviceProducts: { value: any; label: string; booking_mode?: string }[] = [];
 
   @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() closed = new EventEmitter<void>();
@@ -51,6 +51,13 @@ export class ReservationFormModalComponent implements OnChanges, OnDestroy {
   currentStep = 1;
   availableSlots: AvailabilitySlot[] = [];
   selectedSlot: AvailabilitySlot | null = null;
+
+  // Provider selection state
+  providers: ServiceProvider[] = [];
+  selectedProvider: ServiceProvider | null = null;
+  loadingProviders = false;
+  isFreeBooking = false;
+  skipAvailabilityCheck = false;
 
   // Customer search state
   customerSearch = '';
@@ -103,20 +110,63 @@ export class ReservationFormModalComponent implements OnChanges, OnDestroy {
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['isOpen'] && this.isOpen) {
       this.resetForm();
+      this.loadServiceProducts();
     }
   }
 
+  private loadServiceProducts(): void {
+    if (this.serviceProducts.length > 0) return; // Already provided by parent
+    this.reservationsService.getBookableServices()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (services) => {
+          this.serviceProducts = services.map(s => ({
+            value: s.id,
+            label: s.name + (s.service_duration_minutes ? ` (${s.service_duration_minutes} min)` : ''),
+            booking_mode: s.booking_mode,
+          }));
+        },
+        error: () => {},
+      });
+  }
+
   get totalSteps(): number {
-    return 3;
+    // free_booking: 3 steps (service+date, time, customer)
+    // provider_required: 4 steps (service+date, provider, time, customer)
+    return this.isFreeBooking ? 3 : 4;
+  }
+
+  /** Maps logical step labels depending on mode */
+  get stepLabels(): string[] {
+    if (this.isFreeBooking) {
+      return ['Servicio', 'Horario', 'Cliente'];
+    }
+    return ['Servicio', 'Proveedor', 'Horario', 'Cliente'];
   }
 
   get canGoNext(): boolean {
+    if (this.isFreeBooking) {
+      switch (this.currentStep) {
+        case 1:
+          return this.form.get('product_id')?.valid === true && this.form.get('date')?.valid === true;
+        case 2:
+          return this.form.get('start_time')?.valid === true && this.form.get('end_time')?.valid === true;
+        case 3:
+          return this.form.get('customer_id')?.valid === true;
+        default:
+          return false;
+      }
+    }
+    // provider_required mode (4 steps)
     switch (this.currentStep) {
       case 1:
         return this.form.get('product_id')?.valid === true && this.form.get('date')?.valid === true;
       case 2:
-        return this.form.get('start_time')?.valid === true && this.form.get('end_time')?.valid === true;
+        // Provider step: allow "any available" (null) or a selected provider
+        return true;
       case 3:
+        return this.form.get('start_time')?.valid === true && this.form.get('end_time')?.valid === true;
+      case 4:
         return this.form.get('customer_id')?.valid === true;
       default:
         return false;
@@ -124,10 +174,29 @@ export class ReservationFormModalComponent implements OnChanges, OnDestroy {
   }
 
   nextStep(): void {
-    if (this.currentStep === 1 && this.canGoNext) {
+    if (!this.canGoNext) return;
+
+    if (this.currentStep === 1) {
+      this.detectBookingMode();
+      if (this.isFreeBooking) {
+        // Skip provider, go directly to time step
+        this.currentStep = 2;
+      } else {
+        // Load providers for step 2
+        this.loadProviders();
+        this.currentStep = 2;
+      }
+      return;
+    }
+
+    if (!this.isFreeBooking && this.currentStep === 2) {
+      // Moving from provider step to time/slot step
       this.loadAvailableSlots();
-      this.currentStep = 2;
-    } else if (this.currentStep < this.totalSteps && this.canGoNext) {
+      this.currentStep = 3;
+      return;
+    }
+
+    if (this.currentStep < this.totalSteps) {
       this.currentStep++;
     }
   }
@@ -138,6 +207,48 @@ export class ReservationFormModalComponent implements OnChanges, OnDestroy {
     }
   }
 
+  private detectBookingMode(): void {
+    const productId = this.form.get('product_id')?.value;
+    const selected = this.serviceProducts.find(sp => sp.value === productId);
+    this.isFreeBooking = selected?.booking_mode === 'free_booking';
+  }
+
+  loadProviders(): void {
+    const productId = this.form.get('product_id')?.value;
+    if (!productId) return;
+
+    this.loadingProviders = true;
+    this.reservationsService
+      .getProvidersForService(productId)
+      .pipe(
+        takeUntil(this.destroy$),
+        finalize(() => (this.loadingProviders = false)),
+      )
+      .subscribe({
+        next: (providers) => {
+          this.providers = providers;
+        },
+        error: () => {
+          this.providers = [];
+        },
+      });
+  }
+
+  selectProvider(provider: ServiceProvider | null): void {
+    this.selectedProvider = provider;
+  }
+
+  getProviderDisplayName(provider: ServiceProvider): string {
+    return provider.display_name || `${provider.employee?.first_name || ''} ${provider.employee?.last_name || ''}`.trim() || 'Proveedor';
+  }
+
+  getProviderInitials(provider: ServiceProvider): string {
+    const name = provider.display_name || `${provider.employee?.first_name || ''} ${provider.employee?.last_name || ''}`.trim();
+    if (!name) return '?';
+    const parts = name.split(' ');
+    return parts.map(p => p[0]).slice(0, 2).join('').toUpperCase();
+  }
+
   loadAvailableSlots(): void {
     const productId = this.form.get('product_id')?.value;
     const date = this.form.get('date')?.value;
@@ -146,14 +257,14 @@ export class ReservationFormModalComponent implements OnChanges, OnDestroy {
 
     this.loadingSlots = true;
     this.reservationsService
-      .getAvailability(productId, date, date)
+      .getAvailability(productId, date, date, this.selectedProvider?.id)
       .pipe(
         takeUntil(this.destroy$),
         finalize(() => (this.loadingSlots = false)),
       )
       .subscribe({
         next: (slots) => {
-          this.availableSlots = slots.filter((s) => s.available > 0);
+          this.availableSlots = slots.filter((s) => s.total_available > 0);
         },
         error: () => {
           this.availableSlots = [];
@@ -169,6 +280,16 @@ export class ReservationFormModalComponent implements OnChanges, OnDestroy {
     });
   }
 
+  /** Returns the step number for the time/slot step */
+  get slotStep(): number {
+    return this.isFreeBooking ? 2 : 3;
+  }
+
+  /** Returns the step number for the customer step */
+  get customerStep(): number {
+    return this.isFreeBooking ? 3 : 4;
+  }
+
   onSubmit(): void {
     if (this.form.invalid) {
       this.form.markAllAsTouched();
@@ -176,7 +297,11 @@ export class ReservationFormModalComponent implements OnChanges, OnDestroy {
     }
 
     this.loading = true;
-    const dto: CreateBookingDto = this.form.value;
+    const dto: CreateBookingDto = {
+      ...this.form.value,
+      provider_id: this.selectedProvider?.id,
+      skip_availability_check: this.skipAvailabilityCheck || undefined,
+    };
 
     this.reservationsService
       .createReservation(dto)
@@ -227,6 +352,11 @@ export class ReservationFormModalComponent implements OnChanges, OnDestroy {
     this.customers = [];
     this.selectedCustomer = null;
     this.searchingCustomers = false;
+    this.providers = [];
+    this.selectedProvider = null;
+    this.loadingProviders = false;
+    this.isFreeBooking = false;
+    this.skipAvailabilityCheck = false;
   }
 
   ngOnDestroy(): void {

@@ -15,6 +15,7 @@ import { order_channel_enum } from '@prisma/client';
 import { Public } from '@common/decorators/public.decorator';
 import { AvailabilityService } from '../../store/reservations/availability.service';
 import { ReservationsService } from '../../store/reservations/reservations.service';
+import { ProvidersService } from '../../store/reservations/providers/providers.service';
 import { AvailabilityQueryDto, RescheduleBookingDto } from '../../store/reservations/dto';
 import { CreateEcommerceBookingDto } from './dto/create-ecommerce-booking.dto';
 
@@ -23,6 +24,7 @@ export class EcommerceReservationsController {
   constructor(
     private readonly availabilityService: AvailabilityService,
     private readonly reservationsService: ReservationsService,
+    private readonly providersService: ProvidersService,
   ) {}
 
   @Public()
@@ -31,13 +33,22 @@ export class EcommerceReservationsController {
   async getAvailability(
     @Param('productId', ParseIntPipe) productId: number,
     @Query() query: AvailabilityQueryDto,
+    @Query('provider_id') providerId?: string,
   ) {
     const slots = await this.availabilityService.getAvailableSlots(
       productId,
       query.date_from,
       query.date_to,
+      providerId ? parseInt(providerId, 10) : undefined,
     );
     return { success: true, data: slots };
+  }
+
+  @Public()
+  @Get('providers/:productId')
+  async getProvidersForService(@Param('productId', ParseIntPipe) productId: number) {
+    const providers = await this.providersService.getProvidersForService(productId);
+    return { success: true, data: providers };
   }
 
   @Post()

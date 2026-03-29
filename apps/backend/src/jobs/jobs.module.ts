@@ -5,8 +5,6 @@ import { OrderAutoFinishJob } from './order-auto-finish.job';
 import { OrderFlowModule } from '../domains/store/orders/order-flow/order-flow.module';
 import { LayawayOverdueJob } from './layaway-overdue.job';
 import { LayawayRemindersJob } from './layaway-reminders.job';
-import { CreditOverdueCheckJob } from './credit-overdue-check.job';
-import { CreditRemindersJob } from './credit-reminders.job';
 import { DepreciationMonthlyJob } from './depreciation-monthly.job';
 import { DataRetentionJob } from './data-retention.job';
 import { CertificateExpiryAlertJob } from './certificate-expiry-alert.job';
@@ -26,8 +24,6 @@ import { PrismaModule } from '../prisma/prisma.module';
     OrderAutoFinishJob,
     LayawayOverdueJob,
     LayawayRemindersJob,
-    CreditOverdueCheckJob,
-    CreditRemindersJob,
     DepreciationMonthlyJob,
     DataRetentionJob,
     CertificateExpiryAlertJob,

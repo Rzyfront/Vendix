@@ -1392,6 +1392,32 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Invalid MCP request format',
   },
+  // Bulk Image Upload
+  BULK_IMG_ZIP_CORRUPT: {
+    code: 'BULK_IMG_ZIP_CORRUPT',
+    httpStatus: 400,
+    devMessage: 'ZIP file is corrupt or invalid',
+  },
+  BULK_IMG_NO_SKUS: {
+    code: 'BULK_IMG_NO_SKUS',
+    httpStatus: 400,
+    devMessage: 'ZIP contains no valid SKU folders',
+  },
+  BULK_IMG_SESSION_EXPIRED: {
+    code: 'BULK_IMG_SESSION_EXPIRED',
+    httpStatus: 404,
+    devMessage: 'Analysis session not found or expired',
+  },
+  BULK_IMG_FORMAT_INVALID: {
+    code: 'BULK_IMG_FORMAT_INVALID',
+    httpStatus: 400,
+    devMessage: 'Unsupported image format',
+  },
+  BULK_IMG_LIMIT_EXCEEDED: {
+    code: 'BULK_IMG_LIMIT_EXCEEDED',
+    httpStatus: 400,
+    devMessage: 'Product has reached maximum image limit',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export type ErrorCodeKey = keyof typeof ErrorCodes;

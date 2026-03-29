@@ -8,10 +8,9 @@ import {
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { booking_status_enum, Prisma } from '@prisma/client';
+import { booking_status_enum, booking_mode_enum, Prisma } from '@prisma/client';
 import { CreateBookingDto, RescheduleBookingDto, BookingQueryDto, CalendarQueryDto } from './dto';
 import { AvailabilityService } from './availability.service';
-import { ScheduleService } from './schedule.service';
 import { OrdersService } from '../orders/orders.service';
 
 @Injectable()
@@ -21,7 +20,6 @@ export class ReservationsService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly availabilityService: AvailabilityService,
-    private readonly scheduleService: ScheduleService,
     private readonly ordersService: OrdersService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
@@ -57,6 +55,14 @@ export class ReservationsService {
           select: { image_url: true },
           take: 1,
         },
+      },
+    },
+    provider: {
+      select: {
+        id: true,
+        display_name: true,
+        avatar_url: true,
+        employee: { select: { first_name: true, last_name: true } },
       },
     },
     created_by: {
@@ -96,7 +102,13 @@ export class ReservationsService {
     // 1. Validar que el producto existe y requiere reserva
     const product = await this.prisma.products.findFirst({
       where: { id: dto.product_id },
-      select: { id: true, name: true, requires_booking: true, service_duration_minutes: true },
+      select: {
+        id: true,
+        name: true,
+        requires_booking: true,
+        service_duration_minutes: true,
+        booking_mode: true,
+      },
     });
 
     if (!product) {
@@ -109,38 +121,66 @@ export class ReservationsService {
       );
     }
 
-    // 2. Auto-crear horarios por defecto si no existen
-    const existingSchedules = await this.prisma.service_schedules.findFirst({
-      where: { product_id: dto.product_id, is_active: true },
-    });
+    // 2. Resolver provider_id
+    let resolvedProviderId: number | null = dto.provider_id ?? null;
 
-    if (!existingSchedules) {
-      const duration = product.service_duration_minutes || 60;
-      // Default: Lunes(1) a Sábado(6), 07:00-21:00
-      const defaultItems = [1, 2, 3, 4, 5, 6].map(day => ({
-        day_of_week: day,
-        start_time: '07:00',
-        end_time: '21:00',
-        slot_duration_minutes: duration,
-        capacity: 1,
-        buffer_minutes: 0,
-        is_active: true,
-      }));
-      await this.scheduleService.upsertSchedule(dto.product_id, defaultItems);
+    if (dto.provider_id) {
+      // Validar que el provider existe y ofrece este servicio
+      const providerAssignment = await this.prisma.provider_services.findFirst({
+        where: { provider_id: dto.provider_id, product_id: dto.product_id },
+        include: { provider: { select: { id: true, is_active: true } } },
+      });
+
+      if (!providerAssignment || !providerAssignment.provider.is_active) {
+        throw new BadRequestException(
+          'El proveedor especificado no ofrece este servicio o no esta activo',
+        );
+      }
+    } else if (product.booking_mode === booking_mode_enum.provider_required && !dto.skip_availability_check) {
+      // Check if there are ANY providers for this service
+      const serviceProviders = await this.prisma.provider_services.findMany({
+        where: { product_id: dto.product_id },
+        include: { provider: { select: { id: true, is_active: true } } },
+      });
+
+      const activeProviders = serviceProviders.filter(sp => sp.provider.is_active);
+
+      if (activeProviders.length > 0) {
+        // Auto-asignar el primer provider disponible
+        const availableProviders = await this.availabilityService.getAvailableProvidersForSlot(
+          dto.product_id,
+          dto.date,
+          dto.start_time,
+          dto.end_time,
+        );
+
+        if (availableProviders.length > 0) {
+          resolvedProviderId = availableProviders[0].id;
+        }
+        // If no available providers for this slot but providers exist, we'll validate below
+      }
+      // If NO providers configured at all, skip provider validation (fallback)
     }
 
-    // 3. Validar disponibilidad del slot
-    const isAvailable = await this.availabilityService.isSlotAvailable(
-      dto.product_id,
-      dto.date,
-      dto.start_time,
-      dto.end_time,
-    );
+    // 3. Validar disponibilidad del slot (a menos que se indique lo contrario)
+    const isFreeBooking = product.booking_mode === booking_mode_enum.free_booking;
+    const noProvidersConfigured = !resolvedProviderId && !dto.provider_id;
+    const shouldSkipAvailability = dto.skip_availability_check || isFreeBooking || noProvidersConfigured;
 
-    if (!isAvailable) {
-      throw new ConflictException(
-        'El horario solicitado no esta disponible',
+    if (!shouldSkipAvailability) {
+      const isAvailable = await this.availabilityService.isSlotAvailable(
+        dto.product_id,
+        dto.date,
+        dto.start_time,
+        dto.end_time,
+        resolvedProviderId ?? undefined,
       );
+
+      if (!isAvailable) {
+        throw new ConflictException(
+          'El horario solicitado no esta disponible',
+        );
+      }
     }
 
     // 4. Validar que el cliente no tenga reservas superpuestas
@@ -157,31 +197,23 @@ export class ReservationsService {
     // 6. Crear reserva con transaccion serializable para prevenir condiciones de carrera
     const booking = await this.prisma.$transaction(
       async (tx) => {
-        // Re-verificar disponibilidad dentro de la transaccion
-        const reservedCount = await tx.bookings.count({
-          where: {
-            store_id,
-            product_id: dto.product_id,
-            date: new Date(dto.date),
-            start_time: dto.start_time,
-            end_time: dto.end_time,
-            status: { notIn: [booking_status_enum.cancelled] },
-          },
-        });
+        // Re-verificar disponibilidad dentro de la transaccion (si aplica)
+        if (!shouldSkipAvailability && resolvedProviderId) {
+          const providerBooked = await tx.bookings.count({
+            where: {
+              provider_id: resolvedProviderId,
+              date: new Date(dto.date),
+              start_time: dto.start_time,
+              end_time: dto.end_time,
+              status: { notIn: [booking_status_enum.cancelled] },
+            },
+          });
 
-        const schedule = await tx.service_schedules.findFirst({
-          where: {
-            product_id: dto.product_id,
-            day_of_week: new Date(dto.date).getUTCDay(),
-            is_active: true,
-          },
-        });
-
-        const capacity = schedule?.capacity ?? 1;
-        if (reservedCount >= capacity) {
-          throw new ConflictException(
-            'El horario ya no esta disponible (reservado por otro usuario)',
-          );
+          if (providerBooked > 0) {
+            throw new ConflictException(
+              'El horario ya no esta disponible (reservado por otro usuario)',
+            );
+          }
         }
 
         const created = await tx.bookings.create({
@@ -197,6 +229,7 @@ export class ReservationsService {
             channel: dto.channel || 'pos',
             notes: dto.notes,
             order_id: dto.order_id,
+            provider_id: resolvedProviderId,
             created_by_user_id: context?.user_id,
             updated_at: new Date(),
           },
@@ -361,6 +394,23 @@ export class ReservationsService {
   }
 
   /**
+   * Inicia una reserva (confirmed -> in_progress)
+   */
+  async start(id: number) {
+    const booking = await this.transition(id, 'in_progress');
+    this.eventEmitter.emit('booking.started', {
+      store_id: booking.store_id,
+      booking_id: booking.id,
+      booking_number: booking.booking_number,
+      customer_name: `${booking.customer?.first_name ?? ''} ${booking.customer?.last_name ?? ''}`.trim() || 'Cliente',
+      service_name: booking.product?.name ?? 'Servicio',
+      date: booking.date instanceof Date ? booking.date.toISOString().split('T')[0] : String(booking.date).split('T')[0],
+      start_time: booking.start_time,
+    });
+    return booking;
+  }
+
+  /**
    * Cancela una reserva (pending|confirmed -> cancelled)
    */
   async cancel(id: number) {
@@ -433,6 +483,7 @@ export class ReservationsService {
       dto.date,
       dto.start_time,
       dto.end_time,
+      booking.provider_id ?? undefined,
     );
 
     if (!isAvailable) {

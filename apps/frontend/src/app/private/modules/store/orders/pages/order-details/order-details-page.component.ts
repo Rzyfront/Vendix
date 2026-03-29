@@ -7,6 +7,7 @@ import { StoreOrdersService } from '../../services/store-orders.service';
 import {
   Order,
   OrderState,
+  OrderInstallment,
   OrderFlowMetadata,
   PaymentType,
   DeliveryType,
@@ -82,6 +83,9 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
 
   // Processing state
   isProcessingAction = signal(false);
+
+  // Pre-selected installment for pay modal
+  preSelectedInstallment = signal<any>(null);
 
   // Manual mode flags (use modals but call updateOrderStatus instead of flow endpoints)
   isManualShipMode = signal(false);
@@ -324,6 +328,16 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
         }
 
         actions.push({ id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' });
+
+        // Si es crédito, reemplazar "Confirmar Pago" por "Registrar Pago"
+        if (order.payment_form === '2') {
+          const idx = actions.findIndex(a => a.id === 'confirm-payment');
+          if (idx !== -1) {
+            actions[idx] = { id: 'credit-payment', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' };
+          }
+          const infoIdx = actions.findIndex(a => a.id === 'info');
+          if (infoIdx !== -1) actions.splice(infoIdx, 1);
+        }
         break;
 
       case 'processing':
@@ -374,6 +388,9 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
         break;
 
       case 'finished':
+        if (order.payment_form === '2' && Number(order.remaining_balance) > 0.01) {
+          actions.push({ id: 'credit-payment', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' });
+        }
         actions.push({ id: 'refund', label: 'Procesar Reembolso', icon: 'rotate-ccw', variant: 'warning' });
         break;
 
@@ -511,6 +528,53 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     })),
   );
 
+  // ── Credit Order Computed Signals ────────────────────────────
+  readonly isCreditOrder = computed(() => this.order()?.payment_form === '2');
+
+  readonly isInstallmentCredit = computed(() =>
+    this.isCreditOrder() && this.order()?.credit_type === 'installments'
+  );
+
+  readonly isFreeCredit = computed(() =>
+    this.isCreditOrder() && this.order()?.credit_type === 'free'
+  );
+
+  readonly creditTotal = computed(() => {
+    const order = this.order();
+    if (!order) return 0;
+    return Number(order.total_with_interest || order.grand_total) || 0;
+  });
+
+  readonly totalPaid = computed(() => Number(this.order()?.total_paid) || 0);
+
+  readonly remainingBalance = computed(() => Number(this.order()?.remaining_balance) || 0);
+
+  readonly paymentProgress = computed(() => {
+    const total = this.creditTotal();
+    if (total <= 0) return 0;
+    return Math.min(Math.round((this.totalPaid() / total) * 100), 100);
+  });
+
+  readonly nextInstallment = computed(() => {
+    const installments = this.order()?.order_installments;
+    if (!installments) return null;
+    return installments.find(
+      (i) => i.state === 'overdue' || i.state === 'pending' || i.state === 'partial'
+    ) || null;
+  });
+
+  readonly overdueCount = computed(() => {
+    const installments = this.order()?.order_installments;
+    if (!installments) return 0;
+    return installments.filter((i) => i.state === 'overdue').length;
+  });
+
+  readonly interestTypeLabel = computed(() => {
+    const type = this.order()?.interest_type;
+    if (!type) return '';
+    return type === 'simple' ? 'Simple' : 'Compuesto';
+  });
+
   // ── Sticky Header Configuration ───────────────────────────
 
   readonly headerTitle = computed(() => {
@@ -625,6 +689,18 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
             tax_amount: Number(orderData.tax_amount),
             shipping_cost: Number(orderData.shipping_cost),
             discount_amount: Number(orderData.discount_amount),
+            total_paid: Number(orderData.total_paid) || 0,
+            remaining_balance: Number(orderData.remaining_balance) || 0,
+            total_with_interest: orderData.total_with_interest ? Number(orderData.total_with_interest) : undefined,
+            interest_rate: orderData.interest_rate ? Number(orderData.interest_rate) : undefined,
+            order_installments: (orderData.order_installments || []).map((inst: any) => ({
+              ...inst,
+              amount: Number(inst.amount),
+              capital_amount: Number(inst.capital_amount),
+              interest_amount: Number(inst.interest_amount),
+              amount_paid: Number(inst.amount_paid),
+              remaining_balance: Number(inst.remaining_balance),
+            })),
             order_items: (orderData.order_items || []).map((item: any) => ({
               ...item,
               unit_price: Number(item.unit_price),
@@ -638,6 +714,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
 
           // Load payment methods if order can accept payment
           const needsPayment = orderData.state === 'created' ||
+            orderData.payment_form === '2' ||
             (orderData.state === 'shipped' && !(orderData.payments || []).some((p: any) => p.state === 'succeeded'));
           if (needsPayment) {
             this.loadPaymentMethods();
@@ -730,6 +807,9 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
       case 'direct-deliver':
         this.handleDirectDeliver();
         break;
+      case 'credit-payment':
+        this.openPayModal();
+        break;
     }
   }
 
@@ -739,6 +819,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     if (this.paymentMethods().length === 0) {
       this.loadPaymentMethods();
     }
+    this.preSelectedInstallment.set(null);
     this.showPayModal.set(true);
   }
 
@@ -746,8 +827,11 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     if (!this.orderId) return;
     this.isProcessingAction.set(true);
 
-    this.ordersService
-      .flowPayOrder(this.orderId, dto)
+    const request$ = this.isCreditOrder()
+      ? this.ordersService.flowCreditPayment(this.orderId, dto)
+      : this.ordersService.flowPayOrder(this.orderId, dto);
+
+    request$
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (res) => {
@@ -1024,6 +1108,8 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
   onHeaderAction(actionId: string): void {
     if (actionId === 'print') {
       this.printOrder();
+    } else if (actionId === 'credit-payment') {
+      this.openPayModal();
     }
   }
 
@@ -1208,7 +1294,71 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     this.selectedShippingMethodId.set(null);
   }
 
+  // ── Installment Actions ─────────────────────────────────────
+
+  forgiveInstallment(installmentId: number, installmentNumber: number): void {
+    if (!this.orderId) return;
+
+    this.dialogService
+      .confirm({
+        title: 'Condonar Cuota',
+        message: `¿Estás seguro de condonar la cuota #${installmentNumber}? El saldo pendiente de esta cuota se eliminará y no se podrá revertir.`,
+        confirmText: 'Condonar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed: boolean) => {
+        if (!confirmed || !this.orderId) return;
+
+        this.isProcessingAction.set(true);
+        this.ordersService
+          .flowForgiveInstallment(this.orderId, installmentId)
+          .pipe(takeUntil(this.destroy$))
+          .subscribe({
+            next: () => {
+              this.isProcessingAction.set(false);
+              this.toastService.success(`Cuota #${installmentNumber} condonada exitosamente`);
+              this.loadData();
+            },
+            error: (err: any) => {
+              this.isProcessingAction.set(false);
+              this.toastService.error(err.error?.message || err.message || 'Error al condonar la cuota');
+            },
+          });
+      });
+  }
+
+  payInstallment(installment: any): void {
+    if (this.paymentMethods().length === 0) {
+      this.loadPaymentMethods();
+    }
+    this.preSelectedInstallment.set(installment);
+    this.showPayModal.set(true);
+  }
+
   // ── Helpers ────────────────────────────────────────────────
+
+  getInstallmentStateClass(state: string): string {
+    const classes: Record<string, string> = {
+      pending: 'bg-yellow-500/20 text-yellow-400',
+      paid: 'bg-green-500/20 text-green-400',
+      partial: 'bg-blue-500/20 text-blue-400',
+      overdue: 'bg-red-500/20 text-red-400',
+      forgiven: 'bg-gray-500/20 text-gray-400',
+    };
+    return classes[state] || 'bg-gray-500/20 text-gray-400';
+  }
+
+  getInstallmentStateLabel(state: string): string {
+    const labels: Record<string, string> = {
+      pending: 'Pendiente',
+      paid: 'Pagada',
+      partial: 'Parcial',
+      overdue: 'Vencida',
+      forgiven: 'Condonada',
+    };
+    return labels[state] || state;
+  }
 
   hasSuccessfulPayment(): boolean {
     const order = this.order();

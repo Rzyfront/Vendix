@@ -26,7 +26,7 @@ type OrderState = order_state_enum;
 
 const VALID_TRANSITIONS: Record<OrderState, OrderState[]> = {
   created: ['pending_payment', 'processing', 'finished', 'cancelled'],
-  pending_payment: ['processing', 'cancelled'],
+  pending_payment: ['processing', 'finished', 'cancelled'],
   processing: ['shipped', 'cancelled'],
   shipped: ['delivered'],
   delivered: ['finished', 'refunded'],
@@ -694,6 +694,265 @@ export class OrderFlowService {
     }
 
     return finishedCount;
+  }
+
+  /**
+   * Register a credit payment for an order with payment_form = '2'
+   * Supports partial payments and installment-based credit
+   */
+  async registerCreditPayment(orderId: number, dto: PayOrderDto) {
+    const order = await this.prisma.orders.findFirst({
+      where: { id: orderId },
+      include: {
+        stores: { select: { id: true, name: true, store_code: true } },
+        payments: true,
+        order_installments: { orderBy: { installment_number: 'asc' } },
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    // Validate it's a credit order
+    if (order.payment_form !== '2') {
+      throw new BadRequestException('This order is not a credit sale');
+    }
+
+    const remainingBalance = Number(order.remaining_balance);
+    if (remainingBalance <= 0) {
+      throw new BadRequestException('This order has no remaining balance');
+    }
+
+    // Determine payment amount
+    const paymentAmount = dto.amount || remainingBalance;
+    if (paymentAmount > remainingBalance + 0.01) {
+      throw new BadRequestException(
+        `Payment amount (${paymentAmount}) exceeds remaining balance (${remainingBalance})`,
+      );
+    }
+
+    // Validate payment method
+    const paymentMethod = await this.prisma.store_payment_methods.findFirst({
+      where: { id: dto.store_payment_method_id },
+      include: { system_payment_method: true },
+    });
+
+    if (!paymentMethod) {
+      throw new NotFoundException('Payment method not found');
+    }
+
+    // Calculate change for cash
+    let change = 0;
+    if (paymentMethod.system_payment_method.type === 'cash' && dto.amount_received) {
+      change = dto.amount_received - paymentAmount;
+      if (change < 0) {
+        throw new BadRequestException('Amount received is less than the payment amount');
+      }
+    }
+
+    // Generate transaction ID
+    const transactionId = `credit_pay_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+    // Create payment record
+    await this.prisma.payments.create({
+      data: {
+        order_id: orderId,
+        store_payment_method_id: dto.store_payment_method_id,
+        amount: paymentAmount,
+        currency: order.currency,
+        state: 'succeeded',
+        transaction_id: transactionId,
+        paid_at: new Date(),
+        gateway_response: {
+          payment_type: 'direct',
+          amount_received: dto.amount_received,
+          change: change,
+          payment_reference: dto.payment_reference,
+          metadata: { is_credit_payment: true },
+        },
+      },
+    });
+
+    // Update order balances
+    const newTotalPaid = Number(order.total_paid) + paymentAmount;
+    const newRemainingBalance = Math.max(remainingBalance - paymentAmount, 0);
+
+    const orderUpdateData: any = {
+      total_paid: Math.round(newTotalPaid * 100) / 100,
+      remaining_balance: Math.round(newRemainingBalance * 100) / 100,
+    };
+
+    // If fully paid, transition to finished
+    if (newRemainingBalance <= 0.01) {
+      this.validateTransition(order.state as OrderState, 'finished');
+      orderUpdateData.state = 'finished';
+      orderUpdateData.completed_at = new Date();
+    }
+
+    await this.prisma.orders.update({
+      where: { id: orderId },
+      data: orderUpdateData,
+    });
+
+    // Update installment if specified (for installment-based credit)
+    if (order.credit_type === 'installments') {
+      let remainingPayment = paymentAmount;
+
+      if (dto.installment_id) {
+        // Pay specific installment
+        const installment = await this.prisma.order_installments.findFirst({
+          where: { id: dto.installment_id, order_id: orderId },
+        });
+        if (installment) {
+          const payable = Math.min(remainingPayment, Number(installment.remaining_balance));
+          const newPaid = Number(installment.amount_paid) + payable;
+          const newInstBalance = Number(installment.remaining_balance) - payable;
+
+          await this.prisma.order_installments.update({
+            where: { id: installment.id },
+            data: {
+              amount_paid: Math.round(newPaid * 100) / 100,
+              remaining_balance: Math.round(Math.max(newInstBalance, 0) * 100) / 100,
+              state: newInstBalance <= 0.01 ? 'paid' : 'partial',
+              paid_at: newInstBalance <= 0.01 ? new Date() : null,
+            },
+          });
+          remainingPayment -= payable;
+        }
+      }
+
+      // If there's remaining payment (or no specific installment), apply sequentially
+      if (remainingPayment > 0.01) {
+        const pendingInstallments = await this.prisma.order_installments.findMany({
+          where: {
+            order_id: orderId,
+            state: { in: ['pending', 'partial', 'overdue'] },
+          },
+          orderBy: { installment_number: 'asc' },
+        });
+
+        for (const inst of pendingInstallments) {
+          if (remainingPayment <= 0.01) break;
+          const payable = Math.min(remainingPayment, Number(inst.remaining_balance));
+          const newPaid = Number(inst.amount_paid) + payable;
+          const newInstBalance = Number(inst.remaining_balance) - payable;
+
+          await this.prisma.order_installments.update({
+            where: { id: inst.id },
+            data: {
+              amount_paid: Math.round(newPaid * 100) / 100,
+              remaining_balance: Math.round(Math.max(newInstBalance, 0) * 100) / 100,
+              state: newInstBalance <= 0.01 ? 'paid' : 'partial',
+              paid_at: newInstBalance <= 0.01 ? new Date() : null,
+            },
+          });
+          remainingPayment -= payable;
+        }
+      }
+    }
+
+    this.logger.log(
+      `Credit payment of ${paymentAmount} registered for order #${orderId}. Remaining: ${newRemainingBalance}`,
+    );
+
+    // Record cash register movement
+    this.recordPayOrderCashMovement(
+      order.store_id,
+      orderId,
+      paymentAmount,
+      paymentMethod.system_payment_method.type,
+    ).catch(() => {});
+
+    // Emit event
+    this.eventEmitter.emit('order.credit_payment_received', {
+      order_id: orderId,
+      amount: paymentAmount,
+      remaining_balance: newRemainingBalance,
+      is_fully_paid: newRemainingBalance <= 0.01,
+    });
+
+    // Return updated order
+    const updatedOrder = await this.prisma.orders.findFirst({
+      where: { id: orderId },
+      include: {
+        stores: { select: { id: true, name: true, store_code: true } },
+        order_items: { include: { products: true, product_variants: true } },
+        payments: {
+          include: { store_payment_method: { include: { system_payment_method: true } } },
+          orderBy: { created_at: 'asc' },
+        },
+        order_installments: { orderBy: { installment_number: 'asc' } },
+      },
+    });
+
+    return {
+      order: updatedOrder,
+      payment: { transaction_id: transactionId, change, amount: paymentAmount },
+    };
+  }
+
+  /**
+   * Forgive an installment — mark it as forgiven and reduce order balance
+   * Only owner/admin can perform this action
+   */
+  async forgiveInstallment(orderId: number, installmentId: number) {
+    const order = await this.prisma.orders.findFirst({
+      where: { id: orderId },
+      include: { order_installments: true },
+    });
+
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.payment_form !== '2') throw new BadRequestException('Not a credit order');
+
+    const installment = order.order_installments.find((i: any) => i.id === installmentId);
+    if (!installment) throw new NotFoundException('Installment not found');
+    if (installment.state === 'paid' || installment.state === 'forgiven') {
+      throw new BadRequestException(`Installment is already ${installment.state}`);
+    }
+
+    const forgivenAmount = Number(installment.remaining_balance);
+
+    // Update installment
+    await this.prisma.order_installments.update({
+      where: { id: installmentId },
+      data: { state: 'forgiven', remaining_balance: 0 },
+    });
+
+    // Update order balance
+    const newRemaining = Math.max(Number(order.remaining_balance) - forgivenAmount, 0);
+    const orderUpdate: any = {
+      remaining_balance: Math.round(newRemaining * 100) / 100,
+    };
+
+    // Check if all installments are now paid/forgiven
+    const remaining = await this.prisma.order_installments.findMany({
+      where: {
+        order_id: orderId,
+        state: { in: ['pending', 'partial', 'overdue'] },
+      },
+    });
+
+    if (remaining.length === 0 && newRemaining <= 0.01) {
+      this.validateTransition(order.state as OrderState, 'finished');
+      orderUpdate.state = 'finished';
+      orderUpdate.completed_at = new Date();
+    }
+
+    await this.prisma.orders.update({
+      where: { id: orderId },
+      data: orderUpdate,
+    });
+
+    this.logger.log(`Installment #${installmentId} forgiven for order #${orderId}`);
+
+    return this.prisma.orders.findFirst({
+      where: { id: orderId },
+      include: {
+        order_installments: { orderBy: { installment_number: 'asc' } },
+        payments: true,
+      },
+    });
   }
 
   /**

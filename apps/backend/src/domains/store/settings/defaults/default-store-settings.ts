@@ -129,7 +129,6 @@ export function getDefaultStoreSettings(): StoreSettings {
         orders_purchase_orders: true,
         orders_quotations: true,
         orders_layaway: true,
-        orders_credits: true,
         orders_reservations: true,
         orders_dispatch_notes: true,
 

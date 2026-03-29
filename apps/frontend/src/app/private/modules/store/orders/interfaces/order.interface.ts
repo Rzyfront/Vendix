@@ -49,6 +49,13 @@ export interface Order {
   grand_total: number;
   currency: string;
   payment_form?: string;
+  credit_type?: 'free' | 'installments' | null;
+  interest_rate?: number;
+  interest_type?: 'simple' | 'compound' | null;
+  total_paid?: number;
+  remaining_balance?: number;
+  total_with_interest?: number;
+  order_installments?: OrderInstallment[];
   billing_address_id?: number;
   shipping_address_id?: number;
   internal_notes?: string;
@@ -64,7 +71,6 @@ export interface Order {
   addresses_orders_billing_address_idToaddresses?: Address;
   addresses_orders_shipping_address_idToaddresses?: Address;
   payments?: Payment[];
-  credits?: OrderCredit[];
   users?: {
     id: number;
     first_name: string;
@@ -133,6 +139,7 @@ export interface Payment {
   transaction_id?: string;
   gateway_response?: {
     change?: number;
+    payment_reference?: string;
     metadata?: {
       register_id?: string;
       is_pos_payment?: boolean;
@@ -140,11 +147,20 @@ export interface Payment {
       payment_method?: string;
       amount_received?: number;
       reference?: string;
+      is_credit_payment?: boolean;
     };
   };
   created_at: string;
   updated_at: string;
   store_payment_method_id?: number;
+  store_payment_method?: {
+    id: number;
+    display_name: string;
+    system_payment_method?: {
+      type: string;
+      display_name: string;
+    };
+  };
   users?: {
     id: number;
     first_name: string;
@@ -153,6 +169,23 @@ export interface Payment {
     phone?: string;
     avatar_url?: string;
   };
+}
+
+export interface OrderInstallment {
+  id: number;
+  order_id: number;
+  installment_number: number;
+  amount: number;
+  capital_amount: number;
+  interest_amount: number;
+  due_date: string;
+  state: 'pending' | 'paid' | 'partial' | 'overdue' | 'forgiven';
+  amount_paid: number;
+  remaining_balance: number;
+  paid_at?: string;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // Types and enums - Aligned with backend enums
@@ -453,6 +486,9 @@ export interface PayOrderDto {
   store_payment_method_id: number;
   payment_type: PaymentType;
   amount_received?: number;
+  amount?: number;
+  installment_id?: number;
+  payment_reference?: string;
 }
 
 export interface ShipOrderDto {
@@ -605,29 +641,3 @@ export interface RefundItemRecord {
   };
 }
 
-// ── Credit Types (for Order Detail) ──────────────────────────────
-
-export interface OrderCredit {
-  id: number;
-  credit_number: string;
-  total_amount: number;
-  total_paid: number;
-  remaining_balance: number;
-  num_installments: number;
-  frequency: string;
-  interest_rate: number;
-  state: string;
-  first_installment_date?: string;
-  completed_at?: string;
-  installments?: OrderCreditInstallment[];
-}
-
-export interface OrderCreditInstallment {
-  id: number;
-  installment_number: number;
-  installment_value: number;
-  amount_paid: number;
-  remaining_balance: number;
-  due_date: string;
-  state: string;
-}

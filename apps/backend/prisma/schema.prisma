@@ -109,12 +109,6 @@ model users {
   layaway_plans_created     layaway_plans[]    @relation("layaway_created_by")
   layaway_payments_received layaway_payments[] @relation("layaway_payment_received_by")
 
-  // Credits
-  credit_limit                           Decimal?                      @db.Decimal(12, 2)
-  credits_as_customer                    credits[]                     @relation("credit_customer")
-  credits_created                        credits[]                     @relation("credit_created_by")
-  credit_installment_payments_registered credit_installment_payments[] @relation("credit_installment_payment_registered_by")
-
   // Bank Reconciliation & Advanced Accounting
   bank_reconciliations_created      bank_reconciliations[]        @relation("bank_reconciliations_created_by")
   bank_reconciliation_matches       bank_reconciliation_matches[] @relation("bank_reconciliation_matches_matched_by")
@@ -492,9 +486,6 @@ model stores {
   // Layaway
   layaway_plans layaway_plans[]
 
-  // Credits
-  credits credits[]
-
   // Bank Reconciliation & Advanced Accounting
   bank_accounts             bank_accounts[]
   fixed_assets              fixed_assets[]
@@ -514,9 +505,8 @@ model stores {
   invoice_retry_queue invoice_retry_queue[]
 
   // Bookings
-  bookings            bookings[]
-  service_schedules   service_schedules[]
-  schedule_exceptions schedule_exceptions[]
+  bookings          bookings[]
+  service_providers service_providers[]
 
   // Dispatch Notes
   dispatch_notes dispatch_notes[]
@@ -717,7 +707,14 @@ model orders {
   placed_at                                       DateTime?                 @db.Timestamp(6)
   completed_at                                    DateTime?                 @db.Timestamp(6)
   payment_form                                    String?                   @db.VarChar(2)
+  credit_type                                     String?                   @db.VarChar(20)
+  interest_rate                                   Decimal?                  @db.Decimal(5, 4)
+  interest_type                                   String?                   @db.VarChar(10)
+  total_paid                                      Decimal                   @default(0) @db.Decimal(12, 2)
+  remaining_balance                               Decimal                   @default(0) @db.Decimal(12, 2)
+  total_with_interest                             Decimal?                  @db.Decimal(12, 2)
   order_items                                     order_items[]
+  order_installments                              order_installments[]
   addresses_orders_billing_address_idToaddresses  addresses?                @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   addresses_orders_shipping_address_idToaddresses addresses?                @relation("orders_shipping_address_idToaddresses", fields: [shipping_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   stores                                          stores                    @relation(fields: [store_id], references: [id], onUpdate: NoAction)
@@ -732,14 +729,34 @@ model orders {
   coupon                                          coupons?                  @relation(fields: [coupon_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   coupon_uses                                     coupon_uses[]
   cash_register_movements                         cash_register_movements[]
-  credits                                         credits[]
-
   // Bookings
-  booking bookings?
+  booking                                         bookings?
 
   @@unique([store_id, order_number])
   @@index([store_id, order_number])
   @@index([store_id, channel])
+}
+
+model order_installments {
+  id                 Int                          @id @default(autoincrement())
+  order_id           Int
+  installment_number Int
+  amount             Decimal                      @db.Decimal(12, 2)
+  capital_amount     Decimal                      @db.Decimal(12, 2)
+  interest_amount    Decimal                      @default(0) @db.Decimal(12, 2)
+  due_date           DateTime                     @db.Date
+  state              order_installment_state_enum @default(pending)
+  amount_paid        Decimal                      @default(0) @db.Decimal(12, 2)
+  remaining_balance  Decimal                      @db.Decimal(12, 2)
+  paid_at            DateTime?
+  notes              String?                      @db.VarChar(500)
+  created_at         DateTime                     @default(now())
+  updated_at         DateTime                     @updatedAt
+
+  orders orders @relation(fields: [order_id], references: [id])
+
+  @@index([order_id])
+  @@index([due_date, state])
 }
 
 model system_payment_methods {
@@ -767,23 +784,21 @@ model system_payment_methods {
 }
 
 model store_payment_methods {
-  id                          Int                           @id @default(autoincrement())
-  store_id                    Int
-  system_payment_method_id    Int
-  display_name                String?                       @db.VarChar(100)
-  custom_config               Json?
-  state                       payment_method_state_enum     @default(enabled)
-  display_order               Int                           @default(0)
-  min_amount                  Decimal?                      @db.Decimal(12, 2)
-  max_amount                  Decimal?                      @db.Decimal(12, 2)
-  created_at                  DateTime                      @default(now()) @db.Timestamp(6)
-  updated_at                  DateTime                      @default(now()) @db.Timestamp(6)
-  payments                    payments[]
-  stores                      stores                        @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  system_payment_method       system_payment_methods        @relation(fields: [system_payment_method_id], references: [id], onUpdate: NoAction)
-  layaway_payments            layaway_payments[]
-  credits                     credits[]
-  credit_installment_payments credit_installment_payments[]
+  id                       Int                       @id @default(autoincrement())
+  store_id                 Int
+  system_payment_method_id Int
+  display_name             String?                   @db.VarChar(100)
+  custom_config            Json?
+  state                    payment_method_state_enum @default(enabled)
+  display_order            Int                       @default(0)
+  min_amount               Decimal?                  @db.Decimal(12, 2)
+  max_amount               Decimal?                  @db.Decimal(12, 2)
+  created_at               DateTime                  @default(now()) @db.Timestamp(6)
+  updated_at               DateTime                  @default(now()) @db.Timestamp(6)
+  payments                 payments[]
+  stores                   stores                    @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  system_payment_method    system_payment_methods    @relation(fields: [system_payment_method_id], references: [id], onUpdate: NoAction)
+  layaway_payments         layaway_payments[]
 
   @@unique([store_id, system_payment_method_id])
   @@index([store_id, state])
@@ -898,6 +913,8 @@ model products {
   service_modality         service_modality_enum?
   service_pricing_type     service_pricing_type_enum?
   requires_booking         Boolean                    @default(false)
+  booking_mode             booking_mode_enum          @default(provider_required)
+  buffer_minutes           Int?                       @default(0)
   is_recurring             Boolean                    @default(false)
   service_instructions     String?                    @db.Text
   available_for_ecommerce  Boolean                    @default(false)
@@ -944,9 +961,8 @@ model products {
   layaway_items            layaway_items[]
 
   // Bookings
-  bookings            bookings[]
-  service_schedules   service_schedules[]
-  schedule_exceptions schedule_exceptions[]
+  bookings          bookings[]
+  provider_services provider_services[]
 
   // Dispatch Notes
   dispatch_note_items dispatch_note_items[]
@@ -2032,8 +2048,8 @@ enum currency_position_enum {
 }
 
 enum currency_format_style_enum {
-  comma_dot   // 1,234.56 (US/UK)
-  dot_comma   // 1.234,56 (Europe/Latin America)
+  comma_dot // 1,234.56 (US/UK)
+  dot_comma // 1.234,56 (Europe/Latin America)
   space_comma // 1 234,56 (French)
 }
 
@@ -2069,6 +2085,14 @@ enum order_channel_enum {
   agent
   whatsapp
   marketplace
+}
+
+enum order_installment_state_enum {
+  pending
+  paid
+  partial
+  overdue
+  forgiven
 }
 
 enum payment_method_state_enum {
@@ -3292,7 +3316,6 @@ model accounting_entries {
   accounting_entry_lines      accounting_entry_lines[]
   invoices                    invoices[]
   payroll_runs                payroll_runs[]
-  credit_installment_payments credit_installment_payments[]
   bank_reconciliation_matches bank_reconciliation_matches[]
   depreciation_entries        depreciation_entries[]        @relation("depreciation_accounting_entry")
   intercompany_entries        intercompany_transactions[]   @relation("ic_entry")
@@ -3360,6 +3383,7 @@ model employees {
   payroll_items       payroll_items[]
   payroll_settlements payroll_settlements[]
   employee_advances   employee_advances[]
+  service_providers   service_providers[]
 
   @@unique([organization_id, employee_code])
   @@unique([organization_id, document_type, document_number])
@@ -3892,31 +3916,6 @@ model layaway_payments {
   @@index([layaway_installment_id])
 }
 
-// ===== CREDITS (INSTALLMENT PAYMENTS) DOMAIN =====
-
-enum credit_state_enum {
-  pending
-  active
-  paid
-  overdue
-  cancelled
-  defaulted
-}
-
-enum installment_state_enum {
-  pending
-  paid
-  overdue
-  partial
-  forgiven
-}
-
-enum installment_frequency_enum {
-  weekly
-  biweekly
-  monthly
-}
-
 // ── Legal / Tax Module Enums ──────────────────────────────
 
 enum withholding_applies_to_enum {
@@ -3973,81 +3972,9 @@ enum booking_status_enum {
   no_show
 }
 
-model credits {
-  id                        Int                        @id @default(autoincrement())
-  store_id                  Int
-  order_id                  Int
-  customer_id               Int
-  credit_number             String                     @db.VarChar(50)
-  total_amount              Decimal                    @db.Decimal(12, 2)
-  total_paid                Decimal                    @default(0) @db.Decimal(12, 2)
-  remaining_balance         Decimal                    @db.Decimal(12, 2)
-  num_installments          Int
-  installment_value         Decimal                    @db.Decimal(12, 2)
-  frequency                 installment_frequency_enum
-  interest_rate             Decimal?                   @default(0) @db.Decimal(5, 4)
-  start_date                DateTime                   @db.Timestamp(6)
-  first_installment_date    DateTime                   @db.Timestamp(6)
-  state                     credit_state_enum          @default(pending)
-  default_payment_method_id Int?
-  notes                     String?                    @db.VarChar(500)
-  created_by_user_id        Int?
-  completed_at              DateTime?                  @db.Timestamp(6)
-  created_at                DateTime?                  @default(now()) @db.Timestamp(6)
-  updated_at                DateTime?                  @default(now()) @db.Timestamp(6)
-
-  stores                 stores                 @relation(fields: [store_id], references: [id], onUpdate: NoAction)
-  orders                 orders                 @relation(fields: [order_id], references: [id], onUpdate: NoAction)
-  customer               users                  @relation("credit_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  default_payment_method store_payment_methods? @relation(fields: [default_payment_method_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  created_by             users?                 @relation("credit_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  installments           credit_installments[]
-
-  @@unique([store_id, credit_number])
-  @@index([store_id, state])
-  @@index([store_id, customer_id])
-  @@index([order_id])
-}
-
-model credit_installments {
-  id                 Int                    @id @default(autoincrement())
-  credit_id          Int
-  installment_number Int
-  installment_value  Decimal                @db.Decimal(12, 2)
-  capital_value      Decimal                @db.Decimal(12, 2)
-  interest_value     Decimal                @default(0) @db.Decimal(12, 2)
-  amount_paid        Decimal                @default(0) @db.Decimal(12, 2)
-  remaining_balance  Decimal                @db.Decimal(12, 2)
-  due_date           DateTime               @db.Timestamp(6)
-  payment_date       DateTime?              @db.Timestamp(6)
-  state              installment_state_enum @default(pending)
-  created_at         DateTime?              @default(now()) @db.Timestamp(6)
-  updated_at         DateTime?              @default(now()) @db.Timestamp(6)
-
-  credits                     credits                       @relation(fields: [credit_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  credit_installment_payments credit_installment_payments[]
-
-  @@unique([credit_id, installment_number])
-  @@index([credit_id, state])
-  @@index([due_date, state])
-}
-
-model credit_installment_payments {
-  id                      Int       @id @default(autoincrement())
-  installment_id          Int
-  amount_paid             Decimal   @db.Decimal(12, 2)
-  payment_date            DateTime  @db.Timestamp(6)
-  store_payment_method_id Int?
-  payment_reference       String?   @db.VarChar(255)
-  registered_by_user_id   Int?
-  accounting_entry_id     Int?
-  notes                   String?   @db.VarChar(500)
-  created_at              DateTime? @default(now()) @db.Timestamp(6)
-
-  credit_installments   credit_installments    @relation(fields: [installment_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  store_payment_methods store_payment_methods? @relation(fields: [store_payment_method_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  registered_by         users?                 @relation("credit_installment_payment_registered_by", fields: [registered_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  accounting_entries    accounting_entries?    @relation(fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+enum booking_mode_enum {
+  provider_required
+  free_booking
 }
 
 // ===== BANK RECONCILIATION DOMAIN =====
@@ -4678,62 +4605,89 @@ model bookings {
   internal_notes     String?             @db.Text
   order_id           Int?                @unique
   created_by_user_id Int?
+  provider_id        Int?
   created_at         DateTime?           @default(now()) @db.Timestamp(6)
   updated_at         DateTime?           @default(now()) @db.Timestamp(6)
 
-  store      stores   @relation(fields: [store_id], references: [id])
-  customer   users    @relation("bookings_customer", fields: [customer_id], references: [id])
-  product    products @relation(fields: [product_id], references: [id])
-  order      orders?  @relation(fields: [order_id], references: [id])
-  created_by users?   @relation("bookings_created_by", fields: [created_by_user_id], references: [id])
+  store      stores             @relation(fields: [store_id], references: [id])
+  customer   users              @relation("bookings_customer", fields: [customer_id], references: [id])
+  product    products           @relation(fields: [product_id], references: [id])
+  order      orders?            @relation(fields: [order_id], references: [id])
+  created_by users?             @relation("bookings_created_by", fields: [created_by_user_id], references: [id])
+  provider   service_providers? @relation(fields: [provider_id], references: [id])
 
   @@unique([store_id, booking_number])
   @@index([store_id, date])
   @@index([store_id, status])
   @@index([store_id, product_id, date])
   @@index([customer_id])
+  @@index([provider_id])
 }
 
-model service_schedules {
-  id                    Int       @id @default(autoincrement())
-  store_id              Int
-  product_id            Int
-  day_of_week           Int       @db.SmallInt
-  start_time            String    @db.VarChar(5)
-  end_time              String    @db.VarChar(5)
-  slot_duration_minutes Int
-  capacity              Int       @default(1)
-  buffer_minutes        Int       @default(0)
-  is_active             Boolean   @default(true)
-  created_at            DateTime? @default(now()) @db.Timestamp(6)
-  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+model service_providers {
+  id           Int       @id @default(autoincrement())
+  store_id     Int
+  employee_id  Int
+  is_active    Boolean   @default(true)
+  display_name String?   @db.VarChar(100)
+  avatar_url   String?   @db.Text
+  bio          String?   @db.Text
+  sort_order   Int       @default(0)
+  created_at   DateTime? @default(now()) @db.Timestamp(6)
+  updated_at   DateTime? @default(now()) @db.Timestamp(6)
 
-  store   stores   @relation(fields: [store_id], references: [id])
-  product products @relation(fields: [product_id], references: [id])
+  store      stores                @relation(fields: [store_id], references: [id])
+  employee   employees             @relation(fields: [employee_id], references: [id])
+  services   provider_services[]
+  schedules  provider_schedules[]
+  exceptions provider_exceptions[]
+  bookings   bookings[]
 
-  @@unique([store_id, product_id, day_of_week])
-  @@index([store_id])
-  @@index([product_id])
+  @@unique([store_id, employee_id])
+  @@index([store_id, is_active])
 }
 
-model schedule_exceptions {
+model provider_services {
+  id          Int @id @default(autoincrement())
+  provider_id Int
+  product_id  Int
+
+  provider service_providers @relation(fields: [provider_id], references: [id], onDelete: Cascade)
+  product  products          @relation(fields: [product_id], references: [id])
+
+  @@unique([provider_id, product_id])
+}
+
+model provider_schedules {
+  id          Int       @id @default(autoincrement())
+  provider_id Int
+  day_of_week Int       @db.SmallInt
+  start_time  String    @db.VarChar(5)
+  end_time    String    @db.VarChar(5)
+  is_active   Boolean   @default(true)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  updated_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  provider service_providers @relation(fields: [provider_id], references: [id], onDelete: Cascade)
+
+  @@unique([provider_id, day_of_week])
+  @@index([provider_id])
+}
+
+model provider_exceptions {
   id                Int       @id @default(autoincrement())
-  store_id          Int
-  product_id        Int?
+  provider_id       Int
   date              DateTime  @db.Date
-  is_closed         Boolean   @default(false)
+  is_unavailable    Boolean   @default(true)
   custom_start_time String?   @db.VarChar(5)
   custom_end_time   String?   @db.VarChar(5)
-  custom_capacity   Int?
   reason            String?   @db.VarChar(255)
   created_at        DateTime? @default(now()) @db.Timestamp(6)
   updated_at        DateTime? @default(now()) @db.Timestamp(6)
 
-  store   stores    @relation(fields: [store_id], references: [id])
-  product products? @relation(fields: [product_id], references: [id])
+  provider service_providers @relation(fields: [provider_id], references: [id], onDelete: Cascade)
 
-  @@index([store_id, date])
-  @@index([product_id])
+  @@index([provider_id, date])
 }
 
 // ===== DISPATCH NOTES SYSTEM =====

@@ -96,7 +96,7 @@
           <app-calendar-container
             [refreshTrigger]="calendarRefreshTrigger"
             (slotClicked)="onSlotClicked($event)"
-            (bookingClicked)="onReschedule($event)"
+            (bookingClicked)="onBookingClicked($event)"
             (bookingDropped)="onBookingDropped($event)"
             (createNew)="onCreateNew()"
           />
@@ -155,7 +155,7 @@
       <app-today-reservations-panel
         [bookings]="todayBookings()"
         [loading]="todayLoading()"
-        (bookingClicked)="onReschedule($event)"
+        (bookingClicked)="onBookingClicked($event)"
         (viewAllClicked)="onViewAllToday()"
       />
 
@@ -189,5 +189,19 @@
     [booking]="bookingToReschedule"
     (closed)="isRescheduleModalOpen = false"
     (rescheduled)="onRescheduleCompleted()"
+  />
+
+  <!-- Booking Detail Modal -->
+  <app-booking-detail-modal
+    [isOpen]="isDetailModalOpen"
+    [booking]="selectedBooking"
+    (closed)="onDetailModalClose()"
+    (confirmed)="onConfirm($event)"
+    (cancelled)="onCancel($event)"
+    (completed)="onComplete($event)"
+    (noShow)="onNoShow($event)"
+    (started)="onStartBooking($event)"
+    (rescheduled)="onRescheduledFromDetail()"
+    (notesUpdated)="onNotesUpdated()"
   />
 </div>

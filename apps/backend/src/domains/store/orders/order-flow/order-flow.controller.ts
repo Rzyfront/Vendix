@@ -108,6 +108,30 @@ export class OrderFlowController {
     return this.responseService.success(order, 'Payment cancelled successfully');
   }
 
+  @Post('credit-payment')
+  @Permissions('store:orders:order_flow:create')
+  @HttpCode(HttpStatus.OK)
+  async registerCreditPayment(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Body() dto: PayOrderDto,
+  ) {
+    const result = await this.orderFlowService.registerCreditPayment(orderId, dto);
+    return this.responseService.success(result, 'Credit payment registered successfully');
+  }
+
+  @Post('installments/:installmentId/forgive')
+  @Permissions('store:orders:order_flow:create')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'admin', 'OWNER', 'ADMIN')
+  async forgiveInstallment(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Param('installmentId', ParseIntPipe) installmentId: number,
+  ) {
+    const result = await this.orderFlowService.forgiveInstallment(orderId, installmentId);
+    return this.responseService.success(result, 'Installment forgiven successfully');
+  }
+
   @Post('cancel')
   @Permissions('store:orders:order_flow:create')
   @HttpCode(HttpStatus.OK)

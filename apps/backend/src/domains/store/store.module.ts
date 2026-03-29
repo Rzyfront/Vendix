@@ -31,7 +31,6 @@ import { CouponsModule } from './coupons/coupons.module';
 import { QuotationsModule } from './quotations/quotations.module';
 import { CashRegistersModule } from './cash-registers/cash-registers.module';
 import { LayawayModule } from './layaway/layaway.module';
-import { CreditsModule } from './credits/credits.module';
 import { HabeasDataModule } from './habeas-data/habeas-data.module';
 import { WithholdingTaxModule } from './withholding-tax/withholding-tax.module';
 import { ExogenousModule } from './exogenous/exogenous.module';
@@ -73,7 +72,6 @@ import { McpModule } from './mcp/mcp.module';
     QuotationsModule,
     CashRegistersModule,
     LayawayModule,
-    CreditsModule,
     HabeasDataModule,
     WithholdingTaxModule,
     ExogenousModule,

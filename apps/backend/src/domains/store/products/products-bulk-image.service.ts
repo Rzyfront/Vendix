@@ -1,14 +1,23 @@
 import * as AdmZip from 'adm-zip';
+import * as sharp from 'sharp';
+import { v4 as uuidv4 } from 'uuid';
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper, S3OrgContext, S3StoreContext } from '@common/helpers/s3-path.helper';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
 import {
   BulkImageUploadResultDto,
   BulkImageSkuResultDto,
+  BulkImageAnalysisResultDto,
+  BulkImageAnalysisSkuDto,
 } from './dto';
 
-const VALID_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
+const VALID_IMAGE_EXTENSIONS = [
+  '.jpg', '.jpeg', '.png', '.webp',
+  '.gif', '.bmp', '.tiff', '.tif',
+  '.heic', '.heif', '.avif', '.svg',
+];
 const MAX_IMAGES_PER_PRODUCT = 5;
 
 @Injectable()
@@ -31,7 +40,7 @@ export class ProductsBulkImageService {
       '',
       '1. Crea una carpeta por cada producto, nombrada con el SKU exacto del producto.',
       '2. Dentro de cada carpeta, coloca las imágenes del producto.',
-      '3. Formatos aceptados: .jpg, .jpeg, .png, .webp',
+      '3. Formatos aceptados: .jpg, .jpeg, .png, .webp, .gif, .bmp, .tiff, .heic, .heif, .avif, .svg',
       '4. Máximo 5 imágenes por producto.',
       '5. Las imágenes se ordenan alfabéticamente. La primera será la imagen principal',
       '   (solo si el producto no tiene ya una imagen principal).',
@@ -92,73 +101,7 @@ export class ProductsBulkImageService {
     fileBuffer: Buffer,
     storeId: number,
   ): Promise<BulkImageUploadResultDto> {
-    let zip: AdmZip;
-    try {
-      zip = new AdmZip(fileBuffer);
-    } catch {
-      throw new BadRequestException(
-        'El archivo ZIP está corrupto o no es válido',
-      );
-    }
-
-    const entries = zip.getEntries();
-
-    // First pass: collect valid image entries with their path parts
-    const validEntries: { entry: AdmZip.IZipEntry; parts: string[] }[] = [];
-
-    for (const entry of entries) {
-      const fullPath = entry.entryName;
-
-      // Skip macOS metadata and hidden files
-      if (
-        fullPath.startsWith('__MACOSX/') ||
-        fullPath.includes('.DS_Store') ||
-        fullPath.startsWith('.')
-      ) {
-        continue;
-      }
-
-      // Skip directories themselves and files in root (no folder)
-      if (entry.isDirectory) continue;
-
-      const parts = fullPath.split('/');
-      if (parts.length < 2 || !parts[0]) continue; // File must be inside a folder
-
-      const fileName = parts[parts.length - 1];
-
-      // Only include valid image files
-      const ext = '.' + fileName.split('.').pop()?.toLowerCase();
-      if (!VALID_IMAGE_EXTENSIONS.includes(ext)) continue;
-
-      validEntries.push({ entry, parts });
-    }
-
-    // Detect wrapper folder: if ALL entries share the same top-level folder
-    // and have depth >= 3 (wrapper/SKU/image.jpg), it's a wrapper
-    const topLevelFolders = new Set(validEntries.map((e) => e.parts[0]));
-    const hasWrapper =
-      topLevelFolders.size === 1 &&
-      validEntries.every((e) => e.parts.length >= 3);
-    const skuIndex = hasWrapper ? 1 : 0;
-
-    // Group entries by SKU folder
-    const skuFolders = new Map<string, AdmZip.IZipEntry[]>();
-
-    for (const { entry, parts } of validEntries) {
-      const skuFolder = parts[skuIndex];
-      if (!skuFolder) continue;
-
-      if (!skuFolders.has(skuFolder)) {
-        skuFolders.set(skuFolder, []);
-      }
-      skuFolders.get(skuFolder)!.push(entry);
-    }
-
-    if (skuFolders.size === 0) {
-      throw new BadRequestException(
-        'El ZIP no contiene carpetas con SKUs válidos. Asegúrate de que las imágenes estén dentro de carpetas nombradas por SKU.',
-      );
-    }
+    const skuFolders = this.parseAndGroupZipEntries(fileBuffer);
 
     // Get store context for S3 path
     const { org, store } = await this.getStoreWithOrgContext(storeId);
@@ -169,7 +112,14 @@ export class ProductsBulkImageService {
     let failed = 0;
     let skipped = 0;
 
-    for (const [skuFolder, imageEntries] of skuFolders) {
+    for (const [skuFolder, allEntries] of skuFolders) {
+      // Filter to valid image extensions only
+      const imageEntries = allEntries.filter((entry) => {
+        const fileName = entry.entryName.split('/').pop() || '';
+        const ext = '.' + fileName.split('.').pop()?.toLowerCase();
+        return VALID_IMAGE_EXTENSIONS.includes(ext);
+      });
+
       try {
         const result = await this.processSkuFolder(
           skuFolder,
@@ -201,6 +151,258 @@ export class ProductsBulkImageService {
       skipped,
       results,
     };
+  }
+
+  /**
+   * Analyzes a ZIP file without uploading images. Returns per-SKU analysis.
+   * Stores the ZIP temporarily in S3 for later processing.
+   */
+  async analyzeImageZip(
+    fileBuffer: Buffer,
+    storeId: number,
+  ): Promise<BulkImageAnalysisResultDto> {
+    const skuFolders = this.parseAndGroupZipEntries(fileBuffer);
+
+    // Pre-fetch all active products for the store (avoid N+1)
+    const allProducts = await this.prisma.products.findMany({
+      where: { store_id: storeId },
+      select: {
+        id: true,
+        sku: true,
+        name: true,
+        slug: true,
+        state: true,
+        product_images: { select: { id: true } },
+      },
+    });
+
+    const productMap = new Map<string, (typeof allProducts)[0]>();
+    for (const product of allProducts) {
+      if (product.sku) {
+        productMap.set(product.sku.toLowerCase(), product);
+      }
+    }
+
+    const skus: BulkImageAnalysisSkuDto[] = [];
+    let ready = 0;
+    let withWarnings = 0;
+    let withErrors = 0;
+
+    for (const [skuFolder, entries] of skuFolders) {
+      const skuResult: BulkImageAnalysisSkuDto = {
+        sku: skuFolder,
+        sku_found: false,
+        images_in_zip: entries.length,
+        valid_images: 0,
+        invalid_files: [],
+        current_image_count: 0,
+        slots_available: 0,
+        images_to_upload: 0,
+        status: 'ready',
+        warnings: [],
+        errors: [],
+      };
+
+      // Classify entries
+      for (const entry of entries) {
+        const fileName = entry.entryName.split('/').pop() || '';
+        const ext = '.' + fileName.split('.').pop()?.toLowerCase();
+        if (VALID_IMAGE_EXTENSIONS.includes(ext)) {
+          skuResult.valid_images++;
+        } else {
+          skuResult.invalid_files.push(fileName);
+        }
+      }
+
+      // Find product
+      const product = productMap.get(skuFolder.toLowerCase());
+
+      if (!product) {
+        skuResult.status = 'error';
+        skuResult.errors.push(`No se encontró un producto con SKU "${skuFolder}" en esta tienda`);
+        withErrors++;
+        skus.push(skuResult);
+        continue;
+      }
+
+      skuResult.sku_found = true;
+      skuResult.product_id = product.id;
+      skuResult.product_name = product.name;
+      skuResult.current_image_count = product.product_images.length;
+      skuResult.slots_available = Math.max(0, MAX_IMAGES_PER_PRODUCT - product.product_images.length);
+
+      if (skuResult.valid_images === 0) {
+        skuResult.status = 'error';
+        skuResult.errors.push('La carpeta no contiene imágenes con formato válido');
+        withErrors++;
+        skus.push(skuResult);
+        continue;
+      }
+
+      if (skuResult.slots_available === 0) {
+        skuResult.status = 'error';
+        skuResult.errors.push(`El producto ya tiene ${MAX_IMAGES_PER_PRODUCT} imágenes (máximo permitido)`);
+        withErrors++;
+        skus.push(skuResult);
+        continue;
+      }
+
+      skuResult.images_to_upload = Math.min(skuResult.valid_images, skuResult.slots_available);
+
+      // Warnings
+      if (skuResult.invalid_files.length > 0) {
+        skuResult.warnings.push(
+          `${skuResult.invalid_files.length} archivo(s) con formato no soportado serán ignorados: ${skuResult.invalid_files.join(', ')}`,
+        );
+        skuResult.status = 'warning';
+      }
+
+      if (skuResult.valid_images > skuResult.slots_available) {
+        skuResult.warnings.push(
+          `Solo se subirán ${skuResult.slots_available} de ${skuResult.valid_images} imágenes (el producto ya tiene ${skuResult.current_image_count})`,
+        );
+        skuResult.status = 'warning';
+      }
+
+      if (product.state !== 'active') {
+        skuResult.warnings.push(`El producto está en estado "${product.state}"`);
+        skuResult.status = 'warning';
+      }
+
+      if (skuResult.status === 'warning') {
+        withWarnings++;
+      } else {
+        ready++;
+      }
+
+      skus.push(skuResult);
+    }
+
+    // Upload ZIP to temp S3 for later processing
+    const sessionId = uuidv4();
+    const tempKey = `tmp/bulk-images/${storeId}/${sessionId}.zip`;
+    await this.s3Service.uploadFile(fileBuffer, tempKey, 'application/zip');
+
+    return {
+      session_id: sessionId,
+      total_skus: skuFolders.size,
+      ready,
+      with_warnings: withWarnings,
+      with_errors: withErrors,
+      supported_formats: [...VALID_IMAGE_EXTENSIONS],
+      skus,
+    };
+  }
+
+  /**
+   * Processes a previously analyzed ZIP from a temp S3 session
+   */
+  async processImageZipFromSession(
+    sessionId: string,
+    storeId: number,
+  ): Promise<BulkImageUploadResultDto> {
+    const tempKey = `tmp/bulk-images/${storeId}/${sessionId}.zip`;
+
+    let fileBuffer: Buffer;
+    try {
+      fileBuffer = await this.s3Service.downloadImage(tempKey);
+    } catch {
+      throw new VendixHttpException(
+        ErrorCodes.BULK_IMG_SESSION_EXPIRED,
+        'La sesión de análisis no fue encontrada o ha expirado. Por favor, vuelve a subir el archivo.',
+      );
+    }
+
+    try {
+      const result = await this.processImageZip(fileBuffer, storeId);
+      return result;
+    } finally {
+      // Clean up temp ZIP regardless of success/failure
+      try {
+        await this.s3Service.deleteFile(tempKey);
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }
+
+  /**
+   * Cancels an analysis session by deleting the temp ZIP
+   */
+  async cancelSession(sessionId: string, storeId: number): Promise<void> {
+    const tempKey = `tmp/bulk-images/${storeId}/${sessionId}.zip`;
+    try {
+      await this.s3Service.deleteFile(tempKey);
+    } catch {
+      // Ignore if already deleted
+    }
+  }
+
+  /**
+   * Parses a ZIP buffer and groups file entries by SKU folder.
+   * Does NOT filter by image extension — consumers handle that.
+   */
+  private parseAndGroupZipEntries(fileBuffer: Buffer): Map<string, AdmZip.IZipEntry[]> {
+    let zip: AdmZip;
+    try {
+      zip = new AdmZip(fileBuffer);
+    } catch {
+      throw new VendixHttpException(
+        ErrorCodes.BULK_IMG_ZIP_CORRUPT,
+        'El archivo ZIP está corrupto o no es válido',
+      );
+    }
+
+    const entries = zip.getEntries();
+    const validEntries: { entry: AdmZip.IZipEntry; parts: string[] }[] = [];
+
+    for (const entry of entries) {
+      const fullPath = entry.entryName;
+
+      if (
+        fullPath.startsWith('__MACOSX/') ||
+        fullPath.includes('.DS_Store') ||
+        fullPath.startsWith('.')
+      ) {
+        continue;
+      }
+
+      if (entry.isDirectory) continue;
+
+      const parts = fullPath.split('/');
+      if (parts.length < 2 || !parts[0]) continue;
+
+      validEntries.push({ entry, parts });
+    }
+
+    // Detect wrapper folder
+    const topLevelFolders = new Set(validEntries.map((e) => e.parts[0]));
+    const hasWrapper =
+      topLevelFolders.size === 1 &&
+      validEntries.every((e) => e.parts.length >= 3);
+    const skuIndex = hasWrapper ? 1 : 0;
+
+    // Group entries by SKU folder
+    const skuFolders = new Map<string, AdmZip.IZipEntry[]>();
+
+    for (const { entry, parts } of validEntries) {
+      const skuFolder = parts[skuIndex];
+      if (!skuFolder) continue;
+
+      if (!skuFolders.has(skuFolder)) {
+        skuFolders.set(skuFolder, []);
+      }
+      skuFolders.get(skuFolder)!.push(entry);
+    }
+
+    if (skuFolders.size === 0) {
+      throw new VendixHttpException(
+        ErrorCodes.BULK_IMG_NO_SKUS,
+        'El ZIP no contiene carpetas con SKUs válidos. Asegúrate de que las imágenes estén dentro de carpetas nombradas por SKU.',
+      );
+    }
+
+    return skuFolders;
   }
 
   /**
@@ -254,7 +456,7 @@ export class ProductsBulkImageService {
       return {
         sku,
         status: 'error',
-        message: 'La carpeta no contiene imágenes válidas (.jpg, .jpeg, .png, .webp)',
+        message: `La carpeta no contiene imágenes válidas (formatos soportados: ${VALID_IMAGE_EXTENSIONS.join(', ')})`,
         images_uploaded: 0,
         product_id: product.id,
       };
@@ -273,11 +475,24 @@ export class ProductsBulkImageService {
 
     for (let i = 0; i < sortedEntries.length; i++) {
       const entry = sortedEntries[i];
-      const buffer = entry.getData();
+      let imageBuffer = entry.getData();
+      const ext = '.' + entry.entryName.split('.').pop()?.toLowerCase();
+
+      // SVG needs rasterization before WebP conversion
+      if (ext === '.svg') {
+        try {
+          imageBuffer = await sharp(imageBuffer, { density: 150 })
+            .png()
+            .toBuffer();
+        } catch {
+          // Skip SVG files that fail to rasterize
+          continue;
+        }
+      }
 
       const imageKey = `${basePath}/${product.slug}-bulk-${Date.now()}-${i}`;
 
-      const uploadResult = await this.s3Service.uploadImage(buffer, imageKey, {
+      const uploadResult = await this.s3Service.uploadImage(imageBuffer, imageKey, {
         generateThumbnail: true,
       });
 

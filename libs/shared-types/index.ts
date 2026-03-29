@@ -99,33 +99,37 @@ export interface AvailabilitySlot {
   date: string;
   start_time: string;
   end_time: string;
-  capacity: number;
-  reserved: number;
-  available: number;
+  available_providers: { id: number; display_name: string; avatar_url?: string }[];
+  total_available: number;
 }
 
-export interface ServiceSchedule {
+export interface ServiceProvider {
   id: number;
   store_id: number;
-  product_id: number;
+  employee_id: number;
+  is_active: boolean;
+  display_name?: string;
+  avatar_url?: string;
+  bio?: string;
+  sort_order: number;
+}
+
+export interface ProviderSchedule {
+  id: number;
+  provider_id: number;
   day_of_week: number;
   start_time: string;
   end_time: string;
-  slot_duration_minutes: number;
-  capacity: number;
-  buffer_minutes: number;
   is_active: boolean;
 }
 
-export interface ScheduleException {
+export interface ProviderException {
   id: number;
-  store_id: number;
-  product_id?: number;
+  provider_id: number;
   date: string;
-  is_closed: boolean;
+  is_unavailable: boolean;
   custom_start_time?: string;
   custom_end_time?: string;
-  custom_capacity?: number;
   reason?: string;
 }
 

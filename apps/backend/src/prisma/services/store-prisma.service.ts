@@ -36,11 +36,9 @@ export class StorePrismaService extends BasePrismaService {
     'cash_register_sessions',
     'cash_register_movements',
     'layaway_plans',
-    'credits',
     'exogenous_reports',
     'bookings',
-    'service_schedules',
-    'schedule_exceptions',
+    'service_providers',
     'reviews',
     'ai_conversations',
     'ai_embeddings',
@@ -104,6 +102,7 @@ export class StorePrismaService extends BasePrismaService {
       'return_orders', // Org scoped
       'sales_order_items', // Relational
       'refunds', // Relational
+      'order_installments', // Relational
       'inventory_adjustments', // Relational
       'inventory_movements', // Relational
       'stock_reservations', // Relational
@@ -132,8 +131,6 @@ export class StorePrismaService extends BasePrismaService {
       'layaway_items', // Relational
       'layaway_installments', // Relational
       'layaway_payments', // Relational
-      'credit_installments', // Relational
-      'credit_installment_payments', // Relational
       'bank_accounts', // Org scoped
       'fixed_asset_categories', // Org scoped
       'fixed_assets', // Org scoped
@@ -232,6 +229,7 @@ export class StorePrismaService extends BasePrismaService {
         sales_orders: { organization_id: context.organization_id },
       }, // Changed to Org Scope
       refunds: { orders: { store_id: context.store_id } },
+      order_installments: { orders: { store_id: context.store_id } },
       inventory_adjustments: {
         inventory_locations: { store_id: context.store_id },
       },
@@ -271,8 +269,6 @@ export class StorePrismaService extends BasePrismaService {
       layaway_items: { layaway_plan: { store_id: context.store_id } },
       layaway_installments: { layaway_plan: { store_id: context.store_id } },
       layaway_payments: { layaway_plan: { store_id: context.store_id } },
-      credit_installments: { credits: { store_id: context.store_id } },
-      credit_installment_payments: { credit_installments: { credits: { store_id: context.store_id } } },
       bank_transactions: { bank_account: { organization_id: context.organization_id } },
       bank_reconciliations: { bank_account: { organization_id: context.organization_id } },
       bank_reconciliation_matches: { reconciliation: { bank_account: { organization_id: context.organization_id } } },
@@ -794,19 +790,6 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.layaway_payments;
   }
 
-  // Credits models
-  get credits() {
-    return this.scoped_client.credits;
-  }
-
-  get credit_installments() {
-    return this.scoped_client.credit_installments;
-  }
-
-  get credit_installment_payments() {
-    return this.scoped_client.credit_installment_payments;
-  }
-
   // Withholding Tax models (org scoped)
   get withholding_concepts() {
     return this.scoped_client.withholding_concepts;
@@ -825,12 +808,20 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.bookings;
   }
 
-  get service_schedules() {
-    return this.scoped_client.service_schedules;
+  get service_providers() {
+    return this.scoped_client.service_providers;
   }
 
-  get schedule_exceptions() {
-    return this.scoped_client.schedule_exceptions;
+  get provider_services() {
+    return this.scoped_client.provider_services;
+  }
+
+  get provider_schedules() {
+    return this.scoped_client.provider_schedules;
+  }
+
+  get provider_exceptions() {
+    return this.scoped_client.provider_exceptions;
   }
 
   // Reviews models
@@ -861,6 +852,11 @@ export class StorePrismaService extends BasePrismaService {
 
   get ai_embeddings() {
     return this.scoped_client.ai_embeddings;
+  }
+
+  // Order Installments
+  get order_installments() {
+    return this.scoped_client.order_installments;
   }
 
   // Dispatch Notes models

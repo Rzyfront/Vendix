@@ -66,8 +66,14 @@ export class ReservationsController {
   async getAvailability(
     @Param('productId', ParseIntPipe) productId: number,
     @Query() query: AvailabilityQueryDto,
+    @Query('provider_id') providerId?: string,
   ) {
-    const result = await this.availabilityService.getAvailableSlots(productId, query.date_from, query.date_to);
+    const result = await this.availabilityService.getAvailableSlots(
+      productId,
+      query.date_from,
+      query.date_to,
+      providerId ? parseInt(providerId, 10) : undefined,
+    );
     return this.responseService.success(result, 'Disponibilidad obtenida exitosamente');
   }
 
@@ -90,6 +96,13 @@ export class ReservationsController {
   async confirm(@Param('id', ParseIntPipe) id: number) {
     const result = await this.reservationsService.confirm(id);
     return this.responseService.success(result, 'Reserva confirmada exitosamente');
+  }
+
+  @Patch(':id/start')
+  @Permissions('store:reservations:update')
+  async start(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.reservationsService.start(id);
+    return this.responseService.success(result, 'Reserva iniciada exitosamente');
   }
 
   @Patch(':id/cancel')

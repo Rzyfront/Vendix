@@ -147,6 +147,18 @@
     text-overflow: ellipsis;
   }
 
+  .booking-provider {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    opacity: 0.7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-style: italic;
+  }
+
   .booking-number {
     font-size: 10px;
     opacity: 0.65;

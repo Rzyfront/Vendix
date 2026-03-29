@@ -133,6 +133,13 @@ export class ReservationListComponent {
         val ? `${val.first_name} ${val.last_name}` : '-',
     },
     {
+      key: 'provider',
+      label: 'Proveedor',
+      priority: 2,
+      transform: (val: any) =>
+        val?.display_name || (val?.employee ? `${val.employee.first_name} ${val.employee.last_name}` : '\u2014'),
+    },
+    {
       key: 'status',
       label: 'Estado',
       priority: 1,
@@ -178,6 +185,13 @@ export class ReservationListComponent {
         label: 'Hora',
         icon: 'clock',
         transform: (v: any) => (v ? v.substring(0, 5) : '-'),
+      },
+      {
+        key: 'provider',
+        label: 'Proveedor',
+        icon: 'user-circle',
+        transform: (v: any) =>
+          v?.display_name || (v?.employee ? `${v.employee.first_name} ${v.employee.last_name}` : '\u2014'),
       },
       {
         key: 'channel',

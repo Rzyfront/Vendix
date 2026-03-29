@@ -2248,6 +2248,12 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:dispatch_notes:create') ||
       p.name.includes('store:dispatch_notes:read') ||
       p.name.includes('store:dispatch_notes:read:one') ||
+      p.name.includes('store:dispatch_notes:update') ||
+      p.name.includes('store:dispatch_notes:delete') ||
+      p.name.includes('store:dispatch_notes:confirm') ||
+      p.name.includes('store:dispatch_notes:deliver') ||
+      p.name.includes('store:dispatch_notes:void') ||
+      p.name.includes('store:dispatch_notes:invoice') ||
       p.name.includes('store:reviews:read') ||
       p.name.includes('store:reviews:moderate'),
   );

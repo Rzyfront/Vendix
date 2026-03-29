@@ -413,11 +413,71 @@
                         </app-setting-toggle>
                     </div>
 
+                    @if (productForm.get('requires_booking')?.value) {
+                        <app-selector label="Modo de reserva" formControlName="booking_mode"
+                            [options]="[
+                                { value: 'provider_required', label: 'Requiere proveedor' },
+                                { value: 'free_booking', label: 'Reserva libre' }
+                            ]"
+                            placeholder="Seleccionar modo" customWrapperClass="!mt-0">
+                        </app-selector>
+                    }
+
                     <app-textarea label="Instrucciones post-compra" formControlName="service_instructions"
                         placeholder="Instrucciones que recibirá el cliente después de comprar este servicio..."
                         customWrapperClass="!mt-0">
                     </app-textarea>
                 </section>
+
+                <!-- Proveedores del Servicio (only when requires_booking and edit mode) -->
+                @if (productForm.get('requires_booking')?.value && isEditMode() && productId) {
+                <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4">
+                    <div class="flex items-center gap-2">
+                        <app-icon name="users" size="20" class="text-indigo-500"></app-icon>
+                        <h2 class="text-base font-bold text-gray-900">Proveedores del Servicio</h2>
+                    </div>
+
+                    <!-- Assigned providers as chips -->
+                    <div class="flex flex-wrap items-center gap-2">
+                        @for (provider of assignedProviders(); track provider.id) {
+                            <div class="inline-flex items-center gap-2 pl-1 pr-2 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-sm">
+                                <span class="w-6 h-6 rounded-full bg-indigo-500 text-white text-xs font-bold flex items-center justify-center">
+                                    {{ getProviderInitials(provider) }}
+                                </span>
+                                <span class="text-gray-700 font-medium">{{ provider.display_name || provider.employee?.first_name }}</span>
+                                <button class="w-5 h-5 rounded-full flex items-center justify-center text-indigo-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                                    (click)="removeProviderFromService(provider.id)">
+                                    <app-icon name="x" [size]="12"></app-icon>
+                                </button>
+                            </div>
+                        }
+
+                        <!-- Add dropdown -->
+                        @if (availableProvidersForProduct().length > 0) {
+                            <select class="text-sm border border-dashed border-gray-300 rounded-full px-3 py-1.5 bg-white text-gray-500 hover:border-indigo-400 hover:text-indigo-500 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                                (change)="addProviderToService($any($event.target).value); $any($event.target).value = ''">
+                                <option value="">+ Agregar proveedor</option>
+                                @for (provider of availableProvidersForProduct(); track provider.id) {
+                                    <option [value]="provider.id">{{ provider.display_name || (provider.employee?.first_name + ' ' + provider.employee?.last_name) }}</option>
+                                }
+                            </select>
+                        }
+                    </div>
+
+                    @if (assignedProviders().length === 0 && !loadingProviders()) {
+                        <p class="text-sm text-gray-400 italic">No hay proveedores asignados a este servicio.</p>
+                    }
+
+                    <!-- Link to schedule config -->
+                    <button type="button"
+                        class="inline-flex items-center gap-1.5 text-sm text-indigo-500 hover:text-indigo-700 transition-colors font-medium"
+                        (click)="goToScheduleConfig()">
+                        <app-icon name="settings" [size]="14"></app-icon>
+                        Configurar horarios y disponibilidad
+                        <app-icon name="arrow-right" [size]="14"></app-icon>
+                    </button>
+                </section>
+                }
                 }
 
                 <!-- Dimensiones y Peso Section (only for physical products) -->

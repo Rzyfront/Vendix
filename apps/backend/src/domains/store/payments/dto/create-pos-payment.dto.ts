@@ -6,6 +6,7 @@ import {
   IsArray,
   IsDateString,
   IsEnum,
+  IsIn,
   Min,
   Max,
   MaxLength,
@@ -108,6 +109,11 @@ export class PosInstallmentTermsDto {
   @IsNumber()
   @Min(0)
   interest_rate?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['simple', 'compound'])
+  interest_type?: string;
 
   @IsOptional()
   @IsNumber()
@@ -300,6 +306,11 @@ export class CreatePosPaymentDto {
   @IsBoolean()
   @Type(() => Boolean)
   print_receipt?: boolean = false;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['free', 'installments'])
+  credit_type?: string;
 
   @IsOptional()
   @IsString()

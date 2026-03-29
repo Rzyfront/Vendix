@@ -24,7 +24,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
     <div
       *ngIf="isOpen"
       class="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-      (click)="onWrapperClick($event)"
+      (dblclick)="onWrapperClick($event)"
     >
       <!-- Backdrop overlay con blur y oscuridad mejorada -->
       <div

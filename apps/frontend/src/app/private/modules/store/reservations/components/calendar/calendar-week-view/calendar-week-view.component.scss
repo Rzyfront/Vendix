@@ -128,6 +128,15 @@
     text-overflow: ellipsis;
   }
 
+  .booking-provider {
+    font-size: 9px;
+    opacity: 0.65;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-style: italic;
+  }
+
   &.status-pending {
     background: #fef3c7;
     border-left: 3px solid #f59e0b;

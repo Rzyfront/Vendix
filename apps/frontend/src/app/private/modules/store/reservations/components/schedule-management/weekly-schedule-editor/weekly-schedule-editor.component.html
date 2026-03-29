@@ -1,124 +1,99 @@
-<div class="schedule-editor">
-  <div class="schedule-editor__header">
-    <h4>
-      <app-icon name="clock" [size]="18"></app-icon>
-      Horario Semanal
-    </h4>
+@if (loading()) {
+  <app-spinner size="sm" [center]="true"></app-spinner>
+} @else {
+  <!-- Quick actions -->
+  <div class="quick-actions">
+    <app-button variant="outline" size="xsm" (clicked)="applyPreset('weekdays-9-6')">
+      <app-icon name="briefcase" [size]="13"/> Lun-Vie 9-6
+    </app-button>
+    <app-button variant="outline" size="xsm" (clicked)="applyPreset('weekdays-8-5')">
+      <app-icon name="sunrise" [size]="13"/> Lun-Vie 8-5
+    </app-button>
+    <app-button variant="outline" size="xsm" (clicked)="copyToAll()">
+      <app-icon name="copy" [size]="13"/> Copiar a todos
+    </app-button>
   </div>
 
-  @if (loading()) {
-    <div class="loading-container">
-      <app-spinner size="md"></app-spinner>
-    </div>
-  } @else {
-    <div class="schedule-table">
-      <!-- Desktop header -->
-      <div class="schedule-table__header">
-        <div class="col-day">Día</div>
-        <div class="col-active">Activo</div>
-        <div class="col-time">Hora Inicio</div>
-        <div class="col-time">Hora Fin</div>
-        <div class="col-duration">Duración Slot</div>
-        <div class="col-number">Capacidad</div>
-        <div class="col-number">Buffer (min)</div>
-      </div>
-
-      @for (row of rows(); track row.day_of_week; let i = $index) {
-        <div class="schedule-row" [class.schedule-row--disabled]="!row.is_active">
-          <!-- Day label -->
-          <div class="col-day">
-            <span class="day-label">{{ row.label }}</span>
-          </div>
-
-          <!-- Active toggle -->
-          <div class="col-active">
-            <label class="toggle-checkbox">
-              <input
-                type="checkbox"
-                [checked]="row.is_active"
-                (change)="onToggleDay(i)"
-              />
-              <span class="toggle-checkbox__slider"></span>
-            </label>
-          </div>
-
-          <!-- Start time -->
-          <div class="col-time">
-            <label class="mobile-label">Inicio</label>
-            <input
-              type="time"
-              class="field-input"
-              [value]="row.start_time"
-              [disabled]="!row.is_active"
-              (input)="onFieldChange(i, 'start_time', $any($event.target).value)"
-            />
-          </div>
-
-          <!-- End time -->
-          <div class="col-time">
-            <label class="mobile-label">Fin</label>
-            <input
-              type="time"
-              class="field-input"
-              [value]="row.end_time"
-              [disabled]="!row.is_active"
-              (input)="onFieldChange(i, 'end_time', $any($event.target).value)"
-            />
-          </div>
-
-          <!-- Slot duration -->
-          <div class="col-duration">
-            <label class="mobile-label">Duración</label>
-            <select
-              class="field-input"
-              [value]="row.slot_duration_minutes"
-              [disabled]="!row.is_active"
-              (change)="onFieldChange(i, 'slot_duration_minutes', +$any($event.target).value)"
-            >
-              @for (opt of durationOptions; track opt.value) {
-                <option [value]="opt.value">{{ opt.label }}</option>
-              }
-            </select>
-          </div>
-
-          <!-- Capacity -->
-          <div class="col-number">
-            <label class="mobile-label">Capacidad</label>
-            <input
-              type="number"
-              class="field-input"
-              [value]="row.capacity"
-              [disabled]="!row.is_active"
-              min="1"
-              (input)="onFieldChange(i, 'capacity', +$any($event.target).value)"
-            />
-          </div>
-
-          <!-- Buffer -->
-          <div class="col-number">
-            <label class="mobile-label">Buffer</label>
-            <input
-              type="number"
-              class="field-input"
-              [value]="row.buffer_minutes"
-              [disabled]="!row.is_active"
-              min="0"
-              (input)="onFieldChange(i, 'buffer_minutes', +$any($event.target).value)"
-            />
-          </div>
-        </div>
+  <!-- Timeline header (hour markers) -->
+  <div class="timeline-header">
+    <div class="timeline-label-space"></div>
+    <div class="timeline-toggle-space"></div>
+    <div class="timeline-track-header">
+      @for (hour of hourMarkers; track hour) {
+        <span class="hour-marker" [style.left.%]="((hour - RANGE_START) / RANGE_HOURS) * 100">
+          {{ formatHourMarker(hour) }}
+        </span>
       }
     </div>
+  </div>
 
-    <div class="schedule-editor__actions">
-      <app-button
-        variant="primary"
-        [loading]="saving()"
-        (clicked)="saveSchedule()"
-      >
-        <app-icon name="save" [size]="16"></app-icon>
-        Guardar Horario
-      </app-button>
+  <!-- Day rows -->
+  @for (day of days(); track day.day_of_week; let i = $index) {
+    <div class="timeline-row" [class.inactive]="!day.is_active">
+      <!-- Day label -->
+      <div class="timeline-label">
+        <span class="day-full">{{ day.label }}</span>
+        <span class="day-short">{{ day.shortLabel }}</span>
+      </div>
+
+      <!-- Toggle using shared component -->
+      <div class="timeline-toggle">
+        <app-toggle
+          [checked]="day.is_active"
+          [ariaLabel]="day.label + ': activar o desactivar'"
+          (toggled)="toggleDay(i)"
+        />
+      </div>
+
+      <!-- Timeline bar -->
+      <div class="timeline-track" (click)="day.is_active ? startEditing(i) : null">
+        @if (day.is_active) {
+          <div
+            class="time-bar"
+            [style.left.%]="getBarLeft(day)"
+            [style.width.%]="getBarWidth(day)"
+            [class.editing]="day.editing">
+            @if (!day.editing) {
+              <span class="bar-label">{{ formatTimeShort(day.start_time) }} - {{ formatTimeShort(day.end_time) }}</span>
+            }
+          </div>
+
+          @if (day.editing) {
+            <div class="edit-overlay" [style.left.%]="getBarLeft(day)" [style.width.%]="getBarWidth(day)">
+              <input
+                type="time"
+                [value]="day.start_time"
+                (change)="updateTime(i, 'start_time', $any($event.target).value)"
+                class="time-input"
+              />
+              <span class="edit-separator">&mdash;</span>
+              <input
+                type="time"
+                [value]="day.end_time"
+                (change)="updateTime(i, 'end_time', $any($event.target).value)"
+                class="time-input"
+              />
+              <!-- Stop propagation wrapper -->
+              <div (click)="$event.stopPropagation()">
+                <app-button variant="primary" size="xsm" (clicked)="stopEditing(i)">
+                  <app-icon name="check" [size]="14"/>
+                </app-button>
+              </div>
+            </div>
+          }
+        } @else {
+          <div class="inactive-bar">
+            <span>Dia libre</span>
+          </div>
+        }
+      </div>
     </div>
   }
-</div>
+
+  <!-- Save button -->
+  <div class="save-row">
+    <app-button variant="primary" size="sm" [loading]="saving()" (clicked)="save()">
+      <app-icon name="save" [size]="15"/> Guardar Horario
+    </app-button>
+  </div>
+}

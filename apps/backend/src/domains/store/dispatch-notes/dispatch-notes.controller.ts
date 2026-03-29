@@ -34,7 +34,7 @@ export class DispatchNotesController {
   ) {}
 
   @Get()
-  @Permissions('store:dispatch-notes:read')
+  @Permissions('store:dispatch_notes:read')
   async findAll(@Query() query: DispatchNoteQueryDto) {
     const result = await this.dispatchNotesService.findAll(query);
     return this.responseService.success(
@@ -44,7 +44,7 @@ export class DispatchNotesController {
   }
 
   @Post()
-  @Permissions('store:dispatch-notes:create')
+  @Permissions('store:dispatch_notes:create')
   async create(@Body() dto: CreateDispatchNoteDto) {
     const result = await this.dispatchNotesService.create(dto);
     return this.responseService.created(
@@ -54,7 +54,7 @@ export class DispatchNotesController {
   }
 
   @Get('stats')
-  @Permissions('store:dispatch-notes:read')
+  @Permissions('store:dispatch_notes:read')
   async getStats() {
     const result = await this.dispatchNotesService.getStats();
     return this.responseService.success(
@@ -64,7 +64,7 @@ export class DispatchNotesController {
   }
 
   @Get('by-sales-order/:salesOrderId')
-  @Permissions('store:dispatch-notes:read')
+  @Permissions('store:dispatch_notes:read')
   async getBySalesOrder(
     @Param('salesOrderId', ParseIntPipe) sales_order_id: number,
   ) {
@@ -77,7 +77,7 @@ export class DispatchNotesController {
   }
 
   @Post('from-sales-order/:salesOrderId')
-  @Permissions('store:dispatch-notes:create')
+  @Permissions('store:dispatch_notes:create')
   async createFromSalesOrder(
     @Param('salesOrderId', ParseIntPipe) sales_order_id: number,
     @Body() dto: CreateFromSalesOrderDto,
@@ -93,7 +93,6 @@ export class DispatchNotesController {
   }
 
   @Get('reports/pending')
-  @UseGuards(PermissionsGuard)
   @Permissions('store:dispatch_notes:read')
   async getPendingInvoicing(@Query() query: DispatchNoteQueryDto) {
     const result = await this.dispatchNotesService.getPendingInvoicing(query);
@@ -104,7 +103,6 @@ export class DispatchNotesController {
   }
 
   @Get('reports/by-customer')
-  @UseGuards(PermissionsGuard)
   @Permissions('store:dispatch_notes:read')
   async getByCustomerReport(@Query() query: DispatchNoteQueryDto) {
     const result = await this.dispatchNotesService.getByCustomerReport(query);
@@ -115,7 +113,6 @@ export class DispatchNotesController {
   }
 
   @Get('reports/profitability')
-  @UseGuards(PermissionsGuard)
   @Permissions('store:dispatch_notes:read')
   async getProfitabilityReport(@Query() query: DispatchNoteQueryDto) {
     const result = await this.dispatchNotesService.getProfitabilityReport(query);
@@ -126,7 +123,7 @@ export class DispatchNotesController {
   }
 
   @Get(':id')
-  @Permissions('store:dispatch-notes:read')
+  @Permissions('store:dispatch_notes:read:one')
   async findOne(@Param('id', ParseIntPipe) id: number) {
     const result = await this.dispatchNotesService.findOne(id);
     return this.responseService.success(
@@ -136,7 +133,7 @@ export class DispatchNotesController {
   }
 
   @Patch(':id')
-  @Permissions('store:dispatch-notes:update')
+  @Permissions('store:dispatch_notes:update')
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateDispatchNoteDto,
@@ -149,14 +146,14 @@ export class DispatchNotesController {
   }
 
   @Delete(':id')
-  @Permissions('store:dispatch-notes:delete')
+  @Permissions('store:dispatch_notes:delete')
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.dispatchNotesService.remove(id);
     return this.responseService.deleted('Remisión eliminada exitosamente');
   }
 
   @Post(':id/confirm')
-  @Permissions('store:dispatch-notes:update')
+  @Permissions('store:dispatch_notes:confirm')
   async confirm(@Param('id', ParseIntPipe) id: number) {
     const result = await this.dispatchNoteFlowService.confirm(id);
     return this.responseService.success(
@@ -166,7 +163,7 @@ export class DispatchNotesController {
   }
 
   @Post(':id/deliver')
-  @Permissions('store:dispatch-notes:update')
+  @Permissions('store:dispatch_notes:deliver')
   async deliver(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: DeliverDispatchNoteDto,
@@ -179,7 +176,7 @@ export class DispatchNotesController {
   }
 
   @Post(':id/void')
-  @Permissions('store:dispatch-notes:update')
+  @Permissions('store:dispatch_notes:void')
   async voidNote(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: VoidDispatchNoteDto,
@@ -192,7 +189,7 @@ export class DispatchNotesController {
   }
 
   @Post(':id/invoice')
-  @Permissions('store:dispatch-notes:update')
+  @Permissions('store:dispatch_notes:invoice')
   async invoice(@Param('id', ParseIntPipe) id: number) {
     const result = await this.dispatchNoteFlowService.invoice(id);
     return this.responseService.success(

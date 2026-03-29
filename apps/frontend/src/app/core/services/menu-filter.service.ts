@@ -58,7 +58,6 @@ export class MenuFilterService {
     Cotizaciones: 'orders_quotations',
     Remisiones: 'orders_dispatch_notes',
     'Plan Separe': 'orders_layaway',
-    'Créditos': 'orders_credits',
     Reservas: 'orders_reservations',
 
     // STORE_ADMIN - Inventario (padre + submódulos)

@@ -287,7 +287,7 @@ export class CurrencyInputDirective implements ControlValueAccessor {
    * Remove all characters except digits, decimal separator, and leading minus.
    */
   private sanitize(value: string): string {
-    const { decimal } = this.getSeparators();
+    const { decimal, thousands } = this.getSeparators();
     let result = '';
     let hasDecimal = false;
     const maxDecimals = this.getDecimals();
@@ -303,7 +303,11 @@ export class CurrencyInputDirective implements ControlValueAccessor {
         result += ch;
       } else if (ch === '-' && i === 0 && this.allowNegative()) {
         result += ch;
+      } else if (ch === thousands || ch === '\u00A0') {
+        // Thousands separator → skip (added automatically by formatLive)
+        continue;
       } else if ((ch === decimal || ch === '.' || ch === ',') && !hasDecimal && maxDecimals > 0) {
+        // Any remaining '.' or ',' that isn't the thousands separator → decimal
         result += decimal;
         hasDecimal = true;
       }

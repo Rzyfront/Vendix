@@ -57,6 +57,8 @@ export interface Product {
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
   service_pricing_type?: 'per_hour' | 'per_session' | 'package' | 'subscription';
   requires_booking?: boolean;
+  booking_mode?: 'provider_required' | 'free_booking';
+  buffer_minutes?: number;
   is_recurring?: boolean;
   service_instructions?: string;
   final_price: number;
@@ -213,6 +215,8 @@ export interface CreateProductDto {
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
   service_pricing_type?: 'per_hour' | 'per_session' | 'package' | 'subscription';
   requires_booking?: boolean;
+  booking_mode?: 'provider_required' | 'free_booking';
+  buffer_minutes?: number;
   is_recurring?: boolean;
   service_instructions?: string;
   brand_id?: number | null;
@@ -249,6 +253,8 @@ export interface UpdateProductDto {
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
   service_pricing_type?: 'per_hour' | 'per_session' | 'package' | 'subscription';
   requires_booking?: boolean;
+  booking_mode?: 'provider_required' | 'free_booking';
+  buffer_minutes?: number;
   is_recurring?: boolean;
   service_instructions?: string;
   brand_id?: number | null;

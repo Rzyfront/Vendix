@@ -99,31 +99,47 @@
               <span>Crédito</span>
             </button>
           </div>
+        </div>
 
-          <!-- Crédito Config (only when credito selected) -->
-          <div *ngIf="paymentState.paymentForm === 'credito'" class="tab-content">
-            <div class="credit-config">
-              <div *ngIf="!cartState?.customer" class="credit-warning">
-                <app-icon name="alert-triangle" [size]="18"></app-icon>
-                <span>Se requiere un cliente para ventas a crédito</span>
-              </div>
+        <!-- Crédito Config — outside subsection-body so it stays visible when tabs collapse -->
+        <div *ngIf="paymentState.paymentForm === 'credito'" class="tab-content">
+          <div class="credit-config">
+            <div *ngIf="!cartState?.customer" class="credit-warning">
+              <app-icon name="alert-triangle" [size]="18"></app-icon>
+              <span>Se requiere un cliente para ventas a crédito</span>
+            </div>
 
-              <div class="credit-field">
-                <label>Abono inicial (opcional)</label>
-                <input type="number" [(ngModel)]="creditInitialPayment" (ngModelChange)="updateCreditCalculations()" min="0" [max]="cartState?.summary?.total || 0" step="0.01" placeholder="0.00"/>
-                <span class="hint">Se descuenta del total antes de generar cuotas</span>
-              </div>
-
-              <div *ngIf="creditInitialPayment > 0" class="payment-methods-grid mini">
-                <button *ngFor="let method of paymentMethods" type="button"
-                  class="payment-method-btn mini"
-                  [class.selected]="creditInitialPaymentMethod?.id === method.id"
-                  (click)="selectCreditInitialPaymentMethod(method)">
-                  <app-icon [name]="method.icon" [size]="18"></app-icon>
-                  <span class="method-name">{{ method.name }}</span>
+            <!-- Tipo de Crédito -->
+            <div class="credit-field">
+              <label>Tipo de Crédito</label>
+              <div class="frequency-grid">
+                <button *ngFor="let opt of creditTypeOptions" type="button"
+                  class="frequency-btn"
+                  [class.selected]="creditType === opt.value"
+                  (click)="creditType = opt.value; updateCreditCalculations()">
+                  {{ opt.label }}
                 </button>
               </div>
+            </div>
 
+            <div class="credit-field">
+              <label>Abono inicial (opcional)</label>
+              <input appCurrencyInput [(ngModel)]="creditInitialPayment" (ngModelChange)="updateCreditCalculations()" placeholder="0.00"/>
+              <span class="hint">Se descuenta del total antes de generar cuotas</span>
+            </div>
+
+            <div *ngIf="creditInitialPayment > 0" class="payment-methods-grid mini">
+              <button *ngFor="let method of paymentMethods" type="button"
+                class="payment-method-btn mini"
+                [class.selected]="creditInitialPaymentMethod?.id === method.id"
+                (click)="selectCreditInitialPaymentMethod(method)">
+                <app-icon [name]="method.icon" [size]="18"></app-icon>
+                <span class="method-name">{{ method.name }}</span>
+              </button>
+            </div>
+
+            <!-- Campos de cuotas (solo para tipo 'installments') -->
+            <ng-container *ngIf="creditType === 'installments'">
               <div class="credit-field">
                 <label>Periodicidad</label>
                 <div class="frequency-grid">
@@ -145,25 +161,48 @@
                 <label>Fecha primera cuota</label>
                 <input type="date" [(ngModel)]="creditFirstDate" (ngModelChange)="updateCreditCalculations()"/>
               </div>
+            </ng-container>
 
-              <div class="credit-field">
-                <label>Tasa de interés (%) (opcional)</label>
-                <input type="number" [(ngModel)]="creditInterestRate" (ngModelChange)="updateCreditCalculations()" min="0" step="0.1" placeholder="0"/>
+            <div class="credit-field">
+              <label>Tasa de interés (%) (opcional)</label>
+              <input type="number" [(ngModel)]="creditInterestRate" (ngModelChange)="updateCreditCalculations()" min="0" step="0.1" placeholder="0"/>
+            </div>
+
+            <!-- Tipo de Interés (solo visible si hay tasa > 0) -->
+            <div *ngIf="creditInterestRate > 0" class="credit-field">
+              <label>Tipo de Interés</label>
+              <div class="frequency-grid">
+                <button *ngFor="let opt of interestTypeOptions" type="button"
+                  class="frequency-btn"
+                  [class.selected]="creditInterestType === opt.value"
+                  (click)="creditInterestType = opt.value; updateCreditCalculations()">
+                  {{ opt.label }}
+                </button>
               </div>
+            </div>
 
-              <div class="credit-balance">
-                <span>Saldo a financiar</span>
-                <span>{{ creditRemainingBalance | currency }}</span>
-              </div>
+            <div class="credit-balance">
+              <span>Saldo a financiar</span>
+              <span>{{ creditRemainingBalance | currency }}</span>
+            </div>
 
-              <div *ngIf="creditInstallmentsPreview.length > 0" class="installments-preview">
-                <div *ngFor="let inst of creditInstallmentsPreview; let i = index" class="installment-row">
-                  <div class="installment-left">
-                    <span class="installment-number">{{ i + 1 }}</span>
-                    <span class="installment-date">{{ inst.due_date }}</span>
-                  </div>
-                  <span class="installment-amount">{{ inst.amount | currency }}</span>
+            <!-- Interest summary -->
+            <div *ngIf="creditInterestRate > 0 && creditType === 'installments' && creditInstallmentsPreview.length > 0" class="credit-summary-row" style="display: flex; justify-content: space-between; font-size: 12px; color: #6b7280; padding: 4px 0;">
+              <span>Interés ({{ creditInterestType === 'compound' ? 'Compuesto' : 'Simple' }} {{ creditInterestRate > 1 ? creditInterestRate : creditInterestRate * 100 }}%)</span>
+              <span style="color: #ef4444;">+ {{ (getTotalInstallments() - creditRemainingBalance) | currency }}</span>
+            </div>
+            <div *ngIf="creditInterestRate > 0 && creditType === 'installments' && creditInstallmentsPreview.length > 0" class="credit-summary-row" style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; padding: 4px 0; border-top: 1px solid #e5e7eb;">
+              <span>Total a pagar en cuotas</span>
+              <span>{{ getTotalInstallments() | currency }}</span>
+            </div>
+
+            <div *ngIf="creditType === 'installments' && creditInstallmentsPreview.length > 0" class="installments-preview">
+              <div *ngFor="let inst of creditInstallmentsPreview; let i = index" class="installment-row">
+                <div class="installment-left">
+                  <span class="installment-number">{{ i + 1 }}</span>
+                  <span class="installment-date">{{ inst.due_date }}</span>
                 </div>
+                <span class="installment-amount">{{ inst.amount | currency }}</span>
               </div>
             </div>
           </div>
@@ -217,11 +256,9 @@
               <div class="cash-input" [class.error]="isCashAmountInsufficient">
                 <span class="currency">{{ currencySymbol() }}</span>
                 <input
-                  type="number"
+                  appCurrencyInput
                   [formControl]="cashReceivedControl"
                   placeholder="0.00"
-                  step="0.01"
-                  (input)="calculateChange()"
                 />
               </div>
               <span *ngIf="isCashAmountInsufficient" class="error-text">

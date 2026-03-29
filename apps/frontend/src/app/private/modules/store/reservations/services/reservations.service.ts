@@ -9,8 +9,9 @@ import {
   CreateBookingDto,
   RescheduleBookingDto,
   AvailabilitySlot,
-  ServiceSchedule,
-  ScheduleException,
+  ServiceProvider,
+  ProviderSchedule,
+  ProviderException,
 } from '../interfaces/reservation.interface';
 
 export interface PaginatedResponse<T> {
@@ -111,37 +112,18 @@ export class ReservationsService {
     );
   }
 
-  getAvailability(productId: number, dateFrom: string, dateTo: string): Observable<AvailabilitySlot[]> {
-    const params = new HttpParams()
-      .set('product_id', productId.toString())
+  getAvailability(productId: number, dateFrom: string, dateTo: string, providerId?: number): Observable<AvailabilitySlot[]> {
+    let params = new HttpParams()
       .set('date_from', dateFrom)
       .set('date_to', dateTo);
 
-    return this.http.get<any>(`${this.apiUrl}/availability`, { params }).pipe(
+    if (providerId) {
+      params = params.set('provider_id', providerId.toString());
+    }
+
+    return this.http.get<any>(`${this.apiUrl}/availability/${productId}`, { params }).pipe(
       map((response) => response.data || response),
     );
-  }
-
-  getServiceSchedules(productId: number): Observable<ServiceSchedule[]> {
-    return this.http.get<any>(`${this.apiUrl}/schedules/${productId}`).pipe(
-      map((response) => response.data || response),
-    );
-  }
-
-  upsertSchedule(productId: number, items: Partial<ServiceSchedule>[]): Observable<ServiceSchedule[]> {
-    return this.http.put<any>(`${this.apiUrl}/schedules/${productId}`, { items }).pipe(
-      map((response) => response.data || response),
-    );
-  }
-
-  createException(dto: { product_id: number; date: string; reason?: string }): Observable<any> {
-    return this.http.post<any>(`${this.apiUrl}/exceptions`, dto).pipe(
-      map((response) => response.data || response),
-    );
-  }
-
-  deleteException(id: number): Observable<void> {
-    return this.http.delete<void>(`${this.apiUrl}/exceptions/${id}`);
   }
 
   getCalendar(dateFrom: string, dateTo: string, productId?: number): Observable<Record<string, Booking[]>> {
@@ -156,13 +138,116 @@ export class ReservationsService {
     );
   }
 
-  getExceptions(productId: number, dateFrom?: string, dateTo?: string): Observable<ScheduleException[]> {
-    let params = new HttpParams().set('product_id', productId.toString());
+  startReservation(id: number): Observable<Booking> {
+    return this.http.patch<any>(`${this.apiUrl}/${id}/start`, {}).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  updateNotes(id: number, dto: { notes?: string; internal_notes?: string }): Observable<Booking> {
+    return this.http.patch<any>(`${this.apiUrl}/${id}`, dto).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  // --- Providers ---
+
+  getProviders(): Observable<ServiceProvider[]> {
+    return this.http.get<any>(`${this.apiUrl}/providers`).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  getProvider(id: number): Observable<ServiceProvider> {
+    return this.http.get<any>(`${this.apiUrl}/providers/${id}`).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  createProvider(dto: { employee_id: number; display_name?: string; avatar_url?: string; bio?: string }): Observable<ServiceProvider> {
+    return this.http.post<any>(`${this.apiUrl}/providers`, dto).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  updateProvider(id: number, dto: { display_name?: string; avatar_url?: string; bio?: string; is_active?: boolean; sort_order?: number }): Observable<ServiceProvider> {
+    return this.http.patch<any>(`${this.apiUrl}/providers/${id}`, dto).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  getAvailableEmployees(): Observable<{ id: number; first_name: string; last_name: string; position?: string }[]> {
+    return this.http.get<any>(`${this.apiUrl}/providers/available-employees`).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  getProvidersForService(productId: number): Observable<ServiceProvider[]> {
+    return this.http.get<any>(`${this.apiUrl}/providers/for-service/${productId}`).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  assignServiceToProvider(providerId: number, productId: number): Observable<any> {
+    return this.http.post<any>(`${this.apiUrl}/providers/${providerId}/services`, { product_id: productId }).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  removeServiceFromProvider(providerId: number, productId: number): Observable<void> {
+    return this.http.delete<any>(`${this.apiUrl}/providers/${providerId}/services/${productId}`);
+  }
+
+  getProviderSchedule(providerId: number): Observable<ProviderSchedule[]> {
+    return this.http.get<any>(`${this.apiUrl}/providers/${providerId}/schedules`).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  upsertProviderSchedule(providerId: number, items: Partial<ProviderSchedule>[]): Observable<ProviderSchedule[]> {
+    return this.http.put<any>(`${this.apiUrl}/providers/${providerId}/schedules`, { items }).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  getProviderExceptions(providerId: number, dateFrom?: string, dateTo?: string): Observable<ProviderException[]> {
+    let params = new HttpParams();
     if (dateFrom) params = params.set('date_from', dateFrom);
     if (dateTo) params = params.set('date_to', dateTo);
-
-    return this.http.get<any>(`${this.apiUrl}/schedules/exceptions`, { params }).pipe(
+    return this.http.get<any>(`${this.apiUrl}/providers/${providerId}/exceptions`, { params }).pipe(
       map((response) => response.data || response),
+    );
+  }
+
+  createProviderException(providerId: number, dto: Partial<ProviderException>): Observable<ProviderException> {
+    return this.http.post<any>(`${this.apiUrl}/providers/${providerId}/exceptions`, dto).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  deleteProviderException(providerId: number, exceptionId: number): Observable<void> {
+    return this.http.delete<any>(`${this.apiUrl}/providers/${providerId}/exceptions/${exceptionId}`);
+  }
+
+  // Provider service assignments
+  getProviderServices(providerId: number): Observable<any[]> {
+    return this.http.get<any>(`${this.apiUrl}/providers/${providerId}/services`).pipe(
+      map((response) => response.data || response || []),
+    );
+  }
+
+  // Bookable services (for assignment)
+  getBookableServices(): Observable<{ id: number; name: string; base_price?: number; service_duration_minutes?: number; booking_mode?: string }[]> {
+    const params = new HttpParams()
+      .set('product_type', 'service')
+      .set('requires_booking', 'true')
+      .set('limit', '100');
+
+    return this.http.get<any>(`${environment.apiUrl}/store/products`, { params }).pipe(
+      map((response) => {
+        const inner = response.data || response;
+        return inner.data || inner || [];
+      }),
     );
   }
 }

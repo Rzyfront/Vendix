@@ -8,22 +8,22 @@
 >
   <!-- Step indicator -->
   <div class="flex items-center justify-center gap-2 mb-6">
-    @for (step of [1, 2, 3]; track step) {
+    @for (step of stepLabels; track $index; let i = $index) {
       <div class="flex items-center gap-2">
         <div
           class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors"
-          [class.bg-primary]="currentStep >= step"
-          [class.text-white]="currentStep >= step"
-          [class.bg-gray-200]="currentStep < step"
-          [class.text-gray-500]="currentStep < step"
+          [class.bg-primary]="currentStep >= i + 1"
+          [class.text-white]="currentStep >= i + 1"
+          [class.bg-gray-200]="currentStep < i + 1"
+          [class.text-gray-500]="currentStep < i + 1"
         >
-          {{ step }}
+          {{ i + 1 }}
         </div>
-        @if (step < 3) {
+        @if (i < stepLabels.length - 1) {
           <div
             class="w-8 h-0.5 transition-colors"
-            [class.bg-primary]="currentStep > step"
-            [class.bg-gray-200]="currentStep <= step"
+            [class.bg-primary]="currentStep > i + 1"
+            [class.bg-gray-200]="currentStep <= i + 1"
           ></div>
         }
       </div>
@@ -63,51 +63,129 @@
       </div>
     }
 
-    <!-- Step 2: Horario -->
-    @if (currentStep === 2) {
+    <!-- Step 2 (provider mode): Seleccionar Proveedor -->
+    @if (!isFreeBooking && currentStep === 2) {
       <div class="space-y-4">
-        <h3 class="text-sm font-semibold text-text-primary mb-3">Selecciona un horario</h3>
+        <h3 class="text-sm font-semibold text-text-primary mb-3">Selecciona un proveedor</h3>
 
-        @if (loadingSlots) {
+        @if (loadingProviders) {
           <div class="p-6 text-center">
             <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-            <p class="mt-2 text-sm text-text-secondary">Cargando horarios disponibles...</p>
+            <p class="mt-2 text-sm text-text-secondary">Cargando proveedores...</p>
           </div>
         }
 
-        @if (!loadingSlots && availableSlots.length === 0) {
-          <div class="p-6 text-center text-gray-500">
-            <app-icon name="calendar" [size]="32" class="mx-auto mb-2 text-gray-300"></app-icon>
-            <p class="text-sm">No hay horarios disponibles para esta fecha.</p>
-            <p class="text-xs mt-1">Intenta con otra fecha o servicio.</p>
-          </div>
-        }
+        @if (!loadingProviders) {
+          <div class="grid grid-cols-2 gap-3">
+            <!-- "Any available" option -->
+            <button
+              type="button"
+              class="flex flex-col items-center gap-2 p-4 rounded-lg border text-center text-sm transition-colors cursor-pointer"
+              [class.border-primary]="selectedProvider === null"
+              [class.bg-primary/5]="selectedProvider === null"
+              [class.ring-2]="selectedProvider === null"
+              [class.ring-primary/30]="selectedProvider === null"
+              [class.border-border]="selectedProvider !== null"
+              [class.hover:border-primary/50]="selectedProvider !== null"
+              (click)="selectProvider(null)"
+            >
+              <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
+                <app-icon name="users" [size]="20" class="text-gray-500"></app-icon>
+              </div>
+              <span class="font-medium text-text-primary">Cualquier disponible</span>
+              <span class="text-xs text-text-secondary">El sistema asigna automáticamente</span>
+            </button>
 
-        @if (!loadingSlots && availableSlots.length > 0) {
-          <div class="grid grid-cols-3 gap-2 max-h-[240px] overflow-y-auto">
-            @for (slot of availableSlots; track slot.start_time) {
+            @for (provider of providers; track provider.id) {
               <button
                 type="button"
-                class="p-3 rounded-lg border text-center text-sm transition-colors cursor-pointer"
-                [class.border-primary]="selectedSlot === slot"
-                [class.bg-primary/5]="selectedSlot === slot"
-                [class.text-primary]="selectedSlot === slot"
-                [class.font-semibold]="selectedSlot === slot"
-                [class.border-border]="selectedSlot !== slot"
-                [class.hover:border-primary/50]="selectedSlot !== slot"
-                (click)="selectSlot(slot)"
+                class="flex flex-col items-center gap-2 p-4 rounded-lg border text-center text-sm transition-colors cursor-pointer"
+                [class.border-primary]="selectedProvider?.id === provider.id"
+                [class.bg-primary/5]="selectedProvider?.id === provider.id"
+                [class.ring-2]="selectedProvider?.id === provider.id"
+                [class.ring-primary/30]="selectedProvider?.id === provider.id"
+                [class.border-border]="selectedProvider?.id !== provider.id"
+                [class.hover:border-primary/50]="selectedProvider?.id !== provider.id"
+                (click)="selectProvider(provider)"
               >
-                <div class="font-medium">{{ slot.start_time.substring(0, 5) }}</div>
-                <div class="text-xs text-text-secondary mt-0.5">
-                  {{ slot.available }} disponible{{ slot.available > 1 ? 's' : '' }}
-                </div>
+                @if (provider.avatar_url) {
+                  <img [src]="provider.avatar_url" [alt]="getProviderDisplayName(provider)" class="w-10 h-10 rounded-full object-cover">
+                } @else {
+                  <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-sm">
+                    {{ getProviderInitials(provider) }}
+                  </div>
+                }
+                <span class="font-medium text-text-primary">{{ getProviderDisplayName(provider) }}</span>
+                @if (provider.employee?.position) {
+                  <span class="text-xs text-text-secondary">{{ provider.employee?.position }}</span>
+                }
               </button>
             }
           </div>
+
+          @if (!loadingProviders && providers.length === 0) {
+            <div class="p-4 text-center text-gray-500">
+              <app-icon name="user-x" [size]="28" class="mx-auto mb-2 text-gray-300"></app-icon>
+              <p class="text-sm">No hay proveedores asignados a este servicio.</p>
+              <p class="text-xs mt-1">Se utilizara asignacion automatica.</p>
+            </div>
+          }
+        }
+      </div>
+    }
+
+    <!-- Slot step (step 2 for free_booking, step 3 for provider mode) -->
+    @if (currentStep === slotStep) {
+      <div class="space-y-4">
+        <h3 class="text-sm font-semibold text-text-primary mb-3">Selecciona un horario</h3>
+
+        @if (!isFreeBooking) {
+          @if (loadingSlots) {
+            <div class="p-6 text-center">
+              <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+              <p class="mt-2 text-sm text-text-secondary">Cargando horarios disponibles...</p>
+            </div>
+          }
+
+          @if (!loadingSlots && availableSlots.length === 0) {
+            <div class="p-6 text-center text-gray-500">
+              <app-icon name="calendar" [size]="32" class="mx-auto mb-2 text-gray-300"></app-icon>
+              <p class="text-sm">No hay horarios disponibles para esta fecha.</p>
+              <p class="text-xs mt-1">Intenta con otra fecha o servicio.</p>
+            </div>
+          }
+
+          @if (!loadingSlots && availableSlots.length > 0) {
+            <div class="grid grid-cols-3 gap-2 max-h-[240px] overflow-y-auto">
+              @for (slot of availableSlots; track slot.start_time) {
+                <button
+                  type="button"
+                  class="p-3 rounded-lg border text-center text-sm transition-colors cursor-pointer"
+                  [class.border-primary]="selectedSlot === slot"
+                  [class.bg-primary/5]="selectedSlot === slot"
+                  [class.text-primary]="selectedSlot === slot"
+                  [class.font-semibold]="selectedSlot === slot"
+                  [class.border-border]="selectedSlot !== slot"
+                  [class.hover:border-primary/50]="selectedSlot !== slot"
+                  (click)="selectSlot(slot)"
+                >
+                  <div class="font-medium">{{ slot.start_time.substring(0, 5) }}</div>
+                  <div class="text-xs text-text-secondary mt-0.5">
+                    {{ slot.total_available }} disponible{{ slot.total_available > 1 ? 's' : '' }}
+                  </div>
+                </button>
+              }
+            </div>
+          }
         }
 
-        <!-- Manual time input as fallback -->
-        <div class="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-border">
+        <!-- Manual time input (always shown for free_booking, fallback for provider mode) -->
+        <div class="grid grid-cols-2 gap-4"
+          [class.mt-4]="!isFreeBooking"
+          [class.pt-4]="!isFreeBooking"
+          [class.border-t]="!isFreeBooking"
+          [class.border-border]="!isFreeBooking"
+        >
           <app-input
             formControlName="start_time"
             label="Hora inicio"
@@ -130,11 +208,25 @@
             customWrapperClass="mt-0"
           ></app-input>
         </div>
+
+        <!-- Admin override toggle -->
+        <div class="flex items-center gap-2 mt-3 pt-3 border-t border-border">
+          <input
+            type="checkbox"
+            id="skipAvailability"
+            [checked]="skipAvailabilityCheck"
+            (change)="skipAvailabilityCheck = !skipAvailabilityCheck"
+            class="w-4 h-4 rounded border-border text-primary focus:ring-primary/30"
+          />
+          <label for="skipAvailability" class="text-xs text-text-secondary cursor-pointer">
+            Agendar sin verificar disponibilidad
+          </label>
+        </div>
       </div>
     }
 
-    <!-- Step 3: Cliente y Notas -->
-    @if (currentStep === 3) {
+    <!-- Customer step (step 3 for free_booking, step 4 for provider mode) -->
+    @if (currentStep === customerStep) {
       <div class="space-y-4">
         <h3 class="text-sm font-semibold text-text-primary mb-3">Datos del cliente</h3>
 
@@ -155,7 +247,7 @@
             <input
               type="text"
               class="w-full px-3 py-2 border border-border rounded-lg text-sm bg-surface outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-              placeholder="Buscar por nombre, email o teléfono..."
+              placeholder="Buscar por nombre, email o telefono..."
               [value]="customerSearch"
               (input)="onCustomerSearch($any($event.target).value)"
             />

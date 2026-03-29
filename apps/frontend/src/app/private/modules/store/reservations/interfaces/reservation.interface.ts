@@ -19,6 +19,8 @@ export interface Booking {
   product?: { id: number; name: string; service_duration_minutes?: number; image_url?: string; base_price?: number };
   created_by?: { id: number; first_name: string; last_name: string };
   order?: { id: number; order_number: string };
+  provider_id?: number;
+  provider?: { id: number; display_name?: string; avatar_url?: string; employee?: { first_name: string; last_name: string } };
 }
 
 export type BookingStatus = 'pending' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'no_show';
@@ -35,21 +37,8 @@ export interface AvailabilitySlot {
   date: string;
   start_time: string;
   end_time: string;
-  capacity: number;
-  reserved: number;
-  available: number;
-}
-
-export interface ServiceSchedule {
-  id: number;
-  product_id: number;
-  day_of_week: number;
-  start_time: string;
-  end_time: string;
-  slot_duration_minutes: number;
-  capacity: number;
-  buffer_minutes: number;
-  is_active: boolean;
+  available_providers: AvailableProvider[];
+  total_available: number;
 }
 
 export interface BookingQuery {
@@ -74,6 +63,8 @@ export interface CreateBookingDto {
   end_time: string;
   channel?: string;
   notes?: string;
+  provider_id?: number;
+  skip_availability_check?: boolean;
 }
 
 export interface RescheduleBookingDto {
@@ -91,14 +82,49 @@ export interface CalendarDateData {
   isCurrentMonth: boolean;
 }
 
-export interface ScheduleException {
+export interface ServiceProvider {
   id: number;
   store_id: number;
-  product_id?: number;
+  employee_id: number;
+  is_active: boolean;
+  display_name?: string;
+  avatar_url?: string;
+  bio?: string;
+  sort_order: number;
+  employee?: { id: number; first_name: string; last_name: string; position?: string };
+  services?: ProviderServiceAssignment[];
+  schedules?: ProviderSchedule[];
+  exceptions?: ProviderException[];
+}
+
+export interface ProviderServiceAssignment {
+  id: number;
+  provider_id: number;
+  product_id: number;
+  product?: { id: number; name: string; base_price?: number; service_duration_minutes?: number };
+}
+
+export interface ProviderSchedule {
+  id: number;
+  provider_id: number;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  is_active: boolean;
+}
+
+export interface ProviderException {
+  id: number;
+  provider_id: number;
   date: string;
-  is_closed: boolean;
+  is_unavailable: boolean;
   custom_start_time?: string;
   custom_end_time?: string;
-  custom_capacity?: number;
   reason?: string;
+}
+
+export interface AvailableProvider {
+  id: number;
+  display_name: string;
+  avatar_url?: string;
 }

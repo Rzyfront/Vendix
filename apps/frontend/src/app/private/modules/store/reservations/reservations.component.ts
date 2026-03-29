@@ -7,6 +7,7 @@ import { ReservationFormModalComponent } from './components/reservation-form-mod
 import { CalendarContainerComponent } from './components/calendar/calendar-container/calendar-container.component';
 import { QuickBookFromSlotModalComponent } from './components/calendar/quick-book-from-slot-modal/quick-book-from-slot-modal.component';
 import { RescheduleModalComponent } from './components/reschedule-modal/reschedule-modal.component';
+import { BookingDetailModalComponent } from './components/booking-detail-modal/booking-detail-modal.component';
 import { TodayReservationsPanelComponent } from './components/today-reservations-panel/today-reservations-panel.component';
 import { QuickActionsPanelComponent } from './components/quick-actions-panel/quick-actions-panel.component';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
@@ -31,6 +32,7 @@ import { ToastService, DialogService, IconComponent } from '../../../../shared/c
     CalendarContainerComponent,
     QuickBookFromSlotModalComponent,
     RescheduleModalComponent,
+    BookingDetailModalComponent,
     TodayReservationsPanelComponent,
     QuickActionsPanelComponent,
     CardComponent,
@@ -71,6 +73,10 @@ export class ReservationsComponent implements OnInit, OnDestroy {
   // Reschedule modal
   isRescheduleModalOpen = false;
   bookingToReschedule: Booking | null = null;
+
+  // Detail modal
+  isDetailModalOpen = false;
+  selectedBooking: Booking | null = null;
 
   // Tap-to-book modal
   isTapToBookModalOpen = false;
@@ -184,10 +190,12 @@ export class ReservationsComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
+          this.isDetailModalOpen = false;
           this.toastService.success('Reserva confirmada');
           this.loadBookings();
           this.loadStats();
           this.loadTodayBookings();
+          this.calendarRefreshTrigger++;
         },
         error: () => {
           this.toastService.error('Error al confirmar la reserva');
@@ -210,10 +218,12 @@ export class ReservationsComponent implements OnInit, OnDestroy {
             .pipe(takeUntil(this.destroy$))
             .subscribe({
               next: () => {
+                this.isDetailModalOpen = false;
                 this.toastService.success('Reserva cancelada');
                 this.loadBookings();
                 this.loadStats();
                 this.loadTodayBookings();
+                this.calendarRefreshTrigger++;
               },
               error: () => {
                 this.toastService.error('Error al cancelar la reserva');
@@ -229,10 +239,12 @@ export class ReservationsComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
+          this.isDetailModalOpen = false;
           this.toastService.success('Reserva completada');
           this.loadBookings();
           this.loadStats();
           this.loadTodayBookings();
+          this.calendarRefreshTrigger++;
         },
         error: () => {
           this.toastService.error('Error al completar la reserva');
@@ -255,10 +267,12 @@ export class ReservationsComponent implements OnInit, OnDestroy {
             .pipe(takeUntil(this.destroy$))
             .subscribe({
               next: () => {
+                this.isDetailModalOpen = false;
                 this.toastService.success('Reserva marcada como No Show');
                 this.loadBookings();
                 this.loadStats();
                 this.loadTodayBookings();
+                this.calendarRefreshTrigger++;
               },
               error: () => {
                 this.toastService.error('Error al marcar como No Show');
@@ -271,6 +285,48 @@ export class ReservationsComponent implements OnInit, OnDestroy {
   onReschedule(booking: Booking): void {
     this.bookingToReschedule = booking;
     this.isRescheduleModalOpen = true;
+  }
+
+  onBookingClicked(booking: Booking): void {
+    this.selectedBooking = booking;
+    this.isDetailModalOpen = true;
+  }
+
+  onStartBooking(booking: Booking): void {
+    this.reservationsService
+      .startReservation(booking.id)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.isDetailModalOpen = false;
+          this.toastService.success('Reserva iniciada');
+          this.loadBookings();
+          this.loadStats();
+          this.loadTodayBookings();
+          this.calendarRefreshTrigger++;
+        },
+        error: () => {
+          this.toastService.error('Error al iniciar la reserva');
+        },
+      });
+  }
+
+  onRescheduledFromDetail(): void {
+    this.isDetailModalOpen = false;
+    this.loadBookings();
+    this.loadStats();
+    this.loadTodayBookings();
+    this.calendarRefreshTrigger++;
+  }
+
+  onDetailModalClose(): void {
+    this.isDetailModalOpen = false;
+  }
+
+  onNotesUpdated(): void {
+    this.loadBookings();
+    this.loadTodayBookings();
+    this.calendarRefreshTrigger++;
   }
 
   onSlotClicked(event: { date: string; time: string }): void {

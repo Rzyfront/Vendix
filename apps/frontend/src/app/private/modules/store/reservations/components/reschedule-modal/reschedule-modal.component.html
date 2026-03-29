@@ -12,6 +12,12 @@
         <app-icon name="user" [size]="16"></app-icon>
         <span>{{ booking()!.customer?.first_name }} {{ booking()!.customer?.last_name }}</span>
       </div>
+      @if (booking()!.provider) {
+        <div class="info-row">
+          <app-icon name="user-circle" [size]="16"></app-icon>
+          <span>{{ booking()!.provider?.display_name || (booking()!.provider?.employee?.first_name + ' ' + booking()!.provider?.employee?.last_name) }}</span>
+        </div>
+      }
       <div class="info-row muted">
         <app-icon name="calendar" [size]="14"></app-icon>
         <span>Actual: {{ booking()!.date }} {{ formatTime(booking()!.start_time) }} - {{ formatTime(booking()!.end_time) }}</span>

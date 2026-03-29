@@ -60,6 +60,21 @@
             <span>Entrega:</span>
             <span class="text-text-secondary font-normal">{{ deliveryConfig().label }}</span>
           </div>
+          @if (isCreditOrder()) {
+            <span class="w-px h-3.5 bg-border"></span>
+            <div class="flex items-center gap-1.5">
+              <span class="px-2 py-0.5 bg-blue-500 text-white text-[10px] font-black uppercase rounded tracking-wider">Crédito</span>
+              <span class="px-1.5 py-0.5 text-[10px] font-bold uppercase rounded tracking-wider"
+                [ngClass]="isInstallmentCredit() ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'">
+                {{ isInstallmentCredit() ? 'Cuotas' : 'Libre' }}
+              </span>
+              @if (overdueCount() > 0) {
+                <span class="px-1.5 py-0.5 bg-red-500 text-white text-[10px] font-black rounded">
+                  {{ overdueCount() }} vencida{{ overdueCount() > 1 ? 's' : '' }}
+                </span>
+              }
+            </div>
+          }
         </div>
       </div>
 
@@ -180,6 +195,116 @@
               }
             </div>
           </app-card>
+
+          <!-- PLAN DE CUOTAS (Credit Installments) -->
+          @if (isInstallmentCredit() && order()?.order_installments?.length) {
+            <app-card title="Plan de Cuotas" shadow="sm" [responsivePadding]="true">
+              <!-- Desktop Table -->
+              <div class="hidden md:block overflow-x-auto -mx-3 sm:-mx-4">
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="bg-[var(--color-surface)]">
+                      <th class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-left">#</th>
+                      <th class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-left">Vence</th>
+                      <th class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-right">Capital</th>
+                      <th class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-right">Interés</th>
+                      <th class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-right">Total</th>
+                      <th class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-right">Pagado</th>
+                      <th class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-center">Estado</th>
+                      <th class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-border">
+                    @for (inst of order()!.order_installments!; track inst.id) {
+                      <tr class="hover:bg-[var(--color-surface)] transition-colors">
+                        <td class="px-3 py-2.5 text-sm font-medium text-gray-900">{{ inst.installment_number }}</td>
+                        <td class="px-3 py-2.5 text-sm text-text-secondary">{{ formatDate(inst.due_date) }}</td>
+                        <td class="px-3 py-2.5 text-sm text-text-secondary text-right">{{ inst.capital_amount | currency }}</td>
+                        <td class="px-3 py-2.5 text-sm text-text-secondary text-right">{{ inst.interest_amount | currency }}</td>
+                        <td class="px-3 py-2.5 text-sm font-semibold text-gray-900 text-right">{{ inst.amount | currency }}</td>
+                        <td class="px-3 py-2.5 text-sm font-semibold text-right" [ngClass]="inst.amount_paid > 0 ? 'text-green-600' : 'text-gray-400'">
+                          {{ inst.amount_paid | currency }}
+                        </td>
+                        <td class="px-3 py-2.5 text-center">
+                          <span class="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider"
+                            [ngClass]="getInstallmentStateClass(inst.state)">
+                            {{ getInstallmentStateLabel(inst.state) }}
+                          </span>
+                        </td>
+                        <td class="px-3 py-2.5 text-center">
+                          <div class="flex items-center justify-center gap-1">
+                            @if (inst.state === 'pending' || inst.state === 'partial' || inst.state === 'overdue') {
+                              <button
+                                (click)="payInstallment(inst)"
+                                class="p-1.5 rounded-lg hover:bg-primary/10 text-primary transition-colors"
+                                title="Pagar cuota"
+                              >
+                                <app-icon name="credit-card" size="14"></app-icon>
+                              </button>
+                              @if (isPrivilegedUser()) {
+                                <button
+                                  (click)="forgiveInstallment(inst.id, inst.installment_number)"
+                                  class="p-1.5 rounded-lg hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors"
+                                  title="Condonar cuota"
+                                >
+                                  <app-icon name="x-circle" size="14"></app-icon>
+                                </button>
+                              }
+                            }
+                          </div>
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Mobile Cards -->
+              <div class="md:hidden divide-y divide-border -mx-3 sm:-mx-4">
+                @for (inst of order()!.order_installments!; track inst.id) {
+                  <div class="px-3 py-2.5 space-y-1.5">
+                    <div class="flex justify-between items-center">
+                      <span class="text-sm font-bold text-gray-900">Cuota {{ inst.installment_number }}</span>
+                      <span class="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider"
+                        [ngClass]="getInstallmentStateClass(inst.state)">
+                        {{ getInstallmentStateLabel(inst.state) }}
+                      </span>
+                    </div>
+                    <div class="flex justify-between text-xs text-text-secondary">
+                      <span>Vence: {{ formatDate(inst.due_date) }}</span>
+                      <span class="font-semibold text-gray-900">{{ inst.amount | currency }}</span>
+                    </div>
+                    @if (inst.amount_paid > 0) {
+                      <div class="flex justify-between text-xs">
+                        <span class="text-text-secondary">Pagado</span>
+                        <span class="font-semibold text-green-600">{{ inst.amount_paid | currency }}</span>
+                      </div>
+                    }
+                    @if (inst.state === 'pending' || inst.state === 'partial' || inst.state === 'overdue') {
+                      <div class="flex gap-2 pt-1.5">
+                        <button
+                          (click)="payInstallment(inst)"
+                          class="flex-1 px-2 py-1.5 text-[10px] font-bold text-primary bg-primary/10 rounded-lg hover:bg-primary/20 transition-colors flex items-center justify-center gap-1"
+                        >
+                          <app-icon name="credit-card" size="12"></app-icon>
+                          Pagar
+                        </button>
+                        @if (isPrivilegedUser()) {
+                          <button
+                            (click)="forgiveInstallment(inst.id, inst.installment_number)"
+                            class="px-2 py-1.5 text-[10px] font-bold text-red-500 bg-red-50 rounded-lg hover:bg-red-100 transition-colors flex items-center justify-center gap-1"
+                          >
+                            <app-icon name="x-circle" size="12"></app-icon>
+                            Condonar
+                          </button>
+                        }
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+            </app-card>
+          }
 
           <!-- 3. HISTORIAL DE LA ORDEN (cronológico ascendente) -->
           <app-card title="Historial de la Orden" shadow="sm" [responsivePadding]="true">
@@ -505,6 +630,47 @@
               </div>
             </div>
 
+            <!-- Credit Payment Progress -->
+            @if (isCreditOrder()) {
+              <div class="pt-3 mt-1 border-t border-border space-y-2.5">
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">Total a pagar</span>
+                  <span class="font-bold text-gray-900">{{ creditTotal() | currency }}</span>
+                </div>
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">Pagado</span>
+                  <span class="font-bold text-green-600">{{ totalPaid() | currency }}</span>
+                </div>
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">Pendiente</span>
+                  <span class="font-bold" [ngClass]="overdueCount() > 0 ? 'text-red-600' : 'text-gray-900'">
+                    {{ remainingBalance() | currency }}
+                  </span>
+                </div>
+                @if (order()?.interest_rate) {
+                  <div class="flex justify-between items-center text-xs">
+                    <span class="text-text-secondary">Interés</span>
+                    <span class="text-text-secondary">{{ interestTypeLabel() }} ({{ (order()?.interest_rate || 0) * 100 }}%)</span>
+                  </div>
+                }
+                <!-- Progress Bar -->
+                <div class="space-y-1">
+                  <div class="flex justify-between items-center">
+                    <span class="text-[10px] font-bold text-text-secondary uppercase tracking-wider">Progreso</span>
+                    <span class="text-xs font-bold" [ngClass]="paymentProgress() >= 100 ? 'text-green-600' : 'text-primary'">
+                      {{ paymentProgress() }}%
+                    </span>
+                  </div>
+                  <div class="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                    <div class="h-full rounded-full transition-all duration-500"
+                      [ngClass]="paymentProgress() >= 100 ? 'bg-green-500' : overdueCount() > 0 ? 'bg-red-500' : 'bg-primary'"
+                      [style.width.%]="paymentProgress()">
+                    </div>
+                  </div>
+                </div>
+              </div>
+            }
+
             <!-- Payment History -->
             @if (orderData.payments && orderData.payments.length > 0) {
               <div class="mt-4 space-y-2">
@@ -552,6 +718,11 @@
       [isOpen]="showPayModal()"
       [order]="orderData"
       [paymentMethods]="paymentMethods()"
+      [isCreditOrder]="isCreditOrder()"
+      [remainingBalance]="remainingBalance()"
+      [installments]="orderData.order_installments || []"
+      [creditType]="orderData.credit_type || ''"
+      [preSelectedInstallment]="preSelectedInstallment()"
       (isOpenChange)="showPayModal.set($event)"
       (closed)="showPayModal.set(false)"
       (paymentSubmitted)="onPaymentSubmitted($event)"

@@ -68,10 +68,10 @@ export class RescheduleModalComponent {
     if (!b) return;
 
     this.loadingSlots.set(true);
-    this.reservationsService.getAvailability(b.product_id, date, date)
+    this.reservationsService.getAvailability(b.product_id, date, date, b.provider_id)
       .pipe(finalize(() => this.loadingSlots.set(false)))
       .subscribe({
-        next: (slots) => this.slots.set(slots.filter(s => s.available > 0)),
+        next: (slots) => this.slots.set(slots.filter(s => s.total_available > 0)),
         error: () => this.slots.set([]),
       });
   }

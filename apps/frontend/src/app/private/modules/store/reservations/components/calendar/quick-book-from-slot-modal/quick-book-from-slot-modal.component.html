@@ -188,6 +188,42 @@
         }
       </div>
 
+      <!-- Provider selection -->
+      @if (loadingProviders()) {
+        <div class="mt-4 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+          <app-spinner size="sm" color="primary"></app-spinner>
+          Cargando proveedores...
+        </div>
+      } @else if (providers().length > 0) {
+        <div class="form-section">
+          <div class="section-header">
+            <div class="section-icon-badge" style="background: rgba(99, 102, 241, 0.1); color: #6366f1;">
+              <app-icon name="users" [size]="14"></app-icon>
+            </div>
+            <span class="section-title">
+              <span class="title-text">Proveedor</span>
+              <span class="title-optional">(opcional)</span>
+            </span>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" class="provider-chip" [class.selected]="!selectedProvider()" (click)="selectProvider(null)">
+              <app-icon name="users" [size]="14"></app-icon> Cualquiera
+            </button>
+            @for (p of providers(); track p.id) {
+              <button type="button" class="provider-chip" [class.selected]="selectedProvider()?.id === p.id" (click)="selectProvider(p)">
+                <app-icon name="user" [size]="14"></app-icon> {{ p.display_name || p.employee?.first_name }}
+              </button>
+            }
+          </div>
+        </div>
+      }
+
+      <!-- Skip availability toggle -->
+      <div class="flex items-center gap-2 mt-3 pt-3 border-t border-[var(--color-border)]">
+        <input type="checkbox" id="qb-skip" [checked]="skipAvailability()" (change)="skipAvailability.set(!skipAvailability())" class="w-4 h-4 rounded"/>
+        <label for="qb-skip" class="text-xs text-[var(--color-text-secondary)] cursor-pointer">Agendar sin verificar disponibilidad</label>
+      </div>
+
       <!-- Notes Section -->
       <div class="form-section">
         <div class="section-header">
@@ -246,6 +282,17 @@
             {{ formatDate(prefilledDate()) }} &middot; {{ formatTime(prefilledTime()) }} → {{ formatTime(getEndTime()) }}
           </div>
         </div>
+
+        <!-- Provider -->
+        @if (selectedProvider()) {
+          <div class="confirm-section">
+            <div class="confirm-label">
+              <app-icon name="user" [size]="14"></app-icon>
+              Proveedor
+            </div>
+            <div class="confirm-value">{{ selectedProvider()?.display_name || selectedProvider()?.employee?.first_name }}</div>
+          </div>
+        }
 
         <!-- Customer -->
         <div class="confirm-section">

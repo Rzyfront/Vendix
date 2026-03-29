@@ -3,16 +3,14 @@ import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
-import { DialogService } from '../../../../shared/components/dialog/dialog.service';
 import { DispatchNotesService } from './services/dispatch-notes.service';
 import { DispatchNotePrintService } from './services/dispatch-note-print.service';
 import { DispatchNoteListComponent } from './components/dispatch-note-list/dispatch-note-list.component';
 import { DispatchNoteStatsComponent } from './components/dispatch-note-stats/dispatch-note-stats.component';
-import { DispatchNoteFormModalComponent } from './components/dispatch-note-form-modal/dispatch-note-form-modal.component';
+import { DispatchNoteWizardComponent } from './components/wizard/dispatch-note-wizard.component';
 import {
   DispatchNote,
   DispatchNoteStats,
-  CreateDispatchNoteDto,
 } from './interfaces/dispatch-note.interface';
 
 @Component({
@@ -22,7 +20,7 @@ import {
     CommonModule,
     DispatchNoteListComponent,
     DispatchNoteStatsComponent,
-    DispatchNoteFormModalComponent,
+    DispatchNoteWizardComponent,
   ],
   template: `
     <div class="w-full">
@@ -43,13 +41,12 @@ import {
         (refresh)="refreshData()"
       ></app-dispatch-note-list>
 
-      <!-- Create Modal -->
-      <app-dispatch-note-form-modal
-        [is_open]="is_modal_open()"
-        [dispatch_note]="editing_note()"
-        (save)="onCreateDispatchNote($event)"
-        (closed)="closeCreateModal()"
-      ></app-dispatch-note-form-modal>
+      <!-- Create Wizard -->
+      <app-dispatch-note-wizard
+        [isOpen]="is_modal_open()"
+        (isOpenChange)="onWizardOpenChange($event)"
+        (created)="onDispatchNoteCreated()"
+      ></app-dispatch-note-wizard>
     </div>
   `,
 })
@@ -58,7 +55,6 @@ export class DispatchNotesComponent implements OnInit, OnDestroy {
   private printService = inject(DispatchNotePrintService);
   private router = inject(Router);
   private toastService = inject(ToastService);
-  private dialogService = inject(DialogService);
 
   @ViewChild(DispatchNoteListComponent) dispatch_note_list!: DispatchNoteListComponent;
 
@@ -67,7 +63,6 @@ export class DispatchNotesComponent implements OnInit, OnDestroy {
   });
   stats_loading = signal(false);
   is_modal_open = signal(false);
-  editing_note = signal<DispatchNote | null>(null);
 
   private destroy$ = new Subject<void>();
 
@@ -101,26 +96,15 @@ export class DispatchNotesComponent implements OnInit, OnDestroy {
   }
 
   openCreateModal(): void {
-    this.editing_note.set(null);
     this.is_modal_open.set(true);
   }
 
-  closeCreateModal(): void {
-    this.is_modal_open.set(false);
-    this.editing_note.set(null);
+  onWizardOpenChange(isOpen: boolean): void {
+    this.is_modal_open.set(isOpen);
   }
 
-  onCreateDispatchNote(dto: CreateDispatchNoteDto): void {
-    this.dispatchNotesService.create(dto)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: () => {
-          this.toastService.success('Remision creada exitosamente');
-          this.closeCreateModal();
-          this.refreshData();
-        },
-        error: () => this.toastService.error('Error al crear la remision'),
-      });
+  onDispatchNoteCreated(): void {
+    this.refreshData();
   }
 
   refreshData(): void {

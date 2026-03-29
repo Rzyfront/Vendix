@@ -27,6 +27,7 @@ export type InputType =
   | 'url'
   | 'search'
   | 'date'
+  | 'time'
   | 'datetime-local';
 export type InputSize = 'sm' | 'md' | 'lg';
 

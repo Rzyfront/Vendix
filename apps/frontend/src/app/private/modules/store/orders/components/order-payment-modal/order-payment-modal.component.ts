@@ -7,7 +7,7 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { CommonModule, DatePipe } from '@angular/common';
 import { ReactiveFormsModule, FormControl } from '@angular/forms';
 import { ModalComponent } from '../../../../../../shared/components';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -37,6 +37,7 @@ interface PaymentMethodDisplay {
     IconComponent,
     InputComponent,
     CurrencyPipe,
+    DatePipe,
   ],
   templateUrl: './order-payment-modal.component.html',
   styleUrls: ['./order-payment-modal.component.css'],
@@ -46,6 +47,11 @@ export class OrderPaymentModalComponent {
   isOpen = input<boolean>(false);
   order = input<Order | null>(null);
   paymentMethods = input<StorePaymentMethod[]>([]);
+  isCreditOrder = input<boolean>(false);
+  remainingBalance = input<number>(0);
+  installments = input<any[]>([]);
+  creditType = input<string>('');
+  preSelectedInstallment = input<any>(null);
 
   // ── Signal Outputs ──────────────────────────────────────────
   isOpenChange = output<boolean>();
@@ -60,6 +66,11 @@ export class OrderPaymentModalComponent {
   isProcessing = signal(false);
   referenceControl = new FormControl('');
 
+  // ── Credit State ──────────────────────────────────────────
+  customAmount = signal<number>(0);
+  selectedInstallmentId = signal<number | null>(null);
+  paymentReference = signal<string>('');
+
   // ── Currency ────────────────────────────────────────────────
   private currencyService = inject(CurrencyFormatService);
   currencySymbol = this.currencyService.currencySymbol;
@@ -71,6 +82,15 @@ export class OrderPaymentModalComponent {
         this.resetState();
       }
     });
+
+    // Pre-select installment when provided
+    effect(() => {
+      const pre = this.preSelectedInstallment();
+      if (pre && this.isOpen()) {
+        this.selectedInstallmentId.set(pre.id);
+        this.customAmount.set(Number(pre.remaining_balance));
+      }
+    });
   }
 
   // ── Computed ──────────────────────────────────────────────
@@ -79,7 +99,20 @@ export class OrderPaymentModalComponent {
     return this.paymentMethods().map((m) => this.mapToDisplay(m));
   });
 
-  readonly orderTotal = computed(() => this.order()?.grand_total || 0);
+  readonly orderTotal = computed(() => {
+    if (this.isCreditOrder()) {
+      const custom = this.customAmount();
+      if (custom > 0) return custom;
+      return this.remainingBalance() || this.order()?.grand_total || 0;
+    }
+    return this.order()?.grand_total || 0;
+  });
+
+  readonly pendingInstallments = computed(() => {
+    return (this.installments() || []).filter(
+      (i: any) => i.state === 'pending' || i.state === 'partial' || i.state === 'overdue'
+    );
+  });
 
   readonly isCashInsufficient = computed(() => {
     if (this.selectedMethod()?.type !== 'cash') return false;
@@ -166,6 +199,16 @@ export class OrderPaymentModalComponent {
     this.paymentType.set(type);
   }
 
+  selectInstallment(installment: any): void {
+    this.selectedInstallmentId.set(installment.id);
+    this.customAmount.set(Number(installment.remaining_balance));
+  }
+
+  clearInstallmentSelection(): void {
+    this.selectedInstallmentId.set(null);
+    this.customAmount.set(0);
+  }
+
   confirmPayment(): void {
     const method = this.selectedMethod();
     if (!method || !this.canProcess()) return;
@@ -178,6 +221,16 @@ export class OrderPaymentModalComponent {
       ...(method.type === 'cash' ? { amount_received: this.cashReceived() } : {}),
       ...(method.requiresReference ? { reference: this.referenceControl.value || undefined } : {}),
     };
+
+    if (this.isCreditOrder()) {
+      dto.amount = this.customAmount() > 0 ? this.customAmount() : this.remainingBalance();
+      if (this.selectedInstallmentId()) {
+        dto.installment_id = this.selectedInstallmentId()!;
+      }
+      if (this.paymentReference()) {
+        dto.payment_reference = this.paymentReference();
+      }
+    }
 
     this.paymentSubmitted.emit(dto);
   }
@@ -208,6 +261,9 @@ export class OrderPaymentModalComponent {
     this.paymentType.set('direct');
     this.isProcessing.set(false);
     this.referenceControl.reset();
+    this.customAmount.set(0);
+    this.selectedInstallmentId.set(null);
+    this.paymentReference.set('');
   }
 
   private mapToDisplay(m: StorePaymentMethod): PaymentMethodDisplay {

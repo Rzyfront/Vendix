@@ -306,12 +306,20 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.bookings;
   }
 
-  get service_schedules() {
-    return this.baseClient.service_schedules;
+  get service_providers() {
+    return this.baseClient.service_providers;
   }
 
-  get schedule_exceptions() {
-    return this.baseClient.schedule_exceptions;
+  get provider_services() {
+    return this.baseClient.provider_services;
+  }
+
+  get provider_schedules() {
+    return this.baseClient.provider_schedules;
+  }
+
+  get provider_exceptions() {
+    return this.baseClient.provider_exceptions;
   }
 
   // Support models
@@ -380,19 +388,6 @@ export class GlobalPrismaService extends BasePrismaService {
 
   get layaway_payments() {
     return this.baseClient.layaway_payments;
-  }
-
-  // Credits models
-  get credits() {
-    return this.baseClient.credits;
-  }
-
-  get credit_installments() {
-    return this.baseClient.credit_installments;
-  }
-
-  get credit_installment_payments() {
-    return this.baseClient.credit_installment_payments;
   }
 
   // Habeas Data models

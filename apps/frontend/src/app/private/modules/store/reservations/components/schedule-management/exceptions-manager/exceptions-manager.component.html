@@ -1,132 +1,109 @@
-<div class="exceptions-manager">
-  <div class="exceptions-manager__header">
-    <h4>
-      <app-icon name="calendar" [size]="18"></app-icon>
-      Excepciones de Horario
-    </h4>
-    <app-button
-      variant="outline"
-      size="sm"
-      (clicked)="toggleForm()"
-    >
-      @if (showForm()) {
-        <app-icon name="x" [size]="14"></app-icon>
-        Cancelar
-      } @else {
-        <app-icon name="plus" [size]="14"></app-icon>
-        Agregar Excepcion
-      }
-    </app-button>
+<!-- Header -->
+<div class="section-header">
+  <div class="section-title">
+    <app-icon name="calendar-x" [size]="18" class="text-[var(--color-primary)]"/>
+    <h3>Excepciones y Dias Especiales</h3>
   </div>
+  <app-button variant="outline" size="sm" (clicked)="showForm.set(!showForm())">
+    <app-icon [name]="showForm() ? 'x' : 'plus'" [size]="14"/>
+    {{ showForm() ? 'Cancelar' : 'Agregar' }}
+  </app-button>
+</div>
 
-  <!-- Inline form -->
-  @if (showForm()) {
-    <div class="exception-form">
-      <div class="exception-form__fields">
+<!-- Inline form (collapsible) -->
+@if (showForm()) {
+  <div class="exception-form">
+    <div class="form-grid">
+      <div class="form-field">
+        <app-input
+          type="date"
+          label="Fecha"
+          size="sm"
+          [ngModel]="formDate()"
+          (inputChange)="formDate.set($event)"
+          customWrapperClass="!mt-0"
+        />
+      </div>
+      <div class="form-field flex items-end pb-1">
+        <app-toggle
+          [checked]="formIsUnavailable()"
+          label="No disponible todo el dia"
+          (toggled)="formIsUnavailable.set($event)"
+        />
+      </div>
+    </div>
+    @if (!formIsUnavailable()) {
+      <div class="form-grid">
         <div class="form-field">
-          <label>Fecha</label>
-          <input
-            type="date"
-            class="field-input"
-            [value]="formDate()"
-            (input)="formDate.set($any($event.target).value)"
+          <app-input
+            type="time"
+            label="Hora inicio"
+            size="sm"
+            [ngModel]="formStartTime()"
+            (inputChange)="formStartTime.set($event)"
+            customWrapperClass="!mt-0"
           />
         </div>
-
-        <div class="form-field form-field--checkbox">
-          <label class="checkbox-label">
-            <input
-              type="checkbox"
-              [checked]="formIsClosed()"
-              (change)="formIsClosed.set($any($event.target).checked)"
-            />
-            Dia completo cerrado
-          </label>
-        </div>
-
-        @if (!formIsClosed()) {
-          <div class="form-field">
-            <label>Hora Inicio</label>
-            <input
-              type="time"
-              class="field-input"
-              [value]="formStartTime()"
-              (input)="formStartTime.set($any($event.target).value)"
-            />
-          </div>
-
-          <div class="form-field">
-            <label>Hora Fin</label>
-            <input
-              type="time"
-              class="field-input"
-              [value]="formEndTime()"
-              (input)="formEndTime.set($any($event.target).value)"
-            />
-          </div>
-        }
-
-        <div class="form-field form-field--wide">
-          <label>Razon (opcional)</label>
-          <input
-            type="text"
-            class="field-input"
-            placeholder="Ej: Festivo, mantenimiento..."
-            [value]="formReason()"
-            (input)="formReason.set($any($event.target).value)"
+        <div class="form-field">
+          <app-input
+            type="time"
+            label="Hora fin"
+            size="sm"
+            [ngModel]="formEndTime()"
+            (inputChange)="formEndTime.set($event)"
+            customWrapperClass="!mt-0"
           />
         </div>
       </div>
+    }
+    <div class="form-field form-field--wide">
+      <app-input
+        label="Motivo (opcional)"
+        placeholder="Vacaciones, cita medica..."
+        size="sm"
+        [ngModel]="formReason()"
+        (inputChange)="formReason.set($event)"
+        customWrapperClass="!mt-0"
+      />
+    </div>
+    <div class="form-actions">
+      <app-button variant="ghost" size="sm" (clicked)="showForm.set(false)">Cancelar</app-button>
+      <app-button variant="primary" size="sm" [disabled]="!formDate()" [loading]="saving()" (clicked)="createException()">Guardar</app-button>
+    </div>
+  </div>
+}
 
-      <div class="exception-form__actions">
-        <app-button
-          variant="primary"
-          size="sm"
-          [loading]="saving()"
-          (clicked)="saveException()"
-        >
-          <app-icon name="save" [size]="14"></app-icon>
-          Guardar
+<!-- Loading -->
+@if (loading()) {
+  <app-spinner size="sm" [center]="true"></app-spinner>
+}
+
+<!-- Exception list as mini-cards -->
+@if (!loading() && exceptions().length > 0) {
+  <div class="exceptions-list">
+    @for (ex of exceptions(); track ex.id) {
+      <div class="exception-card">
+        <div class="exception-date">
+          <app-icon name="calendar" [size]="14"/>
+          {{ formatDate(ex.date) }}
+        </div>
+        <app-badge [variant]="ex.is_unavailable ? 'error' : 'warning'" size="xsm">
+          {{ ex.is_unavailable ? 'No disponible' : ex.custom_start_time + ' - ' + ex.custom_end_time }}
+        </app-badge>
+        @if (ex.reason) {
+          <span class="exception-reason">{{ ex.reason }}</span>
+        }
+        <app-button variant="ghost" size="xsm" (clicked)="deleteException(ex.id)" aria-label="Eliminar excepcion">
+          <app-icon name="trash-2" [size]="14"/>
         </app-button>
       </div>
-    </div>
-  }
-
-  <!-- Exceptions list -->
-  @if (loading()) {
-    <div class="loading-container">
-      <app-spinner size="sm"></app-spinner>
-    </div>
-  } @else if (exceptions().length === 0) {
-    <div class="empty-exceptions">
-      <p>No hay excepciones configuradas para este servicio.</p>
-    </div>
-  } @else {
-    <ul class="exceptions-list">
-      @for (exception of exceptions(); track exception.id) {
-        <li class="exception-item">
-          <div class="exception-item__info">
-            <span class="exception-item__date">{{ formatDate(exception.date) }}</span>
-            @if (exception.is_closed) {
-              <span class="exception-badge exception-badge--closed">Cerrado</span>
-            } @else {
-              <span class="exception-badge exception-badge--modified">
-                {{ exception.custom_start_time }} - {{ exception.custom_end_time }}
-              </span>
-            }
-            @if (exception.reason) {
-              <span class="exception-item__reason">{{ exception.reason }}</span>
-            }
-          </div>
-          <button
-            class="delete-btn"
-            (click)="deleteException(exception)"
-            title="Eliminar excepcion"
-          >
-            <app-icon name="trash-2" [size]="16"></app-icon>
-          </button>
-        </li>
-      }
-    </ul>
-  }
-</div>
+    }
+  </div>
+} @else if (!loading()) {
+  <app-empty-state
+    icon="calendar-x"
+    title="Sin excepciones"
+    description="No hay excepciones programadas"
+    [showActionButton]="false"
+  />
+}

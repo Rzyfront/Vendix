@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:0.8.2-pg15
     container_name: vendix_postgres
     restart: unless-stopped
     environment:

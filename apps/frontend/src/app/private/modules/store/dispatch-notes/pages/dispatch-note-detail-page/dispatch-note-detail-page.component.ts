@@ -7,6 +7,9 @@ import { DialogService } from '../../../../../../shared/components/dialog/dialog
 import { DispatchNotesService } from '../../services/dispatch-notes.service';
 import { DispatchNotePrintService } from '../../services/dispatch-note-print.service';
 import { DispatchNoteDetailComponent } from '../../components/dispatch-note-detail/dispatch-note-detail.component';
+import { DeliverModalComponent } from '../../components/deliver-modal/deliver-modal.component';
+import { VoidModalComponent } from '../../components/void-modal/void-modal.component';
+import { InvoiceModalComponent } from '../../components/invoice-modal/invoice-modal.component';
 import { DispatchNote } from '../../interfaces/dispatch-note.interface';
 
 @Component({
@@ -15,6 +18,9 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
   imports: [
     CommonModule,
     DispatchNoteDetailComponent,
+    DeliverModalComponent,
+    VoidModalComponent,
+    InvoiceModalComponent,
   ],
   template: `
     <div class="w-full">
@@ -29,9 +35,9 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
         *ngIf="!is_loading() && dispatch_note()"
         [dispatch_note]="dispatch_note()!"
         (confirmAction)="handleConfirm($event)"
-        (deliverAction)="handleDeliver($event)"
-        (voidAction)="handleVoid($event)"
-        (invoiceAction)="handleInvoice($event)"
+        (deliverAction)="openDeliverModal($event)"
+        (voidAction)="openVoidModal($event)"
+        (invoiceAction)="openInvoiceModal($event)"
         (printAction)="handlePrint($event)"
         (backAction)="handleBack()"
       ></app-dispatch-note-detail>
@@ -40,6 +46,31 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
       <div *ngIf="!is_loading() && !dispatch_note()" class="p-8 text-center">
         <p class="text-text-secondary">No se encontro la remision.</p>
       </div>
+
+      <!-- Lifecycle Modals -->
+      <app-deliver-modal
+        *ngIf="dispatch_note()"
+        [isOpen]="showDeliverModal()"
+        (isOpenChange)="showDeliverModal.set($event)"
+        [dispatchNote]="dispatch_note()!"
+        (delivered)="handleDeliver($event)"
+      ></app-deliver-modal>
+
+      <app-void-modal
+        *ngIf="dispatch_note()"
+        [isOpen]="showVoidModal()"
+        (isOpenChange)="showVoidModal.set($event)"
+        [dispatchNote]="dispatch_note()!"
+        (voided)="handleVoid($event)"
+      ></app-void-modal>
+
+      <app-invoice-modal
+        *ngIf="dispatch_note()"
+        [isOpen]="showInvoiceModal()"
+        (isOpenChange)="showInvoiceModal.set($event)"
+        [dispatchNote]="dispatch_note()!"
+        (invoiced)="handleInvoice()"
+      ></app-invoice-modal>
     </div>
   `,
 })
@@ -53,6 +84,9 @@ export class DispatchNoteDetailPageComponent implements OnInit, OnDestroy {
 
   dispatch_note = signal<DispatchNote | null>(null);
   is_loading = signal(false);
+  showDeliverModal = signal(false);
+  showVoidModal = signal(false);
+  showInvoiceModal = signal(false);
 
   private destroy$ = new Subject<void>();
 
@@ -104,16 +138,24 @@ export class DispatchNoteDetailPageComponent implements OnInit, OnDestroy {
       });
   }
 
-  async handleDeliver(dn: DispatchNote): Promise<void> {
-    const confirmed = await this.dialogService.confirm({
-      title: 'Marcar como Entregada',
-      message: `Marcar la remision ${dn.dispatch_number} como entregada?`,
-      confirmText: 'Entregar',
-      cancelText: 'Volver',
-    });
-    if (!confirmed) return;
+  openDeliverModal(dn: DispatchNote): void {
+    this.showDeliverModal.set(true);
+  }
 
-    this.dispatchNotesService.deliver(dn.id)
+  openVoidModal(dn: DispatchNote): void {
+    this.showVoidModal.set(true);
+  }
+
+  openInvoiceModal(dn: DispatchNote): void {
+    this.showInvoiceModal.set(true);
+  }
+
+  handleDeliver(payload: { actual_delivery_date: string; notes?: string }): void {
+    const dn = this.dispatch_note();
+    if (!dn) return;
+
+    this.showDeliverModal.set(false);
+    this.dispatchNotesService.deliver(dn.id, payload)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
@@ -124,17 +166,12 @@ export class DispatchNoteDetailPageComponent implements OnInit, OnDestroy {
       });
   }
 
-  async handleVoid(dn: DispatchNote): Promise<void> {
-    const confirmed = await this.dialogService.confirm({
-      title: 'Anular Remision',
-      message: `Anular la remision ${dn.dispatch_number}? Esta accion no se puede deshacer.`,
-      confirmText: 'Anular',
-      cancelText: 'Volver',
-      confirmVariant: 'danger',
-    });
-    if (!confirmed) return;
+  handleVoid(payload: { void_reason: string }): void {
+    const dn = this.dispatch_note();
+    if (!dn) return;
 
-    this.dispatchNotesService.void(dn.id, { void_reason: 'Anulada por usuario' })
+    this.showVoidModal.set(false);
+    this.dispatchNotesService.void(dn.id, payload)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
@@ -145,15 +182,11 @@ export class DispatchNoteDetailPageComponent implements OnInit, OnDestroy {
       });
   }
 
-  async handleInvoice(dn: DispatchNote): Promise<void> {
-    const confirmed = await this.dialogService.confirm({
-      title: 'Facturar Remision',
-      message: `Generar factura para la remision ${dn.dispatch_number}?`,
-      confirmText: 'Facturar',
-      cancelText: 'Volver',
-    });
-    if (!confirmed) return;
+  handleInvoice(): void {
+    const dn = this.dispatch_note();
+    if (!dn) return;
 
+    this.showInvoiceModal.set(false);
     this.dispatchNotesService.invoice(dn.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
