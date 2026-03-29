@@ -24,7 +24,6 @@ import {
 // Import new components
 import {
   StoreStatsComponent,
-  StoreEmptyStateComponent,
   StoreCreateModalComponent,
   StoreEditModalComponent,
 } from './components/index';
@@ -44,6 +43,8 @@ import {
   TableColumn,
   TableAction,
   PaginationComponent,
+  EmptyStateComponent,
+  CardComponent,
 } from '../../../../shared/components/index';
 
 // Import styles (CSS instead of SCSS to avoid loader issues)
@@ -58,7 +59,7 @@ import './stores.component.css';
     FormsModule,
     ReactiveFormsModule,
     StoreStatsComponent,
-    StoreEmptyStateComponent,
+    EmptyStateComponent,
     StoreCreateModalComponent,
     StoreEditModalComponent,
     StoreSettingsModalComponent,
@@ -68,6 +69,7 @@ import './stores.component.css';
     ResponsiveDataViewComponent,
     ButtonComponent,
     PaginationComponent,
+    CardComponent,
   ],
   providers: [StoresService],
   templateUrl: './stores.component.html',
@@ -345,7 +347,12 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
 
   get hasFilters(): boolean {
     const filters = this.filterForm.value;
-    return !!(filters.search || filters.store_type || filters.is_active || filters.include_non_production);
+    return !!(
+      filters.search ||
+      filters.store_type ||
+      filters.is_active ||
+      filters.include_non_production
+    );
   }
 
   openCreateStoreModal(): void {

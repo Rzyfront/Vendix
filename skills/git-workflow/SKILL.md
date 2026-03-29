@@ -6,7 +6,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "2.0"
   scope: [root]
   auto_invoke:
     - "git commit, git push, create PR, create branch"
@@ -24,24 +24,24 @@ metadata:
 
 ---
 
-## Tool Preference: GitHub MCP (PRIORITY)
+## Tool Preference: GitHub CLI `gh` (PRIORITY)
 
-**If the GitHub MCP server is available, ALWAYS prefer using MCP tools over bash git commands.** This applies especially to:
+**ALWAYS use `gh` CLI for GitHub operations.** Do not use GitHub MCP tools (`mcp__github__*`).
 
-| Operation            | Preferred MCP Tool                                        | Avoid                                 |
-| -------------------- | --------------------------------------------------------- | ------------------------------------- |
-| Create PR            | `mcp__github__create_pull_request`                        | `gh pr create` via Bash               |
-| Create branch        | `mcp__github__create_branch`                              | `git checkout -b` + `git push`        |
-| View PRs             | `mcp__github__list_pull_requests`                         | `gh pr list` via Bash                 |
-| View issues          | `mcp__github__list_issues` / `mcp__github__search_issues` | `gh issue list` via Bash              |
-| Read repo files      | `mcp__github__get_file_contents`                          | `gh api` via Bash                     |
-| View PR diff         | `mcp__github__pull_request_read` (method: get_diff)       | `gh pr diff` via Bash                 |
-| Comment on PR/issue  | `mcp__github__add_issue_comment`                          | `gh pr comment` via Bash              |
-| Create review        | `mcp__github__pull_request_review_write`                  | `gh pr review` via Bash               |
-| Push files           | `mcp__github__push_files`                                 | `git add` + `git commit` + `git push` |
-| Merge PR             | `mcp__github__merge_pull_request`                         | `gh pr merge` via Bash                |
+| Operation           | `gh` CLI (preferred)                         | Avoid                                     |
+| ------------------- | -------------------------------------------- | ----------------------------------------- |
+| Create PR           | `gh pr create`                               | `mcp__github__create_pull_request`        |
+| Create branch       | `git checkout -b` + `git push`               | `mcp__github__create_branch`              |
+| View PRs            | `gh pr list`                                 | `mcp__github__list_pull_requests`         |
+| View issues         | `gh issue list` / `gh search issues`         | `mcp__github__list_issues`                |
+| Read repo files     | `gh api repos/OWNER/REPO/contents/PATH`      | `mcp__github__get_file_contents`          |
+| View PR diff        | `gh pr diff N`                               | `mcp__github__pull_request_read`          |
+| Comment on PR/issue | `gh pr comment N` / `gh issue comment N`     | `mcp__github__add_issue_comment`          |
+| Create review       | `gh pr review N`                             | `mcp__github__pull_request_review_write`  |
+| Push files          | `git add` + `git commit` + `git push`        | `mcp__github__push_files`                 |
+| Merge PR            | `gh pr merge N`                              | `mcp__github__merge_pull_request`         |
 
-**Reason:** MCP tools provide structured, typed access with better error handling than CLI commands. Only use `git` via Bash for local operations that have no MCP equivalent (e.g., `git status`, local `git diff`, `git stash`).
+**Reason:** `gh` CLI is locally authenticated, reliable, and does not depend on the GitHub MCP server. Only use native `git` for local operations (e.g., `git status`, local `git diff`, `git stash`).
 
 ---
 
@@ -95,30 +95,20 @@ feat: add status field to orders table
 - CREATE INDEX idx_orders_status ON orders(status)
 ```
 
-Format for PRs with migrations:
+Format for PRs with migrations — ALTERs go in a clean, copyable SQL block:
 
-````markdown
+```markdown
 ## Summary
-
 Add status field to orders
 
 ## ⚠️ DATABASE MIGRATION
-
 > **ATTENTION**: This PR requires running migrations before deployment.
 
-| Operation    | Table  | Details                                         |
-| ------------ | ------ | ----------------------------------------------- |
-| ALTER TABLE  | orders | ADD COLUMN status VARCHAR(50) DEFAULT 'pending' |
-| CREATE INDEX | orders | idx_orders_status ON orders(status)             |
-
-### Migration Commands
-
-```bash
-npx prisma migrate deploy
+\`\`\`sql
+ALTER TABLE orders ADD COLUMN status VARCHAR(50) DEFAULT 'pending';
+CREATE INDEX idx_orders_status ON orders(status);
+\`\`\`
 ```
-````
-
-````
 
 ### RULE 4: Conflict Resolution
 
@@ -135,7 +125,7 @@ git commit -m "merge: resolve conflicts with main"
 # FORBIDDEN: resolve conflicts in main
 git checkout main
 git merge feature/my-branch  # Do NOT do this directly
-````
+```
 
 ---
 
@@ -163,13 +153,13 @@ Does the commit have an AI co-author?
 
 ## Conflicts: Resolution Rules
 
-| Situation                                | Action                                                    |
-| ---------------------------------------- | --------------------------------------------------------- |
-| Clear conflict (formatting only, imports)| Resolve in favor of the new change                        |
-| Conflict in business logic               | Keep both changes if possible, prioritize the new one     |
-| Ambiguous or risky conflict              | Ask the user showing the options                          |
-| Conflict in config files                 | Manual merge, preserve both configurations                |
-| Conflict in migrations                   | Always ask the user (high risk)                           |
+| Situation                                 | Action                                                    |
+| ----------------------------------------- | --------------------------------------------------------- |
+| Clear conflict (formatting only, imports) | Resolve in favor of the new change                        |
+| Conflict in business logic                | Keep both changes if possible, prioritize the new one     |
+| Ambiguous or risky conflict               | Ask the user showing the options                          |
+| Conflict in config files                  | Manual merge, preserve both configurations                |
+| Conflict in migrations                    | Always ask the user (high risk)                           |
 
 ---
 

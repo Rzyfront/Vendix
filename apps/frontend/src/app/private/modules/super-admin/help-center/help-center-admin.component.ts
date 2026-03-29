@@ -30,6 +30,7 @@ import {
   ItemListCardConfig,
 } from '../../../../shared/components/index';
 import { ConfirmationModalComponent } from '../../../../shared/components/confirmation-modal/confirmation-modal.component';
+import { CardComponent } from '../../../../shared/components';
 
 @Component({
   selector: 'app-help-center-admin',
@@ -45,10 +46,11 @@ import { ConfirmationModalComponent } from '../../../../shared/components/confir
     InputsearchComponent,
     ResponsiveDataViewComponent,
     ConfirmationModalComponent,
+    CardComponent,
   ],
   template: `
     <!-- Standard Module Layout -->
-    <div class="flex flex-col gap-6 p-6">
+    <div class="flex flex-col gap-4 p-6">
       <!-- Stats Grid -->
       <div class="stats-container">
         <app-stats
@@ -85,9 +87,7 @@ import { ConfirmationModalComponent } from '../../../../shared/components/confir
       </div>
 
       <!-- Main Content Card -->
-      <div
-        class="flex flex-col bg-surface border border-border rounded-xl shadow-sm overflow-hidden"
-      >
+      <app-card [padding]="false" overflow="hidden">
         <!-- Tabs -->
         <div class="flex border-b border-border">
           <button
@@ -116,7 +116,7 @@ import { ConfirmationModalComponent } from '../../../../shared/components/confir
         <div *ngIf="activeTab() === 'articles'">
           <!-- Header -->
           <div
-            class="p-4 md:px-6 md:py-4 border-b border-border flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between bg-surface"
+            class="p-4 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
           >
             <div class="flex-1 min-w-0">
               <h3 class="text-lg font-semibold text-text-primary">
@@ -201,7 +201,7 @@ import { ConfirmationModalComponent } from '../../../../shared/components/confir
         <app-categories-tab
           *ngIf="activeTab() === 'categories'"
         ></app-categories-tab>
-      </div>
+      </app-card>
     </div>
 
     <!-- Delete Confirmation Modal -->
@@ -347,16 +347,28 @@ export class HelpCenterAdminComponent implements OnInit {
     subtitleKey: 'category',
     subtitleTransform: (item: HelpArticle) => item.category?.name || '-',
     badgeKey: 'status',
-    badgeConfig: { type: 'custom', size: 'sm', colorMap: {
-      PUBLISHED: 'bg-green-100 text-green-800',
-      DRAFT: 'bg-yellow-100 text-yellow-800',
-      ARCHIVED: 'bg-gray-100 text-gray-800',
-    }},
+    badgeConfig: {
+      type: 'custom',
+      size: 'sm',
+      colorMap: {
+        PUBLISHED: 'bg-green-100 text-green-800',
+        DRAFT: 'bg-yellow-100 text-yellow-800',
+        ARCHIVED: 'bg-gray-100 text-gray-800',
+      },
+    },
     badgeTransform: (val: string) => this.formatStatusLabel(val),
     detailKeys: [
-      { key: 'type', label: 'Tipo', transform: (val: string) => this.formatEnumLabel(val) },
+      {
+        key: 'type',
+        label: 'Tipo',
+        transform: (val: string) => this.formatEnumLabel(val),
+      },
       { key: 'view_count', label: 'Vistas' },
-      { key: 'created_at', label: 'Fecha', transform: (val: string) => new Date(val).toLocaleDateString() },
+      {
+        key: 'created_at',
+        label: 'Fecha',
+        transform: (val: string) => new Date(val).toLocaleDateString(),
+      },
     ],
   };
 
@@ -373,8 +385,10 @@ export class HelpCenterAdminComponent implements OnInit {
     this.loading.set(true);
     const params: any = {};
     if (this.searchQuery) params.search = this.searchQuery;
-    if (this.statusFilterControl.value) params.status = this.statusFilterControl.value;
-    if (this.typeFilterControl.value) params.type = this.typeFilterControl.value;
+    if (this.statusFilterControl.value)
+      params.status = this.statusFilterControl.value;
+    if (this.typeFilterControl.value)
+      params.type = this.typeFilterControl.value;
 
     this.service.getArticles(params).subscribe({
       next: (response) => {
@@ -406,14 +420,18 @@ export class HelpCenterAdminComponent implements OnInit {
   }
 
   navigateToEdit(article: HelpArticle) {
-    this.router.navigate([`/super-admin/help-center/articles/${article.id}/edit`]);
+    this.router.navigate([
+      `/super-admin/help-center/articles/${article.id}/edit`,
+    ]);
   }
 
   toggleStatus(article: HelpArticle, newStatus: string) {
     this.service.updateArticle(article.id, { status: newStatus }).subscribe({
       next: () => {
         this.toast.success(
-          newStatus === 'PUBLISHED' ? 'Artículo publicado' : 'Artículo despublicado',
+          newStatus === 'PUBLISHED'
+            ? 'Artículo publicado'
+            : 'Artículo despublicado',
         );
         this.loadArticles();
         this.loadStats();

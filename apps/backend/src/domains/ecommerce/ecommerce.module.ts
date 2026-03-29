@@ -5,6 +5,8 @@ import { WishlistModule } from './wishlist/wishlist.module';
 import { CheckoutModule } from './checkout/checkout.module';
 import { AccountModule } from './account/account.module';
 import { EcommerceLegalModule } from './legal/ecommerce-legal.module';
+import { EcommerceReviewsModule } from './reviews/reviews.module';
+import { EcommerceReservationsModule } from './reservations/ecommerce-reservations.module';
 
 /**
  * 🛒 Ecommerce Domain Module
@@ -15,6 +17,7 @@ import { EcommerceLegalModule } from './legal/ecommerce-legal.module';
  * - WishlistModule: User favorites
  * - CheckoutModule: Order placement
  * - AccountModule: Customer profile and orders
+ * - EcommerceReviewsModule: Product reviews and ratings
  */
 @Module({
     imports: [
@@ -24,6 +27,8 @@ import { EcommerceLegalModule } from './legal/ecommerce-legal.module';
         CheckoutModule,
         AccountModule,
         EcommerceLegalModule,
+        EcommerceReviewsModule,
+        EcommerceReservationsModule,
     ],
 })
 export class EcommerceDomainModule { }

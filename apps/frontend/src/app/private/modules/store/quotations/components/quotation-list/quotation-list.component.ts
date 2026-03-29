@@ -1,20 +1,29 @@
-import { Component, input, output, signal, computed } from '@angular/core';
+import { Component, input, output, signal, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
 import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import { ResponsiveDataViewComponent } from '../../../../../../shared/components/responsive-data-view/responsive-data-view.component';
-import { TableColumn, TableAction } from '../../../../../../shared/components/table/table.component';
+import {
+  TableColumn,
+  TableAction,
+} from '../../../../../../shared/components/table/table.component';
 import { ItemListCardConfig } from '../../../../../../shared/components/item-list/item-list.interfaces';
-import { FilterConfig, FilterValues } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import {
+  FilterConfig,
+  FilterValues,
+} from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { Quotation } from '../../interfaces/quotation.interface';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'app-quotation-list',
   standalone: true,
   imports: [
     CommonModule,
+    CardComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
@@ -22,7 +31,7 @@ import { Quotation } from '../../interfaces/quotation.interface';
     ButtonComponent,
   ],
   template: `
-    <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border">
+    <app-card [responsive]="true" [padding]="false">
       <!-- Search Section (inside card) -->
       <div
         class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
@@ -68,7 +77,9 @@ import { Quotation } from '../../interfaces/quotation.interface';
       <!-- Loading State -->
       @if (loading()) {
         <div class="p-4 md:p-6 text-center">
-          <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <div
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
           <p class="mt-2 text-text-secondary">Cargando cotizaciones...</p>
         </div>
       }
@@ -88,10 +99,12 @@ import { Quotation } from '../../interfaces/quotation.interface';
           ></app-responsive-data-view>
         </div>
       }
-    </div>
+    </app-card>
   `,
 })
 export class QuotationListComponent {
+  private currencyService = inject(CurrencyFormatService);
+
   quotations = input.required<Quotation[]>();
   loading = input<boolean>(false);
 
@@ -140,27 +153,25 @@ export class QuotationListComponent {
       key: 'status',
       label: 'Estado',
       badge: true,
-      badgeConfig: { type: 'custom', colorMap: {
-        draft: '#94a3b8',
-        sent: '#3b82f6',
-        accepted: '#10b981',
-        rejected: '#ef4444',
-        expired: '#f59e0b',
-        converted: '#8b5cf6',
-        cancelled: '#6b7280',
-      }},
+      badgeConfig: {
+        type: 'custom',
+        colorMap: {
+          draft: '#94a3b8',
+          sent: '#3b82f6',
+          accepted: '#10b981',
+          rejected: '#ef4444',
+          expired: '#f59e0b',
+          converted: '#8b5cf6',
+          cancelled: '#6b7280',
+        },
+      },
       transform: (v: string) => this.getStatusLabel(v),
     },
     {
       key: 'grand_total',
       label: 'Total',
       align: 'right',
-      transform: (v: number) =>
-        new Intl.NumberFormat('es-CO', {
-          style: 'currency',
-          currency: 'COP',
-          minimumFractionDigits: 0,
-        }).format(v || 0),
+      transform: (v: number) => this.currencyService.format(v || 0),
     },
     {
       key: 'valid_until',
@@ -188,12 +199,7 @@ export class QuotationListComponent {
     footerKey: 'grand_total',
     footerLabel: 'Total',
     footerStyle: 'prominent',
-    footerTransform: (v: number) =>
-      new Intl.NumberFormat('es-CO', {
-        style: 'currency',
-        currency: 'COP',
-        minimumFractionDigits: 0,
-      }).format(v || 0),
+    footerTransform: (v: number) => this.currencyService.format(v || 0),
     detailKeys: [
       {
         key: 'valid_until',
@@ -236,7 +242,8 @@ export class QuotationListComponent {
       icon: 'arrow-right-circle',
       variant: 'success',
       action: (item: Quotation) => this.convert.emit(item),
-      show: (item: Quotation) => ['draft', 'sent', 'accepted'].includes(item.status),
+      show: (item: Quotation) =>
+        ['draft', 'sent', 'accepted'].includes(item.status),
     },
     {
       label: 'Editar',

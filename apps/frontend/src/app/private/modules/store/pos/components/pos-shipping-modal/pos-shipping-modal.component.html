@@ -95,7 +95,7 @@
           <div *ngIf="shippingPaymentForm === 'credito'" style="margin-top: 8px;">
             <div class="credit-field" style="display: flex; flex-direction: column; gap: 6px;">
               <label style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--color-text-muted);">Abono inicial (opcional)</label>
-              <input type="number" [(ngModel)]="creditInitialPayment" (ngModelChange)="updateCreditCalculations()" min="0" [max]="totalWithShipping" step="0.01" placeholder="0.00" style="padding: 10px 12px; border: 2px solid var(--color-border); border-radius: 10px; background: var(--color-background); font-size: 14px; color: var(--color-text-primary); outline: none;"/>
+              <input appCurrencyInput [(ngModel)]="creditInitialPayment" (ngModelChange)="updateCreditCalculations()" placeholder="0.00" style="padding: 10px 12px; border: 2px solid var(--color-border); border-radius: 10px; background: var(--color-background); font-size: 14px; color: var(--color-text-primary); outline: none;"/>
               <span style="font-size: 11px; color: var(--color-text-muted);">Se descuenta del total antes de generar cuotas</span>
             </div>
 
@@ -263,10 +263,9 @@
                 <div class="cash-input" [class.error]="isCashInsufficient">
                   <span class="currency">{{ currencySymbol() }}</span>
                   <input
-                    type="number"
+                    appCurrencyInput
                     [formControl]="cashReceivedControl"
                     placeholder="0.00"
-                    step="0.01"
                   />
                 </div>
                 <span *ngIf="isCashInsufficient" class="error-text">
@@ -545,12 +544,10 @@
             <div class="cash-input">
               <span class="currency">{{ currencySymbol() }}</span>
               <input
-                type="number"
-                [value]="shippingCost"
-                (input)="onManualCostChange($event)"
+                appCurrencyInput
+                [(ngModel)]="shippingCost"
+                (ngModelChange)="onShippingCostChange()"
                 placeholder="0.00"
-                step="0.01"
-                min="0"
               />
             </div>
           </div>

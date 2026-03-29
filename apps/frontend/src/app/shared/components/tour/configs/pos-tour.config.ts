@@ -51,7 +51,7 @@ export const POS_TOUR_CONFIG: TourConfig = {
       // Try to find the "Crear Primer Producto" button in empty state first,
       // otherwise fall back to the dropdown action
       target:
-        'app-product-empty-state app-button[variant="primary"], app-options-dropdown button.action-item',
+        'app-empty-state app-button[variant="primary"], app-options-dropdown button.action-item',
       beforeNext: async () => {
         // Wait a moment for the modal/form to appear
         await new Promise((resolve) => setTimeout(resolve, 500));

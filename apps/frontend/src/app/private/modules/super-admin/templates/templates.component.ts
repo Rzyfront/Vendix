@@ -17,7 +17,6 @@ import {
 // Import components
 import {
   TemplateStatsComponent,
-  TemplateEmptyStateComponent,
   TemplateCreateModalComponent,
   TemplateEditModalComponent,
 } from './components/index';
@@ -35,6 +34,7 @@ import {
   ItemListCardConfig,
   TableColumn,
   TableAction,
+  EmptyStateComponent,
 } from '../../../../shared/components/index';
 
 // Import styles
@@ -49,7 +49,7 @@ import './templates.component.css';
     FormsModule,
     ReactiveFormsModule,
     TemplateStatsComponent,
-    TemplateEmptyStateComponent,
+    EmptyStateComponent,
     TemplateCreateModalComponent,
     TemplateEditModalComponent,
     InputsearchComponent,
@@ -126,13 +126,15 @@ import './templates.component.css';
         </div>
 
         <!-- Empty State -->
-        <app-template-empty-state
+        <app-empty-state
           *ngIf="!isLoading && templates.length === 0"
+          icon="file-text"
           [title]="getEmptyStateTitle()"
           [description]="getEmptyStateDescription()"
+          actionButtonText="Crear Template"
           (actionClick)="openCreateTemplateModal()"
         >
-        </app-template-empty-state>
+        </app-empty-state>
 
         <!-- Templates Table -->
         <div *ngIf="!isLoading && templates.length > 0" class="p-6">

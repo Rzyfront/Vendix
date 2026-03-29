@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
-import { map, tap, catchError, delay } from 'rxjs/operators';
+import { map, tap, catchError } from 'rxjs/operators';
 import {
   LotInfo,
   PreBulkData,
@@ -86,7 +86,6 @@ export class PopCartService {
     this._loading.next(true);
 
     return of(request).pipe(
-      delay(200),
       map((req) => this.processAddToCart(req)),
       tap((newState) => {
         this._cartState.next(newState);
@@ -106,7 +105,6 @@ export class PopCartService {
     this._loading.next(true);
 
     return of(request).pipe(
-      delay(150),
       map((req) => this.processUpdateCartItem(req)),
       tap((newState) => {
         this._cartState.next(newState);
@@ -126,7 +124,6 @@ export class PopCartService {
     this._loading.next(true);
 
     return of(itemId).pipe(
-      delay(100),
       map((id) => this.processRemoveFromCart(id)),
       tap((newState) => {
         this._cartState.next(newState);
@@ -155,7 +152,6 @@ export class PopCartService {
     this._loading.next(true);
 
     return of(null).pipe(
-      delay(100),
       map(() => ({
         ...INITIAL_STATE,
         orderDate: new Date(),
@@ -299,7 +295,6 @@ export class PopCartService {
     lotInfo: PopCartItemLotInfo | undefined,
   ): Observable<PopCartState> {
     return of({ itemId, lotInfo }).pipe(
-      delay(100),
       map(({ itemId, lotInfo }) => {
         const currentState = this.currentState;
         const itemIndex = currentState.items.findIndex(
@@ -469,7 +464,7 @@ export class PopCartService {
 
     // Update variant if provided
     if (request.variant !== undefined) {
-      updatedItem.variant = request.variant;
+      updatedItem.variant = request.variant === null ? undefined : request.variant;
     }
 
     // Update pricing_type if provided

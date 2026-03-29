@@ -31,10 +31,14 @@ import { CouponsModule } from './coupons/coupons.module';
 import { QuotationsModule } from './quotations/quotations.module';
 import { CashRegistersModule } from './cash-registers/cash-registers.module';
 import { LayawayModule } from './layaway/layaway.module';
-import { CreditsModule } from './credits/credits.module';
 import { HabeasDataModule } from './habeas-data/habeas-data.module';
 import { WithholdingTaxModule } from './withholding-tax/withholding-tax.module';
 import { ExogenousModule } from './exogenous/exogenous.module';
+import { ReservationsModule } from './reservations/reservations.module';
+import { ReviewsModule } from './reviews/reviews.module';
+import { AIChatModule } from './ai-chat/ai-chat.module';
+import { DispatchNotesModule } from './dispatch-notes/dispatch-notes.module';
+import { McpModule } from './mcp/mcp.module';
 
 @Module({
   imports: [
@@ -68,10 +72,14 @@ import { ExogenousModule } from './exogenous/exogenous.module';
     QuotationsModule,
     CashRegistersModule,
     LayawayModule,
-    CreditsModule,
     HabeasDataModule,
     WithholdingTaxModule,
     ExogenousModule,
+    ReservationsModule,
+    ReviewsModule,
+    AIChatModule,
+    DispatchNotesModule,
+    McpModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],

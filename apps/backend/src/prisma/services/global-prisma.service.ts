@@ -301,6 +301,27 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.push_subscriptions;
   }
 
+  // Booking models
+  get bookings() {
+    return this.baseClient.bookings;
+  }
+
+  get service_providers() {
+    return this.baseClient.service_providers;
+  }
+
+  get provider_services() {
+    return this.baseClient.provider_services;
+  }
+
+  get provider_schedules() {
+    return this.baseClient.provider_schedules;
+  }
+
+  get provider_exceptions() {
+    return this.baseClient.provider_exceptions;
+  }
+
   // Support models
   get support_tickets() {
     return this.baseClient.support_tickets;
@@ -331,6 +352,22 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.ai_engine_applications;
   }
 
+  get ai_engine_logs() {
+    return this.baseClient.ai_engine_logs;
+  }
+
+  get ai_conversations() {
+    return this.baseClient.ai_conversations;
+  }
+
+  get ai_messages() {
+    return this.baseClient.ai_messages;
+  }
+
+  get ai_embeddings() {
+    return this.baseClient.ai_embeddings;
+  }
+
   // Help Center models (global - no scoping)
   get help_article_categories() {
     return this.baseClient.help_article_categories;
@@ -351,19 +388,6 @@ export class GlobalPrismaService extends BasePrismaService {
 
   get layaway_payments() {
     return this.baseClient.layaway_payments;
-  }
-
-  // Credits models
-  get credits() {
-    return this.baseClient.credits;
-  }
-
-  get credit_installments() {
-    return this.baseClient.credit_installments;
-  }
-
-  get credit_installment_payments() {
-    return this.baseClient.credit_installment_payments;
   }
 
   // Habeas Data models

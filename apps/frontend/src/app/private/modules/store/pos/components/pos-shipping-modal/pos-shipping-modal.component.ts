@@ -49,6 +49,7 @@ import {
   PosShippingPaymentMode,
 } from '../../models/shipping.model';
 import { PaymentRequest } from '../../models/payment.model';
+import { CurrencyInputDirective } from '../../../../../../shared/directives/currency-input.directive';
 
 @Component({
   selector: 'app-pos-shipping-modal',
@@ -63,6 +64,7 @@ import { PaymentRequest } from '../../models/payment.model';
     TooltipComponent,
     SelectorComponent,
     CurrencyPipe,
+    CurrencyInputDirective,
   ],
   templateUrl: './pos-shipping-modal.component.html',
   styles: [
@@ -1234,9 +1236,8 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
     }
   }
 
-  onManualCostChange(event: Event): void {
-    const value = (event.target as HTMLInputElement).value;
-    this.shippingCost = parseFloat(value) || 0;
+  onShippingCostChange(): void {
+    // shippingCost already updated by ngModel
   }
 
   // --- Location Dropdowns (API Colombia) ---

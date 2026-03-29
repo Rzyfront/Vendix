@@ -185,6 +185,20 @@ import {
   ArrowLeftRight,
   LayoutGrid,
   SearchX,
+  // Booking time-of-day icons
+  Sunrise,
+  Sun,
+  Moon,
+  // Booking detail icons
+  Briefcase,
+  Bot,
+  CalendarClock,
+  CalendarCheck,
+  // Bulk upload icons
+  FileSpreadsheet,
+  Images,
+  // Invoice scanner icons
+  ScanLine,
 } from 'lucide-angular';
 
 /**
@@ -431,6 +445,26 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'arrow-left-right': ArrowLeftRight,
   'layout-grid': LayoutGrid,
   'search-x': SearchX,
+
+  // Booking time-of-day icons
+  sunrise: Sunrise,
+  sun: Sun,
+  moon: Moon,
+
+  // Booking detail icons
+  pencil: Pencil,
+  briefcase: Briefcase,
+  bot: Bot,
+  'calendar-clock': CalendarClock,
+  'calendar-check': CalendarCheck,
+
+  // Bulk upload icons
+  loader: Loader2,
+  'file-spreadsheet': FileSpreadsheet,
+  images: Images,
+
+  // Invoice scanner icons
+  'scan-line': ScanLine,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

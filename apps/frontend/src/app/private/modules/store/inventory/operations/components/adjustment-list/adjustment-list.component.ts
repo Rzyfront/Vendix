@@ -16,6 +16,8 @@ import {
   IconComponent,
   ButtonComponent,
   PaginationComponent,
+  EmptyStateComponent,
+  CardComponent,
 } from '../../../../../../../shared/components/index';
 
 // Interfaces
@@ -33,6 +35,8 @@ import { InventoryAdjustment, AdjustmentType } from '../../../interfaces';
     IconComponent,
     ButtonComponent,
     PaginationComponent,
+    EmptyStateComponent,
+    CardComponent,
   ],
   templateUrl: './adjustment-list.component.html',
 })
@@ -40,7 +44,12 @@ export class AdjustmentListComponent {
   // Inputs
   readonly adjustments = input.required<InventoryAdjustment[]>();
   readonly isLoading = input<boolean>(false);
-  readonly paginationData = input({ page: 1, limit: 10, total: 0, totalPages: 0 });
+  readonly paginationData = input({
+    page: 1,
+    limit: 10,
+    total: 0,
+    totalPages: 0,
+  });
 
   // Outputs
   readonly search = output<string>();
@@ -76,7 +85,12 @@ export class AdjustmentListComponent {
   dropdownActions: DropdownAction[] = [
     { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
     { label: 'Carga Masiva', icon: 'upload', action: 'bulk' },
-    { label: 'Nuevo Ajuste', icon: 'plus', action: 'create', variant: 'primary' },
+    {
+      label: 'Nuevo Ajuste',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   // Table Configuration
@@ -115,7 +129,12 @@ export class AdjustmentListComponent {
       priority: 1,
       transform: (value: number) => (value > 0 ? `+${value}` : `${value}`),
       cellStyle: (value: number) => ({
-        color: value > 0 ? 'var(--color-success)' : value < 0 ? 'var(--color-error, #ef4444)' : '',
+        color:
+          value > 0
+            ? 'var(--color-success)'
+            : value < 0
+              ? 'var(--color-error, #ef4444)'
+              : '',
         'font-weight': value !== 0 ? '700' : '',
       }),
     },
@@ -151,7 +170,8 @@ export class AdjustmentListComponent {
   // Card Config for mobile
   cardConfig: ItemListCardConfig = {
     titleKey: 'products.name',
-    titleTransform: (item: any) => item.products?.name || item.product?.name || 'Sin producto',
+    titleTransform: (item: any) =>
+      item.products?.name || item.product?.name || 'Sin producto',
     subtitleKey: 'adjustment_type',
     subtitleTransform: (val: AdjustmentType) => this.getTypeLabel(val),
     badgeKey: 'adjustment_type',
@@ -190,7 +210,10 @@ export class AdjustmentListComponent {
 
   // Computed
   readonly hasFilters = computed(() => {
-    return !!(this.searchTerm || Object.keys(this.filterValues).some(k => this.filterValues[k]));
+    return !!(
+      this.searchTerm ||
+      Object.keys(this.filterValues).some((k) => this.filterValues[k])
+    );
   });
 
   // Event Handlers

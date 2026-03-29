@@ -158,13 +158,23 @@ export async function seedTestOrders(
         continue;
       }
 
+      // Get store_id from the product
+      const product = await client.products.findUnique({
+        where: { id: review.product_id },
+        select: { store_id: true },
+      });
+
+      if (!product?.store_id) continue;
+
       await client.reviews.create({
         data: {
+          store_id: product.store_id,
           product_id: review.product_id,
           user_id: review.user_id,
           rating: review.rating,
           comment: review.comment,
           state: review.state as any,
+          verified_purchase: true,
         },
       });
       reviewsCreated++;

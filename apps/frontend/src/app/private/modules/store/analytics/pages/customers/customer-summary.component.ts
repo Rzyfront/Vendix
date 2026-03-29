@@ -4,16 +4,27 @@ import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable, Subject, combineLatest, takeUntil } from 'rxjs';
 
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
-import { FilterConfig, FilterValues } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
-import { CurrencyPipe, CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
+import {
+  FilterConfig,
+  FilterValues,
+} from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import {
+  CurrencyPipe,
+  CurrencyFormatService,
+} from '../../../../../../shared/pipes/currency/currency.pipe';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
-import { CustomersSummary, CustomerTrend, TopCustomer } from '../../interfaces/customers-analytics.interface';
+import {
+  CustomersSummary,
+  CustomerTrend,
+  TopCustomer,
+} from '../../interfaces/customers-analytics.interface';
 
 import * as CustomersActions from './state/customers-analytics.actions';
 import * as CustomersSelectors from './state/customers-analytics.selectors';
@@ -26,6 +37,7 @@ import { EChartsOption } from 'echarts';
   imports: [
     CommonModule,
     RouterLink,
+    CardComponent,
     StatsComponent,
     ChartComponent,
     IconComponent,
@@ -42,14 +54,30 @@ export class CustomerSummaryComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
 
   // Observables from store
-  summary$: Observable<CustomersSummary | null> = this.store.select(CustomersSelectors.selectSummary);
-  trends$: Observable<CustomerTrend[]> = this.store.select(CustomersSelectors.selectTrends);
-  topCustomers$: Observable<TopCustomer[]> = this.store.select(CustomersSelectors.selectTopCustomers);
-  loading$: Observable<boolean> = this.store.select(CustomersSelectors.selectLoading);
-  loadingTrends$: Observable<boolean> = this.store.select(CustomersSelectors.selectLoadingTrends);
-  exporting$: Observable<boolean> = this.store.select(CustomersSelectors.selectExporting);
-  dateRange$: Observable<DateRangeFilter> = this.store.select(CustomersSelectors.selectDateRange);
-  granularity$: Observable<string> = this.store.select(CustomersSelectors.selectGranularity);
+  summary$: Observable<CustomersSummary | null> = this.store.select(
+    CustomersSelectors.selectSummary,
+  );
+  trends$: Observable<CustomerTrend[]> = this.store.select(
+    CustomersSelectors.selectTrends,
+  );
+  topCustomers$: Observable<TopCustomer[]> = this.store.select(
+    CustomersSelectors.selectTopCustomers,
+  );
+  loading$: Observable<boolean> = this.store.select(
+    CustomersSelectors.selectLoading,
+  );
+  loadingTrends$: Observable<boolean> = this.store.select(
+    CustomersSelectors.selectLoadingTrends,
+  );
+  exporting$: Observable<boolean> = this.store.select(
+    CustomersSelectors.selectExporting,
+  );
+  dateRange$: Observable<DateRangeFilter> = this.store.select(
+    CustomersSelectors.selectDateRange,
+  );
+  granularity$: Observable<string> = this.store.select(
+    CustomersSelectors.selectGranularity,
+  );
 
   // Chart options
   trendsChartOptions: EChartsOption = {};
@@ -133,30 +161,41 @@ export class CustomerSummaryComponent implements OnInit, OnDestroy {
     const granularity = values['granularity'] as string;
 
     const currentRange = this.filterValues;
-    if (dateFrom !== currentRange['date_from'] || dateTo !== currentRange['date_to']) {
-      this.store.dispatch(CustomersActions.setDateRange({
-        dateRange: {
-          start_date: dateFrom || '',
-          end_date: dateTo || '',
-          preset: 'custom',
-        },
-      }));
+    if (
+      dateFrom !== currentRange['date_from'] ||
+      dateTo !== currentRange['date_to']
+    ) {
+      this.store.dispatch(
+        CustomersActions.setDateRange({
+          dateRange: {
+            start_date: dateFrom || '',
+            end_date: dateTo || '',
+            preset: 'custom',
+          },
+        }),
+      );
     }
 
     if (granularity !== currentRange['granularity']) {
-      this.store.dispatch(CustomersActions.setGranularity({ granularity: granularity || 'day' }));
+      this.store.dispatch(
+        CustomersActions.setGranularity({ granularity: granularity || 'day' }),
+      );
     }
   }
 
   onClearAllFilters(): void {
-    this.store.dispatch(CustomersActions.setDateRange({
-      dateRange: {
-        start_date: this.getDefaultStartDate(),
-        end_date: this.getDefaultEndDate(),
-        preset: 'thisMonth',
-      },
-    }));
-    this.store.dispatch(CustomersActions.setGranularity({ granularity: 'day' }));
+    this.store.dispatch(
+      CustomersActions.setDateRange({
+        dateRange: {
+          start_date: this.getDefaultStartDate(),
+          end_date: this.getDefaultEndDate(),
+          preset: 'thisMonth',
+        },
+      }),
+    );
+    this.store.dispatch(
+      CustomersActions.setGranularity({ granularity: 'day' }),
+    );
   }
 
   exportReport(): void {
@@ -179,15 +218,22 @@ export class CustomerSummaryComponent implements OnInit, OnDestroy {
     return `${sign}${growth.toFixed(1)}% vs período anterior`;
   }
 
-  private updateTrendsChart(trends: CustomerTrend[], granularity: string): void {
+  private updateTrendsChart(
+    trends: CustomerTrend[],
+    granularity: string,
+  ): void {
     if (!trends.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const primaryColor = '#8b5cf6';
-    const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
-    const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+    const borderColor =
+      style.getPropertyValue('--color-border').trim() || '#e5e7eb';
+    const textSecondary =
+      style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
-    const labels = trends.map((t) => this.formatPeriodLabel(t.period, granularity));
+    const labels = trends.map((t) =>
+      this.formatPeriodLabel(t.period, granularity),
+    );
     const newCustomers = trends.map((t) => t.new_customers);
 
     this.trendsChartOptions = {
@@ -225,7 +271,10 @@ export class CustomerSummaryComponent implements OnInit, OnDestroy {
           areaStyle: {
             color: {
               type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
               colorStops: [
                 { offset: 0, color: `${primaryColor}4D` },
                 { offset: 1, color: `${primaryColor}0D` },
@@ -243,8 +292,10 @@ export class CustomerSummaryComponent implements OnInit, OnDestroy {
     if (!topCustomers.length) return;
 
     const style = getComputedStyle(document.documentElement);
-    const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
-    const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+    const borderColor =
+      style.getPropertyValue('--color-border').trim() || '#e5e7eb';
+    const textSecondary =
+      style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
     const primaryColor = '#3b82f6';
 
     const sorted = [...topCustomers].reverse();
@@ -296,7 +347,10 @@ export class CustomerSummaryComponent implements OnInit, OnDestroy {
           itemStyle: {
             color: {
               type: 'linear',
-              x: 0, y: 0, x2: 1, y2: 0,
+              x: 0,
+              y: 0,
+              x2: 1,
+              y2: 0,
               colorStops: [
                 { offset: 0, color: `${primaryColor}99` },
                 { offset: 1, color: primaryColor },

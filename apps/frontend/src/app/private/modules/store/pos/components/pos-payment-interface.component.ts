@@ -34,6 +34,7 @@ import {
   CurrencyFormatService,
   CurrencyPipe,
 } from '../../../../../shared/pipes/currency';
+import { CurrencyInputDirective } from '../../../../../shared/directives/currency-input.directive';
 import {
   PosPaymentService,
   PaymentMethod,
@@ -65,6 +66,7 @@ interface PaymentState {
     IconComponent,
     SelectorComponent,
     CurrencyPipe,
+    CurrencyInputDirective,
   ],
   templateUrl: './pos-payment-interface.component.html',
   styles: [
@@ -1262,6 +1264,19 @@ export class PosPaymentInterfaceComponent
   creditInterestRate = 0;
   creditInitialPayment = 0;
   creditInitialPaymentMethod: PaymentMethod | null = null;
+  creditType: 'installments' | 'free' = 'installments';
+  creditInterestType: 'simple' | 'compound' = 'simple';
+
+  creditTypeOptions = [
+    { value: 'installments' as const, label: 'Con Cuotas' },
+    { value: 'free' as const, label: 'Libre' },
+  ];
+
+  interestTypeOptions = [
+    { value: 'simple' as const, label: 'Simple' },
+    { value: 'compound' as const, label: 'Compuesto' },
+  ];
+
   creditRemainingBalance = 0;
   creditInstallmentsPreview: { amount: number; due_date: string }[] = [];
 
@@ -1603,11 +1618,13 @@ export class PosPaymentInterfaceComponent
   canProcessPayment(): boolean {
     if (this.paymentState.isProcessing) return false;
 
-    // Modo crédito: requiere cliente y cuotas válidas
+    // Modo crédito: requiere cliente y saldo válido (cuotas solo para tipo 'installments')
     if (this.paymentState.paymentForm === 'credito') {
-      return !!this.cartState?.customer
-        && this.creditNumInstallments > 0
-        && this.creditRemainingBalance > 0;
+      const baseValid = !!this.cartState?.customer && this.creditRemainingBalance > 0;
+      if (this.creditType === 'installments') {
+        return baseValid && this.creditNumInstallments > 0;
+      }
+      return baseValid;
     }
 
     // Modo contado: lógica actual
@@ -1766,6 +1783,7 @@ export class PosPaymentInterfaceComponent
       frequency: this.creditFrequency,
       first_installment_date: this.creditFirstDate,
       interest_rate: this.creditInterestRate,
+      interest_type: this.creditInterestType,
       initial_payment: this.creditInitialPayment,
       initial_payment_method_id: this.creditInitialPaymentMethod
         ? parseInt(this.creditInitialPaymentMethod.id)
@@ -1773,7 +1791,7 @@ export class PosPaymentInterfaceComponent
     };
 
     this.paymentService
-      .processCreditSaleWithTerms(this.cartState, creditConfig, 'current_user')
+      .processCreditSaleWithTerms(this.cartState, creditConfig, 'current_user', this.creditType)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
@@ -1955,6 +1973,8 @@ export class PosPaymentInterfaceComponent
     this.creditInterestRate = 0;
     this.creditInitialPayment = 0;
     this.creditInitialPaymentMethod = null;
+    this.creditType = 'installments';
+    this.creditInterestType = 'simple';
     this.setDefaultCreditFirstDate();
     this.updateCreditCalculations();
     this.closed.emit();
@@ -2013,32 +2033,99 @@ export class PosPaymentInterfaceComponent
     });
   }
 
+  getTotalInstallments(): number {
+    return this.creditInstallmentsPreview.reduce((sum, inst) => sum + inst.amount, 0);
+  }
+
+  getAnnualRate(): number {
+    const raw = this.creditInterestRate || 0;
+    return raw > 1 ? raw : raw * 100;
+  }
+
+  getPeriodicRate(): number {
+    const annual = this.getAnnualRate();
+    const divisors: Record<string, number> = { weekly: 52, biweekly: 26, monthly: 12 };
+    return Math.round((annual / (divisors[this.creditFrequency] || 12)) * 100) / 100;
+  }
+
+  getPeriodicLabel(): string {
+    const labels: Record<string, string> = { weekly: 'semanal', biweekly: 'quincenal', monthly: 'mensual' };
+    return labels[this.creditFrequency] || 'mensual';
+  }
+
+  getInterestAmount(): number {
+    if (this.creditInstallmentsPreview.length === 0) return 0;
+    return Math.round((this.getTotalInstallments() - this.creditRemainingBalance) * 100) / 100;
+  }
+
+  getEffectivePercent(): number {
+    if (this.creditRemainingBalance <= 0) return 0;
+    return Math.round((this.getInterestAmount() / this.creditRemainingBalance) * 10000) / 100;
+  }
+
   selectCreditInitialPaymentMethod(method: PaymentMethod): void {
     this.creditInitialPaymentMethod = method;
   }
 
   updateCreditCalculations(): void {
     const total = this.cartState?.summary?.total || 0;
-    this.creditRemainingBalance = Math.max(0, total - (this.creditInitialPayment || 0));
+    const initialPayment = this.creditInitialPayment || 0;
+    const amountToFinance = Math.max(0, total - initialPayment);
+    this.creditRemainingBalance = amountToFinance;
 
     const n = this.creditNumInstallments;
-    if (n <= 0 || this.creditRemainingBalance <= 0) {
+    if (n <= 0 || amountToFinance <= 0) {
       this.creditInstallmentsPreview = [];
       return;
     }
 
-    const baseAmount = Math.round((this.creditRemainingBalance / n) * 100) / 100;
+    const rawRate = this.creditInterestRate || 0;
+    const annualRate = rawRate > 1 ? rawRate / 100 : rawRate;
+    const interestType = this.creditInterestType || 'simple';
     const freqDays: Record<string, number> = { weekly: 7, biweekly: 14, monthly: 30 };
+    const periodsPerYear: Record<string, number> = { weekly: 52, biweekly: 26, monthly: 12 };
     const startDate = this.creditFirstDate ? new Date(this.creditFirstDate + 'T12:00:00') : new Date();
 
-    this.creditInstallmentsPreview = Array.from({ length: n }, (_, i) => {
-      const due = new Date(startDate);
-      due.setDate(due.getDate() + freqDays[this.creditFrequency] * i);
-      return {
-        amount: i === n - 1 ? Math.round((this.creditRemainingBalance - baseAmount * (n - 1)) * 100) / 100 : baseAmount,
-        due_date: due.toISOString().split('T')[0],
-      };
-    });
+    if (annualRate <= 0) {
+      // No interest: simple division
+      const baseAmount = Math.round((amountToFinance / n) * 100) / 100;
+      this.creditInstallmentsPreview = Array.from({ length: n }, (_, i) => {
+        const due = new Date(startDate);
+        due.setDate(due.getDate() + freqDays[this.creditFrequency] * i);
+        return {
+          amount: i === n - 1 ? Math.round((amountToFinance - baseAmount * (n - 1)) * 100) / 100 : baseAmount,
+          due_date: due.toISOString().split('T')[0],
+        };
+      });
+    } else if (interestType === 'compound') {
+      // Compound interest (capitalization): FV = P × (1+r)^n
+      // Interest capitalizes each period, then total divided into equal installments
+      const r = annualRate / (periodsPerYear[this.creditFrequency] || 12);
+      const totalWithInterest = Math.round(amountToFinance * Math.pow(1 + r, n) * 100) / 100;
+      const baseAmount = Math.round((totalWithInterest / n) * 100) / 100;
+      this.creditInstallmentsPreview = Array.from({ length: n }, (_, i) => {
+        const due = new Date(startDate);
+        due.setDate(due.getDate() + freqDays[this.creditFrequency] * i);
+        return {
+          amount: i === n - 1 ? Math.round((totalWithInterest - baseAmount * (n - 1)) * 100) / 100 : baseAmount,
+          due_date: due.toISOString().split('T')[0],
+        };
+      });
+    } else {
+      // Simple interest: I = P × r × n, distributed equally
+      const r = annualRate / (periodsPerYear[this.creditFrequency] || 12);
+      const totalInterest = Math.round(amountToFinance * r * n * 100) / 100;
+      const totalWithInterest = amountToFinance + totalInterest;
+      const baseAmount = Math.round((totalWithInterest / n) * 100) / 100;
+      this.creditInstallmentsPreview = Array.from({ length: n }, (_, i) => {
+        const due = new Date(startDate);
+        due.setDate(due.getDate() + freqDays[this.creditFrequency] * i);
+        return {
+          amount: i === n - 1 ? Math.round((totalWithInterest - baseAmount * (n - 1)) * 100) / 100 : baseAmount,
+          due_date: due.toISOString().split('T')[0],
+        };
+      });
+    }
   }
 
   // Customer Management Methods

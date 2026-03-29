@@ -5,6 +5,7 @@ import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 
 import { Employee } from '../../../interfaces/payroll.interface';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import * as PayrollActions from '../../../state/actions/payroll.actions';
 import {
   selectEmployeeSearch,
@@ -13,6 +14,7 @@ import {
   selectEmployeePage,
 } from '../../../state/selectors/payroll.selectors';
 
+import { CardComponent } from '../../../../../../../shared/components/card/card.component';
 import {
   InputsearchComponent,
   ButtonComponent,
@@ -26,6 +28,7 @@ import {
   FilterValues,
   IconComponent,
   PaginationComponent,
+  EmptyStateComponent,
 } from '../../../../../../../shared/components/index';
 
 @Component({
@@ -34,12 +37,14 @@ import {
   imports: [
     CommonModule,
     FormsModule,
+    CardComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     ButtonComponent,
     IconComponent,
     PaginationComponent,
+    EmptyStateComponent,
   ],
   templateUrl: './employee-list.component.html',
 })
@@ -54,9 +59,12 @@ export class EmployeeListComponent {
   @Output() bulkUpload = new EventEmitter<void>();
 
   private store = inject(Store);
+  private currencyService = inject(CurrencyFormatService);
 
   search$: Observable<string> = this.store.select(selectEmployeeSearch);
-  statusFilter$: Observable<string> = this.store.select(selectEmployeeStatusFilter);
+  statusFilter$: Observable<string> = this.store.select(
+    selectEmployeeStatusFilter,
+  );
   meta$ = this.store.select(selectEmployeeMeta);
   page$ = this.store.select(selectEmployeePage);
 
@@ -78,7 +86,12 @@ export class EmployeeListComponent {
   ];
 
   dropdownActions: DropdownAction[] = [
-    { label: 'Nuevo Empleado', icon: 'plus', action: 'create', variant: 'primary' },
+    {
+      label: 'Nuevo Empleado',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
     { label: 'Carga Masiva', icon: 'upload', action: 'bulk-upload' },
   ];
 
@@ -110,10 +123,16 @@ export class EmployeeListComponent {
       key: 'user',
       label: 'Usuario',
       priority: 3,
-      transform: (val: any) => val ? `${val.first_name} ${val.last_name}` : 'No vinculado',
+      transform: (val: any) =>
+        val ? `${val.first_name} ${val.last_name}` : 'No vinculado',
     },
     { key: 'position', label: 'Cargo', priority: 2, defaultValue: 'Sin cargo' },
-    { key: 'department', label: 'Departamento', priority: 2, defaultValue: 'Sin departamento' },
+    {
+      key: 'department',
+      label: 'Departamento',
+      priority: 2,
+      defaultValue: 'Sin departamento',
+    },
     {
       key: 'cost_center',
       label: 'Centro de Costo',
@@ -134,7 +153,8 @@ export class EmployeeListComponent {
       sortable: true,
       align: 'right',
       priority: 1,
-      transform: (val: any) => (val ? `$${Number(val).toLocaleString('es-CO')}` : '$0'),
+      transform: (val: any) =>
+        this.currencyService.format(Number(val) || 0),
     },
     {
       key: 'status',
@@ -170,7 +190,7 @@ export class EmployeeListComponent {
     footerKey: 'base_salary',
     footerLabel: 'Salario',
     footerStyle: 'prominent',
-    footerTransform: (val: any) => `$${Number(val).toLocaleString('es-CO')}`,
+    footerTransform: (val: any) => this.currencyService.format(Number(val) || 0),
     detailKeys: [
       {
         key: 'department',
@@ -187,7 +207,7 @@ export class EmployeeListComponent {
         key: 'user',
         label: 'Usuario',
         icon: 'user',
-        transform: (val: any) => val ? `${val.email}` : 'No vinculado',
+        transform: (val: any) => (val ? `${val.email}` : 'No vinculado'),
       },
     ],
   };
@@ -200,7 +220,9 @@ export class EmployeeListComponent {
   onFilterChange(values: FilterValues): void {
     this.filterValues = { ...values };
     const statusFilter = (values['status'] as string) || '';
-    this.store.dispatch(PayrollActions.setEmployeeStatusFilter({ statusFilter }));
+    this.store.dispatch(
+      PayrollActions.setEmployeeStatusFilter({ statusFilter }),
+    );
   }
 
   onClearFilters(): void {

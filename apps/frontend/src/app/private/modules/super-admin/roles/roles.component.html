@@ -1,28 +1,46 @@
 <!-- Standard Module Layout -->
-<div class="flex flex-col gap-6">
-
+<div class="flex flex-col gap-4">
   <!-- Stats Grid -->
   <div class="stats-container">
-    <app-stats title="Total Roles" [value]="roleStats.totalRoles" iconName="shield" iconBgColor="bg-blue-100"
-      iconColor="text-blue-600"></app-stats>
+    <app-stats
+      title="Total Roles"
+      [value]="roleStats.totalRoles"
+      iconName="shield"
+      iconBgColor="bg-blue-100"
+      iconColor="text-blue-600"
+    ></app-stats>
 
-    <app-stats title="Roles de Sistema" [value]="roleStats.systemRoles" iconName="lock" iconBgColor="bg-purple-100"
-      iconColor="text-purple-600"></app-stats>
+    <app-stats
+      title="Roles de Sistema"
+      [value]="roleStats.systemRoles"
+      iconName="lock"
+      iconBgColor="bg-purple-100"
+      iconColor="text-purple-600"
+    ></app-stats>
 
-    <app-stats title="Roles Personalizados" [value]="roleStats.customRoles" iconName="user-check"
-      iconBgColor="bg-green-100" iconColor="text-green-600"></app-stats>
+    <app-stats
+      title="Roles Personalizados"
+      [value]="roleStats.customRoles"
+      iconName="user-check"
+      iconBgColor="bg-green-100"
+      iconColor="text-green-600"
+    ></app-stats>
 
-    <app-stats title="Total Permisos" [value]="roleStats.totalPermissions" iconName="key" iconBgColor="bg-yellow-100"
-      iconColor="text-yellow-600"></app-stats>
+    <app-stats
+      title="Total Permisos"
+      [value]="roleStats.totalPermissions"
+      iconName="key"
+      iconBgColor="bg-yellow-100"
+      iconColor="text-yellow-600"
+    ></app-stats>
   </div>
 
   <!-- Main Content Card -->
-  <div class="flex flex-col bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
-
+  <app-card [padding]="false" overflow="hidden">
     <!-- Table Header (Title, Description, Controls) -->
     <div
-      class="p-2 md:px-6 md:py-4 border-b border-border flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between bg-surface">
-
+      class="p-2 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
+    >
       <!-- Left: Title & Description -->
       <div class="flex-1 min-w-0">
         <h3 class="text-lg font-semibold text-text-primary">
@@ -34,22 +52,39 @@
       </div>
 
       <!-- Right: Controls (Search, Filters, Actions) -->
-      <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+      <div
+        class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+      >
         <!-- Search -->
         <div class="w-full sm:w-60">
-          <app-inputsearch placeholder="Buscar roles..." [debounceTime]="300" (searchChange)="onSearchChange($event)"
-            size="sm" fullWidth="true"></app-inputsearch>
+          <app-inputsearch
+            placeholder="Buscar roles..."
+            [debounceTime]="300"
+            (searchChange)="onSearchChange($event)"
+            size="sm"
+            fullWidth="true"
+          ></app-inputsearch>
         </div>
 
         <!-- Filter -->
         <div class="w-full sm:w-48">
-          <app-selector placeholder="Tipo de Rol" [options]="roleTypes"
-            [formControl]="$any(filterForm.get('is_system_role'))" size="sm" variant="outline"></app-selector>
+          <app-selector
+            placeholder="Tipo de Rol"
+            [options]="roleTypes"
+            [formControl]="$any(filterForm.get('is_system_role'))"
+            size="sm"
+            variant="outline"
+          ></app-selector>
         </div>
 
         <!-- Actions -->
         <div class="flex gap-2 items-center sm:ml-auto">
-          <app-button variant="primary" size="sm" iconName="plus" (clicked)="createRole()">
+          <app-button
+            variant="primary"
+            size="sm"
+            iconName="plus"
+            (clicked)="createRole()"
+          >
             <span class="hidden sm:inline">Nuevo Rol</span>
             <span class="sm:hidden">Nuevo</span>
           </app-button>
@@ -60,25 +95,50 @@
     <!-- Table Content -->
     <div class="relative min-h-[400px] p-2 md:p-4">
       <!-- Loading Overlay -->
-      <div *ngIf="isLoading" class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
-        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      <div
+        *ngIf="isLoading"
+        class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+      >
+        <div
+          class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+        ></div>
       </div>
 
       <!-- Table -->
       <!-- Table -->
-      <app-responsive-data-view [data]="roles" [columns]="tableColumns" [actions]="tableActions"
-        [cardConfig]="cardConfig" [loading]="isLoading" (sortChange)="onSortChange($any($event))">
+      <app-responsive-data-view
+        [data]="roles"
+        [columns]="tableColumns"
+        [actions]="tableActions"
+        [cardConfig]="cardConfig"
+        [loading]="isLoading"
+        (sortChange)="onSortChange($any($event))"
+      >
         <!-- Empty State -->
-        <div class="p-8 flex justify-center" *ngIf="!isLoading && roles.length === 0">
-          <app-role-empty-state [title]="getEmptyStateTitle()" [description]="getEmptyStateDescription()"
-            [showAction]="!filterForm.value.search && !filterForm.value.is_system_role" (actionClick)="createRole()">
-          </app-role-empty-state>
+        <div
+          class="p-8 flex justify-center"
+          *ngIf="!isLoading && roles.length === 0"
+        >
+          <app-empty-state
+            icon="shield"
+            [title]="getEmptyStateTitle()"
+            [description]="getEmptyStateDescription()"
+            actionButtonText="Crear Rol"
+            [showActionButton]="
+              !filterForm.value.search && !filterForm.value.is_system_role
+            "
+            (actionClick)="createRole()"
+          >
+          </app-empty-state>
         </div>
       </app-responsive-data-view>
     </div>
 
     <!-- Pagination -->
-    <div class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center" *ngIf="roles.length > 0">
+    <div
+      class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center"
+      *ngIf="roles.length > 0"
+    >
       <app-pagination
         [currentPage]="pagination.page"
         [totalPages]="pagination.totalPages"
@@ -88,18 +148,32 @@
         (pageChange)="onPageChange($event)"
       />
     </div>
-  </div>
+  </app-card>
 </div>
 
 <!-- Modals -->
-<app-role-create-modal [isOpen]="showCreateModal" (isOpenChange)="showCreateModal = $event"
-  [isSubmitting]="isCreatingRole" (submit)="onRoleCreated($event)"
-  (cancel)="showCreateModal = false"></app-role-create-modal>
+<app-role-create-modal
+  [isOpen]="showCreateModal"
+  (isOpenChange)="showCreateModal = $event"
+  [isSubmitting]="isCreatingRole"
+  (submit)="onRoleCreated($event)"
+  (cancel)="showCreateModal = false"
+></app-role-create-modal>
 
-<app-role-edit-modal [isOpen]="showEditModal" (isOpenChange)="showEditModal = $event" [role]="currentRole"
-  [isSubmitting]="isUpdatingRole" (submit)="onRoleUpdated($event)"
-  (cancel)="showEditModal = false"></app-role-edit-modal>
+<app-role-edit-modal
+  [isOpen]="showEditModal"
+  (isOpenChange)="showEditModal = $event"
+  [role]="currentRole"
+  [isSubmitting]="isUpdatingRole"
+  (submit)="onRoleUpdated($event)"
+  (cancel)="showEditModal = false"
+></app-role-edit-modal>
 
-<app-role-permissions-modal [isOpen]="showPermissionsModal" (isOpenChange)="showPermissionsModal = $event"
-  [role]="currentRole" [isSubmitting]="isUpdatingPermissions" (submit)="onPermissionsUpdated($event)"
-  (cancel)="showPermissionsModal = false"></app-role-permissions-modal>
+<app-role-permissions-modal
+  [isOpen]="showPermissionsModal"
+  (isOpenChange)="showPermissionsModal = $event"
+  [role]="currentRole"
+  [isSubmitting]="isUpdatingPermissions"
+  (submit)="onPermissionsUpdated($event)"
+  (cancel)="showPermissionsModal = false"
+></app-role-permissions-modal>

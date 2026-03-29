@@ -2,6 +2,9 @@ import {
   Controller,
   Post,
   Get,
+  Delete,
+  Body,
+  Param,
   UseGuards,
   UseInterceptors,
   UploadedFile,
@@ -66,6 +69,89 @@ export class ProductsBulkImageController {
         error: { message: error.message },
       });
     }
+  }
+
+  /**
+   * Upload ZIP for analysis (dry-run before actual upload)
+   */
+  @Post('analyze')
+  @Permissions('store:products:create')
+  @UseInterceptors(FileInterceptor('file'))
+  async analyzeImages(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 100 * 1024 * 1024 }),
+        ],
+      }),
+    )
+    file: any,
+  ) {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+
+    if (!storeId) {
+      throw new BadRequestException('Store context not found');
+    }
+
+    const result = await this.bulkImageService.analyzeImageZip(
+      file.buffer,
+      storeId,
+    );
+
+    return this.responseService.success(result, 'Análisis completado');
+  }
+
+  /**
+   * Process images from a previously analyzed session
+   */
+  @Post('upload-session')
+  @Permissions('store:products:create')
+  async uploadFromSession(@Body() body: { session_id: string }) {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+
+    if (!storeId) {
+      throw new BadRequestException('Store context not found');
+    }
+
+    if (!body.session_id) {
+      throw new BadRequestException('session_id is required');
+    }
+
+    const result = await this.bulkImageService.processImageZipFromSession(
+      body.session_id,
+      storeId,
+    );
+
+    if (result.failed > 0) {
+      return this.responseService.created(
+        result,
+        'Carga de imágenes completada con algunos errores',
+      );
+    }
+
+    return this.responseService.created(
+      result,
+      'Carga de imágenes completada exitosamente',
+    );
+  }
+
+  /**
+   * Cancel an analysis session
+   */
+  @Delete('session/:id')
+  @Permissions('store:products:create')
+  async cancelSession(@Param('id') sessionId: string) {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+
+    if (!storeId) {
+      throw new BadRequestException('Store context not found');
+    }
+
+    await this.bulkImageService.cancelSession(sessionId, storeId);
+    return this.responseService.success(null, 'Sesión cancelada');
   }
 
   /**

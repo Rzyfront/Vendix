@@ -24,6 +24,7 @@ import { EnvironmentContextService } from '../../../core/services/environment-co
 import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
 import { DialogService, ToastService } from '../index';
 import { SettingToggleComponent } from '../setting-toggle/setting-toggle.component';
+import { InputsearchComponent } from '../inputsearch/inputsearch.component';
 import { ThemeService } from '../../../core/services/theme.service';
 
 // Constant: Configuration of modules per app type
@@ -152,9 +153,14 @@ const APP_MODULES = {
           description: 'Planes de pago a cuotas con reserva de productos',
         },
         {
-          key: 'orders_credits',
-          label: 'Créditos',
-          description: 'Ventas a crédito con cronograma de cuotas e intereses',
+          key: 'orders_reservations',
+          label: 'Reservas',
+          description: 'Gestión de reservas y agendamiento de servicios',
+        },
+        {
+          key: 'orders_dispatch_notes',
+          label: 'Remisiones',
+          description: 'Notas de despacho / remisiones',
         },
       ],
     },
@@ -439,6 +445,7 @@ const APP_MODULES = {
     ButtonComponent,
     IconComponent,
     SettingToggleComponent,
+    InputsearchComponent,
   ],
   template: `
     <app-modal
@@ -584,12 +591,20 @@ const APP_MODULES = {
             >
           </div>
 
+          <app-inputsearch
+            placeholder="Buscar módulos..."
+            size="sm"
+            [debounceTime]="200"
+            (searchChange)="onModuleSearch($event)"
+            class="mb-4 block"
+          ></app-inputsearch>
+
           <div formGroupName="panel_ui" class="relative">
             <div [formGroupName]="currentAppType" class="flex flex-col gap-6">
               <!-- SECTION A: Modules WITH Children (larger cards/areas) -->
               <div class="compact-modules-grid">
                 <div
-                  *ngFor="let module of getModulesWithChildren(currentAppType)"
+                  *ngFor="let module of filteredModulesWithChildren"
                   class="module-group is-parent"
                   [class.new-module]="isNewModule(module.key)"
                 >
@@ -629,7 +644,7 @@ const APP_MODULES = {
                 </h5>
                 <div class="compact-modules-grid">
                   <div
-                    *ngFor="let module of getStandaloneModules(currentAppType)"
+                    *ngFor="let module of filteredStandaloneModules"
                     class="module-group"
                     [class.new-module]="isNewModule(module.key)"
                   >
@@ -642,6 +657,14 @@ const APP_MODULES = {
                   </div>
                 </div>
               </div>
+
+              <!-- No results message -->
+              <p
+                *ngIf="moduleSearchTerm && filteredModulesWithChildren.length === 0 && filteredStandaloneModules.length === 0"
+                class="text-sm text-gray-400 text-center py-4"
+              >
+                No se encontraron módulos para "{{ moduleSearchTerm }}"
+              </p>
             </div>
           </div>
 
@@ -733,6 +756,9 @@ export class SettingsModalComponent implements OnInit {
   upgrading = false;
   defaultPanelUi: Record<string, Record<string, boolean>> | null = null;
   newModuleKeys = new Set<string>();
+  moduleSearchTerm = '';
+  filteredModulesWithChildren: any[] = [];
+  filteredStandaloneModules: any[] = [];
 
   constructor() {
     // Initialize panel_ui controls for ORG_ADMIN
@@ -769,6 +795,7 @@ export class SettingsModalComponent implements OnInit {
 
     // Check permissions synchronously
     this.checkPermissions();
+    this.recomputeFilteredModules();
   }
 
   ngOnInit() {}
@@ -794,6 +821,7 @@ export class SettingsModalComponent implements OnInit {
       this.currentAppType = 'STORE_ADMIN';
       this.settingsForm.patchValue({ app: 'STORE_ADMIN' });
     }
+    this.recomputeFilteredModules();
   }
 
   onClose() {
@@ -906,6 +934,56 @@ export class SettingsModalComponent implements OnInit {
     );
   }
 
+  onModuleSearch(term: string): void {
+    this.moduleSearchTerm = term;
+    this.recomputeFilteredModules();
+  }
+
+  private recomputeFilteredModules(): void {
+    const appType = this.currentAppType;
+    const term = this.moduleSearchTerm.toLowerCase().trim();
+
+    const parentModules = this.getParentModules(appType).filter(
+      (m) => m.isParent && m.children && m.children.length > 0,
+    );
+
+    if (!term) {
+      this.filteredModulesWithChildren = parentModules;
+    } else {
+      this.filteredModulesWithChildren = parentModules
+        .map((module) => {
+          const parentMatches =
+            module.label.toLowerCase().includes(term) ||
+            (module.description && module.description.toLowerCase().includes(term));
+          const matchingChildren = module.children.filter(
+            (child: any) =>
+              child.label.toLowerCase().includes(term) ||
+              (child.description && child.description.toLowerCase().includes(term)),
+          );
+          if (parentMatches) return module;
+          if (matchingChildren.length > 0) {
+            return { ...module, children: matchingChildren };
+          }
+          return null;
+        })
+        .filter(Boolean);
+    }
+
+    const standalone = this.getParentModules(appType).filter(
+      (m) => !m.isParent || !m.children || m.children.length === 0,
+    );
+
+    if (!term) {
+      this.filteredStandaloneModules = standalone;
+    } else {
+      this.filteredStandaloneModules = standalone.filter(
+        (m) =>
+          m.label.toLowerCase().includes(term) ||
+          (m.description && m.description.toLowerCase().includes(term)),
+      );
+    }
+  }
+
   /**
    * Compute which module keys are new (exist in defaults but not in user config)
    * Keys are stored as "appType::key" to avoid cross-app-type contamination
@@ -950,12 +1028,14 @@ export class SettingsModalComponent implements OnInit {
           }
 
           this.initializeForm(settings.config || {});
+          this.recomputeFilteredModules();
         },
         error: (err) => {
           console.error('Error loading settings', err);
           // Initialize with defaults even on error
           this.currentAppType = 'ORG_ADMIN';
           this.initializeForm({});
+          this.recomputeFilteredModules();
         },
       });
   }
@@ -1044,6 +1124,7 @@ export class SettingsModalComponent implements OnInit {
   selectAppType(appType: string) {
     if (!this.canChangeAppType) return;
 
+    this.moduleSearchTerm = '';
     this.currentAppType = appType;
     this.settingsForm.patchValue({ app: appType });
   }

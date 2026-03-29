@@ -9,6 +9,8 @@ metadata:
   auto_invoke: "When adding icons to components, buttons, menus, or using <app-icon>"
 ---
 
+> **Tip**: Antes de usar app-icon, consulta su README en `apps/frontend/src/app/shared/components/icon/README.md` para conocer como registrar iconos y los iconos disponibles.
+
 ## 🎨 Icon System Protocol
 
 Vendix uses **Lucide Angular** icons, but they are **NOT** globally available. They must be explicitly registered in a central registry to optimize bundle size.

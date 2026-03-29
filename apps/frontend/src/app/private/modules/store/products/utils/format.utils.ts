@@ -3,9 +3,10 @@ import { Product, ProductState, ProductStats } from '../interfaces';
 export class FormatUtils {
   /**
    * Format currency
+   * @deprecated Use CurrencyFormatService.format() instead for store-aware formatting
    */
   static formatCurrency(amount: number, currency: string = '$'): string {
-    return `${currency}${amount.toFixed(2)}`;
+    return `${currency}${(amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
 
   /**

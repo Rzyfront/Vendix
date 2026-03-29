@@ -144,16 +144,30 @@ The search section is sticky on mobile and positioned below the stats.
 
 **Important:** The `top-[99px]` value must match the height of the stats cards (~104px minus margin adjustments).
 
-### 4. Container Styling (Mobile-First)
+### 4. No Padding on Root Container
+
+**RULE:** The component's root `<div>` must NOT have padding (`px-*`, `py-*`, `p-*`). The parent layout already handles padding. Adding padding here causes double-spacing.
+
+```html
+<!-- ✅ Correct -->
+<div class="w-full">...</div>
+<div class="md:space-y-4">...</div>
+
+<!-- ❌ Wrong — layout already provides padding -->
+<div class="px-3 py-3 sm:px-4 sm:py-4 lg:px-6 lg:py-5">...</div>
+```
+
+### 5. Container Styling (Mobile-First)
 
 **Mobile:** Transparent, no borders (items float individually)
 **Desktop:** Surface background, rounded, shadow, border
 
 ```html
 <!-- Content container (wraps ResponsiveDataView) -->
-<div
-  class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-            md:border md:border-border md:min-h-[600px] md:overflow-hidden"
+<app-card
+  [responsive]="true"
+  [padding]="false"
+  customClasses="md:min-h-[600px]"
 >
   <app-responsive-data-view
     [data]="items"
@@ -162,7 +176,7 @@ The search section is sticky on mobile and positioned below the stats.
     [actions]="actions"
     [loading]="loading"
   />
-</div>
+</app-card>
 ```
 
 **Consistent Shadow Value:** `0 2px 8px rgba(0,0,0,0.07)` - used across:
@@ -172,7 +186,7 @@ The search section is sticky on mobile and positioned below the stats.
 - Item cards (mobile only)
 - Main container (desktop only)
 
-### 5. Data Display Container
+### 6. Data Display Container
 
 Use `ResponsiveDataViewComponent` for automatic mobile/desktop switching:
 
@@ -202,7 +216,7 @@ Use `ResponsiveDataViewComponent` for automatic mobile/desktop switching:
 </div>
 ```
 
-### 6. Stats Component Usage
+### 7. Stats Component Usage
 
 **RULE:** Use `iconBgColor` and `iconColor` inputs directly. Do NOT rely on generic `variant` unless absolutely necessary.
 **Data Rule:** Stats data properties usually come as camelCase from the API (e.g., `totalRoles`, `systemRoles`). Match the interface exactly.
@@ -217,7 +231,7 @@ Use `ResponsiveDataViewComponent` for automatic mobile/desktop switching:
 ></app-stats>
 ```
 
-### 7. Angular Signals
+### 8. Angular Signals
 
 All new logic MUST use Angular Signals.
 
@@ -225,7 +239,7 @@ All new logic MUST use Angular Signals.
 - `output()` instead of `@Output()`
 - Use `inject()` for dependency injection.
 
-### 8. Complete List Component Example
+### 9. Complete List Component Example
 
 ```typescript
 @Component({
@@ -266,9 +280,10 @@ All new logic MUST use Angular Signals.
     </div>
 
     <!-- Content Container -->
-    <div
-      class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-                md:border md:border-border md:min-h-[600px] md:overflow-hidden"
+    <app-card
+      [responsive]="true"
+      [padding]="false"
+      customClasses="md:min-h-[600px]"
     >
       <app-responsive-data-view
         [data]="filteredItems()"
@@ -277,7 +292,7 @@ All new logic MUST use Angular Signals.
         [actions]="actions"
         [loading]="loading()"
       />
-    </div>
+    </app-card>
   `,
 })
 export class ProductListComponent {
@@ -319,7 +334,7 @@ export class ProductListComponent {
 }
 ```
 
-### 9. Role Stats Interface (camelCase)
+### 10. Role Stats Interface (camelCase)
 
 ```typescript
 export interface RoleStats {

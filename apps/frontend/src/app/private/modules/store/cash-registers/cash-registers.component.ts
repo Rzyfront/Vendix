@@ -1,7 +1,14 @@
-import { Component, OnInit, OnDestroy, signal, computed } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule, FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+import {
+  FormsModule,
+  FormBuilder,
+  FormGroup,
+  Validators,
+  ReactiveFormsModule,
+} from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
+import { CardComponent } from '../../../../shared/components/card/card.component';
 import {
   ToastService,
   StatsComponent,
@@ -26,6 +33,7 @@ import {
   CashRegisterSession,
 } from '../pos/services/pos-cash-register.service';
 import { PosSessionDetailModalComponent } from '../pos/components/pos-session-detail-modal.component';
+import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-cash-registers',
@@ -34,6 +42,7 @@ import { PosSessionDetailModalComponent } from '../pos/components/pos-session-de
     CommonModule,
     FormsModule,
     ReactiveFormsModule,
+    CardComponent,
     StatsComponent,
     ButtonComponent,
     IconComponent,
@@ -48,7 +57,7 @@ import { PosSessionDetailModalComponent } from '../pos/components/pos-session-de
     <div class="w-full md:space-y-4">
       <!-- Stats: Sticky on mobile, static on desktop -->
       <div
-        class="stats-container !mb-0 md:!mb-6 sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
           title="Cajas Activas"
@@ -89,15 +98,19 @@ import { PosSessionDetailModalComponent } from '../pos/components/pos-session-de
 
       <!-- Tab: Cajas -->
       @if (active_tab() === 'registers') {
-        <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-                    md:border md:border-border">
-
+        <app-card [responsive]="true" [padding]="false">
           <!-- Sticky search header -->
-          <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                      md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
-            <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-              <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
-                         md:text-lg md:font-semibold md:text-text-primary">
+          <div
+            class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                      md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+          >
+            <div
+              class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+            >
+              <h2
+                class="text-[13px] font-bold text-gray-600 tracking-wide
+                         md:text-lg md:font-semibold md:text-text-primary"
+              >
                 Cajas Registradoras ({{ filtered_registers().length }})
               </h2>
               <div class="flex items-center gap-2 w-full md:w-auto">
@@ -140,7 +153,9 @@ import { PosSessionDetailModalComponent } from '../pos/components/pos-session-de
           <!-- Loading State -->
           @if (is_loading_registers()) {
             <div class="p-4 md:p-6 text-center">
-              <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <div
+                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+              ></div>
               <p class="mt-2 text-text-secondary">Cargando cajas...</p>
             </div>
           }
@@ -148,31 +163,47 @@ import { PosSessionDetailModalComponent } from '../pos/components/pos-session-de
           <!-- Empty State -->
           @if (!is_loading_registers() && filtered_registers().length === 0) {
             <div class="p-8 text-center">
-              <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
-                <app-icon name="monitor" [size]="24" class="text-gray-400"></app-icon>
+              <div
+                class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center"
+              >
+                <app-icon
+                  name="monitor"
+                  [size]="24"
+                  class="text-gray-400"
+                ></app-icon>
               </div>
               @if (registers_search_term()) {
-                <p class="text-sm text-text-secondary">No se encontraron cajas con ese criterio</p>
+                <p class="text-sm text-text-secondary">
+                  No se encontraron cajas con ese criterio
+                </p>
               } @else {
-                <p class="text-sm text-text-secondary">No hay cajas registradas</p>
-                <p class="text-xs text-gray-400 mt-1">Crea tu primera caja registradora</p>
+                <p class="text-sm text-text-secondary">
+                  No hay cajas registradas
+                </p>
+                <p class="text-xs text-gray-400 mt-1">
+                  Crea tu primera caja registradora
+                </p>
               }
             </div>
           }
-        </div>
+        </app-card>
       }
 
       <!-- Tab: Sesiones -->
       @if (active_tab() === 'sessions') {
-        <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-                    md:border md:border-border">
-
+        <app-card [responsive]="true" [padding]="false">
           <!-- Sticky search header -->
-          <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                      md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
-            <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-              <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
-                         md:text-lg md:font-semibold md:text-text-primary">
+          <div
+            class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                      md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+          >
+            <div
+              class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+            >
+              <h2
+                class="text-[13px] font-bold text-gray-600 tracking-wide
+                         md:text-lg md:font-semibold md:text-text-primary"
+              >
                 Historial de Sesiones ({{ filtered_sessions().length }})
               </h2>
               <div class="flex items-center gap-2 w-full md:w-auto">
@@ -206,7 +237,9 @@ import { PosSessionDetailModalComponent } from '../pos/components/pos-session-de
           <!-- Loading State -->
           @if (is_loading_sessions()) {
             <div class="p-4 md:p-6 text-center">
-              <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <div
+                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+              ></div>
               <p class="mt-2 text-text-secondary">Cargando sesiones...</p>
             </div>
           }
@@ -214,31 +247,53 @@ import { PosSessionDetailModalComponent } from '../pos/components/pos-session-de
           <!-- Empty State -->
           @if (!is_loading_sessions() && filtered_sessions().length === 0) {
             <div class="p-8 text-center">
-              <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
-                <app-icon name="clock" [size]="24" class="text-gray-400"></app-icon>
+              <div
+                class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center"
+              >
+                <app-icon
+                  name="clock"
+                  [size]="24"
+                  class="text-gray-400"
+                ></app-icon>
               </div>
               @if (sessions_search_term()) {
-                <p class="text-sm text-text-secondary">No se encontraron sesiones con ese criterio</p>
+                <p class="text-sm text-text-secondary">
+                  No se encontraron sesiones con ese criterio
+                </p>
               } @else {
-                <p class="text-sm text-text-secondary">No hay sesiones registradas</p>
-                <p class="text-xs text-gray-400 mt-1">Las sesiones aparecen al abrir una caja desde el POS</p>
+                <p class="text-sm text-text-secondary">
+                  No hay sesiones registradas
+                </p>
+                <p class="text-xs text-gray-400 mt-1">
+                  Las sesiones aparecen al abrir una caja desde el POS
+                </p>
               }
             </div>
           }
-        </div>
+        </app-card>
       }
 
       <!-- Register CRUD Modal -->
       <app-modal
         [isOpen]="show_register_modal()"
         [title]="editing_register() ? 'Editar Caja' : 'Nueva Caja'"
-        [subtitle]="editing_register() ? 'Modifica los datos de la caja' : 'Configura una nueva caja registradora'"
+        [subtitle]="
+          editing_register()
+            ? 'Modifica los datos de la caja'
+            : 'Configura una nueva caja registradora'
+        "
         size="md"
         (closed)="closeRegisterModal()"
       >
         <div slot="header">
-          <div class="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center border border-blue-100">
-            <app-icon name="monitor" [size]="20" class="text-blue-600"></app-icon>
+          <div
+            class="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center border border-blue-100"
+          >
+            <app-icon
+              name="monitor"
+              [size]="20"
+              class="text-blue-600"
+            ></app-icon>
           </div>
         </div>
 
@@ -276,10 +331,8 @@ import { PosSessionDetailModalComponent } from '../pos/components/pos-session-de
             formControlName="default_opening_amount"
             label="Monto de Apertura por Defecto"
             placeholder="0"
-            type="number"
+            [currency]="true"
             [size]="'md'"
-            [min]="0"
-            step="1000"
             helperText="Monto sugerido al abrir esta caja"
           ></app-input>
         </form>
@@ -323,6 +376,7 @@ import { PosSessionDetailModalComponent } from '../pos/components/pos-session-de
 })
 export class CashRegistersComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
+  private currencyService = inject(CurrencyFormatService);
 
   // Tabs configuration
   readonly tabs: ScrollableTab[] = [
@@ -348,10 +402,11 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
     const term = this.registers_search_term().toLowerCase();
     const data = this.registers();
     if (!term) return data;
-    return data.filter(r =>
-      r.name?.toLowerCase().includes(term) ||
-      r.code?.toLowerCase().includes(term) ||
-      r.description?.toLowerCase().includes(term)
+    return data.filter(
+      (r) =>
+        r.name?.toLowerCase().includes(term) ||
+        r.code?.toLowerCase().includes(term) ||
+        r.description?.toLowerCase().includes(term),
     );
   });
 
@@ -359,36 +414,40 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
     const term = this.sessions_search_term().toLowerCase();
     const data = this.sessions();
     if (!term) return data;
-    return data.filter(s =>
-      s.register?.name?.toLowerCase().includes(term) ||
-      s.opened_by_user?.first_name?.toLowerCase().includes(term) ||
-      s.opened_by_user?.last_name?.toLowerCase().includes(term) ||
-      s.status?.toLowerCase().includes(term)
+    return data.filter(
+      (s) =>
+        s.register?.name?.toLowerCase().includes(term) ||
+        s.opened_by_user?.first_name?.toLowerCase().includes(term) ||
+        s.opened_by_user?.last_name?.toLowerCase().includes(term) ||
+        s.status?.toLowerCase().includes(term),
     );
   });
 
   // Stats (computed)
-  readonly active_registers_count = computed(() =>
-    this.registers().filter(r => r.is_active).length
+  readonly active_registers_count = computed(
+    () => this.registers().filter((r) => r.is_active).length,
   );
 
-  readonly open_sessions_count = computed(() =>
-    this.sessions().filter(s => s.status === 'open').length
+  readonly open_sessions_count = computed(
+    () => this.sessions().filter((s) => s.status === 'open').length,
   );
 
-  readonly closed_today_count = computed(() =>
-    this.sessions().filter(s => s.status === 'closed' && this.isToday(s.closed_at)).length
+  readonly closed_today_count = computed(
+    () =>
+      this.sessions().filter(
+        (s) => s.status === 'closed' && this.isToday(s.closed_at),
+      ).length,
   );
 
   readonly total_difference = computed(() =>
     this.sessions()
-      .filter(s => s.difference != null)
-      .reduce((sum, s) => sum + Number(s.difference), 0)
+      .filter((s) => s.difference != null)
+      .reduce((sum, s) => sum + Number(s.difference), 0),
   );
 
   readonly total_difference_display = computed(() => {
     const diff = this.total_difference();
-    return `\$${Math.abs(diff).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+    return this.currencyService.format(Math.abs(diff));
   });
 
   // Modal state (signals)
@@ -425,7 +484,10 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
       label: 'Monto Apertura Default',
       sortable: true,
       priority: 3,
-      transform: (value: number) => value != null ? `\$${value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '-',
+      transform: (value: number) =>
+        value != null
+          ? this.currencyService.format(value)
+          : '-',
     },
     {
       key: 'is_active',
@@ -470,7 +532,10 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
       {
         key: 'default_opening_amount',
         label: 'Monto Apertura',
-        transform: (val: number) => val != null ? `\$${val.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '-',
+        transform: (val: number) =>
+          val != null
+            ? this.currencyService.format(val)
+            : '-',
       },
       {
         key: 'sessions',
@@ -510,7 +575,8 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
       label: 'Caja',
       sortable: true,
       priority: 1,
-      transform: (_value: any, item: CashRegisterSession) => item.register?.name || '-',
+      transform: (_value: any, item: CashRegisterSession) =>
+        item.register?.name || '-',
     },
     {
       key: 'opened_by_user',
@@ -541,14 +607,20 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
       label: 'Apertura',
       sortable: true,
       priority: 2,
-      transform: (value: number) => value != null ? `\$${value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '-',
+      transform: (value: number) =>
+        value != null
+          ? this.currencyService.format(value)
+          : '-',
     },
     {
       key: 'actual_closing_amount',
       label: 'Cierre',
       sortable: true,
       priority: 3,
-      transform: (value: number) => value != null ? `\$${value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '-',
+      transform: (value: number) =>
+        value != null
+          ? this.currencyService.format(value)
+          : '-',
     },
     {
       key: 'difference',
@@ -558,7 +630,7 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
       transform: (value: number) => {
         if (value == null) return '-';
         const sign = value >= 0 ? '+' : '';
-        return `${sign}\$${value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+        return `${sign}${this.currencyService.format(Math.abs(value))}`;
       },
     },
     {
@@ -566,13 +638,15 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
       label: 'Fecha',
       sortable: true,
       priority: 2,
-      transform: (value: string) => value ? new Date(value).toLocaleDateString() : '-',
+      transform: (value: string) =>
+        value ? new Date(value).toLocaleDateString() : '-',
     },
   ];
 
   sessions_card_config: ItemListCardConfig = {
     titleKey: 'register',
-    titleTransform: (item: CashRegisterSession) => item.register?.name || 'Sin caja',
+    titleTransform: (item: CashRegisterSession) =>
+      item.register?.name || 'Sin caja',
     subtitleKey: 'opened_by_user',
     subtitleTransform: (item: CashRegisterSession) => {
       const user = item.opened_by_user;
@@ -595,7 +669,10 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
       {
         key: 'opening_amount',
         label: 'Apertura',
-        transform: (val: number) => val != null ? `\$${val.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '-',
+        transform: (val: number) =>
+          val != null
+            ? this.currencyService.format(val)
+            : '-',
       },
       {
         key: 'difference',
@@ -603,13 +680,14 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
         transform: (val: number) => {
           if (val == null) return '-';
           const sign = val >= 0 ? '+' : '';
-          return `${sign}\$${val.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+          return `${sign}${this.currencyService.format(Math.abs(val))}`;
         },
       },
     ],
     footerKey: 'opened_at',
     footerLabel: 'Fecha',
-    footerTransform: (val: string) => val ? new Date(val).toLocaleDateString() : '-',
+    footerTransform: (val: string) =>
+      val ? new Date(val).toLocaleDateString() : '-',
   };
 
   sessions_table_actions: TableAction[] = [
@@ -690,7 +768,9 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
           this.is_loading_sessions.set(false);
         },
         error: (error: any) => {
-          this.toast_service.error('Error al cargar sesiones: ' + error.message);
+          this.toast_service.error(
+            'Error al cargar sesiones: ' + error.message,
+          );
           this.sessions.set([]);
           this.is_loading_sessions.set(false);
         },
@@ -701,7 +781,12 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
 
   openRegisterModal(): void {
     this.editing_register.set(null);
-    this.register_form.reset({ name: '', code: '', description: '', default_opening_amount: 0 });
+    this.register_form.reset({
+      name: '',
+      code: '',
+      description: '',
+      default_opening_amount: 0,
+    });
     this.show_register_modal.set(true);
   }
 
@@ -732,24 +817,24 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
       ? this.cash_register_service.updateRegister(editing.id, data)
       : this.cash_register_service.createRegister(data);
 
-    obs$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: () => {
-          this.is_saving_register.set(false);
-          this.closeRegisterModal();
-          this.toast_service.success(
-            editing ? 'Caja actualizada correctamente' : 'Caja creada correctamente',
-          );
-          this.loadRegisters();
-        },
-        error: (err: any) => {
-          this.is_saving_register.set(false);
-          this.toast_service.error(
-            err.error?.message || 'Error al guardar la caja',
-          );
-        },
-      });
+    obs$.pipe(takeUntil(this.destroy$)).subscribe({
+      next: () => {
+        this.is_saving_register.set(false);
+        this.closeRegisterModal();
+        this.toast_service.success(
+          editing
+            ? 'Caja actualizada correctamente'
+            : 'Caja creada correctamente',
+        );
+        this.loadRegisters();
+      },
+      error: (err: any) => {
+        this.is_saving_register.set(false);
+        this.toast_service.error(
+          err.error?.message || 'Error al guardar la caja',
+        );
+      },
+    });
   }
 
   confirmDeactivateRegister(register: CashRegister): void {
@@ -785,7 +870,8 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
     const field = this.register_form.get(fieldName);
     if (field && field.errors && field.touched) {
       if (field.errors['required']) return 'Este campo es requerido';
-      if (field.errors['maxlength']) return `Máximo ${field.errors['maxlength'].requiredLength} caracteres`;
+      if (field.errors['maxlength'])
+        return `Máximo ${field.errors['maxlength'].requiredLength} caracteres`;
     }
     return undefined;
   }

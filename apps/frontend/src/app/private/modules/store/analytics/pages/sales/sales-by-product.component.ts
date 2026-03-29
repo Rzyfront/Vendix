@@ -3,8 +3,15 @@ import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 
-import { TableColumn, TableAction } from '../../../../../../shared/components/table/table.component';
-import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../../../shared/components/index';
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
+import {
+  TableColumn,
+  TableAction,
+} from '../../../../../../shared/components/table/table.component';
+import {
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
+} from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
@@ -13,7 +20,10 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 import { AnalyticsService } from '../../services/analytics.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
-import { SalesByProduct, SalesAnalyticsQueryDto } from '../../interfaces/sales-analytics.interface';
+import {
+  SalesByProduct,
+  SalesAnalyticsQueryDto,
+} from '../../interfaces/sales-analytics.interface';
 
 @Component({
   selector: 'vendix-sales-by-product',
@@ -21,6 +31,7 @@ import { SalesByProduct, SalesAnalyticsQueryDto } from '../../interfaces/sales-a
   imports: [
     CommonModule,
     RouterModule,
+    CardComponent,
     ResponsiveDataViewComponent,
     IconComponent,
     DateRangeFilterComponent,
@@ -29,19 +40,31 @@ import { SalesByProduct, SalesAnalyticsQueryDto } from '../../interfaces/sales-a
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
       <!-- Header -->
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+      >
         <div>
           <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/reports" class="hover:text-primary">Reportes</a>
+            <a routerLink="/admin/reports" class="hover:text-primary"
+              >Reportes</a
+            >
             <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/reports/sales" class="hover:text-primary">Ventas</a>
+            <a routerLink="/admin/reports/sales" class="hover:text-primary"
+              >Ventas</a
+            >
             <app-icon name="chevron-right" [size]="14"></app-icon>
             <span>Por Producto</span>
           </div>
-          <h1 class="text-2xl font-bold text-text-primary">Ventas por Producto</h1>
-          <p class="text-text-secondary mt-1">Análisis detallado de ventas por producto</p>
+          <h1 class="text-2xl font-bold text-text-primary">
+            Ventas por Producto
+          </h1>
+          <p class="text-text-secondary mt-1">
+            Análisis detallado de ventas por producto
+          </p>
         </div>
-        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        <div
+          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3"
+        >
           <vendix-date-range-filter
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
@@ -54,14 +77,21 @@ import { SalesByProduct, SalesAnalyticsQueryDto } from '../../interfaces/sales-a
       </div>
 
       <!-- Main Content Card -->
-      <div class="bg-surface border border-border rounded-xl overflow-hidden">
-        <div class="p-4 border-b border-border">
-          <h3 class="font-semibold text-text-primary">
+      <app-card
+        shadow="none"
+        [padding]="false"
+        overflow="hidden"
+        [showHeader]="true"
+      >
+        <div slot="header" class="flex flex-col">
+          <span class="text-sm font-bold text-[var(--color-text-primary)]">
             Productos Vendidos
-            <span class="text-text-secondary font-normal text-sm ml-2">
+            <span
+              class="text-xs text-[var(--color-text-secondary)] font-normal ml-2"
+            >
               ({{ data().length }} productos)
             </span>
-          </h3>
+          </span>
         </div>
 
         <div class="p-4">
@@ -74,7 +104,7 @@ import { SalesByProduct, SalesAnalyticsQueryDto } from '../../interfaces/sales-a
             emptyIcon="package"
           ></app-responsive-data-view>
         </div>
-      </div>
+      </app-card>
     </div>
   `,
 })

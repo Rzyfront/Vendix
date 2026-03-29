@@ -6,11 +6,14 @@
 
 ---
 
+> **Tip**: Para notificaciones, consulta el README de ToastService en `apps/frontend/src/app/shared/components/toast/README.md`.
+
 > **Store Settings Module** - Multi-section configuration system for stores with cross-domain synchronization.
 
 ## 🎯 When to Use
 
 Use this skill when:
+
 - Working on the store general settings module (`/admin/settings/general`)
 - Creating or modifying configuration sections (general, inventory, notifications, pos, receipts, app, checkout, shipping)
 - Modifying synchronization between `store_settings`, `stores`, and `store_settings.settings.branding` (source of truth)
@@ -70,12 +73,12 @@ model store_settings {
 **File:** `apps/frontend/src/app/private/modules/store/settings/general/services/store-settings.service.ts`
 
 ```typescript
-import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
-import { Observable, Subject, BehaviorSubject } from 'rxjs';
-import { debounceTime, distinctUntilChanged, switchMap } from 'rxjs/operators';
+import { Injectable, inject } from "@angular/core";
+import { HttpClient } from "@angular/common/http";
+import { Observable, Subject, BehaviorSubject } from "rxjs";
+import { debounceTime, distinctUntilChanged, switchMap } from "rxjs/operators";
 
-@Injectable({ providedIn: 'root' })
+@Injectable({ providedIn: "root" })
 export class StoreSettingsService {
   private http = inject(HttpClient);
   private readonly api_base_url = `${environment.apiUrl}/store`;
@@ -91,7 +94,9 @@ export class StoreSettingsService {
    * Saves settings with a 2.5s debounce
    * RETURNS Observable so the component can receive feedback
    */
-  saveSettings(settings: Partial<StoreSettings>): Observable<ApiResponse<StoreSettings>> {
+  saveSettings(
+    settings: Partial<StoreSettings>,
+  ): Observable<ApiResponse<StoreSettings>> {
     return this.save_settings$$.pipe(
       debounceTime(2500),
       distinctUntilChanged(
@@ -104,11 +109,15 @@ export class StoreSettingsService {
   /**
    * Immediate save (no debounce)
    */
-  saveSettingsNow(settings: Partial<StoreSettings>): Observable<ApiResponse<StoreSettings>> {
+  saveSettingsNow(
+    settings: Partial<StoreSettings>,
+  ): Observable<ApiResponse<StoreSettings>> {
     return this.update_settings_api(settings);
   }
 
-  private update_settings_api(settings: Partial<StoreSettings>): Observable<ApiResponse<StoreSettings>> {
+  private update_settings_api(
+    settings: Partial<StoreSettings>,
+  ): Observable<ApiResponse<StoreSettings>> {
     return this.http.patch<ApiResponse<StoreSettings>>(
       `${this.api_base_url}/settings`,
       settings,
@@ -137,14 +146,14 @@ export class StoreSettingsService {
 **File:** `apps/frontend/src/app/private/modules/store/settings/general/general-settings.component.ts`
 
 ```typescript
-import { Component, inject } from '@angular/core';
-import { StoreSettingsService } from './services/store-settings.service';
-import { ToastService } from '@shared/components/toast/toast.service';
+import { Component, inject } from "@angular/core";
+import { StoreSettingsService } from "./services/store-settings.service";
+import { ToastService } from "@shared/components/toast/toast.service";
 
 @Component({
-  selector: 'app-general-settings',
+  selector: "app-general-settings",
   standalone: true,
-  templateUrl: './general-settings.component.html',
+  templateUrl: "./general-settings.component.html",
 })
 export class GeneralSettingsComponent {
   private settings_service = inject(StoreSettingsService);
@@ -178,14 +187,14 @@ export class GeneralSettingsComponent {
         this.hasUnsavedChanges = false;
         this.lastSaved = new Date();
         this.isAutoSaving = false;
-        this.toast_service.success('Changes saved automatically');
+        this.toast_service.success("Changes saved automatically");
       },
       error: (error) => {
         this.hasUnsavedChanges = true;
-        this.saveError = error.message || 'Error saving changes';
+        this.saveError = error.message || "Error saving changes";
         this.isAutoSaving = false;
-        this.toast_service.error('Error saving changes');
-      }
+        this.toast_service.error("Error saving changes");
+      },
     });
   }
 
@@ -199,12 +208,12 @@ export class GeneralSettingsComponent {
         this.isSaving = false;
         this.hasUnsavedChanges = false;
         this.lastSaved = new Date();
-        this.toast_service.success('Settings saved');
+        this.toast_service.success("Settings saved");
       },
       error: (error) => {
         this.isSaving = false;
-        console.error('Error saving settings:', error);
-        this.toast_service.error('Error saving settings');
+        console.error("Error saving settings:", error);
+        this.toast_service.error("Error saving settings");
       },
     });
   }
@@ -220,11 +229,11 @@ export class GeneralSettingsComponent {
 **File:** `apps/backend/src/domains/store/settings/settings.service.ts`
 
 ```typescript
-import { Injectable, ForbiddenException } from '@nestjs/common';
-import { StorePrismaService } from '@prisma/services/store-prisma.service';
-import { OrganizationPrismaService } from '@prisma/services/organization-prisma.service';
-import { RequestContextService } from '@common/context/request-context.service';
-import { UpdateSettingsDto } from './dto/update-settings.dto';
+import { Injectable, ForbiddenException } from "@nestjs/common";
+import { StorePrismaService } from "@prisma/services/store-prisma.service";
+import { OrganizationPrismaService } from "@prisma/services/organization-prisma.service";
+import { RequestContextService } from "@common/context/request-context.service";
+import { UpdateSettingsDto } from "./dto/update-settings.dto";
 
 @Injectable()
 export class SettingsService {
@@ -243,7 +252,7 @@ export class SettingsService {
     const store_id = context?.store_id;
 
     if (!store_id) {
-      throw new ForbiddenException('Store context required');
+      throw new ForbiddenException("Store context required");
     }
 
     // Get store data from stores table
@@ -256,7 +265,7 @@ export class SettingsService {
         store_type: true,
         timezone: true,
         organization_id: true,
-      }
+      },
     });
 
     let storeSettings = await this.prisma.store_settings.findUnique({
@@ -272,17 +281,18 @@ export class SettingsService {
         ...getDefaultStoreSettings(),
         general: {
           ...getDefaultStoreSettings().general,
-          name: store?.name,              // From stores table
-          logo_url: store?.logo_url,      // From stores table
-          store_type: store?.store_type,  // From stores table
-          timezone: store?.timezone || getDefaultStoreSettings().general.timezone,
+          name: store?.name, // From stores table
+          logo_url: store?.logo_url, // From stores table
+          store_type: store?.store_type, // From stores table
+          timezone:
+            store?.timezone || getDefaultStoreSettings().general.timezone,
         },
         app: {
-          name: branding.name || store?.name || 'Vendix',
-          primary_color: branding.primary_color || '#7ED7A5',
-          secondary_color: branding.secondary_color || '#2F6F4E',
+          name: branding.name || store?.name || "Vendix",
+          primary_color: branding.primary_color || "#7ED7A5",
+          secondary_color: branding.secondary_color || "#2F6F4E",
           // ... other branding fields
-        }
+        },
       };
     }
 
@@ -292,16 +302,16 @@ export class SettingsService {
       ...settings,
       general: {
         ...settings.general,
-        name: store?.name,              // Override with stores table
+        name: store?.name, // Override with stores table
         logo_url: store?.logo_url,
         store_type: store?.store_type,
         timezone: store?.timezone || settings.general.timezone,
       },
       app: {
-        name: branding.name || store?.name || 'Vendix',
-        primary_color: branding.primary_color || '#7ED7A5',
+        name: branding.name || store?.name || "Vendix",
+        primary_color: branding.primary_color || "#7ED7A5",
         // ... other branding fields
-      }
+      },
     };
   }
 
@@ -314,7 +324,7 @@ export class SettingsService {
     const store_id = context?.store_id;
 
     if (!store_id) {
-      throw new ForbiddenException('Store context required');
+      throw new ForbiddenException("Store context required");
     }
 
     const currentSettings = await this.getSettings();
@@ -348,8 +358,9 @@ export class SettingsService {
 
         // Trigger favicon generation if logo changed
         if (logo_url !== undefined && logo_url !== null) {
-          this.generateFaviconForStore(store_id, logo_url)
-            .catch(error => this.logger.warn(`Favicon generation failed: ${error.message}`));
+          this.generateFaviconForStore(store_id, logo_url).catch((error) =>
+            this.logger.warn(`Favicon generation failed: ${error.message}`),
+          );
         }
       }
     }
@@ -379,13 +390,18 @@ export class SettingsService {
    * Update branding in ALL domains for the store
    * IMPORTANT: Updates every domain associated with the store
    */
-  private async updateDomainBranding(storeId: number, appSettings: AppSettingsDto): Promise<void> {
+  private async updateDomainBranding(
+    storeId: number,
+    appSettings: AppSettingsDto,
+  ): Promise<void> {
     const domains = await this.organizationPrisma.domain_settings.findMany({
-      where: { store_id: storeId }
+      where: { store_id: storeId },
     });
 
     if (domains.length === 0) {
-      this.logger.warn(`No domains found for store ${storeId}, skipping branding update`);
+      this.logger.warn(
+        `No domains found for store ${storeId}, skipping branding update`,
+      );
       return;
     }
 
@@ -399,18 +415,28 @@ export class SettingsService {
         branding: {
           ...existingBranding,
           ...(appSettings.name !== undefined && { name: appSettings.name }),
-          ...(appSettings.primary_color !== undefined && { primary_color: appSettings.primary_color }),
-          ...(appSettings.secondary_color !== undefined && { secondary_color: appSettings.secondary_color }),
-          ...(appSettings.accent_color !== undefined && { accent_color: appSettings.accent_color }),
+          ...(appSettings.primary_color !== undefined && {
+            primary_color: appSettings.primary_color,
+          }),
+          ...(appSettings.secondary_color !== undefined && {
+            secondary_color: appSettings.secondary_color,
+          }),
+          ...(appSettings.accent_color !== undefined && {
+            accent_color: appSettings.accent_color,
+          }),
           ...(appSettings.theme !== undefined && { theme: appSettings.theme }),
-          ...(appSettings.logo_url !== undefined && { logo_url: appSettings.logo_url }),
-          ...(appSettings.favicon_url !== undefined && { favicon_url: appSettings.favicon_url }),
-        }
+          ...(appSettings.logo_url !== undefined && {
+            logo_url: appSettings.logo_url,
+          }),
+          ...(appSettings.favicon_url !== undefined && {
+            favicon_url: appSettings.favicon_url,
+          }),
+        },
       };
 
       return this.organizationPrisma.domain_settings.update({
         where: { id: domain.id },
-        data: { config: updatedConfig }
+        data: { config: updatedConfig },
       });
     });
 
@@ -428,11 +454,11 @@ export class SettingsService {
 **File:** `apps/backend/src/domains/store/settings/dto/update-settings.dto.ts`
 
 ```typescript
-import { PartialType, OmitType } from '@nestjs/mapped-types';
-import { IsOptional, ValidateNested } from 'class-validator';
-import { Type } from 'class-transformer';
-import { GeneralSettingsDto } from './settings-schemas.dto';
-import { AppSettingsDto } from './settings-schemas.dto';
+import { PartialType, OmitType } from "@nestjs/mapped-types";
+import { IsOptional, ValidateNested } from "class-validator";
+import { Type } from "class-transformer";
+import { GeneralSettingsDto } from "./settings-schemas.dto";
+import { AppSettingsDto } from "./settings-schemas.dto";
 // ... other section DTOs
 
 export class UpdateSettingsDto {
@@ -453,7 +479,13 @@ export class UpdateSettingsDto {
 ### Section DTO Example
 
 ```typescript
-import { IsString, IsBoolean, IsOptional, IsEnum, Matches } from 'class-validator';
+import {
+  IsString,
+  IsBoolean,
+  IsOptional,
+  IsEnum,
+  Matches,
+} from "class-validator";
 
 export class GeneralSettingsDto {
   @IsString()
@@ -477,25 +509,33 @@ export class GeneralSettingsDto {
   logo_url?: string;
 
   @IsOptional()
-  @IsEnum(['physical', 'online', 'hybrid', 'popup', 'kiosko'])
-  store_type?: 'physical' | 'online' | 'hybrid' | 'popup' | 'kiosko';
+  @IsEnum(["physical", "online", "hybrid", "popup", "kiosko"])
+  store_type?: "physical" | "online" | "hybrid" | "popup" | "kiosko";
 }
 
 export class AppSettingsDto {
   @IsString()
   name: string;
 
-  @Matches(/^#[0-9A-Fa-f]{6}$/, { message: 'primary_color must be a valid hex color' })
+  @Matches(/^#[0-9A-Fa-f]{6}$/, {
+    message: "primary_color must be a valid hex color",
+  })
   primary_color: string;
 
-  @Matches(/^#[0-9A-Fa-f]{6}$/, { message: 'secondary_color must be a valid hex color' })
+  @Matches(/^#[0-9A-Fa-f]{6}$/, {
+    message: "secondary_color must be a valid hex color",
+  })
   secondary_color: string;
 
-  @Matches(/^#[0-9A-Fa-f]{6}$/, { message: 'accent_color must be a valid hex color' })
+  @Matches(/^#[0-9A-Fa-f]{6}$/, {
+    message: "accent_color must be a valid hex color",
+  })
   accent_color: string;
 
-  @IsIn(['default', 'aura', 'monocromo'], { message: 'theme must be either "default", "aura", or "monocromo"' })
-  theme: 'default' | 'aura' | 'monocromo';
+  @IsIn(["default", "aura", "monocromo"], {
+    message: 'theme must be either "default", "aura", or "monocromo"',
+  })
+  theme: "default" | "aura" | "monocromo";
 
   @IsOptional()
   @IsString()
@@ -532,13 +572,13 @@ Working on store settings?
 
 ## 🔍 Key Files
 
-| File | Purpose |
-|------|---------|
-| `apps/frontend/src/app/private/modules/store/settings/general/general-settings.component.ts` | Main component |
+| File                                                                                              | Purpose                      |
+| ------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `apps/frontend/src/app/private/modules/store/settings/general/general-settings.component.ts`      | Main component               |
 | `apps/frontend/src/app/private/modules/store/settings/general/services/store-settings.service.ts` | Service with BehaviorSubject |
-| `apps/backend/src/domains/store/settings/settings.service.ts` | Backend service |
-| `apps/backend/src/domains/store/settings/settings.controller.ts` | API controller |
-| `apps/backend/src/domains/store/settings/dto/update-settings.dto.ts` | Validation DTOs |
+| `apps/backend/src/domains/store/settings/settings.service.ts`                                     | Backend service              |
+| `apps/backend/src/domains/store/settings/settings.controller.ts`                                  | API controller               |
+| `apps/backend/src/domains/store/settings/dto/update-settings.dto.ts`                              | Validation DTOs              |
 
 ---
 
@@ -580,7 +620,7 @@ return {
   general: {
     ...settings.general,
     name: store?.name, // ✅ From stores table
-  }
+  },
 };
 ```
 

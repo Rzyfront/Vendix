@@ -11,7 +11,6 @@ import { RolesService } from './services/roles.service';
 import {
   RoleCreateModalComponent,
   RoleEditModalComponent,
-  RoleEmptyStateComponent,
   RolePermissionsModalComponent,
 } from './components/index';
 
@@ -28,6 +27,8 @@ import {
   ResponsiveDataViewComponent,
   ItemListCardConfig,
   PaginationComponent,
+  EmptyStateComponent,
+  CardComponent,
 } from '../../../../shared/components/index';
 
 import {
@@ -46,7 +47,7 @@ import {
     ReactiveFormsModule,
     RoleCreateModalComponent,
     RoleEditModalComponent,
-    RoleEmptyStateComponent,
+    EmptyStateComponent,
     RolePermissionsModalComponent,
     InputsearchComponent,
     ButtonComponent,
@@ -54,6 +55,7 @@ import {
     SelectorComponent,
     ResponsiveDataViewComponent,
     PaginationComponent,
+    CardComponent,
   ],
   templateUrl: './roles.component.html',
   styleUrls: ['./roles.component.css'],

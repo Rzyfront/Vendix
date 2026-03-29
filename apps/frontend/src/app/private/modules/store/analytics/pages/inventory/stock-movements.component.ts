@@ -4,9 +4,16 @@ import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
 
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
-import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../../../shared/components/index';
-import { SelectorComponent, SelectorOption } from '../../../../../../shared/components/selector/selector.component';
+import {
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
+} from '../../../../../../shared/components/index';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../shared/components/selector/selector.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
@@ -14,7 +21,10 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 
 import { AnalyticsService } from '../../services/analytics.service';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
-import { StockMovementReport, InventoryAnalyticsQueryDto } from '../../interfaces/inventory-analytics.interface';
+import {
+  StockMovementReport,
+  InventoryAnalyticsQueryDto,
+} from '../../interfaces/inventory-analytics.interface';
 
 @Component({
   selector: 'vendix-stock-movements',
@@ -23,6 +33,7 @@ import { StockMovementReport, InventoryAnalyticsQueryDto } from '../../interface
     CommonModule,
     RouterModule,
     FormsModule,
+    CardComponent,
     ResponsiveDataViewComponent,
     SelectorComponent,
     IconComponent,
@@ -32,19 +43,31 @@ import { StockMovementReport, InventoryAnalyticsQueryDto } from '../../interface
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
       <!-- Header -->
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+      >
         <div>
           <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/reports" class="hover:text-primary">Reportes</a>
+            <a routerLink="/admin/reports" class="hover:text-primary"
+              >Reportes</a
+            >
             <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/reports/inventory" class="hover:text-primary">Inventario</a>
+            <a routerLink="/admin/reports/inventory" class="hover:text-primary"
+              >Inventario</a
+            >
             <app-icon name="chevron-right" [size]="14"></app-icon>
             <span>Movimientos</span>
           </div>
-          <h1 class="text-2xl font-bold text-text-primary">Historial de Movimientos</h1>
-          <p class="text-text-secondary mt-1">Registro de entradas, salidas y ajustes de inventario</p>
+          <h1 class="text-2xl font-bold text-text-primary">
+            Historial de Movimientos
+          </h1>
+          <p class="text-text-secondary mt-1">
+            Registro de entradas, salidas y ajustes de inventario
+          </p>
         </div>
-        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        <div
+          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3"
+        >
           <vendix-date-range-filter
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
@@ -66,14 +89,21 @@ import { StockMovementReport, InventoryAnalyticsQueryDto } from '../../interface
       </div>
 
       <!-- Main Content -->
-      <div class="bg-surface border border-border rounded-xl overflow-hidden">
-        <div class="p-4 border-b border-border">
-          <h3 class="font-semibold text-text-primary">
+      <app-card
+        shadow="none"
+        [padding]="false"
+        overflow="hidden"
+        [showHeader]="true"
+      >
+        <div slot="header" class="flex flex-col">
+          <span class="text-sm font-bold text-[var(--color-text-primary)]">
             Movimientos de Inventario
-            <span class="text-text-secondary font-normal text-sm ml-2">
+            <span
+              class="text-xs text-[var(--color-text-secondary)] font-normal ml-2"
+            >
               ({{ data().length }} registros)
             </span>
-          </h3>
+          </span>
         </div>
 
         <div class="p-4">
@@ -86,7 +116,7 @@ import { StockMovementReport, InventoryAnalyticsQueryDto } from '../../interface
             emptyIcon="activity"
           ></app-responsive-data-view>
         </div>
-      </div>
+      </app-card>
     </div>
   `,
 })

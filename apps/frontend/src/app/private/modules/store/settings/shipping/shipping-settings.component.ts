@@ -8,10 +8,7 @@ import {
   StoreShippingMethod,
   SystemShippingMethod,
 } from './interfaces/shipping-methods.interface';
-import {
-  ShippingZone,
-  ZoneStats,
-} from './interfaces/shipping-zones.interface';
+import { ShippingZone, ZoneStats } from './interfaces/shipping-zones.interface';
 import {
   ToastService,
   StatsComponent,
@@ -25,12 +22,10 @@ import {
   ItemListCardConfig,
   OptionsDropdownComponent,
   DropdownAction,
+  CardComponent,
 } from '../../../../../../app/shared/components/index';
 import { ShippingMethodsModalComponent } from './components/shipping-methods-modal.component';
-import {
-  ZoneModalComponent,
-  RatesModalComponent,
-} from './components/index';
+import { ZoneModalComponent, RatesModalComponent } from './components/index';
 import { ModalComponent } from '../../../../../../app/shared/components/index';
 import {
   ScrollableTabsComponent,
@@ -54,12 +49,13 @@ import {
     ZoneModalComponent,
     RatesModalComponent,
     OptionsDropdownComponent,
+    CardComponent,
   ],
   template: `
     <div class="w-full md:space-y-4">
       <!-- Stats: Sticky on mobile, static on desktop -->
       <div
-        class="stats-container !mb-0 md:!mb-6 sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
           title="Métodos Activos"
@@ -100,8 +96,7 @@ import {
 
       <!-- Tab: Methods -->
       @if (active_tab() === 'methods') {
-        <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-                    md:border md:border-border">
+        <app-card [responsive]="true" [padding]="false">
 
           <!-- Sticky search header -->
           <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
@@ -170,13 +165,12 @@ import {
               }
             </div>
           }
-        </div>
+        </app-card>
       }
 
       <!-- Tab: Zones -->
       @if (active_tab() === 'zones') {
-        <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-                    md:border md:border-border">
+        <app-card [responsive]="true" [padding]="false">
 
           <!-- Sticky search header -->
           <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
@@ -241,9 +235,10 @@ import {
               }
             </div>
           }
-        </div>
+        </app-card>
+      }
 
-        <!-- Zone CRUD Modal -->
+      <!-- Zone CRUD Modal -->
         @if (show_zone_modal()) {
           <app-zone-modal
             [zone]="selected_zone"
@@ -328,7 +323,6 @@ import {
             </app-button>
           </div>
         </app-modal>
-      }
 
       <!-- Modal para agregar métodos disponibles -->
       @if (show_methods_modal()) {
@@ -379,10 +373,11 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
     const term = this.search_term().toLowerCase();
     const methods = this.shipping_methods();
     if (!term) return methods;
-    return methods.filter(m =>
-      m.name?.toLowerCase().includes(term) ||
-      m.type?.toLowerCase().includes(term) ||
-      m.provider_name?.toLowerCase().includes(term)
+    return methods.filter(
+      (m) =>
+        m.name?.toLowerCase().includes(term) ||
+        m.type?.toLowerCase().includes(term) ||
+        m.provider_name?.toLowerCase().includes(term),
     );
   });
 
@@ -394,10 +389,11 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
     const term = this.zones_search_term().toLowerCase();
     const zones = this.store_zones();
     if (!term) return zones;
-    return zones.filter(z =>
-      z.name?.toLowerCase().includes(term) ||
-      z.display_name?.toLowerCase().includes(term) ||
-      z.countries?.some((c: string) => c.toLowerCase().includes(term))
+    return zones.filter(
+      (z) =>
+        z.name?.toLowerCase().includes(term) ||
+        z.display_name?.toLowerCase().includes(term) ||
+        z.countries?.some((c: string) => c.toLowerCase().includes(term)),
     );
   });
 
@@ -405,10 +401,11 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
     const term = this.system_zones_search_term().toLowerCase();
     const zones = this.system_zones();
     if (!term) return zones;
-    return zones.filter(z =>
-      z.name?.toLowerCase().includes(term) ||
-      z.display_name?.toLowerCase().includes(term) ||
-      z.countries?.some((c: string) => c.toLowerCase().includes(term))
+    return zones.filter(
+      (z) =>
+        z.name?.toLowerCase().includes(term) ||
+        z.display_name?.toLowerCase().includes(term) ||
+        z.countries?.some((c: string) => c.toLowerCase().includes(term)),
     );
   });
 
@@ -490,7 +487,8 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
     titleKey: 'name',
     titleTransform: (item: StoreShippingMethod) => item.name || 'Sin nombre',
     subtitleKey: 'type',
-    subtitleTransform: (item: StoreShippingMethod) => this.getTypeLabel(item.type),
+    subtitleTransform: (item: StoreShippingMethod) =>
+      this.getTypeLabel(item.type),
     avatarFallbackIcon: 'truck',
     avatarShape: 'square',
     badgeKey: 'is_active',
@@ -519,11 +517,13 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
       label: 'Configurar',
       icon: 'settings',
       variant: 'secondary',
-      action: (row: StoreShippingMethod) => this.openEditShippingMethodModal(row),
+      action: (row: StoreShippingMethod) =>
+        this.openEditShippingMethodModal(row),
       show: (row: StoreShippingMethod) => row.is_active,
     },
     {
-      label: (row: StoreShippingMethod) => (row.is_active ? 'Desactivar' : 'Activar'),
+      label: (row: StoreShippingMethod) =>
+        row.is_active ? 'Desactivar' : 'Activar',
       icon: (row: StoreShippingMethod) => (row.is_active ? 'pause' : 'play'),
       variant: 'primary',
       action: (row: StoreShippingMethod) => this.toggleShippingMethod(row),
@@ -532,7 +532,8 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
       label: 'Eliminar',
       icon: 'trash',
       variant: 'danger',
-      action: (row: StoreShippingMethod) => this.confirmDeleteShippingMethod(row),
+      action: (row: StoreShippingMethod) =>
+        this.confirmDeleteShippingMethod(row),
       show: (row: StoreShippingMethod) => !row.is_active,
     },
   ];
@@ -542,13 +543,26 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
   zones_table_columns: TableColumn[] = [
     { key: 'name', label: 'Zona', sortable: true, priority: 1 },
     {
-      key: 'countries', label: 'Países', priority: 2,
+      key: 'countries',
+      label: 'Países',
+      priority: 2,
       transform: (value: string[]) => this.formatCountries(value),
     },
-    { key: '_count.shipping_rates', label: 'Tarifas', priority: 2, defaultValue: '0' },
     {
-      key: 'is_active', label: 'Estado', badge: true, priority: 1,
-      badgeConfig: { type: 'custom', colorMap: { true: '#22c55e', false: '#f59e0b' } },
+      key: '_count.shipping_rates',
+      label: 'Tarifas',
+      priority: 2,
+      defaultValue: '0',
+    },
+    {
+      key: 'is_active',
+      label: 'Estado',
+      badge: true,
+      priority: 1,
+      badgeConfig: {
+        type: 'custom',
+        colorMap: { true: '#22c55e', false: '#f59e0b' },
+      },
       transform: (value: boolean) => (value ? 'Activa' : 'Inactiva'),
     },
   ];
@@ -556,42 +570,61 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
   zones_card_config: ItemListCardConfig = {
     titleKey: 'name',
     subtitleKey: 'countries',
-    subtitleTransform: (item: ShippingZone) => this.formatCountries(item.countries),
+    subtitleTransform: (item: ShippingZone) =>
+      this.formatCountries(item.countries),
     avatarFallbackIcon: 'map-pin',
     avatarShape: 'square',
     badgeKey: 'is_active',
-    badgeConfig: { type: 'custom', size: 'sm', colorMap: { true: '#22c55e', false: '#f59e0b' } },
+    badgeConfig: {
+      type: 'custom',
+      size: 'sm',
+      colorMap: { true: '#22c55e', false: '#f59e0b' },
+    },
     badgeTransform: (value: boolean) => (value ? 'Activa' : 'Inactiva'),
     detailKeys: [
       { key: '_count.shipping_rates', label: 'Tarifas' },
       {
-        key: 'source_type', label: 'Origen',
-        transform: (val: string) => val === 'system_copy' ? 'Del sistema' : 'Personalizada',
+        key: 'source_type',
+        label: 'Origen',
+        transform: (val: string) =>
+          val === 'system_copy' ? 'Del sistema' : 'Personalizada',
       },
     ],
     footerKey: 'created_at',
     footerLabel: 'Creada',
-    footerTransform: (val: string) => val ? new Date(val).toLocaleDateString() : '-',
+    footerTransform: (val: string) =>
+      val ? new Date(val).toLocaleDateString() : '-',
   };
 
   zones_table_actions: TableAction[] = [
     {
-      label: 'Tarifas', icon: 'tag', variant: 'primary',
+      label: 'Tarifas',
+      icon: 'tag',
+      variant: 'primary',
       action: (zone: ShippingZone) => this.openRatesModal(zone, false),
     },
     {
-      label: 'Editar', icon: 'edit', variant: 'ghost',
+      label: 'Editar',
+      icon: 'edit',
+      variant: 'ghost',
       action: (zone: ShippingZone) => this.openZoneModal('edit', zone),
     },
     {
-      label: 'Eliminar', icon: 'trash-2', variant: 'danger',
+      label: 'Eliminar',
+      icon: 'trash-2',
+      variant: 'danger',
       action: (zone: ShippingZone) => this.confirmDeleteZone(zone),
     },
   ];
 
   // Zones dropdown actions
   zones_dropdown_actions: DropdownAction[] = [
-    { label: 'Crear zona', icon: 'plus', action: 'create_zone', variant: 'primary' },
+    {
+      label: 'Crear zona',
+      icon: 'plus',
+      action: 'create_zone',
+      variant: 'primary',
+    },
     { label: 'Zonas del sistema', icon: 'globe', action: 'system_zones' },
   ];
 
@@ -599,30 +632,40 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
   system_zones_columns: TableColumn[] = [
     { key: 'name', label: 'Zona', sortable: true, priority: 1 },
     {
-      key: 'countries', label: 'Países', priority: 2,
+      key: 'countries',
+      label: 'Países',
+      priority: 2,
       transform: (value: string[]) => this.formatCountries(value),
     },
-    { key: '_count.shipping_rates', label: 'Tarifas', priority: 2, defaultValue: '0' },
+    {
+      key: '_count.shipping_rates',
+      label: 'Tarifas',
+      priority: 2,
+      defaultValue: '0',
+    },
   ];
 
   system_zones_card_config: ItemListCardConfig = {
     titleKey: 'name',
     subtitleKey: 'countries',
-    subtitleTransform: (item: ShippingZone) => this.formatCountries(item.countries),
+    subtitleTransform: (item: ShippingZone) =>
+      this.formatCountries(item.countries),
     avatarFallbackIcon: 'globe',
     avatarShape: 'square',
-    detailKeys: [
-      { key: '_count.shipping_rates', label: 'Tarifas' },
-    ],
+    detailKeys: [{ key: '_count.shipping_rates', label: 'Tarifas' }],
   };
 
   system_zones_actions: TableAction[] = [
     {
-      label: 'Ver', icon: 'eye', variant: 'primary',
+      label: 'Ver',
+      icon: 'eye',
+      variant: 'primary',
       action: (zone: ShippingZone) => this.openRatesModal(zone, true),
     },
     {
-      label: 'Duplicar', icon: 'copy', variant: 'ghost',
+      label: 'Duplicar',
+      icon: 'copy',
+      variant: 'ghost',
       action: (zone: ShippingZone) => this.duplicateSystemZone(zone),
     },
   ];
@@ -630,7 +673,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
   constructor(
     private shipping_methods_service: ShippingMethodsService,
     private toast_service: ToastService,
-    private dialog_service: DialogService
+    private dialog_service: DialogService,
   ) {}
 
   ngOnInit(): void {
@@ -698,7 +741,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
         },
         error: (error: any) => {
           this.toast_service.error(
-            'Error al cargar métodos de envío: ' + error.message
+            'Error al cargar métodos de envío: ' + error.message,
           );
           this.shipping_methods.set([]);
           this.is_loading.set(false);
@@ -716,7 +759,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
         },
         error: (error: any) => {
           this.toast_service.error(
-            'Error al cargar estadísticas: ' + error.message
+            'Error al cargar estadísticas: ' + error.message,
           );
           this.shipping_method_stats.set(null);
         },
@@ -732,13 +775,13 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
         next: (methods: any) => {
           const methods_data = methods.data || methods;
           this.available_shipping_methods.set(
-            this.sortAvailableMethods(methods_data)
+            this.sortAvailableMethods(methods_data),
           );
           this.is_loading_available.set(false);
         },
         error: (error: any) => {
           this.toast_service.error(
-            'Error al cargar métodos disponibles: ' + error.message
+            'Error al cargar métodos disponibles: ' + error.message,
           );
           this.available_shipping_methods.set([]);
           this.is_loading_available.set(false);
@@ -779,7 +822,10 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
                 const data = result.data || result;
                 const copyStats = data._copy_stats;
                 let message = 'Método de envío activado correctamente';
-                if (copyStats && (copyStats.zones_copied > 0 || copyStats.rates_copied > 0)) {
+                if (
+                  copyStats &&
+                  (copyStats.zones_copied > 0 || copyStats.rates_copied > 0)
+                ) {
                   message = `✓ Método activado con ${copyStats.zones_copied} zonas y ${copyStats.rates_copied} tarifas copiadas`;
                 }
                 this.toast_service.success(message);
@@ -797,7 +843,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
               },
               error: (error: any) => {
                 this.toast_service.error(
-                  'Error al activar método de envío: ' + error.message
+                  'Error al activar método de envío: ' + error.message,
                 );
                 this.is_enabling.set(false);
               },
@@ -806,7 +852,9 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
       });
   }
 
-  sortAvailableMethods(methods: SystemShippingMethod[]): SystemShippingMethod[] {
+  sortAvailableMethods(
+    methods: SystemShippingMethod[],
+  ): SystemShippingMethod[] {
     return methods.sort((a, b) => {
       if (a.display_order !== b.display_order) {
         return a.display_order - b.display_order;
@@ -832,7 +880,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
           },
           error: (error: any) => {
             this.toast_service.error(
-              'Error al desactivar método: ' + error.message
+              'Error al desactivar método: ' + error.message,
             );
           },
         });
@@ -851,7 +899,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
           error: (error: any) => {
             this.is_loading.set(false);
             this.toast_service.error(
-              'Error al activar método: ' + error.message
+              'Error al activar método: ' + error.message,
             );
           },
         });
@@ -874,7 +922,9 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
             .pipe(takeUntil(this.destroy$))
             .subscribe({
               next: () => {
-                this.toast_service.success('Método de envío eliminado correctamente');
+                this.toast_service.success(
+                  'Método de envío eliminado correctamente',
+                );
                 this.loadShippingMethods();
                 this.loadShippingMethodStats();
                 this.loadAvailableShippingMethods();
@@ -883,7 +933,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
               },
               error: (error: any) => {
                 this.toast_service.error(
-                  'Error al eliminar método: ' + error.message
+                  'Error al eliminar método: ' + error.message,
                 );
               },
             });
@@ -977,7 +1027,9 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
                 this.loadZoneStats();
               },
               error: (error) => {
-                this.toast_service.error('Error al eliminar zona: ' + error.message);
+                this.toast_service.error(
+                  'Error al eliminar zona: ' + error.message,
+                );
               },
             });
         }
@@ -1020,14 +1072,14 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
             .subscribe({
               next: () => {
                 this.toast_service.success(
-                  `Zona duplicada correctamente. Ahora puedes editarla.`
+                  `Zona duplicada correctamente. Ahora puedes editarla.`,
                 );
                 this.loadStoreZones();
                 this.loadZoneStats();
               },
               error: (error: any) => {
                 this.toast_service.error(
-                  'Error al duplicar zona: ' + error.message
+                  'Error al duplicar zona: ' + error.message,
                 );
               },
             });
@@ -1062,7 +1114,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
               },
               error: (error: any) => {
                 this.toast_service.error(
-                  'Error al sincronizar zona: ' + error.message
+                  'Error al sincronizar zona: ' + error.message,
                 );
               },
             });
@@ -1091,12 +1143,28 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
   }
 
   private readonly country_map: Record<string, string> = {
-    DO: 'República Dominicana', US: 'Estados Unidos', CO: 'Colombia',
-    MX: 'México', ES: 'España', AR: 'Argentina', CL: 'Chile', PE: 'Perú',
-    VE: 'Venezuela', EC: 'Ecuador', GT: 'Guatemala', HN: 'Honduras',
-    SV: 'El Salvador', NI: 'Nicaragua', CR: 'Costa Rica', PA: 'Panamá',
-    PR: 'Puerto Rico', CU: 'Cuba', BR: 'Brasil', UY: 'Uruguay',
-    PY: 'Paraguay', BO: 'Bolivia',
+    DO: 'República Dominicana',
+    US: 'Estados Unidos',
+    CO: 'Colombia',
+    MX: 'México',
+    ES: 'España',
+    AR: 'Argentina',
+    CL: 'Chile',
+    PE: 'Perú',
+    VE: 'Venezuela',
+    EC: 'Ecuador',
+    GT: 'Guatemala',
+    HN: 'Honduras',
+    SV: 'El Salvador',
+    NI: 'Nicaragua',
+    CR: 'Costa Rica',
+    PA: 'Panamá',
+    PR: 'Puerto Rico',
+    CU: 'Cuba',
+    BR: 'Brasil',
+    UY: 'Uruguay',
+    PY: 'Paraguay',
+    BO: 'Bolivia',
   };
 
   formatCountries(countries: string[]): string {

@@ -44,7 +44,7 @@ import { SelectorComponent, SelectorOption } from '../../../../../../../shared/c
 
           <app-input
             label="Monto Solicitado"
-            type="number"
+            [currency]="true"
             formControlName="amount_requested"
             [control]="form.get('amount_requested')"
             [required]="true"

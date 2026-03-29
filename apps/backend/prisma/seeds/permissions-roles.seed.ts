@@ -507,6 +507,100 @@ export async function seedPermissionsAndRoles(
       method: 'PATCH',
     },
 
+    // Reservas
+    {
+      name: 'store:reservations:create',
+      description: 'Crear reserva',
+      path: '/api/store/reservations',
+      method: 'POST',
+    },
+    {
+      name: 'store:reservations:read',
+      description: 'Ver reservas',
+      path: '/api/store/reservations',
+      method: 'GET',
+    },
+    {
+      name: 'store:reservations:read:one',
+      description: 'Ver detalle de reserva',
+      path: '/api/store/reservations/:id',
+      method: 'GET',
+    },
+    {
+      name: 'store:reservations:update',
+      description: 'Actualizar reserva',
+      path: '/api/store/reservations/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:reservations:delete',
+      description: 'Eliminar reserva',
+      path: '/api/store/reservations/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:reservations:schedules:manage',
+      description: 'Gestionar horarios de servicio',
+      path: '/api/store/reservations/schedules/service/:productId',
+      method: 'PUT',
+    },
+
+    // Remisiones
+    {
+      name: 'store:dispatch_notes:create',
+      description: 'Crear remisión',
+      path: '/api/store/dispatch-notes',
+      method: 'POST',
+    },
+    {
+      name: 'store:dispatch_notes:read',
+      description: 'Leer remisiones',
+      path: '/api/store/dispatch-notes',
+      method: 'GET',
+    },
+    {
+      name: 'store:dispatch_notes:read:one',
+      description: 'Leer remisión específica',
+      path: '/api/store/dispatch-notes/:id',
+      method: 'GET',
+    },
+    {
+      name: 'store:dispatch_notes:update',
+      description: 'Actualizar remisión',
+      path: '/api/store/dispatch-notes/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:dispatch_notes:delete',
+      description: 'Eliminar remisión',
+      path: '/api/store/dispatch-notes/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:dispatch_notes:confirm',
+      description: 'Confirmar remisión',
+      path: '/api/store/dispatch-notes/:id/confirm',
+      method: 'POST',
+    },
+    {
+      name: 'store:dispatch_notes:deliver',
+      description: 'Entregar remisión',
+      path: '/api/store/dispatch-notes/:id/deliver',
+      method: 'POST',
+    },
+    {
+      name: 'store:dispatch_notes:void',
+      description: 'Anular remisión',
+      path: '/api/store/dispatch-notes/:id/void',
+      method: 'POST',
+    },
+    {
+      name: 'store:dispatch_notes:invoice',
+      description: 'Facturar remisión',
+      path: '/api/store/dispatch-notes/:id/invoice',
+      method: 'POST',
+    },
+
     // Categorías
     {
       name: 'store:categories:create',
@@ -574,6 +668,44 @@ export async function seedPermissionsAndRoles(
       name: 'store:coupons:validate',
       description: 'Validar cupón',
       path: '/api/store/coupons/validate',
+      method: 'POST',
+    },
+
+    // Reseñas
+    {
+      name: 'store:reviews:read',
+      description: 'Leer reseñas',
+      path: '/api/store/reviews',
+      method: 'GET',
+    },
+    {
+      name: 'store:reviews:read:stats',
+      description: 'Ver estadísticas de reseñas',
+      path: '/api/store/reviews/stats',
+      method: 'GET',
+    },
+    {
+      name: 'store:reviews:read:one',
+      description: 'Leer reseña específica',
+      path: '/api/store/reviews/:id',
+      method: 'GET',
+    },
+    {
+      name: 'store:reviews:moderate',
+      description: 'Moderar reseñas (aprobar/rechazar/ocultar)',
+      path: '/api/store/reviews/:id/approve',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:reviews:delete',
+      description: 'Eliminar reseña',
+      path: '/api/store/reviews/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:reviews:respond',
+      description: 'Responder a reseñas',
+      path: '/api/store/reviews/:id/response',
       method: 'POST',
     },
 
@@ -1280,115 +1412,115 @@ export async function seedPermissionsAndRoles(
 
     {
       name: 'store:accounting:account_mappings:create',
-      description: 'Create accounting account mappings',
+      description: 'Crear mapeo de cuentas contables',
       path: '/api/store/accounting/account-mappings',
       method: 'POST',
     },
     {
       name: 'store:accounting:account_mappings:read',
-      description: 'Read accounting account mappings',
+      description: 'Leer mapeo de cuentas contables',
       path: '/api/store/accounting/account-mappings',
       method: 'GET',
     },
     {
       name: 'store:accounting:account_mappings:update',
-      description: 'Update accounting account mappings',
+      description: 'Actualizar mapeo de cuentas contables',
       path: '/api/store/accounting/account-mappings',
       method: 'PATCH',
     },
     {
       name: 'store:accounting:chart_of_accounts:create',
-      description: 'Create accounting chart of accounts',
+      description: 'Crear plan de cuentas',
       path: '/api/store/accounting/chart-of-accounts',
       method: 'POST',
     },
     {
       name: 'store:accounting:chart_of_accounts:delete',
-      description: 'Delete accounting chart of accounts',
+      description: 'Eliminar plan de cuentas',
       path: '/api/store/accounting/chart-of-accounts',
       method: 'DELETE',
     },
     {
       name: 'store:accounting:chart_of_accounts:read',
-      description: 'Read accounting chart of accounts',
+      description: 'Leer plan de cuentas',
       path: '/api/store/accounting/chart-of-accounts',
       method: 'GET',
     },
     {
       name: 'store:accounting:chart_of_accounts:update',
-      description: 'Update accounting chart of accounts',
+      description: 'Actualizar plan de cuentas',
       path: '/api/store/accounting/chart-of-accounts',
       method: 'PATCH',
     },
     {
       name: 'store:accounting:fiscal_periods:create',
-      description: 'Create accounting fiscal periods',
+      description: 'Crear períodos fiscales',
       path: '/api/store/accounting/fiscal-periods',
       method: 'POST',
     },
     {
       name: 'store:accounting:fiscal_periods:delete',
-      description: 'Delete accounting fiscal periods',
+      description: 'Eliminar períodos fiscales',
       path: '/api/store/accounting/fiscal-periods',
       method: 'DELETE',
     },
     {
       name: 'store:accounting:fiscal_periods:read',
-      description: 'Read accounting fiscal periods',
+      description: 'Leer períodos fiscales',
       path: '/api/store/accounting/fiscal-periods',
       method: 'GET',
     },
     {
       name: 'store:accounting:fiscal_periods:update',
-      description: 'Update accounting fiscal periods',
+      description: 'Actualizar períodos fiscales',
       path: '/api/store/accounting/fiscal-periods',
       method: 'PATCH',
     },
     {
       name: 'store:accounting:journal_entries:create',
-      description: 'Create accounting journal entries',
+      description: 'Crear asientos contables',
       path: '/api/store/accounting/journal-entries',
       method: 'POST',
     },
     {
       name: 'store:accounting:journal_entries:delete',
-      description: 'Delete accounting journal entries',
+      description: 'Eliminar asientos contables',
       path: '/api/store/accounting/journal-entries',
       method: 'DELETE',
     },
     {
       name: 'store:accounting:journal_entries:post',
-      description: 'Post accounting journal entries',
+      description: 'Publicar asientos contables',
       path: '/api/store/accounting/journal-entries',
       method: 'PATCH',
     },
     {
       name: 'store:accounting:journal_entries:read',
-      description: 'Read accounting journal entries',
+      description: 'Leer asientos contables',
       path: '/api/store/accounting/journal-entries',
       method: 'GET',
     },
     {
       name: 'store:accounting:journal_entries:update',
-      description: 'Update accounting journal entries',
+      description: 'Actualizar asientos contables',
       path: '/api/store/accounting/journal-entries/:id',
       method: 'PATCH',
     },
     {
       name: 'store:accounting:journal_entries:void',
-      description: 'Void accounting journal entries',
+      description: 'Anular asientos contables',
       path: '/api/store/accounting/journal-entries/:id/void',
       method: 'PATCH',
     },
     {
       name: 'store:accounting:reports:read',
-      description: 'Read accounting reports',
+      description: 'Leer reportes contables',
       path: '/api/store/accounting/reports',
       method: 'GET',
     },
     {
       name: 'store:analytics:read',
-      description: 'Read analytics',
+      description: 'Leer análisis',
       path: '/api/store/analytics',
       method: 'GET',
     },
@@ -1699,52 +1831,52 @@ export async function seedPermissionsAndRoles(
       method: 'PATCH',
     },
 
-    // Cash Registers
+    // Cajas
     {
       name: 'store:cash_registers:read',
-      description: 'Read cash registers and sessions',
+      description: 'Leer cajas y sesiones',
       path: '/api/store/cash-registers/unique-read',
       method: 'GET',
     },
     {
       name: 'store:cash_registers:create',
-      description: 'Create cash registers',
+      description: 'Crear caja',
       path: '/api/store/cash-registers/unique-create',
       method: 'POST',
     },
     {
       name: 'store:cash_registers:update',
-      description: 'Update cash registers',
+      description: 'Actualizar caja',
       path: '/api/store/cash-registers/:id/unique-update',
       method: 'PUT',
     },
     {
       name: 'store:cash_registers:delete',
-      description: 'Delete/deactivate cash registers',
+      description: 'Eliminar/desactivar caja',
       path: '/api/store/cash-registers/:id/unique-delete',
       method: 'DELETE',
     },
     {
       name: 'store:cash_registers:open_session',
-      description: 'Open cash register sessions',
+      description: 'Abrir sesión de caja',
       path: '/api/store/cash-registers/sessions/open',
       method: 'POST',
     },
     {
       name: 'store:cash_registers:close_session',
-      description: 'Close cash register sessions',
+      description: 'Cerrar sesión de caja',
       path: '/api/store/cash-registers/sessions/:id/close',
       method: 'POST',
     },
     {
       name: 'store:cash_registers:movements',
-      description: 'Manage cash register movements (cash in/out)',
+      description: 'Gestionar movimientos de caja (entrada/salida de efectivo)',
       path: '/api/store/cash-registers/sessions/:id/movements',
       method: 'POST',
     },
     {
       name: 'store:cash_registers:reports',
-      description: 'View cash register session reports',
+      description: 'Ver reportes de sesión de caja',
       path: '/api/store/cash-registers/sessions/:id/report',
       method: 'GET',
     },
@@ -1795,7 +1927,8 @@ export async function seedPermissionsAndRoles(
     },
     {
       name: 'store:payroll:runs:manage',
-      description: 'Gestionar liquidaciones (calcular, aprobar, enviar, pagar, cancelar)',
+      description:
+        'Gestionar liquidaciones (calcular, aprobar, enviar, pagar, cancelar)',
       path: '/api/store/payroll/runs',
       method: 'PATCH',
     },
@@ -1885,7 +2018,9 @@ export async function seedPermissionsAndRoles(
     }
   }
   if (permissionsSkipped > 0) {
-    console.log(`   ⚠️  Skipped ${permissionsSkipped} permissions (duplicate path+method)`);
+    console.log(
+      `   ⚠️  Skipped ${permissionsSkipped} permissions (duplicate path+method)`,
+    );
   }
 
   // Mark critical permissions as system permissions
@@ -1969,6 +2104,16 @@ export async function seedPermissionsAndRoles(
     create: {
       name: 'customer',
       description: 'Cliente de la tienda',
+      is_system_role: true,
+    },
+  });
+
+  const cashierRole = await client.roles.upsert({
+    where: { name: 'cashier' },
+    update: {},
+    create: {
+      name: 'cashier',
+      description: 'Cajero de tienda',
       is_system_role: true,
     },
   });
@@ -2108,7 +2253,22 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:addresses:read') ||
       p.name.includes('store:taxes:read') ||
       p.name.includes('store:cash_registers:read') ||
-      p.name.includes('store:cash_registers:reports'),
+      p.name.includes('store:cash_registers:reports') ||
+      p.name.includes('store:reservations:create') ||
+      p.name.includes('store:reservations:read') ||
+      p.name.includes('store:reservations:read:one') ||
+      p.name.includes('store:reservations:update') ||
+      p.name.includes('store:dispatch_notes:create') ||
+      p.name.includes('store:dispatch_notes:read') ||
+      p.name.includes('store:dispatch_notes:read:one') ||
+      p.name.includes('store:dispatch_notes:update') ||
+      p.name.includes('store:dispatch_notes:delete') ||
+      p.name.includes('store:dispatch_notes:confirm') ||
+      p.name.includes('store:dispatch_notes:deliver') ||
+      p.name.includes('store:dispatch_notes:void') ||
+      p.name.includes('store:dispatch_notes:invoice') ||
+      p.name.includes('store:reviews:read') ||
+      p.name.includes('store:reviews:moderate'),
   );
 
   for (const permission of supervisorPermissions) {
@@ -2143,7 +2303,13 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:cash_registers:read') ||
       p.name.includes('store:cash_registers:open_session') ||
       p.name.includes('store:cash_registers:close_session') ||
-      p.name.includes('store:cash_registers:movements'),
+      p.name.includes('store:cash_registers:movements') ||
+      p.name.includes('store:reservations:read') ||
+      p.name.includes('store:reservations:read:one') ||
+      p.name.includes('store:dispatch_notes:create') ||
+      p.name.includes('store:dispatch_notes:read') ||
+      p.name.includes('store:dispatch_notes:read:one') ||
+      p.name.includes('store:reviews:read'),
   );
 
   for (const permission of employeePermissions) {
@@ -2204,6 +2370,107 @@ export async function seedPermissionsAndRoles(
       },
       update: {},
       create: { role_id: customerRole.id, permission_id: permission.id },
+    });
+    assignmentsCreated++;
+  }
+
+  // Assign permissions to cashier (lectura amplia, escritura limitada)
+  const cashierPermissions = allPermissions.filter(
+    (p) =>
+      // Autenticación básica
+      p.name.includes('auth.login') ||
+      p.name.includes('auth.logout') ||
+      p.name.includes('auth.profile') ||
+      p.name.includes('auth.me') ||
+      p.name.includes('auth.sessions') ||
+      p.name.includes('auth.change.password') ||
+      // Productos - lectura
+      p.name.includes('store:products:read') ||
+      p.name.includes('store:products:read:one') ||
+      p.name.includes('store:products:read:store') ||
+      p.name.includes('store:products:read:slug') ||
+      // Categorías - lectura
+      p.name.includes('store:categories:read') ||
+      p.name.includes('store:categories:read:one') ||
+      // Marcas - lectura
+      p.name.includes('store:brands:read') ||
+      p.name.includes('store:brands:read:one') ||
+      p.name.includes('store:brands:read:store') ||
+      p.name.includes('store:brands:read:slug') ||
+      // Órdenes - crear, leer, actualizar estado
+      p.name.includes('store:orders:create') ||
+      p.name.includes('store:orders:read') ||
+      p.name.includes('store:orders:read:one') ||
+      // Cupones - leer y validar
+      p.name.includes('store:coupons:read') ||
+      p.name.includes('store:coupons:read:one') ||
+      p.name.includes('store:coupons:validate') ||
+      // Clientes - leer y crear (no actualizar ni eliminar)
+      p.name.includes('store:customers:read') ||
+      p.name.includes('store:customers:create') ||
+      // Direcciones - leer y crear
+      p.name.includes('organization:addresses:read') ||
+      p.name.includes('organization:addresses:create') ||
+      p.name.includes('store:addresses:read') ||
+      p.name.includes('store:addresses:create') ||
+      // Impuestos - solo lectura
+      p.name.includes('store:taxes:read') ||
+      p.name.includes('store:taxes:read:one') ||
+      // Caja - gestión completa de caja
+      p.name.includes('store:cash_registers:read') ||
+      p.name.includes('store:cash_registers:create') ||
+      p.name.includes('store:cash_registers:update') ||
+      p.name.includes('store:cash_registers:delete') ||
+      p.name.includes('store:cash_registers:open_session') ||
+      p.name.includes('store:cash_registers:close_session') ||
+      p.name.includes('store:cash_registers:movements') ||
+      p.name.includes('store:cash_registers:reports') ||
+      // Reservas - leer y crear
+      p.name.includes('store:reservations:read') ||
+      p.name.includes('store:reservations:read:one') ||
+      p.name.includes('store:reservations:create') ||
+      // Remisiones - crear, leer, confirmar (no delete ni void)
+      p.name.includes('store:dispatch_notes:create') ||
+      p.name.includes('store:dispatch_notes:read') ||
+      p.name.includes('store:dispatch_notes:read:one') ||
+      p.name.includes('store:dispatch_notes:confirm') ||
+      p.name.includes('store:dispatch_notes:deliver') ||
+      // Reseñas - solo lectura
+      p.name.includes('store:reviews:read') ||
+      p.name.includes('store:reviews:read:one') ||
+      p.name.includes('store:reviews:read:stats') ||
+      // POS - acceso
+      p.name.includes('store:pos:access') ||
+      // Inventario - solo lectura de stock
+      p.name.includes('store:inventory:stock_levels:read') ||
+      p.name.includes('store:inventory:locations:read') ||
+      // Ecommerce - solo lectura
+      p.name.includes('store:ecommerce:read') ||
+      // Configuración de tienda - solo lectura
+      p.name.includes('store:settings:read') ||
+      // Proveedores - solo lectura
+      p.name.includes('store:suppliers:read') ||
+      p.name.includes('store:inventory:suppliers:read') ||
+      // Transferencias - solo lectura
+      p.name.includes('store:stock-transfers:read') ||
+      // Notificaciones - lectura
+      p.name.includes('store:notifications:read') ||
+      // Dominios públicos
+      p.name.includes('domains.resolve') ||
+      p.name.includes('domains.check') ||
+      p.name.includes('system.health'),
+  );
+
+  for (const permission of cashierPermissions) {
+    await client.role_permissions.upsert({
+      where: {
+        role_id_permission_id: {
+          role_id: cashierRole.id,
+          permission_id: permission.id,
+        },
+      },
+      update: {},
+      create: { role_id: cashierRole.id, permission_id: permission.id },
     });
     assignmentsCreated++;
   }

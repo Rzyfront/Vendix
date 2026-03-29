@@ -13,6 +13,7 @@ import {
   FilterValues,
   IconComponent,
   ButtonComponent,
+  CardComponent,
 } from '../../../../../../shared/components/index';
 
 import { StockTransfer, TransferStatus } from '../interfaces';
@@ -27,35 +28,54 @@ import { StockTransfer, TransferStatus } from '../interfaces';
     ResponsiveDataViewComponent,
     IconComponent,
     ButtonComponent,
+    CardComponent,
   ],
   template: `
     <div class="md:space-y-4">
-      <div
-        class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border">
+      <app-card [responsive]="true" [padding]="false">
         <!-- Search Section -->
         <div
-          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
-          <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-            <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
+          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+        >
+          <div
+            class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+          >
+            <h2
+              class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
+            >
               Transferencias ({{ transfers().length }})
             </h2>
 
             <div class="flex items-center gap-2 w-full md:w-auto">
-              <app-inputsearch class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-                size="sm" placeholder="Buscar transferencia..." [debounceTime]="300"
-                (searchChange)="onSearchChange($event)">
+              <app-inputsearch
+                class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                size="sm"
+                placeholder="Buscar transferencia..."
+                [debounceTime]="300"
+                (searchChange)="onSearchChange($event)"
+              >
               </app-inputsearch>
 
-              <app-button variant="outline" size="sm"
+              <app-button
+                variant="outline"
+                size="sm"
                 customClasses="w-9 h-9 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
-                (clicked)="onActionClick('create')" title="Nueva Transferencia">
+                (clicked)="onActionClick('create')"
+                title="Nueva Transferencia"
+              >
                 <app-icon slot="icon" name="plus" [size]="18"></app-icon>
               </app-button>
 
-              <app-options-dropdown class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-                [filters]="filterConfigs" [filterValues]="filterValues" [actions]="dropdownActions"
-                [isLoading]="isLoading()" (filterChange)="onFilterChange($event)" (clearAllFilters)="onClearFilters()"
-                (actionClick)="onActionClick($event)">
+              <app-options-dropdown
+                class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                [filters]="filterConfigs"
+                [filterValues]="filterValues"
+                [actions]="dropdownActions"
+                [isLoading]="isLoading()"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="onClearFilters()"
+                (actionClick)="onActionClick($event)"
+              >
               </app-options-dropdown>
             </div>
           </div>
@@ -64,7 +84,9 @@ import { StockTransfer, TransferStatus } from '../interfaces';
         <!-- Loading -->
         @if (isLoading()) {
           <div class="p-4 md:p-6 text-center">
-            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
             <p class="mt-2 text-text-secondary">Cargando transferencias...</p>
           </div>
         }
@@ -72,17 +94,30 @@ import { StockTransfer, TransferStatus } from '../interfaces';
         <!-- Empty State -->
         @if (!isLoading() && transfers().length === 0) {
           <div class="p-8 md:p-12 text-center text-gray-500">
-            <app-icon name="repeat" [size]="48" class="mx-auto mb-4 text-gray-300"></app-icon>
-            <h3 class="text-lg font-medium text-gray-900">{{ getEmptyStateTitle() }}</h3>
-            <p class="mt-1 text-sm text-text-secondary">{{ getEmptyStateDescription() }}</p>
+            <app-icon
+              name="repeat"
+              [size]="48"
+              class="mx-auto mb-4 text-gray-300"
+            ></app-icon>
+            <h3 class="text-lg font-medium text-gray-900">
+              {{ getEmptyStateTitle() }}
+            </h3>
+            <p class="mt-1 text-sm text-text-secondary">
+              {{ getEmptyStateDescription() }}
+            </p>
 
             @if (hasFilters()) {
               <div class="mt-6 flex justify-center gap-3">
-                <app-button variant="outline" (clicked)="onClearFilters()">Limpiar filtros</app-button>
+                <app-button variant="outline" (clicked)="onClearFilters()"
+                  >Limpiar filtros</app-button
+                >
               </div>
             } @else {
               <div class="mt-6">
-                <app-button variant="primary" (clicked)="onActionClick('create')">
+                <app-button
+                  variant="primary"
+                  (clicked)="onActionClick('create')"
+                >
                   <app-icon name="plus" [size]="16" slot="icon"></app-icon>
                   Nueva Transferencia
                 </app-button>
@@ -102,11 +137,12 @@ import { StockTransfer, TransferStatus } from '../interfaces';
               [loading]="isLoading()"
               [sortable]="true"
               emptyMessage="No hay transferencias"
-              emptyIcon="repeat">
+              emptyIcon="repeat"
+            >
             </app-responsive-data-view>
           </div>
         }
-      </div>
+      </app-card>
     </div>
   `,
 })
@@ -144,7 +180,12 @@ export class TransferListComponent {
 
   dropdownActions: DropdownAction[] = [
     { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
-    { label: 'Nueva Transferencia', icon: 'plus', action: 'create', variant: 'primary' },
+    {
+      label: 'Nueva Transferencia',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   tableColumns: TableColumn[] = [
@@ -241,13 +282,17 @@ export class TransferListComponent {
         key: 'expected_date',
         label: 'Esperada',
         icon: 'clock',
-        transform: (val: string) => val ? new Date(val).toLocaleDateString('es-CO') : '-',
+        transform: (val: string) =>
+          val ? new Date(val).toLocaleDateString('es-CO') : '-',
       },
     ],
   };
 
   readonly hasFilters = computed(() => {
-    return !!(this.searchTerm || Object.keys(this.filterValues).some(k => this.filterValues[k]));
+    return !!(
+      this.searchTerm ||
+      Object.keys(this.filterValues).some((k) => this.filterValues[k])
+    );
   });
 
   onSearchChange(term: string): void {

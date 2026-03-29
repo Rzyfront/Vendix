@@ -1,18 +1,36 @@
-import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  OnDestroy,
+  inject,
+  signal,
+  computed,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
 import { PayrollService } from '../services/payroll.service';
-import { PayrollSettlement, SettlementStats } from '../interfaces/payroll.interface';
+import {
+  PayrollSettlement,
+  SettlementStats,
+} from '../interfaces/payroll.interface';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
-
+import { CardComponent } from '../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
 import { InputsearchComponent } from '../../../../../shared/components/inputsearch/inputsearch.component';
 import { OptionsDropdownComponent } from '../../../../../shared/components/options-dropdown/options-dropdown.component';
-import { FilterConfig, FilterValues } from '../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
-import { ResponsiveDataViewComponent, TableColumn, TableAction, ItemListCardConfig } from '../../../../../shared/components/responsive-data-view/responsive-data-view.component';
+import {
+  FilterConfig,
+  FilterValues,
+} from '../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import {
+  ResponsiveDataViewComponent,
+  TableColumn,
+  TableAction,
+  ItemListCardConfig,
+} from '../../../../../shared/components/responsive-data-view/responsive-data-view.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 
@@ -24,6 +42,7 @@ import { SettlementDetailComponent } from '../components/settlements/settlement-
   standalone: true,
   imports: [
     CommonModule,
+    CardComponent,
     StatsComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
@@ -35,9 +54,10 @@ import { SettlementDetailComponent } from '../components/settlements/settlement-
   ],
   template: `
     <div class="w-full">
-
       <!-- Stats: Sticky on mobile, static on desktop -->
-      <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         <app-stats
           title="Total"
           [value]="totalSettlements()"
@@ -72,11 +92,17 @@ import { SettlementDetailComponent } from '../components/settlements/settlement-
       </div>
 
       <!-- Search Section -->
-      <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                  md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
-        <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-          <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
-                     md:text-lg md:font-semibold md:text-text-primary">
+      <div
+        class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                  md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+      >
+        <div
+          class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+        >
+          <h2
+            class="text-[13px] font-bold text-gray-600 tracking-wide
+                     md:text-lg md:font-semibold md:text-text-primary"
+          >
             Liquidaciones ({{ settlements().length }})
           </h2>
           <div class="flex items-center gap-2 w-full md:w-auto">
@@ -92,7 +118,11 @@ import { SettlementDetailComponent } from '../components/settlements/settlement-
               [filterValues]="filterValues"
               (filterChange)="onFilterChange($event)"
             ></app-options-dropdown>
-            <app-button variant="primary" size="sm" (clicked)="openCreateModal()">
+            <app-button
+              variant="primary"
+              size="sm"
+              (clicked)="openCreateModal()"
+            >
               <app-icon name="plus" [size]="16"></app-icon>
               <span class="hidden md:inline ml-1">Nueva</span>
             </app-button>
@@ -101,8 +131,11 @@ import { SettlementDetailComponent } from '../components/settlements/settlement-
       </div>
 
       <!-- Content -->
-      <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-                  md:border md:border-border md:min-h-[600px] md:overflow-hidden">
+      <app-card
+        [responsive]="true"
+        [padding]="false"
+        customClasses="md:min-h-[600px] md:overflow-hidden"
+      >
         <app-responsive-data-view
           [data]="settlements()"
           [columns]="columns"
@@ -113,7 +146,7 @@ import { SettlementDetailComponent } from '../components/settlements/settlement-
           emptyIcon="file-minus"
           (rowClick)="viewSettlement($event)"
         ></app-responsive-data-view>
-      </div>
+      </app-card>
 
       <!-- Create Modal -->
       <app-settlement-create
@@ -153,8 +186,13 @@ export class PayrollSettlementsPageComponent implements OnInit, OnDestroy {
   totalSettlements = computed(() => {
     const s = this.stats();
     if (!s) return 0;
-    return (s.by_status.draft || 0) + (s.by_status.calculated || 0) +
-      (s.by_status.approved || 0) + (s.by_status.paid || 0) + (s.by_status.cancelled || 0);
+    return (
+      (s.by_status.draft || 0) +
+      (s.by_status.calculated || 0) +
+      (s.by_status.approved || 0) +
+      (s.by_status.paid || 0) +
+      (s.by_status.cancelled || 0)
+    );
   });
 
   columns: TableColumn[] = [
@@ -162,12 +200,20 @@ export class PayrollSettlementsPageComponent implements OnInit, OnDestroy {
     {
       key: 'employee',
       label: 'Empleado',
-      transform: (val: any) => val ? `${val.first_name} ${val.last_name}` : '-',
+      transform: (val: any) =>
+        val ? `${val.first_name} ${val.last_name}` : '-',
     },
     {
       key: 'termination_date',
       label: 'Fecha Terminacion',
-      transform: (val: string) => val ? new Date(val).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-',
+      transform: (val: string) =>
+        val
+          ? new Date(val).toLocaleDateString('es-CO', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric',
+            })
+          : '-',
     },
     {
       key: 'termination_reason',
@@ -205,7 +251,8 @@ export class PayrollSettlementsPageComponent implements OnInit, OnDestroy {
   cardConfig: ItemListCardConfig = {
     titleKey: 'settlement_number',
     subtitleKey: 'employee',
-    subtitleTransform: (val: any) => val ? `${val.first_name} ${val.last_name}` : '-',
+    subtitleTransform: (val: any) =>
+      val ? `${val.first_name} ${val.last_name}` : '-',
     badgeKey: 'status',
     badgeConfig: {
       type: 'custom',
@@ -257,7 +304,8 @@ export class PayrollSettlementsPageComponent implements OnInit, OnDestroy {
       label: 'Cancelar',
       icon: 'x-circle',
       variant: 'danger',
-      show: (item: PayrollSettlement) => item.status !== 'paid' && item.status !== 'cancelled',
+      show: (item: PayrollSettlement) =>
+        item.status !== 'paid' && item.status !== 'cancelled',
       action: (item: PayrollSettlement) => this.onCancel(item),
     },
   ];
@@ -297,7 +345,8 @@ export class PayrollSettlementsPageComponent implements OnInit, OnDestroy {
     if (this.searchTerm) query['search'] = this.searchTerm;
     if (this.statusFilter) query['status'] = this.statusFilter;
 
-    this.payrollService.getSettlements(query)
+    this.payrollService
+      .getSettlements(query)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (res) => {
@@ -306,13 +355,17 @@ export class PayrollSettlementsPageComponent implements OnInit, OnDestroy {
         },
         error: () => {
           this.loading.set(false);
-          this.toastService.show({ variant: 'error', description: 'Error cargando liquidaciones' });
+          this.toastService.show({
+            variant: 'error',
+            description: 'Error cargando liquidaciones',
+          });
         },
       });
   }
 
   loadStats(): void {
-    this.payrollService.getSettlementStats()
+    this.payrollService
+      .getSettlementStats()
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (res) => this.stats.set(res.data),
@@ -338,10 +391,11 @@ export class PayrollSettlementsPageComponent implements OnInit, OnDestroy {
     this.selectedSettlement = settlement;
     this.isDetailModalOpen = true;
     // Fetch full detail
-    this.payrollService.getSettlement(settlement.id)
+    this.payrollService
+      .getSettlement(settlement.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: (res) => this.selectedSettlement = res.data,
+        next: (res) => (this.selectedSettlement = res.data),
       });
   }
 
@@ -356,38 +410,62 @@ export class PayrollSettlementsPageComponent implements OnInit, OnDestroy {
   }
 
   onApprove(settlement: PayrollSettlement): void {
-    this.payrollService.approveSettlement(settlement.id)
+    this.payrollService
+      .approveSettlement(settlement.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
-          this.toastService.show({ variant: 'success', description: 'Liquidacion aprobada' });
+          this.toastService.show({
+            variant: 'success',
+            description: 'Liquidacion aprobada',
+          });
           this.onSettlementUpdated();
         },
-        error: () => this.toastService.show({ variant: 'error', description: 'Error al aprobar' }),
+        error: () =>
+          this.toastService.show({
+            variant: 'error',
+            description: 'Error al aprobar',
+          }),
       });
   }
 
   onPay(settlement: PayrollSettlement): void {
-    this.payrollService.paySettlement(settlement.id)
+    this.payrollService
+      .paySettlement(settlement.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
-          this.toastService.show({ variant: 'success', description: 'Liquidacion pagada' });
+          this.toastService.show({
+            variant: 'success',
+            description: 'Liquidacion pagada',
+          });
           this.onSettlementUpdated();
         },
-        error: () => this.toastService.show({ variant: 'error', description: 'Error al pagar' }),
+        error: () =>
+          this.toastService.show({
+            variant: 'error',
+            description: 'Error al pagar',
+          }),
       });
   }
 
   onCancel(settlement: PayrollSettlement): void {
-    this.payrollService.cancelSettlement(settlement.id)
+    this.payrollService
+      .cancelSettlement(settlement.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
-          this.toastService.show({ variant: 'success', description: 'Liquidacion cancelada' });
+          this.toastService.show({
+            variant: 'success',
+            description: 'Liquidacion cancelada',
+          });
           this.onSettlementUpdated();
         },
-        error: () => this.toastService.show({ variant: 'error', description: 'Error al cancelar' }),
+        error: () =>
+          this.toastService.show({
+            variant: 'error',
+            description: 'Error al cancelar',
+          }),
       });
   }
 

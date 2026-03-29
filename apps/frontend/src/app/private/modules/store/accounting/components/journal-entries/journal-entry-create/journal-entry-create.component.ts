@@ -128,7 +128,7 @@ import {
                     <div class="md:col-span-2">
                       <div class="md:hidden text-xs font-medium text-gray-500 mb-1">Débito</div>
                       <app-input
-                        type="number"
+                        [currency]="true"
                         formControlName="debit_amount"
                         [control]="line.get('debit_amount')"
                         placeholder="0.00"
@@ -138,7 +138,7 @@ import {
                     <div class="md:col-span-2">
                       <div class="md:hidden text-xs font-medium text-gray-500 mb-1">Crédito</div>
                       <app-input
-                        type="number"
+                        [currency]="true"
                         formControlName="credit_amount"
                         [control]="line.get('credit_amount')"
                         placeholder="0.00"

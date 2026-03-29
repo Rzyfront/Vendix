@@ -1,6 +1,5 @@
 <!-- AI Engine Module Layout -->
 <div class="flex flex-col gap-6">
-
   <!-- Tab Navigation -->
   <div class="flex items-center gap-1 border-b border-border">
     <button
@@ -33,29 +32,47 @@
   <!-- CONFIGS TAB                             -->
   <!-- ═══════════════════════════════════════ -->
   <ng-container *ngIf="activeTab() === 'configs'">
-
     <!-- Stats Grid -->
     <div class="stats-container">
-      <app-stats title="Total Configuraciones" [value]="stats()?.totalConfigs || 0" iconName="cpu"
-        iconBgColor="bg-purple-100" iconColor="text-purple-600"></app-stats>
+      <app-stats
+        title="Total Configuraciones"
+        [value]="stats()?.totalConfigs || 0"
+        iconName="cpu"
+        iconBgColor="bg-purple-100"
+        iconColor="text-purple-600"
+      ></app-stats>
 
-      <app-stats title="Activas" [value]="stats()?.activeConfigs || 0" iconName="check-circle"
-        iconBgColor="bg-green-100" iconColor="text-green-600"></app-stats>
+      <app-stats
+        title="Activas"
+        [value]="stats()?.activeConfigs || 0"
+        iconName="check-circle"
+        iconBgColor="bg-green-100"
+        iconColor="text-green-600"
+      ></app-stats>
 
-      <app-stats title="Inactivas" [value]="stats()?.inactiveConfigs || 0" iconName="slash"
-        iconBgColor="bg-yellow-100" iconColor="text-yellow-600"></app-stats>
+      <app-stats
+        title="Inactivas"
+        [value]="stats()?.inactiveConfigs || 0"
+        iconName="slash"
+        iconBgColor="bg-yellow-100"
+        iconColor="text-yellow-600"
+      ></app-stats>
 
-      <app-stats title="Default" [value]="stats()?.defaultConfig?.label || 'Ninguno'" iconName="star"
-        iconBgColor="bg-blue-100" iconColor="text-blue-600"></app-stats>
+      <app-stats
+        title="Default"
+        [value]="stats()?.defaultConfig?.label || 'Ninguno'"
+        iconName="star"
+        iconBgColor="bg-blue-100"
+        iconColor="text-blue-600"
+      ></app-stats>
     </div>
 
     <!-- Main Content Card -->
-    <div class="flex flex-col bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
-
+    <app-card [padding]="false" overflow="hidden">
       <!-- Table Header -->
       <div
-        class="p-2 md:px-6 md:py-4 border-b border-border flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between bg-surface">
-
+        class="p-2 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
+      >
         <div class="flex-1 min-w-0">
           <h3 class="text-lg font-semibold text-text-primary">
             Configuraciones de IA
@@ -65,19 +82,36 @@
           </p>
         </div>
 
-        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+        <div
+          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+        >
           <div class="w-full sm:w-60">
-            <app-inputsearch placeholder="Buscar configuraciones..." [debounceTime]="300"
-              (searchChange)="onSearchChange($event)" size="sm" fullWidth="true"></app-inputsearch>
+            <app-inputsearch
+              placeholder="Buscar configuraciones..."
+              [debounceTime]="300"
+              (searchChange)="onSearchChange($event)"
+              size="sm"
+              fullWidth="true"
+            ></app-inputsearch>
           </div>
 
           <div class="w-full sm:w-48">
-            <app-selector placeholder="Filtrar por SDK" [options]="sdkTypeOptions"
-              [formControl]="$any(filterForm.get('sdk_type'))" size="sm" variant="outline"></app-selector>
+            <app-selector
+              placeholder="Filtrar por SDK"
+              [options]="sdkTypeOptions"
+              [formControl]="$any(filterForm.get('sdk_type'))"
+              size="sm"
+              variant="outline"
+            ></app-selector>
           </div>
 
           <div class="flex gap-2 items-center sm:ml-auto">
-            <app-button variant="primary" size="sm" iconName="plus" (clicked)="openCreateModal()">
+            <app-button
+              variant="primary"
+              size="sm"
+              iconName="plus"
+              (clicked)="openCreateModal()"
+            >
               <span class="hidden sm:inline">Nueva Configuracion</span>
               <span class="sm:hidden">Nuevo</span>
             </app-button>
@@ -87,24 +121,56 @@
 
       <!-- Table Container -->
       <div class="relative min-h-[400px] p-2 md:p-4">
-        <div *ngIf="isLoading()" class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
-          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div
+          *ngIf="isLoading()"
+          class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+        >
+          <div
+            class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
         </div>
 
-        <app-responsive-data-view [columns]="tableColumns" [data]="configs()" [actions]="tableActions"
-          [cardConfig]="cardConfig" [loading]="isLoading()">
-          <div class="p-8 flex justify-center w-full" *ngIf="!isLoading() && configs().length === 0">
-            <app-ai-engine-empty-state
-              [title]="filterForm.get('search')?.value || filterForm.get('sdk_type')?.value ? 'Sin resultados' : 'No hay configuraciones'"
-              [description]="filterForm.get('search')?.value || filterForm.get('sdk_type')?.value ? 'Ajusta tus filtros de busqueda' : 'Configura tu primer proveedor de IA para comenzar'"
-              [showAction]="!filterForm.get('search')?.value && !filterForm.get('sdk_type')?.value"
-              (actionClick)="openCreateModal()"></app-ai-engine-empty-state>
+        <app-responsive-data-view
+          [columns]="tableColumns"
+          [data]="configs()"
+          [actions]="tableActions"
+          [cardConfig]="cardConfig"
+          [loading]="isLoading()"
+        >
+          <div
+            class="p-8 flex justify-center w-full"
+            *ngIf="!isLoading() && configs().length === 0"
+          >
+            <app-empty-state
+              icon="cpu"
+              [title]="
+                filterForm.get('search')?.value ||
+                filterForm.get('sdk_type')?.value
+                  ? 'Sin resultados'
+                  : 'No hay configuraciones'
+              "
+              [description]="
+                filterForm.get('search')?.value ||
+                filterForm.get('sdk_type')?.value
+                  ? 'Ajusta tus filtros de busqueda'
+                  : 'Configura tu primer proveedor de IA para comenzar'
+              "
+              actionButtonText="Nueva Configuracion"
+              [showActionButton]="
+                !filterForm.get('search')?.value &&
+                !filterForm.get('sdk_type')?.value
+              "
+              (actionClick)="openCreateModal()"
+            ></app-empty-state>
           </div>
         </app-responsive-data-view>
       </div>
 
       <!-- Pagination -->
-      <div class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center" *ngIf="configs().length > 0">
+      <div
+        class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center"
+        *ngIf="configs().length > 0"
+      >
         <app-pagination
           [currentPage]="configPagination.page"
           [totalPages]="configPagination.totalPages"
@@ -114,36 +180,54 @@
           (pageChange)="onConfigPageChange($event)"
         />
       </div>
-    </div>
+    </app-card>
   </ng-container>
 
   <!-- ═══════════════════════════════════════ -->
   <!-- APPS TAB                                -->
   <!-- ═══════════════════════════════════════ -->
   <ng-container *ngIf="activeTab() === 'apps'">
-
     <!-- Stats Grid -->
     <div class="stats-container">
-      <app-stats title="Total Aplicaciones" [value]="appStats()?.totalApps || 0" iconName="app-window"
-        iconBgColor="bg-indigo-100" iconColor="text-indigo-600"></app-stats>
+      <app-stats
+        title="Total Aplicaciones"
+        [value]="appStats()?.totalApps || 0"
+        iconName="app-window"
+        iconBgColor="bg-indigo-100"
+        iconColor="text-indigo-600"
+      ></app-stats>
 
-      <app-stats title="Activas" [value]="appStats()?.activeApps || 0" iconName="check-circle"
-        iconBgColor="bg-green-100" iconColor="text-green-600"></app-stats>
+      <app-stats
+        title="Activas"
+        [value]="appStats()?.activeApps || 0"
+        iconName="check-circle"
+        iconBgColor="bg-green-100"
+        iconColor="text-green-600"
+      ></app-stats>
 
-      <app-stats title="Config Custom" [value]="appStats()?.usingCustomConfig || 0" iconName="settings"
-        iconBgColor="bg-orange-100" iconColor="text-orange-600"></app-stats>
+      <app-stats
+        title="Config Custom"
+        [value]="appStats()?.usingCustomConfig || 0"
+        iconName="settings"
+        iconBgColor="bg-orange-100"
+        iconColor="text-orange-600"
+      ></app-stats>
 
-      <app-stats title="Config Default" [value]="appStats()?.usingDefaultConfig || 0" iconName="star"
-        iconBgColor="bg-blue-100" iconColor="text-blue-600"></app-stats>
+      <app-stats
+        title="Config Default"
+        [value]="appStats()?.usingDefaultConfig || 0"
+        iconName="star"
+        iconBgColor="bg-blue-100"
+        iconColor="text-blue-600"
+      ></app-stats>
     </div>
 
     <!-- Main Content Card -->
-    <div class="flex flex-col bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
-
+    <app-card [padding]="false" overflow="hidden">
       <!-- Table Header -->
       <div
-        class="p-2 md:px-6 md:py-4 border-b border-border flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between bg-surface">
-
+        class="p-2 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
+      >
         <div class="flex-1 min-w-0">
           <h3 class="text-lg font-semibold text-text-primary">
             Aplicaciones de IA
@@ -153,19 +237,36 @@
           </p>
         </div>
 
-        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+        <div
+          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+        >
           <div class="w-full sm:w-60">
-            <app-inputsearch placeholder="Buscar aplicaciones..." [debounceTime]="300"
-              (searchChange)="onAppSearchChange($event)" size="sm" fullWidth="true"></app-inputsearch>
+            <app-inputsearch
+              placeholder="Buscar aplicaciones..."
+              [debounceTime]="300"
+              (searchChange)="onAppSearchChange($event)"
+              size="sm"
+              fullWidth="true"
+            ></app-inputsearch>
           </div>
 
           <div class="w-full sm:w-48">
-            <app-selector placeholder="Filtrar por formato" [options]="outputFormatOptions"
-              [formControl]="$any(appFilterForm.get('output_format'))" size="sm" variant="outline"></app-selector>
+            <app-selector
+              placeholder="Filtrar por formato"
+              [options]="outputFormatOptions"
+              [formControl]="$any(appFilterForm.get('output_format'))"
+              size="sm"
+              variant="outline"
+            ></app-selector>
           </div>
 
           <div class="flex gap-2 items-center sm:ml-auto">
-            <app-button variant="primary" size="sm" iconName="plus" (clicked)="openCreateAppModal()">
+            <app-button
+              variant="primary"
+              size="sm"
+              iconName="plus"
+              (clicked)="openCreateAppModal()"
+            >
               <span class="hidden sm:inline">Nueva Aplicacion</span>
               <span class="sm:hidden">Nuevo</span>
             </app-button>
@@ -175,24 +276,43 @@
 
       <!-- Table Container -->
       <div class="relative min-h-[400px] p-2 md:p-4">
-        <div *ngIf="isLoadingApps()" class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
-          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div
+          *ngIf="isLoadingApps()"
+          class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+        >
+          <div
+            class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
         </div>
 
-        <app-responsive-data-view [columns]="appTableColumns" [data]="apps()" [actions]="appTableActions"
-          [cardConfig]="appCardConfig" [loading]="isLoadingApps()">
-          <div class="p-8 flex justify-center w-full" *ngIf="!isLoadingApps() && apps().length === 0">
-            <app-ai-engine-empty-state
+        <app-responsive-data-view
+          [columns]="appTableColumns"
+          [data]="apps()"
+          [actions]="appTableActions"
+          [cardConfig]="appCardConfig"
+          [loading]="isLoadingApps()"
+        >
+          <div
+            class="p-8 flex justify-center w-full"
+            *ngIf="!isLoadingApps() && apps().length === 0"
+          >
+            <app-empty-state
+              icon="cpu"
               title="No hay aplicaciones"
-              description="Crea tu primera aplicacion de IA para definir casos de uso con prompts y parametros"
-              [showAction]="true"
-              (actionClick)="openCreateAppModal()"></app-ai-engine-empty-state>
+              description="Crea tu primera aplicacion de IA"
+              actionButtonText="Nueva Aplicacion"
+              [showActionButton]="true"
+              (actionClick)="openCreateAppModal()"
+            ></app-empty-state>
           </div>
         </app-responsive-data-view>
       </div>
 
       <!-- Pagination -->
-      <div class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center" *ngIf="apps().length > 0">
+      <div
+        class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center"
+        *ngIf="apps().length > 0"
+      >
         <app-pagination
           [currentPage]="appPagination.page"
           [totalPages]="appPagination.totalPages"
@@ -202,7 +322,7 @@
           (pageChange)="onAppPageChange($event)"
         />
       </div>
-    </div>
+    </app-card>
   </ng-container>
 </div>
 
@@ -212,7 +332,8 @@
   (isOpenChange)="showConfigModal.set($event)"
   [config]="selectedConfig()"
   [isSubmitting]="isSubmitting()"
-  (submit)="saveConfig($event)">
+  (submit)="saveConfig($event)"
+>
 </app-ai-engine-config-modal>
 
 <!-- App Modal (Create + Edit) -->
@@ -222,5 +343,6 @@
   [app]="selectedApp()"
   [configs]="configs()"
   [isSubmitting]="isSubmittingApp()"
-  (submit)="saveApp($event)">
+  (submit)="saveApp($event)"
+>
 </app-ai-engine-app-modal>

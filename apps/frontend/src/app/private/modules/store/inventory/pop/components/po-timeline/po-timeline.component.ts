@@ -10,6 +10,7 @@ import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { PurchaseOrdersService } from '../../../services';
 import { PurchaseOrderTimelineEntry } from '../../../interfaces';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 interface TimelineDisplayItem {
   type: 'audit' | 'reception' | 'payment';
@@ -72,6 +73,7 @@ interface TimelineDisplayItem {
 })
 export class PoTimelineComponent {
   private purchaseOrdersService = inject(PurchaseOrdersService);
+  private currencyService = inject(CurrencyFormatService);
 
   readonly orderId = input<number | null>(null);
 
@@ -167,7 +169,7 @@ export class PoTimelineComponent {
       credit_card: 'Tarjeta',
     };
     const label = methodLabels[method] || method || '';
-    return amount ? `$${Number(amount).toLocaleString()} - ${label}` : label;
+    return amount ? `${this.currencyService.format(Number(amount) || 0)} - ${label}` : label;
   }
 
   private getAuditIcon(data: Record<string, unknown>): string {

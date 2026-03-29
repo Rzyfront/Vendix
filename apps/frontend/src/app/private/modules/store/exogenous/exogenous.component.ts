@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ExogenousService } from './services/exogenous.service';
 import { ExogenousReport, ExogenousStats } from './interfaces/exogenous.interface';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
+import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'app-exogenous',
@@ -99,6 +100,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
 })
 export class ExogenousComponent implements OnInit {
   private service = inject(ExogenousService);
+  private currencyService = inject(CurrencyFormatService);
 
   reports = signal<ExogenousReport[]>([]);
   stats = signal<ExogenousStats | null>(null);
@@ -156,6 +158,6 @@ export class ExogenousComponent implements OnInit {
   }
 
   formatCurrency(value: number): string {
-    return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(value);
+    return this.currencyService.format(Number(value) || 0, 0);
   }
 }

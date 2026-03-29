@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { WithholdingTaxService } from './services/withholding-tax.service';
 import { WithholdingConcept, WithholdingStats } from './interfaces/withholding.interface';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
+import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'app-withholding-tax',
@@ -67,6 +68,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
 })
 export class WithholdingTaxComponent implements OnInit {
   private service = inject(WithholdingTaxService);
+  private currencyService = inject(CurrencyFormatService);
 
   concepts = signal<WithholdingConcept[]>([]);
   stats = signal<WithholdingStats | null>(null);
@@ -85,6 +87,6 @@ export class WithholdingTaxComponent implements OnInit {
   }
 
   formatCurrency(value: number): string {
-    return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(value);
+    return this.currencyService.format(Number(value) || 0, 0);
   }
 }

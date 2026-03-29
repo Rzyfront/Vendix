@@ -3,8 +3,11 @@ import {
   AIProvider,
   AIProviderConfig,
   AIMessage,
+  AIMessageContentPart,
   AIRequestOptions,
   AIResponse,
+  AIStreamChunk,
+  AIToolCall,
 } from '../interfaces/ai-provider.interface';
 
 export class OpenAICompatibleProvider implements AIProvider {
@@ -24,17 +27,37 @@ export class OpenAICompatibleProvider implements AIProvider {
     try {
       const response = await this.client.chat.completions.create({
         model: options?.model || this.config.modelId,
-        messages: this.buildMessages(messages, options?.systemPrompt),
+        messages: this.buildMessages(messages, options?.systemPrompt) as any,
         temperature:
           options?.temperature ?? this.config.settings?.temperature ?? undefined,
         max_tokens:
           options?.maxTokens ?? this.config.settings?.maxTokens ?? undefined,
+        ...(options?.tools?.length && {
+          tools: options.tools.map((t) => ({
+            type: t.type as any,
+            function: t.function,
+          })),
+        }),
+        ...(options?.tool_choice && { tool_choice: options.tool_choice as any }),
       });
 
-      const choice = response.choices?.[0];
+      const message = response.choices[0]?.message;
+      const finishReason = response.choices[0]?.finish_reason;
+
+      const toolCalls: AIToolCall[] | undefined = message?.tool_calls?.map(
+        (tc: any) => ({
+          id: tc.id,
+          type: 'function' as const,
+          function: {
+            name: tc.function.name,
+            arguments: tc.function.arguments,
+          },
+        }),
+      );
+
       return {
         success: true,
-        content: choice?.message?.content || '',
+        content: message?.content || '',
         usage: response.usage
           ? {
               promptTokens: response.usage.prompt_tokens || 0,
@@ -43,6 +66,13 @@ export class OpenAICompatibleProvider implements AIProvider {
             }
           : undefined,
         model: response.model,
+        tool_calls: toolCalls?.length ? toolCalls : undefined,
+        finish_reason:
+          finishReason === 'tool_calls'
+            ? 'tool_calls'
+            : finishReason === 'length'
+              ? 'length'
+              : 'stop',
       };
     } catch (error: any) {
       return {
@@ -74,6 +104,59 @@ export class OpenAICompatibleProvider implements AIProvider {
       return { success: false, message: response.error || 'Unknown error' };
     } catch (error: any) {
       return { success: false, message: error.message || 'Connection failed' };
+    }
+  }
+
+  async *chatStream(
+    messages: AIMessage[],
+    options?: AIRequestOptions,
+  ): AsyncGenerator<AIStreamChunk> {
+    try {
+      const stream = await this.client.chat.completions.create({
+        model: options?.model || this.config.modelId,
+        messages: this.buildMessages(messages, options?.systemPrompt) as any,
+        temperature: options?.temperature ?? this.config.settings?.temperature ?? undefined,
+        max_tokens: options?.maxTokens ?? this.config.settings?.maxTokens ?? undefined,
+        stream: true,
+        ...(options?.tools?.length && {
+          tools: options.tools.map((t) => ({
+            type: t.type as any,
+            function: t.function,
+          })),
+        }),
+        ...(options?.tool_choice && { tool_choice: options.tool_choice as any }),
+      });
+
+      let totalPromptTokens = 0;
+      let totalCompletionTokens = 0;
+
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta;
+
+        if (delta?.content) {
+          yield { type: 'text', content: delta.content };
+        }
+
+        // Capture usage from the final chunk
+        if (chunk.usage) {
+          totalPromptTokens = chunk.usage.prompt_tokens || 0;
+          totalCompletionTokens = chunk.usage.completion_tokens || 0;
+        }
+      }
+
+      yield {
+        type: 'done',
+        usage: {
+          promptTokens: totalPromptTokens,
+          completionTokens: totalCompletionTokens,
+          totalTokens: totalPromptTokens + totalCompletionTokens,
+        },
+      };
+    } catch (error: any) {
+      yield {
+        type: 'error',
+        error: error.message || 'OpenAI-compatible streaming failed',
+      };
     }
   }
 

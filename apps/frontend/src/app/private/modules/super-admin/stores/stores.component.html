@@ -1,16 +1,14 @@
 <!-- Standard Module Layout -->
 <div class="flex flex-col gap-6">
-
   <!-- Stats Grid -->
   <app-store-stats [stats]="stats"></app-store-stats>
 
   <!-- Main Content Card -->
-  <div class="flex flex-col bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
-
+  <app-card [padding]="false" overflow="hidden">
     <!-- Table Header (Title, Description, Controls) -->
     <div
-      class="p-2 md:px-6 md:py-4 border-b border-border flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between bg-surface">
-
+      class="p-2 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
+    >
       <!-- Left: Title & Description -->
       <div class="flex-1 min-w-0">
         <h3 class="text-lg font-semibold text-text-primary">
@@ -22,37 +20,64 @@
       </div>
 
       <!-- Right: Controls (Search, Filters, Actions) -->
-      <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 w-full sm:w-auto">
+      <div
+        class="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 w-full sm:w-auto"
+      >
         <!-- Search -->
         <div class="w-full sm:w-60">
-          <app-inputsearch placeholder="Buscar tiendas..." (searchChange)="onSearchChange($event)"
-            size="sm"></app-inputsearch>
+          <app-inputsearch
+            placeholder="Buscar tiendas..."
+            (searchChange)="onSearchChange($event)"
+            size="sm"
+          ></app-inputsearch>
         </div>
 
         <!-- Filter Tipo -->
         <div class="w-full sm:w-48">
-          <app-selector [options]="storeTypes" [formControl]="$any(filterForm.get('store_type'))" size="sm"
-            variant="outline"></app-selector>
+          <app-selector
+            [options]="storeTypes"
+            [formControl]="$any(filterForm.get('store_type'))"
+            size="sm"
+            variant="outline"
+          ></app-selector>
         </div>
 
         <!-- Filter Estado -->
         <div class="w-full sm:w-48">
-          <app-selector [options]="activeStates" [formControl]="$any(filterForm.get('is_active'))" size="sm"
-            variant="outline"></app-selector>
+          <app-selector
+            [options]="activeStates"
+            [formControl]="$any(filterForm.get('is_active'))"
+            size="sm"
+            variant="outline"
+          ></app-selector>
         </div>
 
         <!-- Filter Modo Org -->
         <div class="w-full sm:w-48">
-          <app-selector [options]="orgModes" [formControl]="$any(filterForm.get('include_non_production'))" size="sm"
-            variant="outline"></app-selector>
+          <app-selector
+            [options]="orgModes"
+            [formControl]="$any(filterForm.get('include_non_production'))"
+            size="sm"
+            variant="outline"
+          ></app-selector>
         </div>
 
         <div class="flex gap-2 items-center sm:ml-auto">
-          <app-button variant="outline" size="sm" (clicked)="refreshStores()" [disabled]="isLoading"
-            title="Actualizar lista">
+          <app-button
+            variant="outline"
+            size="sm"
+            (clicked)="refreshStores()"
+            [disabled]="isLoading"
+            title="Actualizar lista"
+          >
             <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
           </app-button>
-          <app-button variant="primary" size="sm" (clicked)="openCreateStoreModal()" title="Crear Nueva Tienda">
+          <app-button
+            variant="primary"
+            size="sm"
+            (clicked)="openCreateStoreModal()"
+            title="Crear Nueva Tienda"
+          >
             <app-icon name="plus" [size]="16" slot="icon"></app-icon>
             <span class="hidden sm:inline">Nueva Tienda</span>
             <span class="sm:hidden">Nueva</span>
@@ -64,28 +89,58 @@
     <!-- Table Content Wrapper -->
     <div class="relative min-h-[400px] p-2 md:p-4">
       <!-- Loading Overlay -->
-      <div *ngIf="isLoading" class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
-        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      <div
+        *ngIf="isLoading"
+        class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+      >
+        <div
+          class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+        ></div>
       </div>
 
       <!-- Empty State -->
-      <div class="p-8 flex justify-center w-full" *ngIf="!isLoading && stores.length === 0">
-        <app-store-empty-state [title]="getEmptyStateTitle()" [description]="getEmptyStateDescription()"
-          [showAdditionalActions]="hasFilters" (actionClick)="openCreateStoreModal()" (refreshClick)="refreshStores()"
-          (clearFiltersClick)="clearFilters()">
-        </app-store-empty-state>
+      <div
+        class="p-8 flex justify-center w-full"
+        *ngIf="!isLoading && stores.length === 0"
+      >
+        <app-empty-state
+          icon="store"
+          [title]="getEmptyStateTitle()"
+          [description]="getEmptyStateDescription()"
+          actionButtonText="Crear Tienda"
+          [showRefreshButton]="hasFilters"
+          [showClearFilters]="hasFilters"
+          (actionClick)="openCreateStoreModal()"
+          (refreshClick)="refreshStores()"
+          (clearFiltersClick)="clearFilters()"
+        >
+        </app-empty-state>
       </div>
 
       <!-- Stores Table -->
       <!-- Stores Table -->
-      <app-responsive-data-view *ngIf="!isLoading && stores.length > 0" [data]="stores" [columns]="tableColumns"
-        [actions]="tableActions" [cardConfig]="cardConfig" [loading]="isLoading" [sortable]="true" [hoverable]="true"
-        [striped]="true" size="md" (sort)="onTableSort($event)" (rowClick)="viewStore($event)">
+      <app-responsive-data-view
+        *ngIf="!isLoading && stores.length > 0"
+        [data]="stores"
+        [columns]="tableColumns"
+        [actions]="tableActions"
+        [cardConfig]="cardConfig"
+        [loading]="isLoading"
+        [sortable]="true"
+        [hoverable]="true"
+        [striped]="true"
+        size="md"
+        (sort)="onTableSort($event)"
+        (rowClick)="viewStore($event)"
+      >
       </app-responsive-data-view>
     </div>
 
     <!-- Pagination -->
-    <div class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center" *ngIf="!isLoading && stores.length > 0">
+    <div
+      class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center"
+      *ngIf="!isLoading && stores.length > 0"
+    >
       <app-pagination
         [currentPage]="pagination.page"
         [totalPages]="pagination.totalPages"
@@ -95,15 +150,26 @@
         (pageChange)="onPageChange($event)"
       />
     </div>
-  </div>
+  </app-card>
 
   <!-- Modals -->
-  <app-store-create-modal [(isOpen)]="isCreateModalOpen" [isSubmitting]="isCreatingStore"
-    (cancel)="onCreateModalCancel()"></app-store-create-modal>
+  <app-store-create-modal
+    [(isOpen)]="isCreateModalOpen"
+    [isSubmitting]="isCreatingStore"
+    (cancel)="onCreateModalCancel()"
+  ></app-store-create-modal>
 
-  <app-store-edit-modal [(isOpen)]="isEditModalOpen" [isSubmitting]="isUpdatingStore" [store]="selectedStore"
-    (cancel)="onEditModalCancel()"></app-store-edit-modal>
+  <app-store-edit-modal
+    [(isOpen)]="isEditModalOpen"
+    [isSubmitting]="isUpdatingStore"
+    [store]="selectedStore"
+    (cancel)="onEditModalCancel()"
+  ></app-store-edit-modal>
 
-  <app-store-settings-modal [(isOpen)]="isSettingsModalOpen" [isSubmitting]="isUpdatingSettings"
-    [settings]="selectedStoreForSettings?.settings" (submit)="updateStoreSettings($event)"></app-store-settings-modal>
+  <app-store-settings-modal
+    [(isOpen)]="isSettingsModalOpen"
+    [isSubmitting]="isUpdatingSettings"
+    [settings]="selectedStoreForSettings?.settings"
+    (submit)="updateStoreSettings($event)"
+  ></app-store-settings-modal>
 </div>

@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
+import { AILoggingService } from '../../../ai-engine/ai-logging.service';
+import { AIUsageStatsFilter } from '../../../ai-engine/interfaces/ai-log.interface';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { CreateAIConfigDto, UpdateAIConfigDto, AIConfigQueryDto } from './dto';
 
@@ -10,6 +12,7 @@ export class AIEngineConfigService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly aiEngine: AIEngineService,
+    private readonly aiLoggingService: AILoggingService,
   ) {}
 
   async create(dto: CreateAIConfigDto) {
@@ -228,6 +231,14 @@ export class AIEngineConfigService {
 
   async testConnection(id: number) {
     return this.aiEngine.testProvider(id);
+  }
+
+  async getUsageStats(filter: AIUsageStatsFilter) {
+    return this.aiLoggingService.getUsageStats(filter);
+  }
+
+  async getUsageByTenant(orgId: number, dateFrom?: Date, dateTo?: Date) {
+    return this.aiLoggingService.getUsageByTenant(orgId, dateFrom, dateTo);
   }
 
   private maskApiKey(config: any): any {

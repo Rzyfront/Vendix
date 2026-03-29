@@ -9,12 +9,19 @@ export enum CurrencyPosition {
   AFTER = 'after',
 }
 
+export enum CurrencyFormatStyle {
+  COMMA_DOT = 'comma_dot',
+  DOT_COMMA = 'dot_comma',
+  SPACE_COMMA = 'space_comma',
+}
+
 export interface Currency {
   code: string;
   name: string;
   symbol: string;
   decimal_places: number;
   position: CurrencyPosition;  // NUEVO CAMPO
+  format_style: CurrencyFormatStyle;
   state: CurrencyState;
 }
 
@@ -35,6 +42,7 @@ export interface CreateCurrencyDto {
   symbol: string;
   decimal_places: number;
   position?: CurrencyPosition;  // Opcional, valor por defecto desde API
+  format_style?: CurrencyFormatStyle;
   state?: CurrencyState;
 }
 
@@ -42,6 +50,7 @@ export interface CreateCurrencyDto {
 export interface UpdateCurrencyDto {
   decimal_places?: number;  // Solo campos configurables
   position?: CurrencyPosition;  // Configurable (sobrescribe valor de API)
+  format_style?: CurrencyFormatStyle;
   state?: CurrencyState;
 }
 

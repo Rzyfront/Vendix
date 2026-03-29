@@ -39,11 +39,7 @@ import { CommonModule } from '@angular/common';
       </div>
 
       <!-- Footer -->
-      <div
-        *ngIf="hasFooter"
-        [class]="footerClasses"
-        [class.pt-0]="!hasBody"
-      >
+      <div *ngIf="hasFooter" [class]="footerClasses" [class.pt-0]="!hasBody">
         <ng-content select="[slot=footer]"></ng-content>
       </div>
     </div>
@@ -69,7 +65,7 @@ import { CommonModule } from '@angular/common';
 export class CardComponent {
   @Input() title?: string;
   @Input() subtitle?: string;
-  @Input() shadow: 'none' | 'sm' | 'md' | 'lg' | 'xl' = 'md';
+  @Input() shadow: 'none' | 'sm' | 'md' | 'lg' | 'xl' = 'sm';
   @Input() padding = true;
   @Input() customClasses = '';
   @Input() animateOnLoad = false;
@@ -83,50 +79,64 @@ export class CardComponent {
    * Use 'visible' when you need tooltips or dropdowns to extend beyond the card boundaries.
    */
   @Input() overflow: 'hidden' | 'visible' | 'auto' = 'hidden';
+  /**
+   * When true, applies card styling only on md+ breakpoints (desktop).
+   * Mobile shows transparent (no chrome). Useful for standard module list containers.
+   */
+  @Input() responsive = false;
   // Optional sizing inputs. Accept any valid CSS size (px, %, rem, etc.)
   @Input() width?: string;
   @Input() height?: string;
   @Input() maxWidth?: string;
 
   get cardClasses(): string {
-    const baseClasses = [
-      'bg-[var(--color-surface)]',
-      'border',
-      'border-[var(--color-border)]',
-      'rounded-lg',
-      `overflow-${this.overflow}`,
-    ];
+    const classes: string[] = [];
 
-    const shadowClasses = {
-      none: [],
-      sm: ['shadow-[var(--shadow-sm)]'],
-      md: ['shadow-[var(--shadow-md)]'],
-      lg: ['shadow-[var(--shadow-lg)]'],
-      xl: ['shadow-[var(--shadow-xl)]'],
-    };
-
-    const paddingClasses = this.padding ? [] : ['p-0'];
-
-    const animationClasses = this.animateOnLoad
-      ? ['animate-slide-up-fade-in']
-      : [];
-
-    const classes = [
-      ...baseClasses,
-      ...shadowClasses[this.shadow],
-      ...paddingClasses,
-      ...animationClasses,
-    ];
-
-    if (this.customClasses) {
-      classes.push(this.customClasses);
+    // Use literal class strings so Tailwind can detect them at build time.
+    // NEVER concatenate prefixes dynamically (e.g. `prefix + class`) — Tailwind purges them.
+    if (this.responsive) {
+      classes.push(
+        'md:bg-[var(--color-surface)]',
+        'md:border',
+        'md:border-[var(--color-border)]',
+        'md:rounded-xl',
+      );
+    } else {
+      classes.push(
+        'bg-[var(--color-surface)]',
+        'border',
+        'border-[var(--color-border)]',
+        'rounded-xl',
+      );
     }
+
+    // Overflow — literal classes per value
+    const overflowClasses = this.responsive
+      ? { hidden: 'md:overflow-hidden', visible: 'md:overflow-visible', auto: 'md:overflow-auto' }
+      : { hidden: 'overflow-hidden', visible: 'overflow-visible', auto: 'overflow-auto' };
+    classes.push(overflowClasses[this.overflow]);
+
+    // Shadow — literal classes per value
+    const shadowNormal = { none: '', sm: 'shadow-sm', md: 'shadow-md', lg: 'shadow-lg', xl: 'shadow-xl' };
+    const shadowResponsive = { none: '', sm: 'md:shadow-sm', md: 'md:shadow-md', lg: 'md:shadow-lg', xl: 'md:shadow-xl' };
+    const shadowClass = this.responsive ? shadowResponsive[this.shadow] : shadowNormal[this.shadow];
+    if (shadowClass) classes.push(shadowClass);
+
+    if (!this.padding) classes.push('p-0');
+    if (this.animateOnLoad) classes.push('animate-slide-up-fade-in');
+    if (this.customClasses) classes.push(this.customClasses);
 
     return classes.join(' ');
   }
 
+  /**
+   * Explicitly show the header section even without title/subtitle.
+   * Useful when using slot="header" for custom header content.
+   */
+  @Input() showHeader = false;
+
   get hasHeader(): boolean {
-    return !!(this.title || this.subtitle);
+    return !!(this.title || this.subtitle || this.showHeader);
   }
 
   get hasBody(): boolean {
@@ -158,6 +168,7 @@ export class CardComponent {
 
   /** Body classes with optional responsive padding */
   get bodyClasses(): string {
+    if (!this.padding) return '';
     if (this.responsivePadding) {
       return 'p-4 sm:p-6';
     }

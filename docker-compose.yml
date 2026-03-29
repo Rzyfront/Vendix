@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:0.8.2-pg15
     container_name: vendix_postgres
     restart: unless-stopped
     environment:
@@ -19,6 +19,23 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  redis:
+    image: redis:7-alpine
+    container_name: vendix_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - vendix_redis_data:/data
+    networks:
+      - vendix_net
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   backend:
     build:
       context: ./apps/backend
@@ -31,8 +48,11 @@ services:
       DATABASE_URL: postgres://username:password@db:5432/vendix_db?schema=public
       NODE_ENV: development
       CHOKIDAR_USEPOLLING: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     depends_on:
       - db
+      - redis
     ports:
       - "3000:3000"
     volumes:
@@ -123,6 +143,7 @@ services:
 
 volumes:
   vendix_pgdata:
+  vendix_redis_data:
 
 networks:
   vendix_net:

@@ -600,6 +600,11 @@ export class ProductQueryDto {
   @IsOptional()
   @IsEnum(ProductType)
   product_type?: ProductType;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  requires_booking?: boolean;
 }
 
 // Product Variants DTOs
@@ -1103,10 +1108,14 @@ export class BulkProductUploadDto {
 }
 
 export class BulkUploadItemResultDto {
+  product_name?: string;
+  sku?: string;
+  action?: 'create' | 'update';
   product: any;
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'skipped';
   message: string;
   error?: string;
+  error_code?: string;
 }
 
 export class BulkUploadResultDto {
@@ -1114,6 +1123,7 @@ export class BulkUploadResultDto {
   total_processed: number;
   successful: number;
   failed: number;
+  skipped: number;
   results: BulkUploadItemResultDto[];
 }
 
@@ -1156,4 +1166,6 @@ export class GenerateProductDescriptionDto {
 }
 
 export * from './bulk-image-upload.dto';
+export * from './bulk-image-analysis.dto';
 export * from './update-product-promotions.dto';
+export * from './bulk-product-analysis.dto';

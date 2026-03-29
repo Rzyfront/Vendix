@@ -602,6 +602,64 @@ export const ErrorCodes = {
     devMessage: 'AI application rate limit exceeded',
   },
 
+  // AI Queue
+  AI_QUEUE_001: {
+    code: 'AI_QUEUE_001',
+    httpStatus: 500,
+    devMessage: 'Failed to enqueue AI job',
+  },
+  AI_QUEUE_002: {
+    code: 'AI_QUEUE_002',
+    httpStatus: 404,
+    devMessage: 'AI job not found',
+  },
+  AI_CACHE_001: {
+    code: 'AI_CACHE_001',
+    httpStatus: 500,
+    devMessage: 'AI cache operation failed',
+  },
+
+  // AI Logging
+  AI_LOG_001: {
+    code: 'AI_LOG_001',
+    httpStatus: 500,
+    devMessage: 'Failed to log AI request',
+  },
+
+  // AI Streaming
+  AI_STREAM_001: {
+    code: 'AI_STREAM_001',
+    httpStatus: 400,
+    devMessage: 'Streaming not supported by this provider',
+  },
+  AI_STREAM_002: {
+    code: 'AI_STREAM_002',
+    httpStatus: 500,
+    devMessage: 'AI streaming failed',
+  },
+
+  // AI Chat
+  AI_CHAT_001: {
+    code: 'AI_CHAT_001',
+    httpStatus: 404,
+    devMessage: 'AI conversation not found',
+  },
+  AI_CHAT_002: {
+    code: 'AI_CHAT_002',
+    httpStatus: 400,
+    devMessage: 'Conversation is archived',
+  },
+  AI_CHAT_003: {
+    code: 'AI_CHAT_003',
+    httpStatus: 403,
+    devMessage: 'Not authorized to access this conversation',
+  },
+  AI_CHAT_004: {
+    code: 'AI_CHAT_004',
+    httpStatus: 400,
+    devMessage: 'Message content is required',
+  },
+
   // Invoicing
   INVOICING_FIND_001: {
     code: 'INVOICING_FIND_001',
@@ -1194,6 +1252,217 @@ export const ErrorCodes = {
     code: 'EXO_DOWNLOAD_FAILED',
     httpStatus: 500,
     devMessage: 'Failed to generate or download exogenous report file',
+  },
+  // Reviews
+  REV_FIND_001: {
+    code: 'REV_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Reseña no encontrada',
+  },
+  REV_DUP_001: {
+    code: 'REV_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya existe una reseña para este producto',
+  },
+  REV_PURCHASE_001: {
+    code: 'REV_PURCHASE_001',
+    httpStatus: 403,
+    devMessage: 'Debe tener una compra verificada para reseñar este producto',
+  },
+  REV_RATE_LIMIT_001: {
+    code: 'REV_RATE_LIMIT_001',
+    httpStatus: 429,
+    devMessage: 'Límite de reseñas diarias alcanzado (máximo 3)',
+  },
+  REV_PERM_001: {
+    code: 'REV_PERM_001',
+    httpStatus: 403,
+    devMessage: 'No tiene permiso para modificar esta reseña',
+  },
+  REV_STATE_001: {
+    code: 'REV_STATE_001',
+    httpStatus: 400,
+    devMessage: 'Solo se pueden editar reseñas en estado pendiente',
+  },
+  REV_VOTE_DUP_001: {
+    code: 'REV_VOTE_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya votó esta reseña',
+  },
+  REV_REPORT_DUP_001: {
+    code: 'REV_REPORT_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya reportó esta reseña',
+  },
+
+  // AI Agent
+  AI_AGENT_001: {
+    code: 'AI_AGENT_001',
+    httpStatus: 500,
+    devMessage: 'Agent loop exceeded maximum iterations',
+  },
+  AI_AGENT_002: {
+    code: 'AI_AGENT_002',
+    httpStatus: 408,
+    devMessage: 'Agent loop timed out',
+  },
+  AI_AGENT_003: {
+    code: 'AI_AGENT_003',
+    httpStatus: 500,
+    devMessage: 'Tool execution failed',
+  },
+  AI_AGENT_004: {
+    code: 'AI_AGENT_004',
+    httpStatus: 403,
+    devMessage: 'Insufficient permissions for tool',
+  },
+  AI_AGENT_005: {
+    code: 'AI_AGENT_005',
+    httpStatus: 400,
+    devMessage: 'Tool requires human confirmation',
+  },
+
+  // AI Embeddings
+  AI_EMBED_001: {
+    code: 'AI_EMBED_001',
+    httpStatus: 500,
+    devMessage: 'Failed to generate embedding',
+  },
+  AI_EMBED_002: {
+    code: 'AI_EMBED_002',
+    httpStatus: 500,
+    devMessage: 'Failed to store embedding',
+  },
+  AI_EMBED_003: {
+    code: 'AI_EMBED_003',
+    httpStatus: 500,
+    devMessage: 'Similarity search failed',
+  },
+
+  // Dispatch Notes (Remisiones)
+  DSP_FIND_001: {
+    code: 'DSP_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Dispatch note not found',
+  },
+  DSP_VALIDATE_001: {
+    code: 'DSP_VALIDATE_001',
+    httpStatus: 400,
+    devMessage: 'Invalid dispatch note state transition',
+  },
+  DSP_VALIDATE_002: {
+    code: 'DSP_VALIDATE_002',
+    httpStatus: 400,
+    devMessage: 'Insufficient stock for dispatch note confirmation',
+  },
+  DSP_VALIDATE_003: {
+    code: 'DSP_VALIDATE_003',
+    httpStatus: 400,
+    devMessage: 'Customer is not active',
+  },
+  DSP_VALIDATE_004: {
+    code: 'DSP_VALIDATE_004',
+    httpStatus: 400,
+    devMessage: 'Dispatch note can only be modified in draft state',
+  },
+  DSP_VALIDATE_005: {
+    code: 'DSP_VALIDATE_005',
+    httpStatus: 400,
+    devMessage: 'Dispatched quantity exceeds remaining ordered quantity',
+  },
+
+  // MCP (Model Context Protocol)
+  AI_MCP_001: {
+    code: 'AI_MCP_001',
+    httpStatus: 401,
+    devMessage: 'MCP authentication failed',
+  },
+  AI_MCP_002: {
+    code: 'AI_MCP_002',
+    httpStatus: 403,
+    devMessage: 'MCP authorization denied',
+  },
+  AI_MCP_003: {
+    code: 'AI_MCP_003',
+    httpStatus: 429,
+    devMessage: 'MCP rate limit exceeded',
+  },
+  AI_MCP_004: {
+    code: 'AI_MCP_004',
+    httpStatus: 400,
+    devMessage: 'Invalid MCP request format',
+  },
+  // Bulk Image Upload
+  BULK_IMG_ZIP_CORRUPT: {
+    code: 'BULK_IMG_ZIP_CORRUPT',
+    httpStatus: 400,
+    devMessage: 'ZIP file is corrupt or invalid',
+  },
+  BULK_IMG_NO_SKUS: {
+    code: 'BULK_IMG_NO_SKUS',
+    httpStatus: 400,
+    devMessage: 'ZIP contains no valid SKU folders',
+  },
+  BULK_IMG_SESSION_EXPIRED: {
+    code: 'BULK_IMG_SESSION_EXPIRED',
+    httpStatus: 404,
+    devMessage: 'Analysis session not found or expired',
+  },
+  BULK_IMG_FORMAT_INVALID: {
+    code: 'BULK_IMG_FORMAT_INVALID',
+    httpStatus: 400,
+    devMessage: 'Unsupported image format',
+  },
+  BULK_IMG_LIMIT_EXCEEDED: {
+    code: 'BULK_IMG_LIMIT_EXCEEDED',
+    httpStatus: 400,
+    devMessage: 'Product has reached maximum image limit',
+  },
+  BULK_PROD_FILE_INVALID: {
+    code: 'BULK_PROD_FILE_INVALID',
+    httpStatus: 400,
+    devMessage: 'Excel/CSV file is invalid or corrupt',
+  },
+  BULK_PROD_EMPTY_FILE: {
+    code: 'BULK_PROD_EMPTY_FILE',
+    httpStatus: 400,
+    devMessage: 'File contains no data rows',
+  },
+  BULK_PROD_LIMIT_EXCEEDED: {
+    code: 'BULK_PROD_LIMIT_EXCEEDED',
+    httpStatus: 400,
+    devMessage: 'File exceeds maximum product limit (1000)',
+  },
+  BULK_PROD_SESSION_EXPIRED: {
+    code: 'BULK_PROD_SESSION_EXPIRED',
+    httpStatus: 404,
+    devMessage: 'Analysis session not found or expired',
+  },
+  BULK_PROD_VALIDATE_001: {
+    code: 'BULK_PROD_VALIDATE_001',
+    httpStatus: 422,
+    devMessage: 'Invalid field type in bulk product data',
+  },
+  // Invoice Scanner
+  INV_SCAN_AI_FAIL: {
+    code: 'INV_SCAN_AI_FAIL',
+    httpStatus: 502,
+    devMessage: 'AI invoice OCR processing failed',
+  },
+  INV_SCAN_PARSE_FAIL: {
+    code: 'INV_SCAN_PARSE_FAIL',
+    httpStatus: 422,
+    devMessage: 'Failed to parse AI OCR response as valid JSON',
+  },
+  INV_SCAN_NO_FILE: {
+    code: 'INV_SCAN_NO_FILE',
+    httpStatus: 400,
+    devMessage: 'No invoice file provided',
+  },
+  INV_SCAN_INVALID_FILE: {
+    code: 'INV_SCAN_INVALID_FILE',
+    httpStatus: 400,
+    devMessage: 'Invalid file type — only images and PDFs are accepted',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

@@ -199,21 +199,17 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 
                   <app-input
                     label="Precio Unit."
-                    type="number"
+                    [currency]="true"
                     formControlName="unit_price"
                     [control]="item.get('unit_price')"
                     [required]="true"
-                    min="0"
-                    step="0.01"
                   ></app-input>
 
                   <app-input
                     label="Descuento"
-                    type="number"
+                    [currency]="true"
                     formControlName="discount_amount"
                     [control]="item.get('discount_amount')"
-                    min="0"
-                    step="0.01"
                   ></app-input>
 
                   <app-input

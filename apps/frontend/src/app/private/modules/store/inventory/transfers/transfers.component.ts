@@ -34,7 +34,7 @@ import {
     <div class="w-full">
       <!-- Stats: Sticky on mobile, static on desktop -->
       <div
-        class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
           title="Total"

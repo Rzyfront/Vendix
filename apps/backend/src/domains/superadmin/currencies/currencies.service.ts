@@ -40,6 +40,7 @@ export class CurrenciesService {
         symbol: createCurrencyDto.symbol,
         decimal_places: createCurrencyDto.decimal_places,
         position: createCurrencyDto.position || 'after',
+        format_style: createCurrencyDto.format_style || 'comma_dot',
         state: createCurrencyDto.state || currency_state_enum.ACTIVE,
       },
     });
@@ -273,6 +274,7 @@ export class CurrenciesService {
         symbol: true,
         decimal_places: true,
         position: true,
+        format_style: true,
         state: true,
       },
     });

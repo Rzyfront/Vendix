@@ -87,13 +87,13 @@ import {
 
           <app-input
             label="Valor"
-            type="number"
+            [type]="form.get('discount_type')?.value === 'PERCENTAGE' ? 'number' : 'text'"
+            [currency]="form.get('discount_type')?.value !== 'PERCENTAGE'"
             formControlName="discount_value"
             [required]="true"
             placeholder="0"
             [prefixIcon]="true"
-            [min]="0"
-            [max]="form.get('discount_type')?.value === 'PERCENTAGE' ? 100 : ''"
+            [max]="form.get('discount_type')?.value === 'PERCENTAGE' ? 100 : undefined"
             [error]="form.get('discount_value')?.touched && form.get('discount_value')?.invalid ? 'Requerido, mayor a 0' : ''"
           >
             <span slot="prefix-icon">{{ form.get('discount_type')?.value === 'PERCENTAGE' ? '%' : '$' }}</span>
@@ -124,10 +124,9 @@ import {
           ></app-input>
           <app-input
             label="Compra minima"
-            type="number"
+            [currency]="true"
             formControlName="min_purchase_amount"
             placeholder="Sin minimo"
-            [min]="0"
           ></app-input>
         </div>
 
@@ -135,10 +134,9 @@ import {
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <app-input
             label="Descuento maximo"
-            type="number"
+            [currency]="true"
             formControlName="max_discount_amount"
             placeholder="Sin limite"
-            [min]="0"
           ></app-input>
           <app-input
             label="Limite de usos"

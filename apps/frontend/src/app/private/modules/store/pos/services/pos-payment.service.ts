@@ -611,10 +611,12 @@ export class PosPaymentService {
       frequency: 'weekly' | 'biweekly' | 'monthly';
       first_installment_date: string;
       interest_rate: number;
+      interest_type?: string;
       initial_payment: number;
       initial_payment_method_id?: number;
     },
     createdBy: string,
+    creditType: 'installments' | 'free' = 'installments',
   ): Observable<any> {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
@@ -664,6 +666,7 @@ export class PosPaymentService {
       ),
       requires_payment: false,
       payment_form: '2', // DIAN: crédito
+      credit_type: creditType,
       register_id: register_id,
       seller_user_id: user_id,
       internal_notes: cartState.notes || '',
@@ -675,6 +678,7 @@ export class PosPaymentService {
         frequency: creditConfig.frequency,
         first_installment_date: creditConfig.first_installment_date,
         interest_rate: creditConfig.interest_rate || 0,
+        interest_type: creditConfig.interest_type || 'simple',
         initial_payment: creditConfig.initial_payment || 0,
         initial_payment_method_id: creditConfig.initial_payment_method_id,
       },

@@ -1,13 +1,13 @@
 ---
 name: pr-code-review
 description: >
-  Skill for reviewing Pull Requests from any GitHub repository using MCP tools.
-  Analyzes security, logic, syntax, core files, and code quality.
+  Skill for reviewing Pull Requests from any GitHub repository using GitHub CLI (gh).
+  Analyzes regression, security, logic, syntax, core files, and code quality.
   Trigger: When the user asks to review PRs, analyze PR code, or do code review.
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "2.0"
   scope: [root]
   auto_invoke:
     [
@@ -30,80 +30,48 @@ Use this skill when:
 
 ---
 
-## Requirements: GitHub MCP Server
+## Requirements: GitHub CLI (`gh`)
 
-This skill **requires** the GitHub MCP server (`github`) to work. Before starting any review, verify that it is available.
+This skill **requires** GitHub CLI (`gh`) authenticated to work. Before starting any review, verify that it is available.
 
-### How to detect if it is installed
+### How to verify
 
-Try running `mcp__github__get_me`. If it works, the MCP is ready. If it fails or the tool does not exist, the user needs to install it.
+Run `gh auth status` via Bash. If it shows an authenticated user, it's ready.
 
 ### If it is NOT installed — Offer help
 
 Tell the user:
 
-> To review PRs I need the GitHub MCP server. Would you like me to help you install it?
+> To review PRs I need `gh` CLI authenticated. Would you like me to help you install it?
 
 #### Installation
 
-The GitHub MCP server is configured in `~/.claude/settings.json` (global) or `.claude/settings.json` (project):
+```bash
+# macOS
+brew install gh
 
-```json
-{
-  "mcpServers": {
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "<TOKEN>"
-      }
-    }
-  }
-}
+# Authenticate
+gh auth login
 ```
 
-#### Steps for the user
+#### Verification
 
-1. **Create a Personal Access Token (PAT)** on GitHub:
-   - Go to GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens
-   - Create a token with permissions: `repo` (full), `read:org`, `read:user`
-   - For private repos, the `repo` scope is essential
-
-2. **Add the config** to the settings file:
-
-   ```bash
-   # Global (works across all projects)
-   ~/.claude/settings.json
-
-   # Or per project (this repo only)
-   .claude/settings.json
-   ```
-
-3. **Restart Claude Code** so it loads the MCP server
-
-4. **Verify** by running: `mcp__github__get_me` — it should return the authenticated user
-
-#### Minimum token permissions by functionality
-
-| Functionality                 | Required permissions  |
-| ----------------------------- | --------------------- |
-| List PRs / view diffs         | `repo` (read)         |
-| Post reviews / comments       | `repo` (write)        |
-| Search repos from an org      | `read:org`            |
-| View user info                | `read:user`           |
-| Private repos                 | `repo` (full control) |
+```bash
+# Should show authenticated user and scopes
+gh auth status
+```
 
 #### Troubleshooting
 
 ```
-Error: "Resource not accessible by personal access token"
-→ The token does not have the `repo` scope or does not have access to that repo/org
+Error: "gh: command not found"
+→ Install with: brew install gh
 
-Error: "Bad credentials"
-→ The token expired or was revoked, create a new one
+Error: "not logged into any GitHub hosts"
+→ Run: gh auth login
 
-Error: Tool `mcp__github__*` does not exist
-→ The MCP server is not configured or Claude Code needs to be restarted
+Error: "HTTP 403" or "Resource not accessible"
+→ Re-authenticate with needed scopes: gh auth login --scopes repo,read:org
 ```
 
 ---
@@ -118,29 +86,53 @@ STEP 2 → Take the first PR and get metadata + files
 STEP 3 → Get the full diff and analyze it
 STEP 4 → Present findings to the user with a rating
 STEP 5 → Wait for decision: approve, request changes, or next PR
-STEP 6 → If a review is posted, use MCP tools to leave the comment
+STEP 6 → If a review is posted, use `gh pr review` to leave the comment
 STEP 7 → Repeat with the next PR
 ```
 
-### Pattern 2: The 6 Analysis Categories (ALWAYS review all of them)
+### Pattern 2: The 7 Analysis Categories (ALWAYS review all of them)
 
-| #   | Category          | What to look for                                                                                                     | Severity |
-| --- | ----------------- | -------------------------------------------------------------------------------------------------------------------- | -------- |
-| 1   | **Security**      | XSS (unsanitized innerHTML), SQL injection, missing auth, exposed secrets, unvalidated inputs                        | HIGH     |
-| 2   | **Logic**         | Race conditions, inconsistent states, falsy values (`\|\| 0` vs `?? 0`), memory leaks, duplicate API calls          | HIGH     |
-| 3   | **Syntax**        | Typos, missing brackets, incorrect imports, code that does not compile                                               | HIGH     |
-| 4   | **Core Files**    | Changes in router, store, package.json, configs — evaluate impact on other modules                                   | MEDIUM   |
-| 5   | **PR Scope**      | Mixed features, changes unrelated to the title, "sneaky" changes buried in the diff                                  | MEDIUM   |
-| 6   | **Quality**       | Hardcoded values, missing error handling, debug console.logs, duplicated code, inconsistent patterns                 | LOW      |
+| #   | Category          | What to look for                                                                                                                                                                                                                                                                                                                                                                                                          | Severity     | Score weight                                                            |
+| --- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ----------------------------------------------------------------------- |
+| 1   | **Regression**    | Changes that modify existing flows, remove/rename methods used by other modules, alter function signatures, change behavior of active endpoints, modify queries consumed by other services, break data contracts between components. Prioritize that changes are **additive** (add without modifying existing). A change that touches existing flows without protection (feature flag, backwards compat) is a critical risk. | **CRITICAL** | **x3** — This criterion weighs 3 times more than any other in the final score |
+| 2   | **Security**      | XSS (unsanitized innerHTML), SQL injection, missing auth, exposed secrets, unvalidated inputs                                                                                                                                                                                                                                                                                                                             | HIGH         | x1                                                                      |
+| 3   | **Logic**         | Race conditions, inconsistent states, falsy values (`\|\| 0` vs `?? 0`), memory leaks, duplicate API calls                                                                                                                                                                                                                                                                                                               | HIGH         | x1                                                                      |
+| 4   | **Syntax**        | Typos, missing brackets, incorrect imports, code that does not compile                                                                                                                                                                                                                                                                                                                                                    | HIGH         | x1                                                                      |
+| 5   | **Core Files**    | Changes in router, store, package.json, configs — evaluate impact on other modules                                                                                                                                                                                                                                                                                                                                        | MEDIUM       | x1                                                                      |
+| 6   | **PR Scope**      | Mixed features, changes unrelated to the title, "sneaky" changes buried in the diff                                                                                                                                                                                                                                                                                                                                       | MEDIUM       | x1                                                                      |
+| 7   | **Quality**       | Hardcoded values, missing error handling, debug console.logs, duplicated code, inconsistent patterns                                                                                                                                                                                                                                                                                                                      | LOW          | x1                                                                      |
+
+#### Special Regression Rule
+
+> If a PR has **LOW regression** (additive changes, does not touch existing flows), it can get APPROVE with comments even if it has minor issues in other categories. The reviewer must inform the user of the comments so they can decide what to do.
+>
+> If a PR has **HIGH regression** (modifies existing flows, changes behavior of active modules), the score is penalized heavily and requires REQUEST CHANGES unless the author demonstrates that the change is protected.
+
+**Regression Checklist (always review):**
+```
+[ ] Is the change additive (adds new functionality without touching existing)?
+[ ] Are methods/functions that other modules call being modified?
+[ ] Are function signatures changed (parameters added/removed/reordered)?
+[ ] Are endpoint responses that other services/components consume being altered?
+[ ] Are SQL queries that feed reports or other modules being modified?
+[ ] Are props, outputs, events, or keys of shared objects removed or renamed?
+[ ] Is the default behavior of something already in production being changed?
+[ ] Is there protection (feature flag, fallback, backwards compat) if modifying something existing?
+```
 
 ### Pattern 3: Rating System
 
 ```
-90-100%  → APPROVE — Clean, no issues
-70-89%   → APPROVE with minor comments — Low-quality issues
-50-69%   → REQUEST CHANGES — Logic bugs or medium issues
-30-49%   → REQUEST CHANGES — Security issues or critical bugs
- 0-29%   → REQUEST CHANGES — Multiple critical issues, PR needs a rewrite
+Calculation: The Regression category weighs x3. All others weigh x1.
+A PR with no regression issues starts with a high base score.
+
+90-100%  → APPROVE — Clean, no issues. Low regression, additive changes.
+70-89%   → APPROVE with comments — Low regression + minor issues in other categories.
+                                    Inform comments to user so they can decide.
+50-69%   → REQUEST CHANGES — Medium regression risk OR logic/security bugs.
+30-49%   → REQUEST CHANGES — High regression risk OR critical security issues.
+ 0-29%   → REQUEST CHANGES — Critical regression: modifies existing flows without protection,
+                              multiple critical issues. PR needs a rewrite.
 ```
 
 ### Pattern 4: Presentation Format for the User
@@ -153,20 +145,16 @@ Always present each PR in this format:
 **Author:** username | **Files:** N | **+adds / -dels** | **Branch:** head → base
 
 ## Modified files
-
 (table with file, changes, what it does)
 
 ## Findings
-
 (organized by severity: CRITICAL > HIGH > MEDIUM > LOW)
 (each finding with: file, approximate line, relevant code, explanation, suggested fix)
 
 ## Core files touched
-
 (table with file, risk level, note)
 
 ## Rating: XX/100
-
 (the good, the bad, recommendation: APPROVE or REQUEST CHANGES)
 ```
 
@@ -198,6 +186,17 @@ Message rules:
 - Abbreviated file references: `file.ext ~LNNN`
 - Include fix code only when it is short and clear
 - Close with a summary of what is most urgent
+- If the PR includes DB migrations, document the ALTERs in a clean, copyable SQL block:
+
+```markdown
+## ⚠️ DATABASE MIGRATION
+> **ATTENTION**: This PR requires running migrations before deployment.
+
+\`\`\`sql
+ALTER TABLE orders ADD COLUMN status VARCHAR(50) DEFAULT 'pending';
+CREATE INDEX idx_orders_status ON orders(status);
+\`\`\`
+```
 
 ---
 
@@ -213,7 +212,7 @@ Did the user ask to review PRs?
 │  └─ NO → List open PRs and review one by one
 │
 ├─ Is the diff very large (>3000 lines)?
-│  └─ YES → Use subagent (Task tool) to analyze the full diff
+│  └─ YES → Use subagent (Agent tool) to analyze the full diff
 │  └─ NO → Analyze inline
 │
 ├─ After presenting findings:
@@ -228,56 +227,59 @@ Did the user ask to review PRs?
 
 ---
 
-## MCP Tools Reference
+## GitHub CLI Reference
 
 ### Discover repos and PRs
 
-```
+```bash
 # Get current user
-mcp__github__get_me
+gh api user --jq '.login'
 
 # Search repos from an org
-mcp__github__search_repositories  query="org:ORGNAME"
+gh repo list ORGNAME --limit 50
 
 # List open PRs
-mcp__github__list_pull_requests  owner, repo, state="open"
+gh pr list --repo OWNER/REPO --state open
+
+# Filter with --json and --jq for large lists
+gh pr list --repo OWNER/REPO --state open --json number,title,author --jq '.[] | "\(.number) \(.title) (\(.author.login))"'
 ```
 
 ### Analyze a specific PR
 
-```
+```bash
 # PR metadata (title, author, branch, mergeable)
-mcp__github__pull_request_read  method="get", owner, repo, pullNumber
+gh pr view N --repo OWNER/REPO
 
-# List of changed files (+adds, -dels, status)
-mcp__github__pull_request_read  method="get_files", owner, repo, pullNumber
+# List of changed files
+gh pr view N --repo OWNER/REPO --json files --jq '.files[] | "\(.additions)+/\(.deletions)- \(.path)"'
 
 # Full diff (KEY for code analysis)
-mcp__github__pull_request_read  method="get_diff", owner, repo, pullNumber
+gh pr diff N --repo OWNER/REPO
 
 # Existing reviews (to avoid duplicates)
-mcp__github__pull_request_read  method="get_reviews", owner, repo, pullNumber
+gh api repos/OWNER/REPO/pulls/N/reviews --jq '.[] | "\(.user.login): \(.state)"'
 ```
 
 ### Post a review
 
-```
-# Simple review (one general comment)
-mcp__github__pull_request_review_write
-  method="create"
-  owner, repo, pullNumber
-  event="APPROVE" | "REQUEST_CHANGES" | "COMMENT"
-  body="review message"
+```bash
+# Review APPROVE
+gh pr review N --repo OWNER/REPO --approve --body "message"
 
-# Review with comments on specific lines (advanced)
-# Step 1: Create a pending review (without event)
-mcp__github__pull_request_review_write  method="create", owner, repo, pullNumber
+# Review REQUEST_CHANGES
+gh pr review N --repo OWNER/REPO --request-changes --body "message"
 
-# Step 2: Add comments to specific lines
-mcp__github__add_comment_to_pending_review  owner, repo, pullNumber, path, line, body, subjectType="LINE", side="RIGHT"
+# Review COMMENT (without approving or requesting changes)
+gh pr review N --repo OWNER/REPO --comment --body "message"
 
-# Step 3: Submit the review
-mcp__github__pull_request_review_write  method="submit_pending", owner, repo, pullNumber, event="REQUEST_CHANGES", body="summary"
+# Comments on specific lines (advanced, via API)
+gh api repos/OWNER/REPO/pulls/N/comments \
+  -f body="comment" \
+  -f path="file.ext" \
+  -F line=42 \
+  -f side="RIGHT" \
+  -f commit_id="$(gh pr view N --repo OWNER/REPO --json headRefOid --jq '.headRefOid')"
 ```
 
 ---
@@ -297,6 +299,7 @@ mcp__github__pull_request_review_write  method="submit_pending", owner, repo, pu
 [ ] Changes in routing/store/package.json → Impact on other modules?
 [ ] New dependencies in package.json → Are they reliable? Bundle size?
 [ ] Signals vs Observables → Is the correct project pattern used?
+[ ] Methods called multiple times in template (should be computed/signal)
 ```
 
 ### Backend (NestJS/TypeScript)
@@ -331,6 +334,18 @@ mcp__github__pull_request_review_write  method="submit_pending", owner, repo, pu
 
 ## Common Issues (Recurring patterns)
 
+### Issue 0: Regression from modifying existing flows (CRITICAL)
+
+**Problem**: A PR modifies a method, endpoint, or query that other modules/services already consume, causing existing functionality to break.
+**Common examples**:
+- Changing a function signature (adding required parameter) without updating all callers
+- Modifying an endpoint response that the frontend already consumes with a specific structure
+- Renaming a field in a SQL query that feeds a report
+- Changing a default value that other modules assume
+- Removing or renaming props, outputs, events, or keys of shared objects
+
+**Fix**: Make additive changes: add the new behavior without breaking the existing one. If modifying something existing is necessary, use feature flags, optional parameters with defaults, or temporary backwards compatibility.
+
 ### Issue 1: `|| 0` vs `?? 0`
 
 **Problem**: `value || 0` fails when value is legitimately `0`, `''`, or `false`
@@ -361,10 +376,15 @@ mcp__github__pull_request_review_write  method="submit_pending", owner, repo, pu
 **Problem**: Using `GlobalPrismaService` in a store domain, or unnecessary `withoutScope()`
 **Fix**: Use the correct scoped service for the domain (see `vendix-prisma-scopes`)
 
+### Issue 7: Double-fetch in store actions
+
+**Problem**: A store action (NgRx effect) already dispatches a fetch, and the component also calls fetch after
+**Fix**: Trust the store effect or move the fetch logic only to the component — not both
+
 ---
 
 ## Resources
 
-- **GitHub MCP Tools**: Available via `mcp__github__*`
+- **GitHub CLI**: `gh` — locally authenticated via `gh auth login`
 - **OWASP Top 10**: Reference for web security analysis
 - **Angular Style Guide**: For Angular conventions (signals, standalone components)

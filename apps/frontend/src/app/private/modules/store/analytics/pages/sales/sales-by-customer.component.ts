@@ -3,8 +3,12 @@ import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
-import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../../../shared/components/index';
+import {
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
+} from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
@@ -13,7 +17,10 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 import { AnalyticsService } from '../../services/analytics.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
-import { SalesByCustomer, SalesAnalyticsQueryDto } from '../../interfaces/sales-analytics.interface';
+import {
+  SalesByCustomer,
+  SalesAnalyticsQueryDto,
+} from '../../interfaces/sales-analytics.interface';
 
 @Component({
   selector: 'vendix-sales-by-customer',
@@ -21,6 +28,7 @@ import { SalesByCustomer, SalesAnalyticsQueryDto } from '../../interfaces/sales-
   imports: [
     CommonModule,
     RouterModule,
+    CardComponent,
     ResponsiveDataViewComponent,
     IconComponent,
     DateRangeFilterComponent,
@@ -29,19 +37,31 @@ import { SalesByCustomer, SalesAnalyticsQueryDto } from '../../interfaces/sales-
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
       <!-- Header -->
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+      >
         <div>
           <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/reports" class="hover:text-primary">Reportes</a>
+            <a routerLink="/admin/reports" class="hover:text-primary"
+              >Reportes</a
+            >
             <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/reports/sales" class="hover:text-primary">Ventas</a>
+            <a routerLink="/admin/reports/sales" class="hover:text-primary"
+              >Ventas</a
+            >
             <app-icon name="chevron-right" [size]="14"></app-icon>
             <span>Por Cliente</span>
           </div>
-          <h1 class="text-2xl font-bold text-text-primary">Ventas por Cliente</h1>
-          <p class="text-text-secondary mt-1">Top clientes por volumen de compras</p>
+          <h1 class="text-2xl font-bold text-text-primary">
+            Ventas por Cliente
+          </h1>
+          <p class="text-text-secondary mt-1">
+            Top clientes por volumen de compras
+          </p>
         </div>
-        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        <div
+          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3"
+        >
           <vendix-date-range-filter
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
@@ -54,14 +74,21 @@ import { SalesByCustomer, SalesAnalyticsQueryDto } from '../../interfaces/sales-
       </div>
 
       <!-- Main Content -->
-      <div class="bg-surface border border-border rounded-xl overflow-hidden">
-        <div class="p-4 border-b border-border">
-          <h3 class="font-semibold text-text-primary">
+      <app-card
+        shadow="none"
+        [padding]="false"
+        overflow="hidden"
+        [showHeader]="true"
+      >
+        <div slot="header" class="flex flex-col">
+          <span class="text-sm font-bold text-[var(--color-text-primary)]">
             Top Clientes
-            <span class="text-text-secondary font-normal text-sm ml-2">
+            <span
+              class="text-xs text-[var(--color-text-secondary)] font-normal ml-2"
+            >
               ({{ data().length }} clientes)
             </span>
-          </h3>
+          </span>
         </div>
 
         <div class="p-4">
@@ -74,7 +101,7 @@ import { SalesByCustomer, SalesAnalyticsQueryDto } from '../../interfaces/sales-
             emptyIcon="users"
           ></app-responsive-data-view>
         </div>
-      </div>
+      </app-card>
     </div>
   `,
 })
@@ -95,7 +122,13 @@ export class SalesByCustomerComponent implements OnInit, OnDestroy {
 
   columns: TableColumn[] = [
     { key: 'customer_name', label: 'Cliente', sortable: true, priority: 1 },
-    { key: 'email', label: 'Email', sortable: true, priority: 2, width: '200px' },
+    {
+      key: 'email',
+      label: 'Email',
+      sortable: true,
+      priority: 2,
+      width: '200px',
+    },
     {
       key: 'total_orders',
       label: 'Órdenes',
@@ -129,7 +162,8 @@ export class SalesByCustomerComponent implements OnInit, OnDestroy {
       align: 'center',
       priority: 2,
       width: '120px',
-      transform: (val) => (val ? new Date(val).toLocaleDateString('es-CO') : '-'),
+      transform: (val) =>
+        val ? new Date(val).toLocaleDateString('es-CO') : '-',
     },
   ];
 

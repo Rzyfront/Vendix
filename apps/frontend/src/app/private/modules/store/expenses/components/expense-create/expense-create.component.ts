@@ -20,6 +20,7 @@ import {
   StepsLineItem,
 } from '../../../../../../shared/components';
 import { ExpenseCategoryQuickCreateComponent } from '../expense-category-quick-create.component';
+import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'vendix-expense-create',
@@ -37,6 +38,7 @@ import { ExpenseCategoryQuickCreateComponent } from '../expense-category-quick-c
     IconComponent,
     StepsLineComponent,
     ExpenseCategoryQuickCreateComponent,
+    CurrencyPipe,
   ],
   template: `
     <app-modal
@@ -74,12 +76,10 @@ import { ExpenseCategoryQuickCreateComponent } from '../expense-category-quick-c
               <!-- Amount -->
               <app-input
                 label="Monto"
-                type="number"
                 formControlName="amount"
                 [control]="expenseForm.get('amount')"
                 [required]="true"
-                min="0"
-                step="0.01"
+                [currency]="true"
                 [prefixIcon]="true"
               >
                 <span slot="prefix-icon" class="text-text-secondary">$</span>
@@ -163,7 +163,7 @@ import { ExpenseCategoryQuickCreateComponent } from '../expense-category-quick-c
             <div class="grid grid-cols-2 divide-x divide-border border-b border-border">
               <div class="p-4">
                 <p class="text-xs text-text-secondary mb-1">Monto</p>
-                <p class="text-lg font-bold text-primary">$ {{ expenseForm.value.amount | number:'1.2-2' }}</p>
+                <p class="text-lg font-bold text-primary">{{ expenseForm.value.amount | currency }}</p>
               </div>
               <div class="p-4">
                 <p class="text-xs text-text-secondary mb-1">Fecha</p>

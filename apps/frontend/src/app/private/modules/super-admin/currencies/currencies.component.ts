@@ -11,7 +11,6 @@ import { CurrenciesService } from './services/currencies.service';
 import {
   CurrencyCreateModalComponent,
   CurrencyEditModalComponent,
-  CurrencyEmptyStateComponent,
 } from './components/index';
 
 // Import components from shared
@@ -29,6 +28,8 @@ import {
   ResponsiveDataViewComponent,
   ItemListCardConfig,
   PaginationComponent,
+  EmptyStateComponent,
+  CardComponent,
 } from '../../../../shared/components/index';
 
 import {
@@ -47,13 +48,14 @@ import {
     ReactiveFormsModule,
     CurrencyCreateModalComponent,
     CurrencyEditModalComponent,
-    CurrencyEmptyStateComponent,
+    EmptyStateComponent,
     ResponsiveDataViewComponent,
     InputsearchComponent,
     ButtonComponent,
     StatsComponent,
     SelectorComponent,
     PaginationComponent,
+    CardComponent,
   ],
   templateUrl: './currencies.component.html',
   styleUrls: ['./currencies.component.css'],
@@ -93,6 +95,20 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
     { key: 'name', label: 'Nombre', sortable: true, priority: 2 },
     { key: 'symbol', label: 'Símbolo', sortable: true, priority: 2 },
     { key: 'decimal_places', label: 'Decimales', sortable: true, priority: 3 },
+    {
+      key: 'format_style',
+      label: 'Formato',
+      sortable: true,
+      priority: 3,
+      transform: (value: string) => {
+        const map: Record<string, string> = {
+          'comma_dot': '1,234.56',
+          'dot_comma': '1.234,56',
+          'space_comma': '1 234,56',
+        };
+        return map[value] || value;
+      },
+    },
     {
       key: 'state',
       label: 'Estado',
@@ -143,7 +159,7 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
     { value: CurrencyState.DEPRECATED, label: 'Obsoletas' },
   ];
 
-  constructor() { }
+  constructor() {}
 
   ngOnInit(): void {
     this.refreshCurrencies();
@@ -180,7 +196,9 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
           this.currencies.set(response.data || []);
           if (response.meta) {
             this.pagination.total = response.meta.total || 0;
-            this.pagination.totalPages = response.meta.total_pages || Math.ceil(this.pagination.total / this.pagination.limit);
+            this.pagination.totalPages =
+              response.meta.total_pages ||
+              Math.ceil(this.pagination.total / this.pagination.limit);
           }
         },
         error: (error) => {

@@ -4,9 +4,12 @@ Guide for implementing interactive tours in the Vendix application with full sup
 
 ## Description
 
+> **Tip**: Antes de usar app-tour, consulta su README en `apps/frontend/src/app/shared/components/tour/README.md` para conocer sus inputs, outputs, configuraciones y patrones de uso.
+
 The tour system allows guiding users through important features the first time they visit them. Tours consist of sequential steps that highlight specific UI elements with a spotlight and display an explanatory tooltip.
 
 **Key features:**
+
 - ✅ Specific responsive support for mobile and desktop
 - ✅ Tooltip minimizable by default on mobile
 - ✅ Smart positioning that does not block interactions
@@ -50,14 +53,14 @@ export interface TourStep {
   action?: string;
 
   // CSS Selectors
-  target?: string;                     // Fallback selector
-  targetMobile?: string;               // Mobile-specific selector (< 768px)
-  targetDesktop?: string;              // Desktop-specific selector (≥ 768px)
+  target?: string; // Fallback selector
+  targetMobile?: string; // Mobile-specific selector (< 768px)
+  targetDesktop?: string; // Desktop-specific selector (≥ 768px)
 
   // Click detection (without spotlight)
-  autoAdvanceTarget?: string;          // Fallback
-  autoAdvanceTargetMobile?: string;    // Mobile-specific
-  autoAdvanceTargetDesktop?: string;   // Desktop-specific
+  autoAdvanceTarget?: string; // Fallback
+  autoAdvanceTargetMobile?: string; // Mobile-specific
+  autoAdvanceTargetDesktop?: string; // Desktop-specific
 
   // Lifecycle hooks
   beforeShow?: () => Promise<void>;
@@ -73,8 +76,8 @@ export interface TourConfig {
   id: string;
   name: string;
   steps: TourStep[];
-  showProgress?: boolean;              // Shows "X of Y" (desktop)
-  showSkipButton?: boolean;            // Shows "Skip" button
+  showProgress?: boolean; // Shows "X of Y" (desktop)
+  showSkipButton?: boolean; // Shows "Skip" button
 }
 ```
 
@@ -82,14 +85,14 @@ export interface TourConfig {
 
 ### Behavior on Mobile vs Desktop
 
-| Feature | Mobile (< 768px) | Desktop (≥ 768px) |
-|----------------|------------------|-------------------|
-| **Default tooltip** | Minimized (50px height) | Fully expanded |
-| **Minimize button** | Visible (arrow) | Not visible |
-| **Positioning** | Smart, avoids blocking | Near the target |
-| **Progress** | Hidden (saves space) | Visible "X of Y" |
-| **Spotlight** | With pulsating shadow | With pulsating shadow |
-| **Safe areas** | Respects notch/insets | Not applicable |
+| Feature             | Mobile (< 768px)        | Desktop (≥ 768px)     |
+| ------------------- | ----------------------- | --------------------- |
+| **Default tooltip** | Minimized (50px height) | Fully expanded        |
+| **Minimize button** | Visible (arrow)         | Not visible           |
+| **Positioning**     | Smart, avoids blocking  | Near the target       |
+| **Progress**        | Hidden (saves space)    | Visible "X of Y"      |
+| **Spotlight**       | With pulsating shadow   | With pulsating shadow |
+| **Safe areas**      | Respects notch/insets   | Not applicable        |
 
 ### Device-Specific Selectors
 
@@ -126,6 +129,7 @@ For elements dynamically generated with `*ngFor` (such as product cards):
 ```
 
 **The system automatically:**
+
 - Detects if the selector includes `.product-card` or `pos-product-selection`
 - Uses a longer timeout (10s vs 6s) to wait for the API response + Angular rendering
 - Does NOT scroll to `top: 0` to keep elements in the viewport
@@ -147,32 +151,32 @@ The tooltip is automatically positioned so it does NOT block the target element:
 **File**: `apps/frontend/src/app/shared/components/tour/configs/my-feature-tour.config.ts`
 
 ```typescript
-import { TourConfig } from '../services/tour.service';
+import { TourConfig } from "../services/tour.service";
 
 export const MY_FEATURE_TOUR_CONFIG: TourConfig = {
-  id: 'my-feature-first-visit',
-  name: 'My Feature Tour',
+  id: "my-feature-first-visit",
+  name: "My Feature Tour",
   showProgress: true,
   showSkipButton: true,
   steps: [
     {
-      id: 'welcome',
-      title: 'Welcome to My Feature! 🎉',
-      description: 'Description of what the feature does.',
+      id: "welcome",
+      title: "Welcome to My Feature! 🎉",
+      description: "Description of what the feature does.",
       action: 'Click "Get Started"',
     },
     {
-      id: 'important-element',
-      title: 'Important Element',
-      description: 'Explanation of this element.',
-      action: 'Review this element',
+      id: "important-element",
+      title: "Important Element",
+      description: "Explanation of this element.",
+      action: "Review this element",
       target: '[data-tour="important-element"]', // Use data-tour attributes
     },
     {
-      id: 'congratulations',
-      title: 'Tour Completed!',
-      description: 'You have completed the tour.',
-      action: 'Start using the feature!',
+      id: "congratulations",
+      title: "Tour Completed!",
+      description: "You have completed the tour.",
+      action: "Start using the feature!",
     },
   ],
 };
@@ -184,15 +188,14 @@ export const MY_FEATURE_TOUR_CONFIG: TourConfig = {
 
 ```html
 <!-- ✅ CORRECT -->
-<div class="bg-white rounded-xl" data-tour="important-section">
-  ...
-</div>
+<div class="bg-white rounded-xl" data-tour="important-section">...</div>
 
 <!-- ❌ AVOID - not supported in all browsers -->
-<div class="bg-white:has(.fa-icon)">
+<div class="bg-white:has(.fa-icon)"></div>
 ```
 
 Recommended selectors:
+
 - `[data-tour="section-id"]` - Attribute selector (most reliable)
 - `app-my-component` - Component selector
 - `.specific-class` - Simple class selector
@@ -201,13 +204,13 @@ Recommended selectors:
 ### 3. Integrate into the component
 
 ```typescript
-import { TourModalComponent } from '../../../../shared/components/tour/tour-modal/tour-modal.component';
-import { TourService } from '../../../../shared/components/tour/services/tour.service';
-import { MY_FEATURE_TOUR_CONFIG } from '../../../../shared/components/tour/configs/my-feature-tour.config';
+import { TourModalComponent } from "../../../../shared/components/tour/tour-modal/tour-modal.component";
+import { TourService } from "../../../../shared/components/tour/services/tour.service";
+import { MY_FEATURE_TOUR_CONFIG } from "../../../../shared/components/tour/configs/my-feature-tour.config";
 
 @Component({
   standalone: true,
-  imports: [TourModalComponent, /* ... */],
+  imports: [TourModalComponent /* ... */],
   template: `
     <!-- ... component content ... -->
 
@@ -216,9 +219,10 @@ import { MY_FEATURE_TOUR_CONFIG } from '../../../../shared/components/tour/confi
       [isOpen]="showTourModal"
       [tourConfig]="myFeatureTourConfig"
       (completed)="onTourCompleted()"
-      (skipped)="onTourSkipped()">
+      (skipped)="onTourSkipped()"
+    >
     </app-tour-modal>
-  `
+  `,
 })
 export class MyFeatureComponent implements OnInit {
   private tourService = inject(TourService);
@@ -230,7 +234,7 @@ export class MyFeatureComponent implements OnInit {
   }
 
   private checkAndStartTour(): void {
-    const tourId = 'my-feature-first-visit';
+    const tourId = "my-feature-first-visit";
     if (this.tourService.canShowTour(tourId)) {
       setTimeout(() => {
         this.showTourModal = true;
@@ -251,6 +255,7 @@ export class MyFeatureComponent implements OnInit {
 ## Best Practices
 
 ### 1. Target Selectors
+
 - ✅ Use `[data-tour="..."]` attributes for specific elements
 - ✅ Use component selectors `app-my-component`
 - ✅ Use unique classes with prefix `.my-feature-section`
@@ -261,6 +266,7 @@ export class MyFeatureComponent implements OnInit {
 ### 2. Mobile vs Desktop Selectors
 
 **When to use specific selectors:**
+
 - Elements in different positions (sidebar vs footer)
 - Different DOM structure between mobile and desktop
 - Elements with different classes depending on breakpoint
@@ -279,6 +285,7 @@ export class MyFeatureComponent implements OnInit {
 ```
 
 ### 3. Step Structure
+
 - First step: Welcome without target (centered tooltip)
 - Intermediate steps: With specific target
 - Last step: Congratulations without target
@@ -300,12 +307,14 @@ export class MyFeatureComponent implements OnInit {
 ```
 
 **Common classes in dynamic cards:**
+
 - `.product-card` - main card class
 - `.group` - Tailwind class for interactions
 - `.rounded-2xl` - card border-radius
 - Combinations: `.group.rounded-2xl`
 
 ### 5. Validation with beforeNext
+
 ```typescript
 {
   id: 'action-required',
@@ -321,24 +330,27 @@ export class MyFeatureComponent implements OnInit {
 ### 6. Testing Tours on Mobile
 
 **To reset a tour:**
+
 ```typescript
-this.tourService.resetTour('my-feature-first-visit');
+this.tourService.resetTour("my-feature-first-visit");
 // Or all:
 this.tourService.resetAllTours();
 ```
 
 **From the console:**
+
 ```javascript
 // View current state
-JSON.parse(localStorage.getItem('user_settings')).config.tours
+JSON.parse(localStorage.getItem("user_settings")).config.tours;
 
 // Reset completed tours
-const settings = JSON.parse(localStorage.getItem('user_settings'));
+const settings = JSON.parse(localStorage.getItem("user_settings"));
 settings.config.tours.completedTours = [];
-localStorage.setItem('user_settings', JSON.stringify(settings));
+localStorage.setItem("user_settings", JSON.stringify(settings));
 ```
 
 **Debug logging in browser console:**
+
 ```
 [TourModal] Mobile check: true, minimized: true
 [TourModal] Waiting for element: app-pos-product-selection .product-card, isMobile: true
@@ -350,6 +362,7 @@ localStorage.setItem('user_settings', JSON.stringify(settings));
 ### 7. Safe Area Insets (Notched Devices)
 
 The tour automatically respects safe areas on mobile:
+
 - `env(safe-area-inset-top)` - notch/punch hole
 - `env(safe-area-inset-bottom)` - home indicator
 - `env(safe-area-inset-left/right)` - landscape notch
@@ -358,11 +371,11 @@ No configuration needed, the system handles it.
 
 ### 8. Timeout for Dynamic Elements
 
-| Element type | Mobile Timeout | Desktop Timeout |
-|-----------------|----------------|-----------------|
-| Static (sidebar, header) | 6s | 8s |
-| Dynamic (ngFor, API) | 10s | 8s |
-| With scroll for lazy-loading | 6s + scroll | 8s |
+| Element type                 | Mobile Timeout | Desktop Timeout |
+| ---------------------------- | -------------- | --------------- |
+| Static (sidebar, header)     | 6s             | 8s              |
+| Dynamic (ngFor, API)         | 10s            | 8s              |
+| With scroll for lazy-loading | 6s + scroll    | 8s              |
 
 ## Troubleshooting
 
@@ -371,6 +384,7 @@ No configuration needed, the system handles it.
 **Problem**: The tooltip is positioned on top of the element the user needs to click.
 
 **Solution**: The automatic positioning system should handle this. If not:
+
 - Verify that the selector includes the correct container component
 - For footer buttons, make sure the selector includes `pos-mobile-footer` or `checkout-btn`
 - The system automatically detects these keywords and positions above
@@ -380,11 +394,13 @@ No configuration needed, the system handles it.
 **Problem**: `waitForElement` finishes without finding the cards.
 
 **Possible causes**:
+
 1. Angular has not yet rendered (dynamic ngFor)
 2. Scrolling to `top: 0` moved them out of the viewport
 3. The selector does not match the actual classes
 
 **Solution**:
+
 ```typescript
 // Use multiple fallbacks
 targetMobile: 'app-pos-product-selection .product-card, ' +
@@ -397,29 +413,30 @@ targetMobile: 'app-pos-product-selection .product-card, ' +
 **Problem**: The tour advances automatically without the user completing the action.
 
 **Solution**: Use `beforeNext` to validate:
+
 ```typescript
 beforeNext: async () => {
   // Verify that the action was completed
-  const cartBadge = document.querySelector('.cart-badge');
-  return cartBadge?.textContent !== '0';
-}
+  const cartBadge = document.querySelector(".cart-badge");
+  return cartBadge?.textContent !== "0";
+};
 ```
 
 ## Existing Tours
 
-| Tour ID | Config | Component | Features |
-|---------|--------|-----------|----------|
-| `pos-first-sale` | `POS_TOUR_CONFIG` | `PosSaleComponent` | Mobile + Desktop, dynamic elements |
-| `ecommerce-config-first-visit` | `ECOMMERCE_TOUR_CONFIG` | `EcommerceComponent` | Ecommerce config |
+| Tour ID                        | Config                  | Component            | Features                           |
+| ------------------------------ | ----------------------- | -------------------- | ---------------------------------- |
+| `pos-first-sale`               | `POS_TOUR_CONFIG`       | `PosSaleComponent`   | Mobile + Desktop, dynamic elements |
+| `ecommerce-config-first-visit` | `ECOMMERCE_TOUR_CONFIG` | `EcommerceComponent` | Ecommerce config                   |
 
 ## Key Files
 
-| File | Description |
-|---------|-------------|
-| `tour.service.ts` | Tour state management in user_settings |
-| `tour-modal.component.ts` | Responsive modal with spotlight + tooltip |
-| `pos-tour.config.ts` | POS tour config with mobile/desktop selectors |
-| `pos-product-selection.component.ts` | Dynamic cards with ngFor (*example of elements requiring special detection*) |
+| File                                 | Description                                                                  |
+| ------------------------------------ | ---------------------------------------------------------------------------- |
+| `tour.service.ts`                    | Tour state management in user_settings                                       |
+| `tour-modal.component.ts`            | Responsive modal with spotlight + tooltip                                    |
+| `pos-tour.config.ts`                 | POS tour config with mobile/desktop selectors                                |
+| `pos-product-selection.component.ts` | Dynamic cards with ngFor (_example of elements requiring special detection_) |
 
 ## Implementation References
 

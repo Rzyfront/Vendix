@@ -13,7 +13,6 @@ import {
   PaymentMethodStatsComponent,
   PaymentMethodCreateModalComponent,
   PaymentMethodEditModalComponent,
-  PaymentMethodEmptyStateComponent,
 } from './components/index';
 
 // Import components from shared
@@ -28,6 +27,8 @@ import {
   ToastService,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  EmptyStateComponent,
+  CardComponent,
 } from '../../../../shared/components/index';
 
 import {
@@ -47,12 +48,13 @@ import {
     PaymentMethodStatsComponent,
     PaymentMethodCreateModalComponent,
     PaymentMethodEditModalComponent,
-    PaymentMethodEmptyStateComponent,
+    EmptyStateComponent,
     ResponsiveDataViewComponent,
     InputsearchComponent,
     SelectorComponent,
     IconComponent,
     ButtonComponent,
+    CardComponent,
   ],
   templateUrl: './payment-methods.component.html',
 })

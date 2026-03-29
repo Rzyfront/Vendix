@@ -1,7 +1,7 @@
 <app-modal
   [isOpen]="isOpen()"
   [size]="'lg'"
-  [title]="'Procesar Pago'"
+  [title]="isCreditOrder() ? 'Registrar Abono' : 'Procesar Pago'"
   [subtitle]="order() ? 'Orden #' + order()!.order_number : ''"
   (isOpenChange)="onIsOpenChange($event)"
   (closed)="onModalClosed()"
@@ -11,11 +11,100 @@
     <section class="payment-section">
       <!-- Total Display -->
       <div class="text-center mb-4 pb-4 border-b border-border">
-        <span class="text-xs font-bold text-text-secondary uppercase">Total a Cobrar</span>
-        <p class="text-3xl font-black text-primary-600 font-mono mt-1">
-          {{ orderTotal() | currency }}
-        </p>
+        @if (isCreditOrder()) {
+          <span class="text-xs font-bold text-text-secondary uppercase">Saldo Pendiente</span>
+          <p class="text-3xl font-black text-primary-600 font-mono mt-1">
+            {{ remainingBalance() | currency }}
+          </p>
+          @if (customAmount() > 0 && customAmount() !== remainingBalance()) {
+            <p class="text-sm font-bold text-blue-600 mt-1">
+              Monto del abono: {{ customAmount() | currency }}
+            </p>
+          }
+        } @else {
+          <span class="text-xs font-bold text-text-secondary uppercase">Total a Cobrar</span>
+          <p class="text-3xl font-black text-primary-600 font-mono mt-1">
+            {{ orderTotal() | currency }}
+          </p>
+        }
       </div>
+
+      <!-- Credit Payment Options -->
+      @if (isCreditOrder()) {
+        <div class="space-y-3 mb-4">
+          <!-- Monto a pagar -->
+          <div class="space-y-1.5">
+            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Monto a pagar</label>
+            <div class="relative">
+              <input
+                type="number"
+                [value]="customAmount() || remainingBalance()"
+                (input)="customAmount.set(+$any($event.target).value)"
+                [max]="remainingBalance()"
+                min="0.01"
+                step="0.01"
+                class="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                placeholder="Monto del abono"
+              />
+              <div class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">
+                Max: {{ remainingBalance() | currency }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Selector de cuota (solo para credito con cuotas) -->
+          @if (creditType() === 'installments' && pendingInstallments().length > 0) {
+            <div class="space-y-1.5">
+              <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Cuota a pagar (opcional)</label>
+              <div class="space-y-1.5 max-h-40 overflow-y-auto">
+                @for (inst of pendingInstallments(); track inst.id) {
+                  <button
+                    type="button"
+                    (click)="selectInstallment(inst)"
+                    class="w-full p-2.5 text-left text-sm border rounded-xl transition-all"
+                    [ngClass]="selectedInstallmentId() === inst.id
+                      ? 'border-primary bg-primary/5 ring-1 ring-primary/20'
+                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'"
+                  >
+                    <div class="flex justify-between items-center">
+                      <span class="font-medium">Cuota {{ inst.installment_number }}</span>
+                      <span class="font-bold">{{ inst.remaining_balance | currency }}</span>
+                    </div>
+                    <div class="flex justify-between items-center text-xs text-gray-500 mt-0.5">
+                      <span>Vence: {{ inst.due_date | date:'dd/MM/yyyy' }}</span>
+                      <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase"
+                        [ngClass]="{
+                          'bg-yellow-100 text-yellow-700': inst.state === 'pending',
+                          'bg-blue-100 text-blue-700': inst.state === 'partial',
+                          'bg-red-100 text-red-700': inst.state === 'overdue'
+                        }">
+                        {{ inst.state === 'overdue' ? 'Vencida' : inst.state === 'partial' ? 'Parcial' : 'Pendiente' }}
+                      </span>
+                    </div>
+                  </button>
+                }
+              </div>
+              @if (selectedInstallmentId()) {
+                <button type="button" (click)="clearInstallmentSelection()" class="text-xs text-primary hover:underline">
+                  Limpiar seleccion (pagar monto libre)
+                </button>
+              }
+            </div>
+          }
+
+          <!-- Referencia de pago -->
+          <div class="space-y-1.5">
+            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Referencia (opcional)</label>
+            <input
+              type="text"
+              [value]="paymentReference()"
+              (input)="paymentReference.set($any($event.target).value)"
+              class="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              placeholder="Numero de transferencia, recibo, etc."
+            />
+          </div>
+        </div>
+      }
 
       <!-- Payment Method Selection -->
       <div class="section-header">
@@ -202,7 +291,11 @@
               </div>
             }
             <div class="flex justify-between pt-2 border-t border-border">
-              <span class="font-bold">Total</span>
+              @if (isCreditOrder()) {
+                <span class="font-bold">Abono</span>
+              } @else {
+                <span class="font-bold">Total</span>
+              }
               <span class="font-black text-primary-600">{{ orderTotal() | currency }}</span>
             </div>
           </div>
@@ -213,8 +306,8 @@
 
   <!-- Footer -->
   <div slot="footer" class="payment-footer">
-    <div class="flex gap-3">
-      <app-button variant="outline" (clicked)="onModalClosed()" class="flex-1">
+    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 12px; width: 100%;">
+      <app-button variant="outline-danger" [fullWidth]="true" (clicked)="onModalClosed()">
         Cancelar
       </app-button>
       <app-button
@@ -224,10 +317,9 @@
         [loading]="isProcessing()"
         [showTextWhileLoading]="true"
         (clicked)="confirmPayment()"
-        customClasses="flex-[2]"
       >
         <app-icon slot="icon" name="check-circle" [size]="20"></app-icon>
-        {{ isProcessing() ? 'Procesando...' : 'Confirmar Pago' }}
+        {{ isProcessing() ? 'Procesando...' : isCreditOrder() ? 'Registrar Abono' : 'Confirmar Pago' }}
       </app-button>
     </div>
   </div>

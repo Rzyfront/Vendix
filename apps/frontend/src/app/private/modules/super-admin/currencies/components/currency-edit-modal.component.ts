@@ -12,7 +12,7 @@ import {
   FormGroup,
   Validators,
 } from '@angular/forms';
-import { Currency, UpdateCurrencyDto, CurrencyPosition } from '../interfaces';
+import { Currency, UpdateCurrencyDto, CurrencyPosition, CurrencyFormatStyle } from '../interfaces';
 import {
   ModalComponent,
   InputComponent,
@@ -83,6 +83,17 @@ import {
             </p>
           </div>
 
+          <!-- Formato de números -->
+          <div class="space-y-2">
+            <app-selector
+              formControlName="format_style"
+              label="Formato de Números"
+              [options]="formatStyleOptions"
+              [disabled]="isSubmitting()"
+              helpText="Define separadores de miles y decimales"
+            ></app-selector>
+          </div>
+
           <!-- Campo configurable: decimales -->
           <app-input
             formControlName="decimal_places"
@@ -149,6 +160,12 @@ export class CurrencyEditModalComponent implements OnChanges {
     { value: 'deprecated', label: 'Obsoleta' },
   ];
 
+  formatStyleOptions: SelectorOption[] = [
+    { value: 'comma_dot', label: '1,234.56 (Coma miles, punto decimal)' },
+    { value: 'dot_comma', label: '1.234,56 (Punto miles, coma decimal)' },
+    { value: 'space_comma', label: '1 234,56 (Espacio miles, coma decimal)' },
+  ];
+
   // Exponer el enum para usar en el template
   readonly CurrencyPosition = CurrencyPosition;
 
@@ -156,6 +173,7 @@ export class CurrencyEditModalComponent implements OnChanges {
 
   currencyForm: FormGroup = this.fb.group({
     position: [CurrencyPosition.BEFORE, [Validators.required]],
+    format_style: [CurrencyFormatStyle.COMMA_DOT, [Validators.required]],
     decimal_places: [
       2,
       [Validators.required, Validators.min(0), Validators.max(4)],
@@ -168,6 +186,7 @@ export class CurrencyEditModalComponent implements OnChanges {
       const currentCurrency = this.currency()!;
       this.currencyForm.patchValue({
         position: currentCurrency.position,
+        format_style: currentCurrency.format_style,
         decimal_places: currentCurrency.decimal_places,
         state: currentCurrency.state,
       });
@@ -178,6 +197,7 @@ export class CurrencyEditModalComponent implements OnChanges {
     if (this.currencyForm.valid && this.currency()) {
       const currencyData: UpdateCurrencyDto = {
         position: this.currencyForm.get('position')?.value,
+        format_style: this.currencyForm.get('format_style')?.value,
         decimal_places: this.currencyForm.get('decimal_places')?.value,
         state: this.currencyForm.get('state')?.value,
       };
@@ -194,6 +214,7 @@ export class CurrencyEditModalComponent implements OnChanges {
   resetForm(): void {
     this.currencyForm.reset({
       position: CurrencyPosition.BEFORE,
+      format_style: CurrencyFormatStyle.COMMA_DOT,
       decimal_places: 2,
       state: 'active',
     });

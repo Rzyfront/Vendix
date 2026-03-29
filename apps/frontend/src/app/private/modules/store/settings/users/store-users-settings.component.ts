@@ -4,13 +4,20 @@ import { Store } from '@ngrx/store';
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
 import { InputsearchComponent } from '../../../../../shared/components/inputsearch/inputsearch.component';
 import { ResponsiveDataViewComponent } from '../../../../../shared/components/responsive-data-view/responsive-data-view.component';
-import { TableColumn, TableAction } from '../../../../../shared/components/table/table.component';
+import {
+  TableColumn,
+  TableAction,
+} from '../../../../../shared/components/table/table.component';
 import { ItemListCardConfig } from '../../../../../shared/components/item-list/item-list.interfaces';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
 import { OptionsDropdownComponent } from '../../../../../shared/components/options-dropdown/options-dropdown.component';
-import { FilterConfig, FilterValues } from '../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import {
+  FilterConfig,
+  FilterValues,
+} from '../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import { CardComponent } from '../../../../../shared/components/card/card.component';
 import {
   StoreUserCreateModalComponent,
   StoreUserEditModalComponent,
@@ -34,6 +41,7 @@ import { StoreUser, StoreUserState } from './interfaces/store-user.interface';
     ButtonComponent,
     IconComponent,
     OptionsDropdownComponent,
+    CardComponent,
     StoreUserCreateModalComponent,
     StoreUserEditModalComponent,
   ],
@@ -41,7 +49,7 @@ import { StoreUser, StoreUserState } from './interfaces/store-user.interface';
     <div class="w-full">
       <!-- Stats Cards -->
       <div
-        class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
           title="Total Usuarios"
@@ -78,10 +86,7 @@ import { StoreUser, StoreUserState } from './interfaces/store-user.interface';
       </div>
 
       <!-- Data Table -->
-      <div
-        class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-               md:border md:border-border"
-      >
+      <app-card [responsive]="true" [padding]="false">
         <!-- Search Section -->
         <div
           class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
@@ -124,7 +129,9 @@ import { StoreUser, StoreUserState } from './interfaces/store-user.interface';
         <!-- Loading State -->
         @if (loading()) {
           <div class="p-4 md:p-6 text-center">
-            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
             <p class="mt-2 text-text-secondary">Cargando usuarios...</p>
           </div>
         }
@@ -143,7 +150,7 @@ import { StoreUser, StoreUserState } from './interfaces/store-user.interface';
             />
           </div>
         }
-      </div>
+      </app-card>
     </div>
 
     <!-- Create Modal -->
@@ -342,9 +349,13 @@ export class StoreUsersSettingsComponent implements OnInit {
       .then((confirmed) => {
         if (confirmed) {
           if (isActive) {
-            this.store.dispatch(StoreUsersActions.deactivateUser({ id: user.id }));
+            this.store.dispatch(
+              StoreUsersActions.deactivateUser({ id: user.id }),
+            );
           } else {
-            this.store.dispatch(StoreUsersActions.reactivateUser({ id: user.id }));
+            this.store.dispatch(
+              StoreUsersActions.reactivateUser({ id: user.id }),
+            );
           }
         }
       });

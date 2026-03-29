@@ -15,6 +15,11 @@ metadata:
     - "Styling AI interaction buttons or loading states"
     - "Working with ai_engine service or AIEngineService"
     - "Adding new AI applications"
+    - "Working with AI streaming"
+    - "Working with AI agent or tool-use"
+    - "Working with AI chat conversations"
+    - "Working with MCP server"
+    - "Working with AI embeddings or RAG"
 ---
 
 ## When to Use
@@ -59,6 +64,33 @@ metadata:
 - **AI Application** = a reusable prompt template with config, temperature, rate limits
 - **`run(appKey, variables)`** = the primary way domains consume AI (preferred)
 - **`complete(prompt)` / `chat(messages)`** = low-level API (use only for simple/one-off calls)
+
+---
+
+## AI Platform Layer (Extended Architecture)
+
+The AI Engine has been extended into a full **AI Platform Layer** with these components:
+
+| Component | Skill | Description |
+|-----------|-------|-------------|
+| **Core Engine** | `vendix-ai-platform-core` | Providers, run/stream, rate limiting, logging, cost tracking |
+| **Agent & Tools** | `vendix-ai-agent-tools` | Tool Registry, domain tools, ReAct loop |
+| **Chat System** | `vendix-ai-chat` | Conversations, messages, NgRx state, chat widget |
+| **Embeddings & RAG** | `vendix-ai-embeddings-rag` | pgvector, similarity search, RAG pipeline |
+| **Streaming** | `vendix-ai-streaming` | SSE endpoints, AsyncGenerator, EventSource |
+| **MCP Gateway** | `vendix-mcp-server` | Resources, tools, prompts for external AI clients |
+| **Queue System** | `vendix-ai-queue` | BullMQ async processing (generation, embedding, agent) |
+
+### Infrastructure
+
+| Service | Purpose |
+|---------|---------|
+| **Redis** | Rate limiting, caching, BullMQ backend |
+| **BullMQ** | 3 async queues (ai-generation, ai-embedding, ai-agent) |
+| **pgvector** | Vector embeddings for semantic search |
+| **Cache Manager** | Redis-backed response caching |
+
+For detailed patterns on each component, invoke the corresponding skill listed above.
 
 ---
 
@@ -593,6 +625,20 @@ Need AI in a new feature?
 | Mistral      | `openai_compatible`    | Mistral models                                      |
 | Ollama       | `openai_compatible`    | Local models, base_url: `http://localhost:11434/v1` |
 | Azure OpenAI | `openai_compatible`    | Custom base_url required                            |
+
+---
+
+## AI Application Metadata Flags
+
+AI Applications support special metadata flags that change chat behavior:
+
+| Flag | Effect |
+|------|--------|
+| `metadata.agent_enabled: true` | Chat uses AIAgentService (ReAct loop with tools) |
+| `metadata.rag_enabled: true` | Chat uses RAGService (semantic search + context injection) |
+| Neither | Chat uses direct AIEngineService.run() |
+
+Set these in the superadmin AI Applications panel via the metadata JSON field.
 
 ---
 

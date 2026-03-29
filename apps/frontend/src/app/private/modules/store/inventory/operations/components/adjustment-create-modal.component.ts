@@ -426,59 +426,85 @@ import {
       <!-- Footer -->
       <div
         slot="footer"
-        class="flex justify-between gap-3 px-6 py-4 bg-gray-50 rounded-b-xl"
+        class="flex flex-col gap-3 px-5 py-4 bg-gray-50 rounded-b-xl"
       >
-        <div>
-          @if (currentStep > 1) {
-            <app-button variant="outline" type="button" (clicked)="goToStep(currentStep - 1)" customClasses="!rounded-xl">
-              <app-icon name="arrow-left" [size]="14" class="mr-1.5" slot="icon"></app-icon>
-              Atras
-            </app-button>
-          }
-        </div>
-        <div class="flex gap-3">
+        <!-- Primary action (full-width) -->
+        @if (!isConfirmStep) {
           <app-button
-            variant="outline"
+            variant="primary"
             type="button"
-            (clicked)="onCancel()"
-            customClasses="!rounded-xl font-bold !text-error !border-error hover:!bg-error/5"
+            (clicked)="goToStep(currentStep + 1)"
+            [disabled]="!canAdvance()"
+            customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 !w-full !justify-center !py-3.5 !text-base"
           >
-            Cancelar
+            Continuar
+            <app-icon name="arrow-right" [size]="16" class="ml-2" slot="icon"></app-icon>
           </app-button>
-          @if (!isConfirmStep) {
-            <app-button
-              variant="primary"
+        } @else if (confirmCreate) {
+          <app-button
+            variant="primary"
+            type="button"
+            (clicked)="onSubmitAndComplete()"
+            [loading]="isSubmitting"
+            [disabled]="isSubmitting || hasMissingType()"
+            customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all !w-full !justify-center !py-3.5 !text-base"
+          >
+            <app-icon name="check-circle" [size]="18" class="mr-2" slot="icon"></app-icon>
+            Crear y Aplicar
+          </app-button>
+        } @else {
+          <app-button
+            variant="primary"
+            type="button"
+            (clicked)="onSubmitDraft()"
+            [loading]="isSubmitting"
+            [disabled]="isSubmitting || hasMissingType()"
+            customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all !w-full !justify-center !py-3.5 !text-base"
+          >
+            <app-icon name="file-text" [size]="18" class="mr-2" slot="icon"></app-icon>
+            Guardar Borrador
+          </app-button>
+        }
+
+        <!-- Secondary actions (icon-only row) -->
+        <div class="flex items-center justify-center gap-6 py-1">
+          @if (currentStep > 1) {
+            <button
               type="button"
-              (clicked)="goToStep(currentStep + 1)"
-              [disabled]="!canAdvance()"
-              customClasses="!rounded-xl font-bold shadow-md shadow-primary-200"
+              (click)="goToStep(currentStep - 1)"
+              class="text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-colors p-1"
             >
-              Continuar
-              <app-icon name="arrow-right" [size]="14" class="ml-1.5" slot="icon"></app-icon>
-            </app-button>
-          } @else {
-            <app-button
-              variant="outline"
-              type="button"
-              (clicked)="onSubmitDraft()"
-              [loading]="isSubmitting"
-              [disabled]="isSubmitting || hasMissingType()"
-              customClasses="!rounded-xl font-bold"
-            >
-              <app-icon name="file-text" [size]="14" class="mr-1.5" slot="icon"></app-icon>
-              Guardar Borrador
-            </app-button>
-            <app-button
-              variant="primary"
-              type="button"
-              (clicked)="onSubmitAndComplete()"
-              [loading]="isSubmitting"
-              [disabled]="isSubmitting || !confirmCreate || hasMissingType()"
-              customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all"
-            >
-              <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon"></app-icon>
-              Crear y Aplicar
-            </app-button>
+              <app-icon name="arrow-left" [size]="22"></app-icon>
+            </button>
+          }
+          <button
+            type="button"
+            (click)="onCancel()"
+            class="text-error hover:text-error/80 transition-colors p-1"
+          >
+            <app-icon name="x" [size]="22"></app-icon>
+          </button>
+          @if (isConfirmStep) {
+            <div class="w-px h-5 bg-[var(--color-border)]"></div>
+            @if (confirmCreate) {
+              <button
+                type="button"
+                (click)="onSubmitDraft()"
+                [disabled]="isSubmitting || hasMissingType()"
+                class="text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-colors p-1 disabled:opacity-40"
+              >
+                <app-icon name="save" [size]="22"></app-icon>
+              </button>
+            } @else {
+              <button
+                type="button"
+                (click)="onSubmitAndComplete()"
+                [disabled]="isSubmitting || !confirmCreate || hasMissingType()"
+                class="text-[var(--color-text-tertiary)] transition-colors p-1 disabled:opacity-40"
+              >
+                <app-icon name="check-circle" [size]="22"></app-icon>
+              </button>
+            }
           }
         </div>
       </div>

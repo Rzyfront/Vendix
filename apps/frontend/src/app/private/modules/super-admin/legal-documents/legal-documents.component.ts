@@ -22,8 +22,12 @@ import {
   TableColumn,
   TableAction,
 } from '../../../../shared/components/table/table.component';
-import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../shared/components/index';
+import {
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
+} from '../../../../shared/components/index';
 import { ConfirmationModalComponent } from '../../../../shared/components/confirmation-modal/confirmation-modal.component';
+import { CardComponent } from '../../../../shared/components';
 
 @Component({
   selector: 'app-legal-documents',
@@ -39,10 +43,11 @@ import { ConfirmationModalComponent } from '../../../../shared/components/confir
     InputsearchComponent,
     ResponsiveDataViewComponent,
     ConfirmationModalComponent,
+    CardComponent,
   ],
   template: `
     <!-- Standard Module Layout -->
-    <div class="flex flex-col gap-6 p-6">
+    <div class="flex flex-col gap-4 p-6">
       <!-- Stats Grid -->
       <div class="stats-container">
         <app-stats
@@ -79,12 +84,10 @@ import { ConfirmationModalComponent } from '../../../../shared/components/confir
       </div>
 
       <!-- Main Content Card -->
-      <div
-        class="flex flex-col bg-surface border border-border rounded-xl shadow-sm overflow-hidden"
-      >
+      <app-card [padding]="false" overflow="hidden">
         <!-- Header (Compact & Symmetric) -->
         <div
-          class="p-4 md:px-6 md:py-4 border-b border-border flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between bg-surface"
+          class="p-4 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
         >
           <!-- Left Side -->
           <div class="flex-1 min-w-0">
@@ -160,7 +163,7 @@ import { ConfirmationModalComponent } from '../../../../shared/components/confir
           >
           </app-responsive-data-view>
         </div>
-      </div>
+      </app-card>
     </div>
 
     <!-- Modal -->
@@ -175,10 +178,16 @@ import { ConfirmationModalComponent } from '../../../../shared/components/confir
     <!-- Confirmation Modal -->
     <app-confirmation-modal
       [(isOpen)]="isConfirmOpen"
-      [title]="confirmAction === 'activate' ? 'Activar Documento' : 'Desactivar Documento'"
-      [message]="confirmAction === 'activate'
-        ? 'Al activar este documento, se desactivarán otras versiones del mismo tipo. ¿Continuar?'
-        : '¿Estás seguro de desactivar este documento?'"
+      [title]="
+        confirmAction === 'activate'
+          ? 'Activar Documento'
+          : 'Desactivar Documento'
+      "
+      [message]="
+        confirmAction === 'activate'
+          ? 'Al activar este documento, se desactivarán otras versiones del mismo tipo. ¿Continuar?'
+          : '¿Estás seguro de desactivar este documento?'
+      "
       [confirmText]="confirmAction === 'activate' ? 'Activar' : 'Desactivar'"
       [confirmVariant]="confirmAction === 'activate' ? 'primary' : 'danger'"
       (confirm)="onConfirmAction()"
@@ -319,13 +328,18 @@ export class LegalDocumentsComponent implements OnInit {
   cardConfig: ItemListCardConfig = {
     titleKey: 'title',
     subtitleKey: 'document_type',
-    subtitleTransform: (item: LegalDocument) => this.formatEnumLabel(item.document_type),
+    subtitleTransform: (item: LegalDocument) =>
+      this.formatEnumLabel(item.document_type),
     badgeKey: 'is_active',
     badgeConfig: { type: 'status', size: 'sm' },
-    badgeTransform: (val: boolean) => val ? 'Activo' : 'Inactivo',
+    badgeTransform: (val: boolean) => (val ? 'Activo' : 'Inactivo'),
     detailKeys: [
       { key: 'version', label: 'Versión' },
-      { key: 'effective_date', label: 'Fecha Efectiva', transform: (val: string) => new Date(val).toLocaleDateString() },
+      {
+        key: 'effective_date',
+        label: 'Fecha Efectiva',
+        transform: (val: string) => new Date(val).toLocaleDateString(),
+      },
     ],
   };
 
@@ -416,7 +430,9 @@ export class LegalDocumentsComponent implements OnInit {
           error: (err) => {
             console.error(err);
             this.isModalSubmitting = false;
-            this.toast.error(this.extractErrorMessage(err, 'Error al actualizar el documento'));
+            this.toast.error(
+              this.extractErrorMessage(err, 'Error al actualizar el documento'),
+            );
           },
         });
     } else {
@@ -432,7 +448,9 @@ export class LegalDocumentsComponent implements OnInit {
           error: (err) => {
             console.error(err);
             this.isModalSubmitting = false;
-            this.toast.error(this.extractErrorMessage(err, 'Error al crear el documento'));
+            this.toast.error(
+              this.extractErrorMessage(err, 'Error al crear el documento'),
+            );
           },
         });
     }
@@ -453,7 +471,10 @@ export class LegalDocumentsComponent implements OnInit {
           this.toast.success('Documento desactivado');
           this.loadDocuments();
         },
-        error: (err) => this.toast.error(this.extractErrorMessage(err, 'Error al desactivar')),
+        error: (err) =>
+          this.toast.error(
+            this.extractErrorMessage(err, 'Error al desactivar'),
+          ),
       });
     } else {
       this.service.activateDocument(this.confirmDocument.id).subscribe({
@@ -461,7 +482,8 @@ export class LegalDocumentsComponent implements OnInit {
           this.toast.success('Documento activado');
           this.loadDocuments();
         },
-        error: (err) => this.toast.error(this.extractErrorMessage(err, 'Error al activar')),
+        error: (err) =>
+          this.toast.error(this.extractErrorMessage(err, 'Error al activar')),
       });
     }
 

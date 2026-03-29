@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 
+import { CardComponent } from '../../../../../../../shared/components/card/card.component';
 import {
   ResponsiveDataViewComponent,
   InputsearchComponent,
@@ -20,9 +21,7 @@ import {
 } from '../../../../../../../shared/components';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency';
 import { Promotion } from '../../interfaces/promotion.interface';
-import {
-  selectPromotionsMeta,
-} from '../../state/selectors/promotions.selectors';
+import { selectPromotionsMeta } from '../../state/selectors/promotions.selectors';
 
 @Component({
   selector: 'app-promotion-list',
@@ -30,6 +29,7 @@ import {
   imports: [
     CommonModule,
     FormsModule,
+    CardComponent,
     ResponsiveDataViewComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
@@ -38,15 +38,20 @@ import {
     PaginationComponent,
   ],
   template: `
-    <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border">
-
+    <app-card [responsive]="true" [padding]="false">
       <!-- Search Section: sticky below stats on mobile -->
-      <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                  md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
-        <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
+      <div
+        class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                  md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+      >
+        <div
+          class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+        >
           <!-- Title -->
-          <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
-                     md:text-lg md:font-semibold md:text-text-primary">
+          <h2
+            class="text-[13px] font-bold text-gray-600 tracking-wide
+                     md:text-lg md:font-semibold md:text-text-primary"
+          >
             Promociones
             <span *ngIf="meta" class="text-text-secondary font-normal">
               ({{ meta.total }})
@@ -89,14 +94,25 @@ import {
 
       <!-- Loading State -->
       <div *ngIf="loading" class="p-4 md:p-6 text-center">
-        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div
+          class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+        ></div>
         <p class="mt-2 text-text-secondary">Cargando promociones...</p>
       </div>
 
       <!-- Empty State -->
-      <div *ngIf="!loading && promotions.length === 0" class="p-12 text-center text-gray-500">
-        <app-icon name="tag" [size]="48" class="mx-auto mb-4 text-gray-300"></app-icon>
-        <h3 class="text-lg font-medium text-gray-900">No se encontraron promociones</h3>
+      <div
+        *ngIf="!loading && promotions.length === 0"
+        class="p-12 text-center text-gray-500"
+      >
+        <app-icon
+          name="tag"
+          [size]="48"
+          class="mx-auto mb-4 text-gray-300"
+        ></app-icon>
+        <h3 class="text-lg font-medium text-gray-900">
+          No se encontraron promociones
+        </h3>
         <p class="mt-1">Comienza creando una nueva promocion.</p>
         <div class="mt-6 flex justify-center">
           <app-button variant="primary" (clicked)="create.emit()">
@@ -107,7 +123,10 @@ import {
       </div>
 
       <!-- Data View -->
-      <div *ngIf="!loading && promotions.length > 0" class="px-2 pb-2 pt-3 md:p-4">
+      <div
+        *ngIf="!loading && promotions.length > 0"
+        class="px-2 pb-2 pt-3 md:p-4"
+      >
         <app-responsive-data-view
           [data]="promotions"
           [columns]="columns"
@@ -133,7 +152,7 @@ import {
           ></app-pagination>
         </div>
       </div>
-    </div>
+    </app-card>
   `,
   styles: [
     `
@@ -289,8 +308,7 @@ export class PromotionListComponent {
   cardConfig: ItemListCardConfig = {
     titleKey: 'name',
     subtitleKey: 'code',
-    subtitleTransform: (item: any) =>
-      item.code ? `Codigo: ${item.code}` : '',
+    subtitleTransform: (item: any) => (item.code ? `Codigo: ${item.code}` : ''),
     avatarFallbackIcon: 'tag',
     avatarShape: 'square',
     badgeKey: 'state',
@@ -351,8 +369,7 @@ export class PromotionListComponent {
       icon: 'play',
       variant: 'ghost',
       action: (row: any) => this.activate.emit(row.id),
-      show: (row: any) =>
-        ['draft', 'scheduled', 'paused'].includes(row.state),
+      show: (row: any) => ['draft', 'scheduled', 'paused'].includes(row.state),
     },
     {
       label: 'Pausar',
@@ -366,8 +383,7 @@ export class PromotionListComponent {
       icon: 'x-circle',
       variant: 'ghost',
       action: (row: any) => this.cancel.emit(row.id),
-      show: (row: any) =>
-        !['cancelled', 'expired'].includes(row.state),
+      show: (row: any) => !['cancelled', 'expired'].includes(row.state),
     },
     {
       label: 'Eliminar',

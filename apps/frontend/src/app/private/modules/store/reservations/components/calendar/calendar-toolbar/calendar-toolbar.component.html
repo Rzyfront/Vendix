@@ -1,0 +1,26 @@
+<div class="toolbar">
+  <div class="toolbar-nav">
+    <app-button variant="ghost" size="sm" (click)="navigate.emit('today')">
+      Hoy
+    </app-button>
+    <app-button variant="ghost" size="sm" (click)="navigate.emit('prev')">
+      <app-icon name="chevron-left" [size]="16"></app-icon>
+    </app-button>
+    <app-button variant="ghost" size="sm" (click)="navigate.emit('next')">
+      <app-icon name="chevron-right" [size]="16"></app-icon>
+    </app-button>
+    <span class="date-label">{{ dateLabel() }}</span>
+  </div>
+
+  <div class="toolbar-modes">
+    @for (mode of viewModes; track mode.value) {
+      <button
+        type="button"
+        class="view-mode-btn"
+        [class.active]="viewMode() === mode.value"
+        (click)="viewModeChange.emit(mode.value)">
+        {{ mode.label }}
+      </button>
+    }
+  </div>
+</div>

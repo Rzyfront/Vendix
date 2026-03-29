@@ -13,7 +13,7 @@ import {
   FormGroup,
   Validators,
 } from '@angular/forms';
-import { CreateCurrencyDto, CurrencyState, CurrencyPosition } from '../interfaces';
+import { CreateCurrencyDto, CurrencyState, CurrencyPosition, CurrencyFormatStyle } from '../interfaces';
 import {
   ModalComponent,
   InputComponent,
@@ -152,6 +152,17 @@ import {
                 </p>
               </div>
 
+              <!-- Formato de números -->
+              <div class="space-y-2">
+                <app-selector
+                  formControlName="format_style"
+                  label="Formato de Números"
+                  [options]="formatStyleOptions"
+                  [disabled]="isSubmitting()"
+                  helpText="Define separadores de miles y decimales"
+                ></app-selector>
+              </div>
+
               <!-- Campo configurable: decimales -->
               <app-input
                 formControlName="decimal_places"
@@ -224,6 +235,12 @@ export class CurrencyCreateModalComponent implements OnInit {
     { value: 'deprecated', label: 'Obsoleta' },
   ];
 
+  formatStyleOptions: SelectorOption[] = [
+    { value: 'comma_dot', label: '1,234.56 (Coma miles, punto decimal)' },
+    { value: 'dot_comma', label: '1.234,56 (Punto miles, coma decimal)' },
+    { value: 'space_comma', label: '1 234,56 (Espacio miles, coma decimal)' },
+  ];
+
   // Exponer el enum para usar en el template
   readonly CurrencyPosition = CurrencyPosition;
 
@@ -247,6 +264,7 @@ export class CurrencyCreateModalComponent implements OnInit {
       CurrencyPosition.BEFORE, // Default before
       [Validators.required],
     ],
+    format_style: [CurrencyFormatStyle.COMMA_DOT],
     decimal_places: [
       2,
       [Validators.required, Validators.min(0), Validators.max(4)],
@@ -341,6 +359,7 @@ export class CurrencyCreateModalComponent implements OnInit {
         symbol: details.symbol,
         decimal_places: this.currencyForm.value.decimal_places,
         position: this.currencyForm.value.position || CurrencyPosition.BEFORE,
+        format_style: this.currencyForm.value.format_style || CurrencyFormatStyle.COMMA_DOT,
         state: this.currencyForm.value.state || CurrencyState.ACTIVE,
       };
       this.submit.emit(currencyData);
@@ -356,6 +375,7 @@ export class CurrencyCreateModalComponent implements OnInit {
   private resetFormFields(): void {
     this.currencyForm.patchValue({
       position: CurrencyPosition.BEFORE,
+      format_style: CurrencyFormatStyle.COMMA_DOT,
     });
   }
 
@@ -365,6 +385,7 @@ export class CurrencyCreateModalComponent implements OnInit {
     this.apiError.set(null);
     this.currencyForm.reset({
       position: CurrencyPosition.BEFORE,
+      format_style: CurrencyFormatStyle.COMMA_DOT,
       decimal_places: 2,
       state: CurrencyState.ACTIVE,
     });

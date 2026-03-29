@@ -1,0 +1,99 @@
+@if (loading()) {
+  <app-spinner size="sm" [center]="true"></app-spinner>
+} @else {
+  <!-- Quick actions -->
+  <div class="quick-actions">
+    <app-button variant="outline" size="xsm" (clicked)="applyPreset('weekdays-9-6')">
+      <app-icon name="briefcase" [size]="13" slot="icon"/> Lun-Vie 9-6
+    </app-button>
+    <app-button variant="outline" size="xsm" (clicked)="applyPreset('weekdays-8-5')">
+      <app-icon name="sunrise" [size]="13" slot="icon"/> Lun-Vie 8-5
+    </app-button>
+    <app-button variant="outline" size="xsm" (clicked)="copyToAll()">
+      <app-icon name="copy" [size]="13" slot="icon"/> Copiar a todos
+    </app-button>
+  </div>
+
+  <!-- Timeline header (hour markers) -->
+  <div class="timeline-header">
+    <div class="timeline-label-space"></div>
+    <div class="timeline-toggle-space"></div>
+    <div class="timeline-track-header">
+      @for (hour of hourMarkers; track hour) {
+        <span class="hour-marker" [style.left.%]="((hour - RANGE_START) / RANGE_HOURS) * 100">
+          {{ formatHourMarker(hour) }}
+        </span>
+      }
+    </div>
+  </div>
+
+  <!-- Day rows -->
+  @for (day of days(); track day.day_of_week; let i = $index) {
+    <div class="timeline-row" [class.inactive]="!day.is_active">
+      <!-- Day label -->
+      <div class="timeline-label">
+        <span class="day-full">{{ day.label }}</span>
+        <span class="day-short">{{ day.shortLabel }}</span>
+      </div>
+
+      <!-- Toggle using shared component -->
+      <div class="timeline-toggle">
+        <app-toggle
+          [checked]="day.is_active"
+          [ariaLabel]="day.label + ': activar o desactivar'"
+          (toggled)="toggleDay(i)"
+        />
+      </div>
+
+      <!-- Timeline bar -->
+      <div class="timeline-track" (click)="day.is_active ? startEditing(i) : null">
+        @if (day.is_active) {
+          <div
+            class="time-bar"
+            [style.left.%]="getBarLeft(day)"
+            [style.width.%]="getBarWidth(day)"
+            [class.editing]="day.editing">
+            @if (!day.editing) {
+              <span class="bar-label">{{ formatTimeShort(day.start_time) }} - {{ formatTimeShort(day.end_time) }}</span>
+            }
+          </div>
+
+          @if (day.editing) {
+            <div class="edit-overlay" [style.left.%]="getBarLeft(day)" [style.width.%]="getBarWidth(day)">
+              <input
+                type="time"
+                [value]="day.start_time"
+                (change)="updateTime(i, 'start_time', $any($event.target).value)"
+                class="time-input"
+              />
+              <span class="edit-separator">&mdash;</span>
+              <input
+                type="time"
+                [value]="day.end_time"
+                (change)="updateTime(i, 'end_time', $any($event.target).value)"
+                class="time-input"
+              />
+              <!-- Stop propagation wrapper -->
+              <div (click)="$event.stopPropagation()">
+                <app-button variant="primary" size="xsm" (clicked)="stopEditing(i)">
+                  <app-icon name="check" [size]="14" slot="icon"/>
+                </app-button>
+              </div>
+            </div>
+          }
+        } @else {
+          <div class="inactive-bar">
+            <span>Dia libre</span>
+          </div>
+        }
+      </div>
+    </div>
+  }
+
+  <!-- Save button -->
+  <div class="save-row">
+    <app-button variant="primary" size="sm" [loading]="saving()" (clicked)="save()">
+      <app-icon name="save" [size]="15" slot="icon"/> Guardar Horario
+    </app-button>
+  </div>
+}

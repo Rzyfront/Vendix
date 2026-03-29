@@ -4,12 +4,19 @@ import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable, Subject, combineLatest, takeUntil } from 'rxjs';
 
+import { CardComponent } from '../../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
-import { FilterConfig, FilterValues } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
-import { CurrencyPipe, CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import {
+  FilterConfig,
+  FilterValues,
+} from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import {
+  CurrencyPipe,
+  CurrencyFormatService,
+} from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { ExportButtonComponent } from '../../../components/export-button/export-button.component';
 
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
@@ -30,6 +37,7 @@ import { EChartsOption } from 'echarts';
   imports: [
     CommonModule,
     RouterLink,
+    CardComponent,
     StatsComponent,
     ChartComponent,
     IconComponent,
@@ -46,17 +54,39 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
 
   // Observables from store
-  summary$: Observable<InventorySummary | null> = this.store.select(InventorySelectors.selectSummary);
-  movementTrends$: Observable<MovementTrend[]> = this.store.select(InventorySelectors.selectMovementTrends);
-  valuations$: Observable<InventoryValuation[]> = this.store.select(InventorySelectors.selectValuations);
-  loading$: Observable<boolean> = this.store.select(InventorySelectors.selectLoading);
-  loadingTrends$: Observable<boolean> = this.store.select(InventorySelectors.selectLoadingTrends);
-  loadingValuation$: Observable<boolean> = this.store.select(InventorySelectors.selectLoadingValuation);
-  exporting$: Observable<boolean> = this.store.select(InventorySelectors.selectExporting);
-  dateRange$: Observable<DateRangeFilter> = this.store.select(InventorySelectors.selectDateRange);
-  granularity$: Observable<string> = this.store.select(InventorySelectors.selectGranularity);
-  lowStockPct$: Observable<string> = this.store.select(InventorySelectors.selectLowStockPercentage);
-  outOfStockPct$: Observable<string> = this.store.select(InventorySelectors.selectOutOfStockPercentage);
+  summary$: Observable<InventorySummary | null> = this.store.select(
+    InventorySelectors.selectSummary,
+  );
+  movementTrends$: Observable<MovementTrend[]> = this.store.select(
+    InventorySelectors.selectMovementTrends,
+  );
+  valuations$: Observable<InventoryValuation[]> = this.store.select(
+    InventorySelectors.selectValuations,
+  );
+  loading$: Observable<boolean> = this.store.select(
+    InventorySelectors.selectLoading,
+  );
+  loadingTrends$: Observable<boolean> = this.store.select(
+    InventorySelectors.selectLoadingTrends,
+  );
+  loadingValuation$: Observable<boolean> = this.store.select(
+    InventorySelectors.selectLoadingValuation,
+  );
+  exporting$: Observable<boolean> = this.store.select(
+    InventorySelectors.selectExporting,
+  );
+  dateRange$: Observable<DateRangeFilter> = this.store.select(
+    InventorySelectors.selectDateRange,
+  );
+  granularity$: Observable<string> = this.store.select(
+    InventorySelectors.selectGranularity,
+  );
+  lowStockPct$: Observable<string> = this.store.select(
+    InventorySelectors.selectLowStockPercentage,
+  );
+  outOfStockPct$: Observable<string> = this.store.select(
+    InventorySelectors.selectOutOfStockPercentage,
+  );
 
   // Chart options
   movementTrendChartOptions: EChartsOption = {};
@@ -121,12 +151,10 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
       });
 
     // Subscribe to valuations for both rose charts (value + quantity)
-    this.valuations$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((valuations) => {
-        this.updateValuationChart(valuations);
-        this.updateQuantityChart(valuations);
-      });
+    this.valuations$.pipe(takeUntil(this.destroy$)).subscribe((valuations) => {
+      this.updateValuationChart(valuations);
+      this.updateQuantityChart(valuations);
+    });
   }
 
   ngOnDestroy(): void {
@@ -141,30 +169,41 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
     const granularity = values['granularity'] as string;
 
     const currentRange = this.filterValues;
-    if (dateFrom !== currentRange['date_from'] || dateTo !== currentRange['date_to']) {
-      this.store.dispatch(InventoryActions.setDateRange({
-        dateRange: {
-          start_date: dateFrom || '',
-          end_date: dateTo || '',
-          preset: 'custom',
-        },
-      }));
+    if (
+      dateFrom !== currentRange['date_from'] ||
+      dateTo !== currentRange['date_to']
+    ) {
+      this.store.dispatch(
+        InventoryActions.setDateRange({
+          dateRange: {
+            start_date: dateFrom || '',
+            end_date: dateTo || '',
+            preset: 'custom',
+          },
+        }),
+      );
     }
 
     if (granularity !== currentRange['granularity']) {
-      this.store.dispatch(InventoryActions.setGranularity({ granularity: granularity || 'day' }));
+      this.store.dispatch(
+        InventoryActions.setGranularity({ granularity: granularity || 'day' }),
+      );
     }
   }
 
   onClearAllFilters(): void {
-    this.store.dispatch(InventoryActions.setDateRange({
-      dateRange: {
-        start_date: this.getDefaultStartDate(),
-        end_date: this.getDefaultEndDate(),
-        preset: 'thisMonth',
-      },
-    }));
-    this.store.dispatch(InventoryActions.setGranularity({ granularity: 'day' }));
+    this.store.dispatch(
+      InventoryActions.setDateRange({
+        dateRange: {
+          start_date: this.getDefaultStartDate(),
+          end_date: this.getDefaultEndDate(),
+          preset: 'thisMonth',
+        },
+      }),
+    );
+    this.store.dispatch(
+      InventoryActions.setGranularity({ granularity: 'day' }),
+    );
   }
 
   exportReport(): void {
@@ -185,17 +224,23 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
     const style = getComputedStyle(document.documentElement);
     return {
       border: style.getPropertyValue('--color-border').trim() || '#e5e7eb',
-      textSecondary: style.getPropertyValue('--color-text-secondary').trim() || '#6b7280',
+      textSecondary:
+        style.getPropertyValue('--color-text-secondary').trim() || '#6b7280',
     };
   }
 
   // ─── Movement Trend Chart (Line + Area) ───
 
-  private updateMovementTrendChart(trends: MovementTrend[], granularity: string): void {
+  private updateMovementTrendChart(
+    trends: MovementTrend[],
+    granularity: string,
+  ): void {
     if (!trends.length) return;
 
     const { border, textSecondary } = this.getThemeColors();
-    const labels = trends.map((t) => this.formatPeriodLabel(t.period, granularity));
+    const labels = trends.map((t) =>
+      this.formatPeriodLabel(t.period, granularity),
+    );
 
     const colors = {
       in: '#22c55e',
@@ -234,10 +279,26 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
         splitLine: { lineStyle: { color: border } },
       },
       series: [
-        this.buildLineSeries('Entradas', trends.map((t) => t.stock_in), colors.in),
-        this.buildLineSeries('Salidas', trends.map((t) => t.stock_out), colors.out),
-        this.buildLineSeries('Ajustes', trends.map((t) => t.adjustments), colors.adjustments),
-        this.buildLineSeries('Transferencias', trends.map((t) => t.transfers), colors.transfers),
+        this.buildLineSeries(
+          'Entradas',
+          trends.map((t) => t.stock_in),
+          colors.in,
+        ),
+        this.buildLineSeries(
+          'Salidas',
+          trends.map((t) => t.stock_out),
+          colors.out,
+        ),
+        this.buildLineSeries(
+          'Ajustes',
+          trends.map((t) => t.adjustments),
+          colors.adjustments,
+        ),
+        this.buildLineSeries(
+          'Transferencias',
+          trends.map((t) => t.transfers),
+          colors.transfers,
+        ),
       ],
     };
   }
@@ -251,7 +312,10 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
       areaStyle: {
         color: {
           type: 'linear',
-          x: 0, y: 0, x2: 0, y2: 1,
+          x: 0,
+          y: 0,
+          x2: 0,
+          y2: 1,
           colorStops: [
             { offset: 0, color: `${color}33` },
             { offset: 1, color: `${color}05` },
@@ -269,9 +333,22 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
     if (!valuations.length) return;
 
     const { textSecondary } = this.getThemeColors();
-    const sorted = [...valuations].sort((a, b) => b.total_value - a.total_value).slice(0, 10);
+    const sorted = [...valuations]
+      .sort((a, b) => b.total_value - a.total_value)
+      .slice(0, 10);
 
-    const locationColors = ['#3b82f6', '#8b5cf6', '#06b6d4', '#f59e0b', '#ec4899', '#10b981', '#f97316', '#6366f1', '#14b8a6', '#e11d48'];
+    const locationColors = [
+      '#3b82f6',
+      '#8b5cf6',
+      '#06b6d4',
+      '#f59e0b',
+      '#ec4899',
+      '#10b981',
+      '#f97316',
+      '#6366f1',
+      '#14b8a6',
+      '#e11d48',
+    ];
 
     this.valuationChartOptions = {
       tooltip: {
@@ -308,9 +385,22 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
     if (!valuations.length) return;
 
     const { textSecondary } = this.getThemeColors();
-    const sorted = [...valuations].sort((a, b) => b.total_quantity - a.total_quantity).slice(0, 10);
+    const sorted = [...valuations]
+      .sort((a, b) => b.total_quantity - a.total_quantity)
+      .slice(0, 10);
 
-    const locationColors = ['#3b82f6', '#8b5cf6', '#06b6d4', '#f59e0b', '#ec4899', '#10b981', '#f97316', '#6366f1', '#14b8a6', '#e11d48'];
+    const locationColors = [
+      '#3b82f6',
+      '#8b5cf6',
+      '#06b6d4',
+      '#f59e0b',
+      '#ec4899',
+      '#10b981',
+      '#f97316',
+      '#6366f1',
+      '#14b8a6',
+      '#e11d48',
+    ];
 
     this.quantityChartOptions = {
       tooltip: {

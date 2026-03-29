@@ -140,7 +140,7 @@ export class NotificationsDropdownComponent {
       case 'installment_overdue':
       case 'installment_paid':
       case 'credit_completed':
-        return d?.credit_id ? `/admin/orders/credits/${d.credit_id}` : '/admin/orders/credits';
+        return '/admin/orders/sales';
       default:
         return null;
     }

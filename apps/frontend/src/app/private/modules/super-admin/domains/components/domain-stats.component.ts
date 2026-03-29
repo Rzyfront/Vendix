@@ -8,7 +8,7 @@ import { StatsComponent } from '../../../../../shared/components/index';
   standalone: true,
   imports: [CommonModule, StatsComponent],
   template: `
-    <div class="space-y-6">
+    <div class="space-y-4">
       <!-- Primary Stats - Total and Status -->
       <div class="stats-container">
         <app-stats

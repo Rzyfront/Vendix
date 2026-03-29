@@ -22,12 +22,12 @@ import {
 import { PaymentError, PaymentErrorCodes, LEGACY_TO_NEW } from './utils';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { resolveCostPrice } from '../orders/utils/resolve-cost-price';
+import { calculateSchedule } from '../orders/utils/installment-schedule-calculator';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../settings/settings.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
-import { CreditsService } from '../credits/credits.service';
 
 @Injectable()
 export class PaymentsService {
@@ -43,7 +43,6 @@ export class PaymentsService {
     private readonly promotionEngine: PromotionEngineService,
     private readonly sessionsService: SessionsService,
     private readonly movementsService: MovementsService,
-    private readonly creditsService: CreditsService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -437,6 +436,11 @@ export class PaymentsService {
           });
           if (!product?.track_inventory) continue;
           try {
+            // Use savepoint to isolate stock reservation errors from the main transaction.
+            // PostgreSQL aborts the entire transaction on any error; a savepoint lets us
+            // catch and rollback just the failed operation while keeping the transaction alive.
+            await tx.$executeRawUnsafe('SAVEPOINT stock_reserve_sp');
+
             // Use stock_level with highest available for this product, falling back to store default location
             const stockLevel = await tx.stock_levels.findFirst({
               where: {
@@ -450,6 +454,7 @@ export class PaymentsService {
             const location_id = stockLevel?.location_id || defaultLocation?.id;
 
             if (!location_id) {
+              await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT stock_reserve_sp');
               this.logger.warn(`No location found for stock reservation of product ${item.product_id} in order #${order.id}`);
               continue;
             }
@@ -465,7 +470,11 @@ export class PaymentsService {
               false, // POS: don't validate availability (non-restrictive UX)
               tx,
             );
+
+            await tx.$executeRawUnsafe('RELEASE SAVEPOINT stock_reserve_sp');
           } catch (error) {
+            // Rollback to savepoint to recover the transaction from PostgreSQL's aborted state
+            try { await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT stock_reserve_sp'); } catch {}
             this.logger.warn(`Stock reservation failed for product ${item.product_id} in order #${order.id}: ${error.message}`);
           }
         }
@@ -655,17 +664,16 @@ export class PaymentsService {
           this.logger.error(`Failed to record cash register movement: ${err.message}`, err.stack);
         });
 
-        // Create credit with installments if installment_terms provided
-        if (createPosPaymentDto.installment_terms && createPosPaymentDto.customer_id && result.order?.id) {
-          try {
-            await this.creditsService.createCreditFromPos(
-              result.order.id,
-              createPosPaymentDto.customer_id,
-              createPosPaymentDto.installment_terms,
-            );
-          } catch (err) {
-            this.logger.error(`Failed to create credit from POS: ${err.message}`, err.stack);
-          }
+        // Create order installments for credit sales
+        if (!createPosPaymentDto.requires_payment && result.order?.id) {
+          this.createOrderInstallments(createPosPaymentDto, result.order).catch(
+            (err) => {
+              this.logger.error(
+                `Failed to create order installments: ${err.message}`,
+                err.stack,
+              );
+            },
+          );
         }
       }
 
@@ -677,6 +685,119 @@ export class PaymentsService {
         errors: [error.message],
       };
     }
+  }
+
+  /**
+   * Create order installments for credit sales (post-transaction)
+   */
+  private async createOrderInstallments(
+    dto: CreatePosPaymentDto,
+    order: { id: number | bigint; total_amount?: any },
+  ) {
+    const creditType = dto.credit_type || 'installments';
+    const orderId =
+      typeof order.id === 'object' ? Number(order.id) : Number(order.id);
+
+    const updateData: Record<string, any> = {
+      credit_type: creditType,
+      remaining_balance: order.total_amount || 0,
+      total_paid: 0,
+    };
+
+    if (dto.installment_terms) {
+      const terms = dto.installment_terms;
+      // Normalize interest rate: if > 1, treat as percentage (e.g., 12 → 0.12)
+      const rawRate = terms.interest_rate || 0;
+      const interestRate = rawRate > 1 ? rawRate / 100 : rawRate;
+      const interestType = terms.interest_type || 'simple';
+
+      if (interestRate > 0) {
+        updateData.interest_rate = interestRate;
+        updateData.interest_type = interestType;
+      }
+
+      if (creditType === 'installments') {
+        const initialPayment = terms.initial_payment || 0;
+        // Subtract initial payment from total BEFORE calculating installments
+        const amountToFinance = Math.round((Number(order.total_amount) - initialPayment) * 100) / 100;
+
+        const schedule = calculateSchedule({
+          total_amount: amountToFinance,
+          num_installments: terms.num_installments,
+          frequency: terms.frequency,
+          first_installment_date: new Date(terms.first_installment_date),
+          interest_rate: interestRate,
+          interest_type: interestType as 'simple' | 'compound',
+        });
+
+        const totalInstallments = schedule.reduce(
+          (sum, item) => sum + item.installment_value,
+          0,
+        );
+        // total_with_interest = initial payment + sum of all installments (which include interest on financed amount)
+        updateData.total_with_interest =
+          Math.round((initialPayment + totalInstallments) * 100) / 100;
+        updateData.remaining_balance = Math.round(totalInstallments * 100) / 100;
+
+        // Create installments (calculated on amount AFTER initial payment)
+        for (const item of schedule) {
+          await this.prisma.order_installments.create({
+            data: {
+              order_id: orderId,
+              installment_number: item.installment_number,
+              amount: item.installment_value,
+              capital_amount: item.capital_value,
+              interest_amount: item.interest_value,
+              due_date: item.due_date,
+              state: 'pending',
+              amount_paid: 0,
+              remaining_balance: item.installment_value,
+            },
+          });
+        }
+
+        // Register initial payment record if provided
+        if (initialPayment > 0) {
+          const transactionId = `pos_credit_init_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+          await this.prisma.payments.create({
+            data: {
+              order_id: orderId,
+              amount: initialPayment,
+              currency: 'COP',
+              state: 'succeeded',
+              transaction_id: transactionId,
+              paid_at: new Date(),
+              store_payment_method_id:
+                terms.initial_payment_method_id || null,
+              gateway_response: {
+                payment_type: 'direct',
+                metadata: { is_initial_credit_payment: true },
+              },
+            },
+          });
+
+          updateData.total_paid = initialPayment;
+          // remaining_balance already set to totalInstallments (excludes initial payment)
+        }
+      } else {
+        // Free credit - just set interest fields if applicable
+        if (interestRate > 0) {
+          const totalInterest =
+            Number(order.total_amount) * interestRate;
+          updateData.total_with_interest =
+            Math.round(
+              (Number(order.total_amount) + totalInterest) * 100,
+            ) / 100;
+          updateData.remaining_balance = updateData.total_with_interest;
+        }
+      }
+    }
+
+    // Update the order with credit fields
+    await this.prisma.orders.update({
+      where: { id: orderId },
+      data: updateData,
+    });
   }
 
   /**
@@ -934,56 +1055,76 @@ export class PaymentsService {
    * Update inventory from order
    */
   private async updateInventoryFromOrder(tx: any, order: any) {
-    // Get default location for the store
-    // Since LocationsService is not injected, we do a direct query or rely on StockLevelManager finding the stock
-    // Ideally we should have the location in the order or item context, but for POS default location is usually implied if not set.
-    // We can check if the store has a default location.
-
-    const defaultLocation = await tx.inventory_locations.findFirst({
-      where: {
-        store_id: order.store_id,
-        is_active: true,
-      },
-      orderBy: { id: 'asc' }, // Pick the first one as default
-    });
-
-    if (!defaultLocation) {
-      return;
-    }
-
     for (const item of order.order_items) {
-      // Skip stock update for products that don't track inventory
       const product = await tx.products.findUnique({
         where: { id: item.product_id },
         select: { track_inventory: true, product_type: true },
       });
       if (!product?.track_inventory || product.product_type === 'service') continue;
 
-      await this.stockLevelManager.updateStock(
-        {
+      // Find active reservation to get the correct location_id (matches Phase 1 reservation)
+      const reservation = await tx.stock_reservations.findFirst({
+        where: {
           product_id: item.product_id,
-          variant_id: item.product_variant_id,
-          location_id: defaultLocation.id,
-          quantity_change: -item.quantity, // Decrease stock
-          movement_type: 'sale',
-          reason: `POS Sale - Order ${order.order_number}`,
-          user_id: order.created_by,
-          order_item_id: item.id,
-          create_movement: true,
-          validate_availability: true, // Enforce stock limits
+          product_variant_id: item.product_variant_id || null,
+          reserved_for_type: 'order',
+          reserved_for_id: order.id,
+          status: 'active',
         },
-        tx, // Pass the transaction client
-      );
+      });
 
-      // Release the reservation (mark as consumed)
-      await this.stockLevelManager.releaseReservation(
-        item.product_id,
-        item.product_variant_id,
-        defaultLocation.id,
-        'order',
-        order.id,
-        tx,
-      );
+      if (reservation) {
+        // Release reservation FIRST so quantity_available is restored before validation
+        await this.stockLevelManager.releaseReservation(
+          item.product_id,
+          item.product_variant_id,
+          reservation.location_id,
+          'order',
+          order.id,
+          tx,
+        );
+
+        // Now deduct stock — available was restored, so validation passes
+        await this.stockLevelManager.updateStock(
+          {
+            product_id: item.product_id,
+            variant_id: item.product_variant_id,
+            location_id: reservation.location_id,
+            quantity_change: -item.quantity,
+            movement_type: 'sale',
+            reason: `POS Sale - Order ${order.order_number}`,
+            user_id: order.created_by,
+            order_item_id: item.id,
+            create_movement: true,
+            validate_availability: true,
+          },
+          tx,
+        );
+      } else {
+        // Fallback: reservation failed silently in Phase 1, use default location
+        const defaultLocation = await tx.inventory_locations.findFirst({
+          where: { store_id: order.store_id, is_active: true },
+          orderBy: { id: 'asc' },
+        });
+
+        if (!defaultLocation) continue;
+
+        await this.stockLevelManager.updateStock(
+          {
+            product_id: item.product_id,
+            variant_id: item.product_variant_id,
+            location_id: defaultLocation.id,
+            quantity_change: -item.quantity,
+            movement_type: 'sale',
+            reason: `POS Sale - Order ${order.order_number}`,
+            user_id: order.created_by,
+            order_item_id: item.id,
+            create_movement: true,
+            validate_availability: false,
+          },
+          tx,
+        );
+      }
     }
   }
 

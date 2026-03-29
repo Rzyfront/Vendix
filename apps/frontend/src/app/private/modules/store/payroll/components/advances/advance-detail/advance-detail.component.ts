@@ -11,6 +11,7 @@ import { ModalComponent } from '../../../../../../../shared/components/modal/mod
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'app-advance-detail',
@@ -66,19 +67,19 @@ import { InputComponent } from '../../../../../../../shared/components/input/inp
         <div class="mb-4 grid grid-cols-2 md:grid-cols-4 gap-3">
           <div class="p-3 bg-blue-50 rounded-lg border border-blue-100">
             <span class="text-xs text-blue-600 block">Solicitado</span>
-            <span class="text-lg font-bold text-blue-800">\${{ formatNumber(advance.amount_requested) }}</span>
+            <span class="text-lg font-bold text-blue-800">{{ formatNumber(advance.amount_requested) }}</span>
           </div>
           <div class="p-3 bg-indigo-50 rounded-lg border border-indigo-100">
             <span class="text-xs text-indigo-600 block">Aprobado</span>
-            <span class="text-lg font-bold text-indigo-800">\${{ formatNumber(advance.amount_approved) }}</span>
+            <span class="text-lg font-bold text-indigo-800">{{ formatNumber(advance.amount_approved) }}</span>
           </div>
           <div class="p-3 bg-green-50 rounded-lg border border-green-100">
             <span class="text-xs text-green-600 block">Pagado</span>
-            <span class="text-lg font-bold text-green-800">\${{ formatNumber(advance.amount_paid) }}</span>
+            <span class="text-lg font-bold text-green-800">{{ formatNumber(advance.amount_paid) }}</span>
           </div>
           <div class="p-3 bg-red-50 rounded-lg border border-red-100">
             <span class="text-xs text-red-600 block">Pendiente</span>
-            <span class="text-lg font-bold text-red-800">\${{ formatNumber(advance.amount_pending) }}</span>
+            <span class="text-lg font-bold text-red-800">{{ formatNumber(advance.amount_pending) }}</span>
           </div>
         </div>
 
@@ -90,7 +91,7 @@ import { InputComponent } from '../../../../../../../shared/components/input/inp
           </div>
           <div>
             <span class="text-xs text-text-secondary block">Valor por Cuota</span>
-            <span class="text-sm font-medium">\${{ formatNumber(advance.installment_value) }}</span>
+            <span class="text-sm font-medium">{{ formatNumber(advance.installment_value) }}</span>
           </div>
           <div>
             <span class="text-xs text-text-secondary block">Frecuencia</span>
@@ -128,7 +129,7 @@ import { InputComponent } from '../../../../../../../shared/components/input/inp
               <tbody>
                 <tr *ngFor="let payment of advance.advance_payments" class="border-b border-border">
                   <td class="py-2 px-3">{{ payment.payment_date | date:'dd/MM/yyyy' }}</td>
-                  <td class="py-2 px-3 text-right font-medium">\${{ formatNumber(payment.amount) }}</td>
+                  <td class="py-2 px-3 text-right font-medium">{{ formatNumber(payment.amount) }}</td>
                   <td class="py-2 px-3 text-center">
                     <span [class]="payment.payment_type === 'manual' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'"
                       class="px-2 py-0.5 rounded-full text-xs font-medium">
@@ -146,7 +147,7 @@ import { InputComponent } from '../../../../../../../shared/components/input/inp
             <div *ngFor="let payment of advance.advance_payments"
               class="p-3 bg-surface rounded-lg border border-border">
               <div class="flex justify-between items-center mb-1">
-                <span class="text-sm font-medium">\${{ formatNumber(payment.amount) }}</span>
+                <span class="text-sm font-medium">{{ formatNumber(payment.amount) }}</span>
                 <span [class]="payment.payment_type === 'manual' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'"
                   class="px-2 py-0.5 rounded-full text-[10px] font-medium">
                   {{ payment.payment_type === 'manual' ? 'Manual' : 'Nomina' }}
@@ -277,6 +278,7 @@ export class AdvanceDetailComponent implements OnDestroy {
   private fb = inject(FormBuilder);
   private payrollService = inject(PayrollService);
   private toastService = inject(ToastService);
+  private currencyService = inject(CurrencyFormatService);
   private destroy$ = new Subject<void>();
 
   actionLoading = false;
@@ -294,7 +296,7 @@ export class AdvanceDetailComponent implements OnDestroy {
   }
 
   formatNumber(value: number): string {
-    return (value || 0).toLocaleString('es-CO');
+    return this.currencyService.format(Number(value) || 0);
   }
 
   onApprove(): void {

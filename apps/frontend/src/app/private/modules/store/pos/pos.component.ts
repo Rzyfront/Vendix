@@ -53,6 +53,8 @@ import { PosSessionOpenModalComponent } from './components/pos-session-open-moda
 import { PosSessionCloseModalComponent } from './components/pos-session-close-modal.component';
 import { PosCashMovementModalComponent } from './components/pos-cash-movement-modal.component';
 import { PosSessionDetailModalComponent } from './components/pos-session-detail-modal.component';
+import { PosReservationsPanelComponent } from './components/pos-reservations-panel/pos-reservations-panel.component';
+import { PosQuickBookComponent } from './components/pos-quick-book/pos-quick-book.component';
 
 @Component({
   selector: 'app-pos',
@@ -79,12 +81,14 @@ import { PosSessionDetailModalComponent } from './components/pos-session-detail-
     PosCashMovementModalComponent,
     PosSessionDetailModalComponent,
     LayawayConfigModalComponent,
+    PosReservationsPanelComponent,
+    PosQuickBookComponent,
   ],
   template: `
-    <div class="flex flex-col gap-4 lg:gap-6 overflow-hidden pos-container">
+    <div class="flex flex-col overflow-hidden pos-container">
       <!-- POS Stats (hidden on mobile and in quotation mode) -->
       @if (!isQuotationMode() && !isLayawayMode()) {
-        <div class="flex-none hidden lg:block">
+        <div class="flex-none hidden lg:block pb-4">
           <app-pos-stats [cartState]="cartState"></app-pos-stats>
         </div>
       }
@@ -202,6 +206,17 @@ import { PosSessionDetailModalComponent } from './components/pos-session-detail-
                 ></app-icon>
                 <span class="hidden sm:inline">Cliente</span>
               </app-button>
+
+              <!-- Reservations Toggle Button -->
+              <button
+                class="flex items-center gap-1.5 px-3 py-2 rounded-lg border transition-all text-sm font-medium"
+                [class]="showReservationsPanel ? 'bg-primary/10 border-primary/30 text-primary' : 'bg-surface border-border text-text-secondary hover:border-primary/30 hover:text-primary'"
+                (click)="showReservationsPanel = !showReservationsPanel"
+                title="Reservas de hoy"
+              >
+                <app-icon name="calendar" [size]="16"></app-icon>
+                <span class="hidden xl:inline">Reservas</span>
+              </button>
 
               <!-- Cash Register Session Status Bar -->
               @if (cashRegisterEnabled) {
@@ -321,6 +336,17 @@ import { PosSessionDetailModalComponent } from './components/pos-session-detail-
                 (layaway)="onLayaway()"
               ></app-pos-cart>
             </div>
+
+            <!-- Reservations Side Panel (slides in from right) -->
+            @if (showReservationsPanel) {
+              <div class="reservations-panel-wrapper">
+                <app-pos-reservations-panel
+                  (close)="showReservationsPanel = false"
+                  (quickBook)="showQuickBookModal = true"
+                  (walkIn)="onWalkIn()"
+                ></app-pos-reservations-panel>
+              </div>
+            }
           </div>
 
           <!-- Mobile: Full width products only -->
@@ -334,6 +360,18 @@ import { PosSessionDetailModalComponent } from './components/pos-session-detail-
           </div>
         </div>
       </div>
+
+      <!-- Mobile Reservations Bottom Sheet -->
+      @if (showReservationsPanel && isMobile()) {
+        <div class="reservations-overlay" (click)="showReservationsPanel = false"></div>
+        <div class="reservations-panel-mobile">
+          <app-pos-reservations-panel
+            (close)="showReservationsPanel = false"
+            (quickBook)="showQuickBookModal = true"
+            (walkIn)="onWalkIn()"
+          ></app-pos-reservations-panel>
+        </div>
+      }
 
       <!-- Mobile Footer (visible on mobile and tablet for sidebar sync) -->
       <app-pos-mobile-footer
@@ -443,6 +481,14 @@ import { PosSessionDetailModalComponent } from './components/pos-session-detail-
         ></app-pos-session-detail-modal>
       }
 
+      <!-- Quick Book Modal -->
+      @if (showQuickBookModal) {
+        <app-pos-quick-book
+          (close)="showQuickBookModal = false"
+          (created)="onReservationCreated()"
+        ></app-pos-quick-book>
+      }
+
       <!-- Layaway Config Modal -->
       @if (showLayawayConfigModal()) {
         <app-layaway-config-modal
@@ -476,6 +522,78 @@ import { PosSessionDetailModalComponent } from './components/pos-session-detail-
       @media (max-width: 1023px) {
         .pos-main-content {
           padding-bottom: 80px;
+        }
+      }
+
+      /* Reservations side panel */
+      .reservations-panel-wrapper {
+        width: 320px;
+        min-width: 320px;
+        max-width: 320px;
+        min-height: 0;
+        overflow: hidden;
+        border-radius: 12px;
+        border: 1px solid var(--color-border);
+        background: var(--color-surface);
+        animation: slideInRight 0.2s ease-out;
+      }
+
+      @keyframes slideInRight {
+        from {
+          opacity: 0;
+          transform: translateX(20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateX(0);
+        }
+      }
+
+      /* Mobile bottom sheet for reservations */
+      .reservations-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.4);
+        z-index: 49;
+        animation: fadeIn 0.2s ease-out;
+      }
+
+      .reservations-panel-mobile {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        max-height: 70vh;
+        height: 70vh;
+        background: var(--color-surface);
+        border-radius: 16px 16px 0 0;
+        box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
+        z-index: 50;
+        overflow: hidden;
+        animation: slideUp 0.25s ease-out;
+      }
+
+      .reservations-panel-mobile::before {
+        content: '';
+        display: block;
+        width: 40px;
+        height: 4px;
+        background: var(--color-border);
+        border-radius: 2px;
+        margin: 8px auto;
+      }
+
+      @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+
+      @keyframes slideUp {
+        from {
+          transform: translateY(100%);
+        }
+        to {
+          transform: translateY(0);
         }
       }
     `,
@@ -525,6 +643,10 @@ export class PosComponent implements OnInit, OnDestroy {
   showSessionCloseModal = false;
   showCashMovementModal = false;
   showSessionDetailModal = false;
+
+  // Reservations
+  showReservationsPanel = false;
+  showQuickBookModal = false;
 
   // Quotation mode
   isQuotationMode = signal(false);
@@ -1025,6 +1147,18 @@ export class PosComponent implements OnInit, OnDestroy {
     this.showOrderConfirmation = false;
     this.completedOrder = null;
     this.onClearCart();
+  }
+
+  onReservationCreated(): void {
+    this.showQuickBookModal = false;
+    this.toastService.success('Reserva creada correctamente');
+    // Refresh the panel if it's open
+    this.showReservationsPanel = true;
+  }
+
+  onWalkIn(): void {
+    // Open the quick book modal with "now" as the pre-selected time
+    this.showQuickBookModal = true;
   }
 
   onViewOrderDetail(orderId: string): void {

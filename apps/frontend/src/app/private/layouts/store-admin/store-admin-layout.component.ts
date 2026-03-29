@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, ViewChild, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, AfterViewInit, ViewChild, inject, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import {
@@ -80,9 +80,9 @@ import { takeUntil, map, distinctUntilChanged, skip, pairwise } from 'rxjs/opera
       <!-- Main Content -->
       <div
         class="main-content flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ease-in-out"
-        [class.margin-desktop]="!sidebarRef?.isMobile"
+        [class.margin-desktop]="sidebarReady && !sidebarRef?.isMobile"
         [style.margin-left]="
-          !sidebarRef?.isMobile ? (sidebarCollapsed ? '3.5rem' : '12.5rem') : '0'
+          sidebarReady && !sidebarRef?.isMobile ? (sidebarCollapsed ? '3.5rem' : '12.5rem') : '0'
         "
         [style.--sidebar-width-current]="sidebarCollapsed ? '3.5rem' : '12.5rem'"
       >
@@ -118,10 +118,11 @@ import { takeUntil, map, distinctUntilChanged, skip, pairwise } from 'rxjs/opera
   `,
   styleUrls: ['./store-admin-layout.component.scss'],
 })
-export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
+export class StoreAdminLayoutComponent implements OnInit, OnDestroy, AfterViewInit {
   @ViewChild('sidebarRef') sidebarRef!: SidebarComponent;
 
   sidebarCollapsed = false;
+  sidebarReady = false;
   currentPageTitle = 'Store Dashboard';
   currentVlink = 'store-admin';
 
@@ -149,6 +150,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   sidebarShimmer = false;
 
   // Panel UI menu filtering
+  private cdr = inject(ChangeDetectorRef);
   private menuFilterService = inject(MenuFilterService);
   private configFacade = inject(ConfigFacade);
 
@@ -184,14 +186,19 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           route: '/admin/orders/quotations',
         },
         {
+          label: 'Remisiones',
+          icon: 'circle',
+          route: '/admin/orders/dispatch-notes',
+        },
+        {
           label: 'Plan Separe',
           icon: 'circle',
           route: '/admin/orders/layaway',
         },
         {
-          label: 'Ventas a Crédito',
-          icon: 'circle',
-          route: '/admin/orders/credits',
+          label: 'Reservas',
+          icon: 'calendar-clock',
+          route: '/admin/reservations',
         },
       ],
     },
@@ -515,6 +522,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     // Subscribe to filtered menu items based on panel_ui configuration
     this.menuItems$.pipe(takeUntil(this.destroy$)).subscribe((items) => {
       this.filteredMenuItems = items;
+      this.cdr.markForCheck();
     });
 
     // Trigger shimmer animation when store_type changes (skip initial emission)
@@ -544,6 +552,10 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
 
     // Check if should show POS first sale tour
     this.checkAndStartPosTour();
+  }
+
+  ngAfterViewInit(): void {
+    this.sidebarReady = true;
   }
 
   /**

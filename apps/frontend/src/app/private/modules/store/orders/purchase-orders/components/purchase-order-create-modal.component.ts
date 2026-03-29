@@ -118,7 +118,7 @@ import { InventoryService } from '../../../inventory/services';
                   <label class="block text-xs text-text-secondary mb-1">Precio Unit.</label>
                   <app-input
                     formControlName="unit_price"
-                    type="number"
+                    [currency]="true"
                     size="sm"
                   ></app-input>
                 </div>
@@ -152,7 +152,7 @@ import { InventoryService } from '../../../inventory/services';
                     <span class="text-text-secondary">Envío:</span>
                     <app-input
                       formControlName="shipping_cost"
-                      type="number"
+                      [currency]="true"
                       size="sm"
                       class="w-24"
                     ></app-input>

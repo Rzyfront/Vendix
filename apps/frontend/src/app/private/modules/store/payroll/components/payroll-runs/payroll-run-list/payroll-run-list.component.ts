@@ -5,6 +5,7 @@ import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 
 import { PayrollRun } from '../../../interfaces/payroll.interface';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import * as PayrollActions from '../../../state/actions/payroll.actions';
 import {
   selectPayrollRunSearch,
@@ -13,6 +14,7 @@ import {
   selectPayrollRunPage,
 } from '../../../state/selectors/payroll.selectors';
 
+import { CardComponent } from '../../../../../../../shared/components/card/card.component';
 import {
   InputsearchComponent,
   ButtonComponent,
@@ -34,6 +36,7 @@ import {
   imports: [
     CommonModule,
     FormsModule,
+    CardComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
@@ -52,9 +55,12 @@ export class PayrollRunListComponent {
   @Output() refresh = new EventEmitter<void>();
 
   private store = inject(Store);
+  private currencyService = inject(CurrencyFormatService);
 
   search$: Observable<string> = this.store.select(selectPayrollRunSearch);
-  statusFilter$: Observable<string> = this.store.select(selectPayrollRunStatusFilter);
+  statusFilter$: Observable<string> = this.store.select(
+    selectPayrollRunStatusFilter,
+  );
   meta$ = this.store.select(selectPayrollRunMeta);
   page$ = this.store.select(selectPayrollRunPage);
 
@@ -90,7 +96,12 @@ export class PayrollRunListComponent {
   ];
 
   dropdownActions: DropdownAction[] = [
-    { label: 'Nueva Nomina', icon: 'plus', action: 'create', variant: 'primary' },
+    {
+      label: 'Nueva Nomina',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   tableActions: TableAction[] = [
@@ -117,7 +128,9 @@ export class PayrollRunListComponent {
       priority: 1,
       transform: (val: any, row: any) => {
         const start = val ? new Date(val).toLocaleDateString('es-CO') : '';
-        const end = row.period_end ? new Date(row.period_end).toLocaleDateString('es-CO') : '';
+        const end = row.period_end
+          ? new Date(row.period_end).toLocaleDateString('es-CO')
+          : '';
         return `${start} - ${end}`;
       },
     },
@@ -127,7 +140,8 @@ export class PayrollRunListComponent {
       sortable: true,
       align: 'right',
       priority: 1,
-      transform: (val: any) => (val ? `$${Number(val).toLocaleString('es-CO')}` : '$0'),
+      transform: (val: any) =>
+        this.currencyService.format(Number(val) || 0),
     },
     {
       key: 'status',
@@ -154,8 +168,12 @@ export class PayrollRunListComponent {
   cardConfig: ItemListCardConfig = {
     titleKey: 'payroll_number',
     subtitleTransform: (item: any) => {
-      const start = item.period_start ? new Date(item.period_start).toLocaleDateString('es-CO') : '';
-      const end = item.period_end ? new Date(item.period_end).toLocaleDateString('es-CO') : '';
+      const start = item.period_start
+        ? new Date(item.period_start).toLocaleDateString('es-CO')
+        : '';
+      const end = item.period_end
+        ? new Date(item.period_end).toLocaleDateString('es-CO')
+        : '';
       return `${start} - ${end}`;
     },
     badgeKey: 'status',
@@ -176,7 +194,7 @@ export class PayrollRunListComponent {
     footerKey: 'total_net_pay',
     footerLabel: 'Neto Total',
     footerStyle: 'prominent',
-    footerTransform: (val: any) => `$${Number(val).toLocaleString('es-CO')}`,
+    footerTransform: (val: any) => this.currencyService.format(Number(val) || 0),
     detailKeys: [
       {
         key: 'frequency',
@@ -197,10 +215,14 @@ export class PayrollRunListComponent {
     const statusFilter = (values['status'] as string) || '';
     const frequencyFilter = (values['frequency'] as string) || '';
     if (statusFilter !== undefined) {
-      this.store.dispatch(PayrollActions.setPayrollRunStatusFilter({ statusFilter }));
+      this.store.dispatch(
+        PayrollActions.setPayrollRunStatusFilter({ statusFilter }),
+      );
     }
     if (frequencyFilter !== undefined) {
-      this.store.dispatch(PayrollActions.setPayrollRunFrequencyFilter({ frequencyFilter }));
+      this.store.dispatch(
+        PayrollActions.setPayrollRunFrequencyFilter({ frequencyFilter }),
+      );
     }
   }
 
@@ -250,7 +272,11 @@ export class PayrollRunListComponent {
   }
 
   get hasFilters(): boolean {
-    return !!(this.searchTerm || this.filterValues['status'] || this.filterValues['frequency']);
+    return !!(
+      this.searchTerm ||
+      this.filterValues['status'] ||
+      this.filterValues['frequency']
+    );
   }
 
   getEmptyStateTitle(): string {

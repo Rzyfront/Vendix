@@ -125,7 +125,7 @@ export interface PreBulkData {
 export interface PopCartItem {
     id: string;
     product: PopProduct;
-    variant?: PopProductVariant;
+    variant?: PopProductVariant | null;
     quantity: number;
     unit_cost: number;
     discount: number;
@@ -180,7 +180,7 @@ export interface PopCartState {
  */
 export interface AddToPopCartRequest {
     product: PopProduct;
-    variant?: PopProductVariant;
+    variant?: PopProductVariant | null;
     quantity: number;
     unit_cost: number;
     lot_info?: LotInfo;
@@ -198,7 +198,7 @@ export interface UpdatePopCartItemRequest {
     unit_cost?: number;
     lot_info?: LotInfo;
     notes?: string;
-    variant?: PopProductVariant;
+    variant?: PopProductVariant | null;
     pricing_type?: 'unit' | 'weight';
 }
 

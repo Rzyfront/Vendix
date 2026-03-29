@@ -10,8 +10,7 @@ import { storeUsersReducer } from '../../private/modules/store/settings/users/st
 import { StoreUsersEffects } from '../../private/modules/store/settings/users/state/effects/store-users.effects';
 import { layawayReducer } from '../../private/modules/store/layaway/state/reducers/layaway.reducer';
 import { LayawayEffects } from '../../private/modules/store/layaway/state/effects/layaway.effects';
-import { creditsReducer } from '../../private/modules/store/credits/state/reducers/credits.reducer';
-import { CreditsEffects } from '../../private/modules/store/credits/state/effects/credits.effects';
+
 
 export const storeAdminRoutes: Routes = [
   {
@@ -223,26 +222,18 @@ export const storeAdminRoutes: Routes = [
             ],
           },
           {
-            path: 'credits',
+            path: 'dispatch-notes',
             loadComponent: () =>
-              import('../../private/modules/store/credits/credits.component').then(
-                (c) => c.CreditsComponent,
-              ),
-            providers: [
-              provideState('credits', creditsReducer),
-              provideEffects(CreditsEffects),
-            ],
+              import(
+                '../../private/modules/store/dispatch-notes/dispatch-notes.component'
+              ).then((c) => c.DispatchNotesComponent),
           },
           {
-            path: 'credits/:id',
+            path: 'dispatch-notes/:id',
             loadComponent: () =>
-              import('../../private/modules/store/credits/pages/credits-detail-page/credits-detail-page.component').then(
-                (c) => c.CreditsDetailPageComponent,
-              ),
-            providers: [
-              provideState('credits', creditsReducer),
-              provideEffects(CreditsEffects),
-            ],
+              import(
+                '../../private/modules/store/dispatch-notes/pages/dispatch-note-detail-page/dispatch-note-detail-page.component'
+              ).then((c) => c.DispatchNoteDetailPageComponent),
           },
           {
             path: ':id',
@@ -250,6 +241,27 @@ export const storeAdminRoutes: Routes = [
               import('../../private/modules/store/orders/pages/order-details/order-details-page.component').then(
                 (c) => c.OrderDetailsPageComponent,
               ),
+          },
+        ],
+      },
+      // Reservations Routes
+      {
+        path: 'reservations',
+        children: [
+          {
+            path: '',
+            pathMatch: 'full',
+            loadComponent: () =>
+              import('../../private/modules/store/reservations/reservations.component').then(
+                (c) => c.ReservationsComponent,
+              ),
+          },
+          {
+            path: 'schedules',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/reservations/components/schedule-management/schedule-management.component'
+              ).then((c) => c.ScheduleManagementComponent),
           },
         ],
       },

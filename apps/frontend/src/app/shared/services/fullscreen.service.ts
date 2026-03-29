@@ -178,6 +178,7 @@ export class FullscreenService implements OnDestroy {
     const isCurrentlyFullscreen = !!this.getFullscreenElement();
     if (isCurrentlyFullscreen !== this.isFullscreen$.value) {
       this.isFullscreen$.next(isCurrentlyFullscreen);
+      document.documentElement.classList.toggle('fullscreen-active', isCurrentlyFullscreen);
     }
   }
 

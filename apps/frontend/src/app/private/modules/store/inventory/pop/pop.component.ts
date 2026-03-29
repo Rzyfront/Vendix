@@ -1,10 +1,23 @@
-import { Component, OnInit, OnDestroy, ViewChild, signal, HostListener } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  OnDestroy,
+  ViewChild,
+  signal,
+  HostListener,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription, take } from 'rxjs';
 
-import { PopCartService, PopCartSummary, PopCartState, PopCartItem, PopProduct } from './services/pop-cart.service';
+import {
+  PopCartService,
+  PopCartSummary,
+  PopCartState,
+  PopCartItem,
+  PopProduct,
+} from './services/pop-cart.service';
 import {
   cartToPurchaseOrderRequest,
   CreatePurchaseOrderRequest,
@@ -31,7 +44,12 @@ import { PopLotModalComponent } from './components/pop-lot-modal.component';
 import { PopPreBulkModalComponent } from './components/pop-prebulk-modal.component';
 import { PopMobileFooterComponent } from './components/pop-mobile-footer.component';
 import { PopCartModalComponent } from './components/pop-cart-modal.component';
-import { PopProductConfigModalComponent, PopProductConfigResult } from './components/pop-product-config-modal.component';
+import {
+  PopProductConfigModalComponent,
+  PopProductConfigResult,
+} from './components/pop-product-config-modal.component';
+import { PopOrderConfirmationModalComponent } from './components/pop-order-confirmation-modal.component';
+import { InvoiceScannerModalComponent } from './components/invoice-scanner/invoice-scanner-modal.component';
 
 /**
  * POP (Point of Purchase) Main Component
@@ -53,6 +71,8 @@ import { PopProductConfigModalComponent, PopProductConfigResult } from './compon
     PopMobileFooterComponent,
     PopCartModalComponent,
     PopProductConfigModalComponent,
+    PopOrderConfirmationModalComponent,
+    InvoiceScannerModalComponent,
   ],
   template: `
     <div
@@ -71,14 +91,19 @@ import { PopProductConfigModalComponent, PopProductConfigResult } from './compon
 
         <!-- Main Content Grid -->
         <div class="flex-1 p-4 sm:p-6 min-h-0 overflow-hidden">
-          <div class="h-full flex flex-col lg:grid lg:grid-cols-3 gap-4 sm:gap-6">
+          <div
+            class="h-full flex flex-col lg:grid lg:grid-cols-3 gap-4 sm:gap-6"
+          >
             <!-- Products Area (single instance for both layouts) -->
-            <div class="lg:col-span-2 h-full min-h-0 flex-1 pb-32 lg:pb-0 overflow-y-auto lg:overflow-hidden">
+            <div
+              class="lg:col-span-2 h-full min-h-0 flex-1 pb-32 lg:pb-0 overflow-y-auto lg:overflow-hidden"
+            >
               <app-pop-product-selection
                 class="h-full block"
                 (productAddedToCart)="onProductAdded($event)"
                 (requestManualAdd)="onManualAddRequested()"
                 (bulkDataLoaded)="onBulkDataReceived($event)"
+                (scanInvoice)="showInvoiceScanner.set(true)"
               ></app-pop-product-selection>
             </div>
 
@@ -151,6 +176,17 @@ import { PopProductConfigModalComponent, PopProductConfigResult } from './compon
       (skip)="onLotSkip()"
     ></app-pop-lot-modal>
 
+    <app-pop-order-confirmation-modal
+      [isOpen]="showOrderConfirmModal"
+      (isOpenChange)="showOrderConfirmModal = $event"
+      [cartState]="cartState"
+      [supplierName]="currentSupplierName"
+      [locationName]="currentLocationName"
+      [actionType]="confirmOrderAction"
+      (confirmed)="onOrderConfirmed()"
+      (cancelled)="showOrderConfirmModal = false"
+    ></app-pop-order-confirmation-modal>
+
     <app-pop-product-config-modal
       [isOpen]="showConfigModal"
       [product]="configModalProduct"
@@ -159,8 +195,18 @@ import { PopProductConfigModalComponent, PopProductConfigResult } from './compon
       [initialPricingType]="editingCartItemPricingType"
       [isEditing]="!!editingCartItemId"
       (confirmed)="onConfigConfirmed($event)"
-      (closed)="showConfigModal = false; configModalProduct = null; editingCartItemId = null"
+      (closed)="
+        showConfigModal = false;
+        configModalProduct = null;
+        editingCartItemId = null
+      "
     ></app-pop-product-config-modal>
+
+    <app-invoice-scanner-modal
+      [isOpen]="showInvoiceScanner()"
+      (isOpenChange)="showInvoiceScanner.set($event)"
+      (confirmed)="onInvoiceScanConfirmed($event)"
+    ></app-invoice-scanner-modal>
   `,
   styles: [
     `
@@ -172,6 +218,9 @@ import { PopProductConfigModalComponent, PopProductConfigResult } from './compon
   ],
 })
 export class PopComponent implements OnInit, OnDestroy {
+  // Invoice scanner
+  showInvoiceScanner = signal(false);
+
   // Modal states
   supplierModalOpen = false;
   warehouseModalOpen = false;
@@ -189,17 +238,36 @@ export class PopComponent implements OnInit, OnDestroy {
 
   get editingCartItemVariant(): any {
     if (!this.editingCartItemId) return null;
-    return this.popCartService.getItemById(this.editingCartItemId)?.variant || null;
+    return (
+      this.popCartService.getItemById(this.editingCartItemId)?.variant || null
+    );
   }
 
   get editingCartItemLotInfo(): any {
     if (!this.editingCartItemId) return null;
-    return this.popCartService.getItemById(this.editingCartItemId)?.lot_info || null;
+    return (
+      this.popCartService.getItemById(this.editingCartItemId)?.lot_info || null
+    );
   }
 
   get editingCartItemPricingType(): 'unit' | 'weight' {
     if (!this.editingCartItemId) return 'unit';
-    return this.popCartService.getItemById(this.editingCartItemId)?.product?.pricing_type || 'unit';
+    return (
+      this.popCartService.getItemById(this.editingCartItemId)?.product
+        ?.pricing_type || 'unit'
+    );
+  }
+
+  get currentSupplierName(): string {
+    const state = this.popCartService.currentState;
+    if (!state.supplierId || !this.header) return '';
+    return this.header.suppliers.find(s => s.id === state.supplierId)?.name || '';
+  }
+
+  get currentLocationName(): string {
+    const state = this.popCartService.currentState;
+    if (!state.locationId || !this.header) return '';
+    return this.header.locations.find(l => l.id === state.locationId)?.name || '';
   }
 
   // Route params
@@ -209,6 +277,10 @@ export class PopComponent implements OnInit, OnDestroy {
   isMobile = signal(false);
   showCartModal = false;
   isProcessingOrder = false;
+
+  // Order confirmation modal
+  showOrderConfirmModal = false;
+  confirmOrderAction: 'create' | 'create-receive' = 'create';
 
   // Cart state for mobile components
   cartState: PopCartState | null = null;
@@ -228,7 +300,7 @@ export class PopComponent implements OnInit, OnDestroy {
     private toastService: ToastService,
     private dialogService: DialogService,
     private authFacade: AuthFacade,
-  ) { }
+  ) {}
 
   ngOnInit(): void {
     // Initialize mobile detection
@@ -240,7 +312,7 @@ export class PopComponent implements OnInit, OnDestroy {
         this.cartState = state;
         this.cartSummary = state.summary;
         this.cartItemCount = state.items.length;
-      })
+      }),
     );
 
     // Check for editing existing order
@@ -279,14 +351,9 @@ export class PopComponent implements OnInit, OnDestroy {
             cost: Number(product.cost_price || product.price || 0),
           };
 
-          // If product has variants or requires batch tracking, open config modal
-          if (popProduct.product_variants?.length || popProduct.requires_batch_tracking) {
-            this.configModalProduct = popProduct;
-            this.showConfigModal = true;
-          } else {
-            this.popCartService.addItem(popProduct, 1);
-            this.toastService.success(`${product.name} agregado automáticamente`);
-          }
+          // Always open config modal in POP
+          this.configModalProduct = popProduct;
+          this.showConfigModal = true;
         }
       },
       error: (err: any) => {
@@ -299,62 +366,129 @@ export class PopComponent implements OnInit, OnDestroy {
     if (!this.configModalProduct) return;
 
     if (this.editingCartItemId) {
-      // Editing existing cart item — single update call with variant + lot + pricing_type
-      this.popCartService.updateCartItem({
-        itemId: this.editingCartItemId,
-        unit_cost: result.unit_cost,
-        lot_info: result.lot_info,
-        variant: result.variant,
-        pricing_type: result.pricing_type,
-      }).subscribe({
-        next: () => {
-          this.toastService.success('Configuración actualizada');
-        },
-      });
+      if (result.variants?.length) {
+        const originalItemId = this.editingCartItemId;
+        const product: PopProduct = {
+          ...this.configModalProduct,
+          pricing_type:
+            result.pricing_type || this.configModalProduct.pricing_type,
+        };
+
+        this.popCartService.removeFromCart(originalItemId).subscribe({
+          next: () => {
+            result.variants!.forEach((variant) => {
+              this.popCartService
+                .addToCart({
+                  product,
+                  variant,
+                  quantity: 1,
+                  unit_cost: variant.cost_price
+                    ? Number(variant.cost_price)
+                    : result.unit_cost,
+                  lot_info: result.lot_info,
+                })
+                .subscribe();
+            });
+            if (this.productSelection) {
+              this.productSelection.updateProductVariants(
+                this.configModalProduct!.id,
+                result.variants!,
+              );
+            }
+            this.toastService.success(
+              `${result.variants!.length === 1 ? '1 variante' : `${result.variants!.length} variantes`} de ${this.configModalProduct?.name} agregadas`,
+            );
+          },
+        });
+      } else if (result.variant) {
+        this.popCartService
+          .updateCartItem({
+            itemId: this.editingCartItemId,
+            unit_cost: result.unit_cost,
+            lot_info: result.lot_info,
+            variant: result.variant,
+            pricing_type: result.pricing_type,
+          })
+          .subscribe({
+            next: () => {
+              this.toastService.success('Configuración actualizada');
+            },
+          });
+      } else {
+        this.popCartService
+          .updateCartItem({
+            itemId: this.editingCartItemId,
+            unit_cost: result.unit_cost,
+            lot_info: result.lot_info,
+            pricing_type: result.pricing_type,
+          })
+          .subscribe({
+            next: () => {
+              this.toastService.success('Configuración actualizada');
+            },
+          });
+      }
     } else if (result.variants?.length) {
       // Adding multiple variants — one cart item per variant
       const product: PopProduct = {
         ...this.configModalProduct,
-        pricing_type: result.pricing_type || this.configModalProduct.pricing_type,
+        pricing_type:
+          result.pricing_type || this.configModalProduct.pricing_type,
       };
 
-      result.variants.forEach(variant => {
-        this.popCartService.addToCart({
-          product,
-          variant,
-          quantity: 1,
-          unit_cost: variant.cost_price ? Number(variant.cost_price) : result.unit_cost,
-          lot_info: result.lot_info,
-        }).subscribe();
+      result.variants.forEach((variant) => {
+        this.popCartService
+          .addToCart({
+            product,
+            variant,
+            quantity: 1,
+            unit_cost: variant.cost_price
+              ? Number(variant.cost_price)
+              : result.unit_cost,
+            lot_info: result.lot_info,
+          })
+          .subscribe();
       });
+
+      if (this.productSelection) {
+        this.productSelection.updateProductVariants(
+          this.configModalProduct!.id,
+          result.variants,
+        );
+      }
 
       const count = result.variants.length;
       this.toastService.success(
         count === 1
           ? `${this.configModalProduct.name} agregado al carrito`
-          : `${count} variantes de ${this.configModalProduct.name} agregadas al carrito`
+          : `${count} variantes de ${this.configModalProduct.name} agregadas al carrito`,
       );
     } else {
       // Adding a single item without variants
       const product: PopProduct = {
         ...this.configModalProduct,
-        pricing_type: result.pricing_type || this.configModalProduct.pricing_type,
+        pricing_type:
+          result.pricing_type || this.configModalProduct.pricing_type,
       };
 
-      this.popCartService.addToCart({
-        product,
-        quantity: result.quantity,
-        unit_cost: result.unit_cost,
-        lot_info: result.lot_info,
-      }).subscribe({
-        next: () => {
-          this.toastService.success(`${this.configModalProduct?.name} agregado al carrito`);
-        },
-        error: (err) => {
-          console.error('Error adding configured product:', err);
-          this.toastService.error('Error al agregar producto');
-        },
-      });
+      this.popCartService
+        .addToCart({
+          product,
+          quantity: result.quantity,
+          unit_cost: result.unit_cost,
+          lot_info: result.lot_info,
+        })
+        .subscribe({
+          next: () => {
+            this.toastService.success(
+              `${this.configModalProduct?.name} agregado al carrito`,
+            );
+          },
+          error: (err) => {
+            console.error('Error adding configured product:', err);
+            this.toastService.error('Error al agregar producto');
+          },
+        });
     }
 
     // Always clean up modal state
@@ -379,7 +513,8 @@ export class PopComponent implements OnInit, OnDestroy {
               ...product,
               cost: Number(product.cost_price || product.price || 0),
               cost_price: Number(product.cost_price || 0),
-              pricing_type: product.pricing_type || item.product.pricing_type || 'unit',
+              pricing_type:
+                product.pricing_type || item.product.pricing_type || 'unit',
               product_variants: product.product_variants || [],
             };
           } else {
@@ -413,6 +548,14 @@ export class PopComponent implements OnInit, OnDestroy {
 
   onManualAddRequested(): void {
     this.prebulkModalOpen = true;
+  }
+
+  onInvoiceScanConfirmed(po: any): void {
+    this.showInvoiceScanner.set(false);
+    this.toastService.success('Orden de compra creada desde factura escaneada');
+    if (po?.id) {
+      this.router.navigate(['/admin/products']);
+    }
   }
 
   onBulkDataReceived(items: any[]): void {
@@ -474,19 +617,68 @@ export class PopComponent implements OnInit, OnDestroy {
       const quantity = Number(qtyRaw) || 1;
 
       // New metadata fields
-      const description = (normalizedRow['description'] || normalizedRow['descripción'] || normalizedRow['detalle'] || '').trim();
-      const state = (normalizedRow['state'] || normalizedRow['estado'] || normalizedRow['status'] || 'active').trim();
-      const weight = Number(normalizedRow['weight'] || normalizedRow['peso']) || 0;
-      const available_for_ecommerce = normalizedRow['available_for_ecommerce'] || normalizedRow['disponible ecommerce'] || normalizedRow['ecommerce'] || true;
-      const base_price = Number(normalizedRow['base_price'] || normalizedRow['precio venta'] || normalizedRow['precio_venta']) || 0;
-      const profit_margin = Number(normalizedRow['profit_margin'] || normalizedRow['margen'] || normalizedRow['margin']) || 0;
+      const description = (
+        normalizedRow['description'] ||
+        normalizedRow['descripción'] ||
+        normalizedRow['detalle'] ||
+        ''
+      ).trim();
+      const state = (
+        normalizedRow['state'] ||
+        normalizedRow['estado'] ||
+        normalizedRow['status'] ||
+        'active'
+      ).trim();
+      const weight =
+        Number(normalizedRow['weight'] || normalizedRow['peso']) || 0;
+      const available_for_ecommerce =
+        normalizedRow['available_for_ecommerce'] ||
+        normalizedRow['disponible ecommerce'] ||
+        normalizedRow['ecommerce'] ||
+        true;
+      const base_price =
+        Number(
+          normalizedRow['base_price'] ||
+            normalizedRow['precio venta'] ||
+            normalizedRow['precio_venta'],
+        ) || 0;
+      const profit_margin =
+        Number(
+          normalizedRow['profit_margin'] ||
+            normalizedRow['margen'] ||
+            normalizedRow['margin'],
+        ) || 0;
 
       // Final metadata mapping for new requirement
       // Note: The modal already maps 'Marca' -> 'brand_id' and 'Categorías' -> 'category_ids'
-      const brand = (normalizedRow['brand_id'] || normalizedRow['marca'] || normalizedRow['brand'] || '').toString().trim();
-      const categories = (normalizedRow['category_ids'] || normalizedRow['categorías'] || normalizedRow['categorias'] || normalizedRow['categories'] || '').toString().trim();
-      const isOnSale = normalizedRow['en oferta'] || normalizedRow['en_oferta'] || normalizedRow['is_on_sale'] || false;
-      const salePrice = Number(normalizedRow['precio oferta'] || normalizedRow['precio_oferta'] || normalizedRow['sale_price']) || 0;
+      const brand = (
+        normalizedRow['brand_id'] ||
+        normalizedRow['marca'] ||
+        normalizedRow['brand'] ||
+        ''
+      )
+        .toString()
+        .trim();
+      const categories = (
+        normalizedRow['category_ids'] ||
+        normalizedRow['categorías'] ||
+        normalizedRow['categorias'] ||
+        normalizedRow['categories'] ||
+        ''
+      )
+        .toString()
+        .trim();
+      const isOnSale =
+        normalizedRow['en oferta'] ||
+        normalizedRow['en_oferta'] ||
+        normalizedRow['is_on_sale'] ||
+        false;
+      const salePrice =
+        Number(
+          normalizedRow['precio oferta'] ||
+            normalizedRow['precio_oferta'] ||
+            normalizedRow['sale_price'],
+        ) || 0;
 
       // Construct dummy product
       const dummyProduct = {
@@ -574,6 +766,8 @@ export class PopComponent implements OnInit, OnDestroy {
   }
 
   @ViewChild(PopHeaderComponent) header!: PopHeaderComponent;
+  @ViewChild(PopProductSelectionComponent)
+  productSelection!: PopProductSelectionComponent;
 
   onSupplierCreated(supplierId: number): void {
     // 1. Trigger refresh to get the new supplier in the list
@@ -632,17 +826,21 @@ export class PopComponent implements OnInit, OnDestroy {
   }
 
   onItemQuantityChanged(event: { itemId: string; quantity: number }): void {
-    this.popCartService.updateCartItem({
-      itemId: event.itemId,
-      quantity: event.quantity,
-    }).subscribe();
+    this.popCartService
+      .updateCartItem({
+        itemId: event.itemId,
+        quantity: event.quantity,
+      })
+      .subscribe();
   }
 
   onItemCostChanged(event: { itemId: string; cost: number }): void {
-    this.popCartService.updateCartItem({
-      itemId: event.itemId,
-      unit_cost: event.cost,
-    }).subscribe();
+    this.popCartService
+      .updateCartItem({
+        itemId: event.itemId,
+        unit_cost: event.cost,
+      })
+      .subscribe();
   }
 
   onItemRemoved(itemId: string): void {
@@ -687,7 +885,7 @@ export class PopComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Create and receive order from modal - keeps modal open until success
+   * Create and receive order from modal - shows confirmation modal first
    */
   private onCreateAndReceiveWithModal(): void {
     const state = this.popCartService.currentState;
@@ -702,54 +900,9 @@ export class PopComponent implements OnInit, OnDestroy {
       return;
     }
 
-    this.isProcessingOrder = true;
-    const userId = this.authFacade.getUserId() || 0;
-    const request = cartToPurchaseOrderRequest(state, userId, undefined);
-    request.status = 'approved';
-
-    this.toastService.info('Creando orden e ingresando inventario...');
-
-    this.purchaseOrdersService.createPurchaseOrder(request).subscribe({
-      next: (response) => {
-        if (response.success && response.data) {
-          const orderId = response.data.id;
-          const orderItems = response.data.purchase_order_items || [];
-
-          const receiveItems = orderItems.map((item: any) => ({
-            id: item.id,
-            quantity_received: item.quantity_ordered,
-          }));
-
-          this.purchaseOrdersService
-            .receivePurchaseOrder(orderId, receiveItems)
-            .subscribe({
-              next: () => {
-                this.isProcessingOrder = false;
-                this.showCartModal = false;
-                this.toastService.success('Stock ingresado correctamente');
-                this.popCartService.clearCart().subscribe();
-                this.router.navigate(['/admin/products']);
-              },
-              error: (err: any) => {
-                this.isProcessingOrder = false;
-                console.error('Error receiving order:', err);
-                this.toastService.error(
-                  'Orden creada pero hubo error al recibir stock',
-                );
-                this.showCartModal = false;
-                this.popCartService.clearCart().subscribe();
-                this.router.navigate(['/admin/products']);
-              },
-            });
-        }
-      },
-      error: (error) => {
-        this.isProcessingOrder = false;
-        console.error('Error creating order:', error);
-        const errorMsg = error.error?.message || error.message || 'Error al crear la orden';
-        this.toastService.error(errorMsg);
-      },
-    });
+    this.showCartModal = false;
+    this.confirmOrderAction = 'create-receive';
+    this.showOrderConfirmModal = true;
   }
 
   // ============================================================
@@ -786,7 +939,10 @@ export class PopComponent implements OnInit, OnDestroy {
       },
       error: (error) => {
         console.error('Error saving draft:', error);
-        const errorMsg = error.error?.message || error.message || 'Error al guardar el borrador';
+        const errorMsg =
+          error.error?.message ||
+          error.message ||
+          'Error al guardar el borrador';
         this.toastService.error(errorMsg);
       },
     });
@@ -796,11 +952,9 @@ export class PopComponent implements OnInit, OnDestroy {
     const state = this.popCartService.currentState;
 
     if (!state.supplierId || !state.locationId || state.items.length === 0) {
-      // On mobile, open the cart modal to show the config alert
       if (this.isMobile()) {
         this.showCartModal = true;
       }
-      // Flash the supplier+warehouse section
       if ((!state.supplierId || !state.locationId) && this.header) {
         this.header.flashConfigWarning();
       }
@@ -810,9 +964,47 @@ export class PopComponent implements OnInit, OnDestroy {
       return;
     }
 
+    this.confirmOrderAction = 'create';
+    this.showOrderConfirmModal = true;
+  }
+
+  onCreateAndReceive(): void {
+    const state = this.popCartService.currentState;
+
+    if (!state.supplierId || !state.locationId || state.items.length === 0) {
+      if (this.isMobile()) {
+        this.showCartModal = true;
+      }
+      if ((!state.supplierId || !state.locationId) && this.header) {
+        this.header.flashConfigWarning();
+      }
+      this.toastService.warning(
+        'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',
+      );
+      return;
+    }
+
+    this.confirmOrderAction = 'create-receive';
+    this.showOrderConfirmModal = true;
+  }
+
+  // ============================================================
+  // Order Confirmation Modal Handlers
+  // ============================================================
+
+  onOrderConfirmed(): void {
+    this.showOrderConfirmModal = false;
+    if (this.confirmOrderAction === 'create') {
+      this._executeSubmitOrder();
+    } else {
+      this._executeCreateAndReceive();
+    }
+  }
+
+  private _executeSubmitOrder(): void {
+    const state = this.popCartService.currentState;
     const userId = this.authFacade.getUserId() || 0;
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
-
     request.status = 'approved';
 
     this.purchaseOrdersService.createPurchaseOrder(request).subscribe({
@@ -825,30 +1017,15 @@ export class PopComponent implements OnInit, OnDestroy {
       },
       error: (error) => {
         console.error('Error submitting order:', error);
-        const errorMsg = error.error?.message || error.message || 'Error al enviar la orden';
+        const errorMsg =
+          error.error?.message || error.message || 'Error al enviar la orden';
         this.toastService.error(errorMsg);
       },
     });
   }
 
-  onCreateAndReceive(): void {
+  private _executeCreateAndReceive(): void {
     const state = this.popCartService.currentState;
-
-    if (!state.supplierId || !state.locationId || state.items.length === 0) {
-      // On mobile, open the cart modal to show the config alert
-      if (this.isMobile()) {
-        this.showCartModal = true;
-      }
-      // Flash the supplier+warehouse section
-      if ((!state.supplierId || !state.locationId) && this.header) {
-        this.header.flashConfigWarning();
-      }
-      this.toastService.warning(
-        'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',
-      );
-      return;
-    }
-
     const userId = this.authFacade.getUserId() || 0;
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
     request.status = 'approved';
@@ -861,19 +1038,17 @@ export class PopComponent implements OnInit, OnDestroy {
           const orderId = response.data.id;
           const orderItems = response.data.purchase_order_items || [];
 
-          // Prepare receive payload
           const receiveItems = orderItems.map((item: any) => ({
             id: item.id,
-            quantity_received: item.quantity_ordered, // Receive full quantity
+            quantity_received: item.quantity_ordered,
           }));
 
           this.purchaseOrdersService
             .receivePurchaseOrder(orderId, receiveItems)
             .subscribe({
-              next: (res: any) => {
+              next: () => {
                 this.toastService.success('Stock ingresado correctamente');
                 this.popCartService.clearCart().subscribe();
-                // Navigate to products list after successful purchase
                 this.router.navigate(['/admin/products']);
               },
               error: (err: any) => {
@@ -881,7 +1056,6 @@ export class PopComponent implements OnInit, OnDestroy {
                 this.toastService.error(
                   'Orden creada pero hubo error al recibir stock',
                 );
-                // Still clear cart as order was created? Yes to prevent dupes
                 this.popCartService.clearCart().subscribe();
                 this.router.navigate(['/admin/products']);
               },
@@ -890,7 +1064,8 @@ export class PopComponent implements OnInit, OnDestroy {
       },
       error: (error) => {
         console.error('Error creating order:', error);
-        const errorMsg = error.error?.message || error.message || 'Error al crear la orden';
+        const errorMsg =
+          error.error?.message || error.message || 'Error al crear la orden';
         this.toastService.error(errorMsg);
       },
     });

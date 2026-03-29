@@ -128,3 +128,76 @@ If you encounter a `403 Forbidden` error in a scoped service:
 3. **Verify Header:** If testing via API, ensure `x-store-id` is sent or the `Host` header matches a registered domain.
 4. **Context Presence:** Use `RequestContextService.getContext()` to debug if the store is being resolved correctly.
 5. **Model Registration:** Ensure the model is registered in the scoped service's model arrays (see `vendix-prisma-scopes`).
+
+## AI Platform Scoping
+
+The AI Platform Layer introduces three new multi-tenant models:
+
+### ai_conversations (Store-Scoped + User-Scoped)
+
+```typescript
+// Registered in store_scoped_models → auto-filters by store_id + organization_id
+// ALSO manually filtered by user_id for privacy:
+const conversation = await this.prisma.ai_conversations.findFirst({
+  where: {
+    id,
+    user_id: context?.user_id,  // Manual check — users only see their own conversations
+  },
+});
+```
+
+**Key:** `StorePrismaService` auto-injects `store_id` and `organization_id`, but `user_id` must be checked manually because multiple users share a store.
+
+### ai_messages (Relationally Scoped)
+
+```typescript
+// Scoped via conversation relation:
+// { conversation: { store_id: context.store_id, organization_id: context.organization_id } }
+// This ensures messages are only accessible if the parent conversation belongs to the tenant.
+```
+
+**Key:** Messages don't have their own `store_id` — they inherit scoping from their parent `ai_conversations`.
+
+### ai_embeddings (Store-Scoped + Raw SQL)
+
+```typescript
+// Registered in store_scoped_models for Prisma queries
+// BUT vector searches use raw SQL with explicit WHERE:
+const results = await this.prisma.$queryRawUnsafe(`
+  SELECT ... FROM ai_embeddings
+  WHERE store_id = $1          -- Explicit tenant filter
+    AND entity_type = ...
+  ORDER BY embedding <=> $2::vector
+`, storeId, embeddingStr);
+```
+
+**Key:** pgvector operations bypass Prisma ORM (raw SQL), so tenant isolation must be enforced manually with `WHERE store_id = $1`.
+
+### MCP Context Injection
+
+MCP endpoints bypass the normal JWT auth flow (`@Public()` decorator) but use `McpAuthGuard` instead:
+
+```typescript
+// McpAuthGuard validates JWT and sets request.user:
+request.user = {
+  user_id: payload.user_id,
+  organization_id: payload.organization_id,
+  store_id: payload.store_id,
+  roles: payload.roles,
+};
+// RequestContextInterceptor then propagates this to AsyncLocalStorage
+// → All downstream scoped services work normally
+```
+
+**Key:** MCP uses the same `request.user` property as JWT auth, so the existing `RequestContextInterceptor` handles context propagation without changes.
+
+### Scoping Summary
+
+| Model | Scope Type | Auto-filtered | Manual Checks |
+|-------|-----------|--------------|---------------|
+| `ai_engine_configs` | Global | None (superadmin only) | — |
+| `ai_engine_applications` | Global | None (superadmin only) | — |
+| `ai_engine_logs` | Global | None (superadmin reads) | org_id, store_id in queries |
+| `ai_conversations` | Store + User | store_id, org_id | user_id |
+| `ai_messages` | Relational | via conversation | — |
+| `ai_embeddings` | Store | store_id, org_id | Raw SQL: `WHERE store_id = $1` |

@@ -23,7 +23,6 @@ import { StorePaymentMethodsService } from './services/store-payment-methods.ser
 import { OrganizationPaymentPoliciesService } from './services/organization-payment-policies.service';
 import { PromotionsModule } from '../promotions/promotions.module';
 import { CashRegistersModule } from '../cash-registers/cash-registers.module';
-import { CreditsModule } from '../credits/credits.module';
 import {
   CashPaymentModule,
   StripeModule,
@@ -49,7 +48,6 @@ import { BankTransferProcessor } from './processors/bank-transfer/bank-transfer.
     SettingsModule,
     PromotionsModule,
     CashRegistersModule,
-    CreditsModule,
   ],
   controllers: [
     PaymentsController,

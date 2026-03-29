@@ -16,6 +16,8 @@ import {
   DropdownAction,
   FilterValues,
   PaginationComponent,
+  EmptyStateComponent,
+  CardComponent,
 } from '../../../../../../../shared/components/index';
 
 // Interfaces
@@ -33,6 +35,8 @@ import { Supplier } from '../../../interfaces';
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     PaginationComponent,
+    EmptyStateComponent,
+    CardComponent,
   ],
   templateUrl: './supplier-list.component.html',
 })
@@ -79,14 +83,30 @@ export class SupplierListComponent {
   // Dropdown actions
   dropdownActions: DropdownAction[] = [
     { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
-    { label: 'Nuevo Proveedor', icon: 'plus', action: 'create', variant: 'primary' },
+    {
+      label: 'Nuevo Proveedor',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   // Table Configuration
   tableColumns: TableColumn[] = [
-    { key: 'code', label: 'Código', sortable: true, width: '100px', priority: 3 },
+    {
+      key: 'code',
+      label: 'Código',
+      sortable: true,
+      width: '100px',
+      priority: 3,
+    },
     { key: 'name', label: 'Nombre', sortable: true, priority: 1 },
-    { key: 'contact_person', label: 'Contacto', defaultValue: '-', priority: 2 },
+    {
+      key: 'contact_person',
+      label: 'Contacto',
+      defaultValue: '-',
+      priority: 2,
+    },
     { key: 'email', label: 'Email', defaultValue: '-', priority: 2 },
     { key: 'phone', label: 'Teléfono', defaultValue: '-', priority: 3 },
     {

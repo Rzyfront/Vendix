@@ -8,14 +8,16 @@ metadata:
 
 # Vendix Frontend Modal Pattern
 
+> **Tip**: Antes de usar app-modal, consulta su README en `apps/frontend/src/app/shared/components/modal/README.md` para conocer sus inputs, outputs, gotchas y patrones de uso.
+
 This skill describes the standard pattern for implementing modals in Vendix, using `app-modal` and the Modal-First architecture.
 
 ## Critical Rules (Best Practices)
 
 1.  **System Components Only**: Inside the modal, ALWAYS use system components (`app-input`, `app-selector`, `app-textarea`). Avoid raw HTML inputs to maintain consistency and prevent event conflicts.
 2.  **State Propagation (Prevent NG0100)**: When handling `isOpenChange`, **ALWAYS** emit the raw event (`$event`).
-    *   Correct: `(isOpenChange)="isOpenChange.emit($event)"`
-    *   Incorrect: `(isOpenChange)="closeModal()"` (If `closeModal` forces `false` immediately, it causes an `ExpressionChangedAfterItHasBeenCheckedError` loop when the modal tries to open).
+    - Correct: `(isOpenChange)="isOpenChange.emit($event)"`
+    - Incorrect: `(isOpenChange)="closeModal()"` (If `closeModal` forces `false` immediately, it causes an `ExpressionChangedAfterItHasBeenCheckedError` loop when the modal tries to open).
 3.  **Single-View Architecture**: For simple CRUD modules, avoid creating child routes (`/create`, `/edit/:id`). Use a single "List" view and handle Creation/Editing through modals on the same view.
 
 ---
@@ -29,13 +31,18 @@ Follow this template to create robust modals:
 ```typescript
 import { Component, Input, Output, EventEmitter } from "@angular/core";
 import { CommonModule } from "@angular/common";
-import { ReactiveFormsModule, FormGroup, FormBuilder, Validators } from "@angular/forms";
+import {
+  ReactiveFormsModule,
+  FormGroup,
+  FormBuilder,
+  Validators,
+} from "@angular/forms";
 import {
   ModalComponent,
   ButtonComponent,
   InputComponent,
   SelectorComponent,
-  TextareaComponent
+  TextareaComponent,
 } from "@/shared/components";
 
 @Component({
@@ -48,7 +55,7 @@ import {
     ButtonComponent,
     InputComponent,
     SelectorComponent,
-    TextareaComponent
+    TextareaComponent,
   ],
   template: `
     <app-modal
@@ -84,10 +91,10 @@ import {
 
       <!-- Footer -->
       <div slot="footer">
-        <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
-          <app-button
-            variant="outline"
-            (clicked)="onClose()">
+        <div
+          class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
+        >
+          <app-button variant="outline" (clicked)="onClose()">
             Cancel
           </app-button>
 
@@ -95,13 +102,14 @@ import {
             variant="primary"
             (clicked)="onSubmit()"
             [disabled]="form.invalid || isSubmitting"
-            [loading]="isSubmitting">
+            [loading]="isSubmitting"
+          >
             Save
           </app-button>
         </div>
       </div>
     </app-modal>
-  `
+  `,
 })
 export class FeatureCreateComponent {
   @Input() isOpen = false;
@@ -112,9 +120,9 @@ export class FeatureCreateComponent {
 
   constructor(private fb: FormBuilder) {
     this.form = this.fb.group({
-      name: ['', Validators.required],
+      name: ["", Validators.required],
       categoryId: [null],
-      notes: ['']
+      notes: [""],
     });
   }
 
@@ -135,13 +143,13 @@ export class FeatureCreateComponent {
 
 ## `app-modal` Properties
 
-| Property          | Type                           | Description                                                          |
-| ----------------- | ------------------------------ | -------------------------------------------------------------------- |
-| `isOpen`          | `boolean`                      | Controls the modal visibility.                                       |
-| `size`            | `'sm' \| 'md' \| 'lg' \| 'xl'` | Defines the maximum width of the modal.                              |
-| `title`           | `string`                       | Main title in the header.                                            |
-| `subtitle`        | `string`                       | Secondary description below the title.                               |
-| `showCloseButton` | `boolean`                      | Shows the 'X' button in the top-right corner (defaults to `true`).   |
+| Property          | Type                           | Description                                                        |
+| ----------------- | ------------------------------ | ------------------------------------------------------------------ |
+| `isOpen`          | `boolean`                      | Controls the modal visibility.                                     |
+| `size`            | `'sm' \| 'md' \| 'lg' \| 'xl'` | Defines the maximum width of the modal.                            |
+| `title`           | `string`                       | Main title in the header.                                          |
+| `subtitle`        | `string`                       | Secondary description below the title.                             |
+| `showCloseButton` | `boolean`                      | Shows the 'X' button in the top-right corner (defaults to `true`). |
 
 ---
 
@@ -169,21 +177,27 @@ The footer typically has the following characteristics:
 ## Troubleshooting Common Issues
 
 ### Modal closes when clicking inside (Click Propagation)
+
 **Cause**: Event bubbling from inner elements to the backdrop.
 **Solution**: The `app-modal` component already implements a robust verification (`contains` check) in its click handler.
+
 1. Make sure you are using the latest version of `app-modal`.
 2. **Do NOT use `stopPropagation` hacks** in your inner containers; the modal handles this natively.
 3. Use `app-input` and system components, as they have predictable event handling.
 
 ### NG0100 Error (ExpressionChangedAfterItHasBeenCheckedError)
+
 **Cause**: Mapping the `isOpenChange` event (which emits `true` on open) to a function that sets the variable to `false` immediately.
 **Solution**: In the modal template, use:
+
 ```html
 (isOpenChange)="isOpenChange.emit($event)"
 ```
+
 This ensures the parent receives the actual value (`true`) at the start, maintaining synchronization. It only emits `false` when it actually closes.
 
 ### Double borders or strange styles
+
 **Cause**: Wrapping components like `app-table` in divs with additional borders inside the modal.
 **Solution**: System components (`app-table`) already have their own borders. Place them directly in the modal container without extra decorative wrappers.
 
@@ -191,7 +205,7 @@ This ensures the parent receives the actual value (`true`) at the start, maintai
 
 ## Key File Reference
 
-| File                                                                                                | Purpose                            |
-| --------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `apps/frontend/src/app/shared/components/modal/modal.component.ts`                                  | Base modal implementation.         |
-| `apps/frontend/src/app/private/modules/store/products/components/product-create-modal.component.ts` | Analyzed reference example.        |
+| File                                                                                                | Purpose                     |
+| --------------------------------------------------------------------------------------------------- | --------------------------- |
+| `apps/frontend/src/app/shared/components/modal/modal.component.ts`                                  | Base modal implementation.  |
+| `apps/frontend/src/app/private/modules/store/products/components/product-create-modal.component.ts` | Analyzed reference example. |

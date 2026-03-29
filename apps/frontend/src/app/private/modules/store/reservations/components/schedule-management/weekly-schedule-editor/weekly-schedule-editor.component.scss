@@ -1,0 +1,224 @@
+// Weekly Schedule Editor — Timeline styles only
+// Buttons and toggles are handled by shared components (app-button, app-toggle)
+// Mobile-first: base styles → @media (min-width: ...) for larger screens
+
+.quick-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+// Timeline header
+.timeline-header {
+  display: flex;
+  align-items: flex-end;
+  margin-bottom: 4px;
+  height: 20px;
+}
+
+.timeline-label-space {
+  width: 40px;
+  flex-shrink: 0;
+
+  @media (min-width: 768px) {
+    width: 80px;
+  }
+}
+
+.timeline-toggle-space {
+  width: 50px;
+  flex-shrink: 0;
+}
+
+.timeline-track-header {
+  flex: 1;
+  position: relative;
+  height: 20px;
+}
+
+.hour-marker {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+// Day rows
+.timeline-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--color-border);
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &.inactive {
+    opacity: 0.5;
+  }
+}
+
+.timeline-label {
+  width: 40px;
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+
+  @media (min-width: 768px) {
+    width: 80px;
+  }
+}
+
+.day-full {
+  display: none;
+
+  @media (min-width: 768px) {
+    display: block;
+  }
+}
+
+.day-short {
+  display: block;
+
+  @media (min-width: 768px) {
+    display: none;
+  }
+}
+
+.timeline-toggle {
+  width: 50px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+}
+
+// Timeline track (the bar area)
+.timeline-track {
+  flex: 1;
+  height: 36px;
+  background: var(--color-background);
+  border-radius: 6px;
+  position: relative;
+  cursor: pointer;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+}
+
+.time-bar {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 4px;
+  background: var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s ease;
+  min-width: 60px;
+
+  &:hover {
+    opacity: 0.9;
+  }
+
+  &.editing {
+    background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+    border: 1px dashed var(--color-primary);
+  }
+}
+
+.bar-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  white-space: nowrap;
+  padding: 0 8px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.edit-overlay {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  z-index: 2;
+}
+
+.time-input {
+  width: 70px;
+  padding: 2px 4px;
+  border: 1px solid var(--color-primary);
+  border-radius: 4px;
+  font-size: 12px;
+  text-align: center;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  outline: none;
+}
+
+.edit-separator {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.inactive-bar {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  span {
+    font-size: 11px;
+    color: var(--color-text-muted);
+    font-style: italic;
+  }
+}
+
+.save-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+// Mobile: stack vertically
+@media (max-width: 639px) {
+  .timeline-header {
+    display: none;
+  }
+
+  .timeline-row {
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px 0;
+  }
+
+  .timeline-label {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .timeline-toggle {
+    width: auto;
+  }
+
+  .timeline-track {
+    width: 100%;
+    height: 40px;
+  }
+
+  .quick-actions {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+}

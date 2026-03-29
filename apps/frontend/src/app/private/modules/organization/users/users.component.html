@@ -49,9 +49,13 @@
     </div>
 
     <!-- Empty State -->
-    <app-user-empty-state *ngIf="!isLoading && users.length === 0" [title]="getEmptyStateTitle()"
-      [description]="getEmptyStateDescription()" (actionClick)="createUser()">
-    </app-user-empty-state>
+    <app-empty-state *ngIf="!isLoading && users.length === 0"
+      icon="users"
+      [title]="getEmptyStateTitle()"
+      [description]="getEmptyStateDescription()"
+      actionButtonText="Crear Primer Usuario"
+      (actionClick)="createUser()">
+    </app-empty-state>
 
     <!-- Responsive Data View -->
     <app-responsive-data-view *ngIf="users.length > 0" [data]="users" [columns]="tableColumns" [actions]="tableActions"

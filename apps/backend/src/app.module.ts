@@ -30,6 +30,9 @@ import { HelpersModule } from './common/helpers/helpers.module';
 import { DomainResolverMiddleware } from './common/middleware/domain-resolver.middleware';
 import { AIEngineModule } from './ai-engine/ai-engine.module';
 import { EncryptionModule } from './common/services/encryption.module';
+import { RedisModule } from './common/redis/redis.module';
+import { QueueModule } from './common/queue/queue.module';
+import { VendixCacheModule } from './common/cache/cache.module';
 
 @Module({
   imports: [
@@ -50,6 +53,9 @@ import { EncryptionModule } from './common/services/encryption.module';
     DefaultPanelUIModule,
     HelpersModule,
     JobsModule,
+    RedisModule,
+    QueueModule,
+    VendixCacheModule,
     AIEngineModule,
     EncryptionModule,
   ],

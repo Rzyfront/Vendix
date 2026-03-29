@@ -50,6 +50,20 @@ export const ECOMMERCE_ROUTES: Routes = [
                         (m) => m.OrderDetailComponent,
                     ),
             },
+            {
+                path: 'book/:productId',
+                loadComponent: () =>
+                    import('./pages/booking/booking.component').then(
+                        (m) => m.BookingComponent,
+                    ),
+            },
+            {
+                path: 'account/reservations',
+                loadComponent: () =>
+                    import('./pages/my-reservations/my-reservations.component').then(
+                        (m) => m.MyReservationsComponent,
+                    ),
+            },
         ],
     },
 ];

@@ -1,17 +1,7 @@
 ---
-name: vendix-notifications-system
-description: >
-  Real-time notifications system: SSE streaming, event-driven creation, NgRx state, subscriptions, and extension guide.
-  Trigger: When working with notifications, SSE connections, event listeners, or adding new notification types.
-license: Apache-2.0
-metadata:
-  author: rzyfront
-  version: "1.0"
-  scope: [root]
-  auto_invoke: "Working with notifications, SSE, or adding new event-driven alerts"
----
-
 # Vendix Notifications System
+
+> **Tip**: Antes de usar notifications-dropdown, consulta su README en `apps/frontend/src/app/shared/components/notifications-dropdown/README.md` para conocer sus inputs, outputs y patrones de suscripcion.
 
 > **Full-stack real-time notifications** - Event-driven backend (NestJS + EventEmitter + SSE) with NgRx-powered frontend (Angular).
 

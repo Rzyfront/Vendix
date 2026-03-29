@@ -4,6 +4,7 @@ import { Store } from '@ngrx/store';
 import { Observable, map } from 'rxjs';
 
 import { JournalEntry } from '../../interfaces/accounting.interface';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import {
   selectEntries,
   selectEntriesLoading,
@@ -14,6 +15,7 @@ import * as AccountingActions from '../../state/actions/accounting.actions';
 import { JournalEntryCreateComponent } from './journal-entry-create/journal-entry-create.component';
 import { JournalEntryDetailComponent } from './journal-entry-detail/journal-entry-detail.component';
 import {
+  CardComponent,
   InputsearchComponent,
   StatsComponent,
   ResponsiveDataViewComponent,
@@ -39,6 +41,7 @@ interface EntryStats {
   standalone: true,
   imports: [
     CommonModule,
+    CardComponent,
     InputsearchComponent,
     StatsComponent,
     ResponsiveDataViewComponent,
@@ -49,13 +52,15 @@ interface EntryStats {
   ],
   template: `
     <div class="w-full">
-
       <!-- Stats: Sticky on mobile, static on desktop -->
-      <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         @if (stats$ | async; as stats) {
           <app-stats
             title="Total Asientos"
             [value]="stats.total"
+            smallText="Registros en el período"
             iconName="file-text"
             iconBgColor="bg-blue-100"
             iconColor="text-blue-600"
@@ -64,6 +69,7 @@ interface EntryStats {
           <app-stats
             title="Borradores"
             [value]="stats.draft"
+            smallText="Pendientes de contabilizar"
             iconName="edit"
             iconBgColor="bg-amber-100"
             iconColor="text-amber-600"
@@ -72,6 +78,7 @@ interface EntryStats {
           <app-stats
             title="Contabilizados"
             [value]="stats.posted"
+            smallText="Registrados en libros"
             iconName="check-circle"
             iconBgColor="bg-emerald-100"
             iconColor="text-emerald-600"
@@ -80,6 +87,7 @@ interface EntryStats {
           <app-stats
             title="Anulados"
             [value]="stats.voided"
+            smallText="Asientos revertidos"
             iconName="x-circle"
             iconBgColor="bg-red-100"
             iconColor="text-red-600"
@@ -89,15 +97,19 @@ interface EntryStats {
       </div>
 
       <!-- Unified Container: Search Header + Data -->
-      <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-                  md:border md:border-border">
-
+      <app-card [responsive]="true" [padding]="false">
         <!-- Search Header -->
-        <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                    md:mt-0 md:static md:bg-transparent md:px-4 md:py-4 md:border-b md:border-border">
-          <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-            <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
-                       md:text-lg md:font-semibold md:text-text-primary">
+        <div
+          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                    md:mt-0 md:static md:bg-transparent md:px-4 md:py-4 md:border-b md:border-border"
+        >
+          <div
+            class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+          >
+            <h2
+              class="text-[13px] font-bold text-gray-600 tracking-wide
+                       md:text-lg md:font-semibold md:text-text-primary"
+            >
               Asientos Contables ({{ (entries$ | async)?.length || 0 }})
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
@@ -145,7 +157,7 @@ interface EntryStats {
             }
           }
         </div>
-      </div>
+      </app-card>
 
       <!-- Create Modal -->
       <vendix-journal-entry-create
@@ -162,6 +174,7 @@ interface EntryStats {
 })
 export class JournalEntriesComponent implements OnInit {
   private store = inject(Store);
+  private currencyService = inject(CurrencyFormatService);
 
   entries$: Observable<JournalEntry[]> = this.store.select(selectEntries);
   loading$: Observable<boolean> = this.store.select(selectEntriesLoading);
@@ -198,7 +211,12 @@ export class JournalEntriesComponent implements OnInit {
   ];
 
   dropdown_actions: DropdownAction[] = [
-    { label: 'Nuevo Asiento', icon: 'plus', action: 'create', variant: 'primary' },
+    {
+      label: 'Nuevo Asiento',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   table_actions: TableAction[] = [
@@ -212,15 +230,36 @@ export class JournalEntriesComponent implements OnInit {
 
   columns: TableColumn[] = [
     { key: 'entry_number', label: 'Número', sortable: true, priority: 1 },
-    { key: 'entry_date', label: 'Fecha', sortable: true, priority: 1,
-      transform: (val: any) => val ? new Date(val).toLocaleDateString() : '' },
+    {
+      key: 'entry_date',
+      label: 'Fecha',
+      sortable: true,
+      priority: 1,
+      transform: (val: any) => (val ? new Date(val).toLocaleDateString() : ''),
+    },
     { key: 'entry_type', label: 'Tipo', priority: 2 },
     { key: 'description', label: 'Descripción', sortable: true, priority: 2 },
-    { key: 'total_debit', label: 'Débito', sortable: true, align: 'right', priority: 1,
-      transform: (val: any) => val ? `$${Number(val).toFixed(2)}` : '$0.00' },
-    { key: 'total_credit', label: 'Crédito', sortable: true, align: 'right', priority: 1,
-      transform: (val: any) => val ? `$${Number(val).toFixed(2)}` : '$0.00' },
-    { key: 'status', label: 'Estado', align: 'center', priority: 1,
+    {
+      key: 'total_debit',
+      label: 'Débito',
+      sortable: true,
+      align: 'right',
+      priority: 1,
+      transform: (val: any) => this.currencyService.format(Number(val) || 0),
+    },
+    {
+      key: 'total_credit',
+      label: 'Crédito',
+      sortable: true,
+      align: 'right',
+      priority: 1,
+      transform: (val: any) => this.currencyService.format(Number(val) || 0),
+    },
+    {
+      key: 'status',
+      label: 'Estado',
+      align: 'center',
+      priority: 1,
       badge: true,
       badgeConfig: {
         type: 'status',
@@ -245,10 +284,15 @@ export class JournalEntriesComponent implements OnInit {
     footerKey: 'total_debit',
     footerLabel: 'Total',
     footerStyle: 'prominent',
-    footerTransform: (val: any) => `$${Number(val).toFixed(2)}`,
+    footerTransform: (val: any) => this.currencyService.format(Number(val) || 0),
     detailKeys: [
-      { key: 'entry_date', label: 'Fecha', icon: 'calendar',
-        transform: (val: any) => val ? new Date(val).toLocaleDateString() : '-' },
+      {
+        key: 'entry_date',
+        label: 'Fecha',
+        icon: 'calendar',
+        transform: (val: any) =>
+          val ? new Date(val).toLocaleDateString() : '-',
+      },
       { key: 'entry_type', label: 'Tipo', icon: 'tag' },
     ],
   };

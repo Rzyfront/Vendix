@@ -24,7 +24,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
     <div
       *ngIf="isOpen"
       class="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-      (click)="onWrapperClick($event)"
+      (dblclick)="onWrapperClick($event)"
     >
       <!-- Backdrop overlay con blur y oscuridad mejorada -->
       <div
@@ -45,7 +45,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
       >
         <!-- Modal content con diseño mejorado -->
         <div
-          class="bg-[var(--color-surface)] rounded-[var(--radius-lg)] shadow-[var(--shadow-xl)] overflow-hidden flex flex-col max-h-[90vh] border border-[var(--color-border)] backdrop-blur-sm"
+          class="bg-[var(--color-surface)] rounded-[var(--radius-lg)] shadow-xl overflow-hidden flex flex-col max-h-[90vh] border border-[var(--color-border)] backdrop-blur-sm"
         >
           <!-- Header con gradiente sutil -->
           <div

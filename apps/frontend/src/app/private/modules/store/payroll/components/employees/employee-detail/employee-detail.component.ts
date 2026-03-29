@@ -147,12 +147,10 @@ import { SelectorComponent, SelectorOption } from '../../../../../../../shared/c
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <app-input
                 label="Salario Base"
-                type="number"
+                [currency]="true"
                 formControlName="base_salary"
                 [control]="employeeForm.get('base_salary')"
                 [required]="true"
-                min="0"
-                step="1000"
                 [prefixIcon]="true"
               >
                 <span slot="prefix-icon" class="text-text-secondary">$</span>

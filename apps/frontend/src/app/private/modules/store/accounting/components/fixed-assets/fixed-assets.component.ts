@@ -5,6 +5,7 @@ import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
 import { AccountingService } from '../../services/accounting.service';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import {
   FixedAsset,
   FixedAssetCategory,
@@ -15,6 +16,7 @@ import { FixedAssetDetailModalComponent } from './fixed-asset-detail-modal/fixed
 import { FixedAssetCategoriesModalComponent } from './fixed-asset-categories-modal/fixed-asset-categories-modal.component';
 import {
   ButtonComponent,
+  CardComponent,
   IconComponent,
   StatsComponent,
   InputsearchComponent,
@@ -38,6 +40,7 @@ interface AssetStats {
     FixedAssetDetailModalComponent,
     FixedAssetCategoriesModalComponent,
     ButtonComponent,
+    CardComponent,
     IconComponent,
     StatsComponent,
     InputsearchComponent,
@@ -45,9 +48,10 @@ interface AssetStats {
   ],
   template: `
     <div class="w-full">
-
       <!-- Stats: Sticky on mobile, static on desktop -->
-      <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         <app-stats
           title="Total Activos"
           [value]="stats.total"
@@ -83,15 +87,19 @@ interface AssetStats {
       </div>
 
       <!-- Unified Container: Search Header + Data -->
-      <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-                  md:border md:border-border md:min-h-[400px]">
-
+      <app-card [responsive]="true" [padding]="false" customClasses="md:min-h-[400px]">
         <!-- Search Header -->
-        <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                    md:mt-0 md:static md:bg-transparent md:px-4 md:py-4 md:border-b md:border-border">
-          <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-            <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
-                       md:text-lg md:font-semibold md:text-text-primary">
+        <div
+          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                    md:mt-0 md:static md:bg-transparent md:px-4 md:py-4 md:border-b md:border-border"
+        >
+          <div
+            class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+          >
+            <h2
+              class="text-[13px] font-bold text-gray-600 tracking-wide
+                       md:text-lg md:font-semibold md:text-text-primary"
+            >
               Activos Fijos ({{ filtered_assets.length }})
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
@@ -110,17 +118,33 @@ interface AssetStats {
                 (valueChange)="onFilterStatus($event)"
               ></app-selector>
 
-              <app-button variant="outline" size="sm" (clicked)="openCategoriesModal()">
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="openCategoriesModal()"
+              >
                 <app-icon name="tag" [size]="16" slot="icon"></app-icon>
                 <span class="hidden sm:inline">Categorias</span>
               </app-button>
 
-              <app-button variant="outline" size="sm" (clicked)="openDepreciationDialog()">
-                <app-icon name="trending-down" [size]="16" slot="icon"></app-icon>
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="openDepreciationDialog()"
+              >
+                <app-icon
+                  name="trending-down"
+                  [size]="16"
+                  slot="icon"
+                ></app-icon>
                 <span class="hidden sm:inline">Depreciar</span>
               </app-button>
 
-              <app-button variant="primary" size="sm" (clicked)="openCreateModal()">
+              <app-button
+                variant="primary"
+                size="sm"
+                (clicked)="openCreateModal()"
+              >
                 <app-icon name="plus" [size]="16" slot="icon"></app-icon>
                 <span class="hidden sm:inline">Nuevo Activo</span>
                 <span class="sm:hidden">Nuevo</span>
@@ -132,14 +156,20 @@ interface AssetStats {
         <!-- Data Content -->
         <div class="relative p-2 md:p-4">
           @if (is_loading) {
-            <div class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
-              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <div
+              class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+            >
+              <div
+                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+              ></div>
             </div>
           }
 
           <!-- Table Header (desktop) -->
-          <div class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-3 bg-gray-50 rounded-lg
-                      text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+          <div
+            class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-3 bg-gray-50 rounded-lg
+                      text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1"
+          >
             <div class="col-span-1">N.o</div>
             <div class="col-span-2">Nombre</div>
             <div class="col-span-2">Categoria</div>
@@ -151,60 +181,131 @@ interface AssetStats {
           </div>
 
           @if (filtered_assets.length === 0 && !is_loading) {
-            <div class="flex flex-col items-center justify-center py-16 text-gray-400">
+            <div
+              class="flex flex-col items-center justify-center py-16 text-gray-400"
+            >
               <app-icon name="package" [size]="48"></app-icon>
               <p class="mt-4 text-base">No se encontraron activos fijos</p>
-              <p class="text-sm">{{ search_term ? 'Intenta con otro termino de busqueda.' : 'Crea tu primer activo fijo para comenzar.' }}</p>
+              <p class="text-sm">
+                {{
+                  search_term
+                    ? 'Intenta con otro termino de busqueda.'
+                    : 'Crea tu primer activo fijo para comenzar.'
+                }}
+              </p>
             </div>
           } @else {
             <div class="divide-y divide-border">
               @for (asset of filtered_assets; track asset.id) {
                 <!-- Mobile Card -->
-                <div class="md:hidden p-3 mx-2 my-1 bg-surface rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]"
-                     (click)="openDetailModal(asset)">
+                <div
+                  class="md:hidden p-3 mx-2 my-1 bg-surface rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]"
+                  (click)="openDetailModal(asset)"
+                >
                   <div class="flex items-center justify-between">
                     <div class="min-w-0">
                       <div class="flex items-center gap-2">
-                        <span class="text-xs font-mono text-gray-500">{{ asset.asset_number }}</span>
-                        <span class="text-[15px] font-bold text-text-primary truncate">{{ asset.name }}</span>
+                        <span class="text-xs font-mono text-gray-500">{{
+                          asset.asset_number
+                        }}</span>
+                        <span
+                          class="text-[15px] font-bold text-text-primary truncate"
+                          >{{ asset.name }}</span
+                        >
                       </div>
                       <div class="flex items-center gap-2 mt-1">
                         @if (asset.category) {
-                          <span class="text-[10px] font-bold uppercase text-gray-500 px-1.5 py-0.5 rounded bg-gray-100">{{ asset.category.name }}</span>
+                          <span
+                            class="text-[10px] font-bold uppercase text-gray-500 px-1.5 py-0.5 rounded bg-gray-100"
+                            >{{ asset.category.name }}</span
+                          >
                         }
-                        <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded"
-                              [class]="getStatusClass(asset.status)">
+                        <span
+                          class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded"
+                          [class]="getStatusClass(asset.status)"
+                        >
                           {{ getStatusLabel(asset.status) }}
                         </span>
                       </div>
-                      <div class="flex items-center gap-4 mt-2 text-xs text-gray-500">
-                        <span>Costo: {{ asset.acquisition_cost | currency:'COP':'symbol-narrow':'1.0-0' }}</span>
-                        <span class="font-semibold text-text-primary">VL: {{ (asset.book_value ?? 0) | currency:'COP':'symbol-narrow':'1.0-0' }}</span>
+                      <div
+                        class="flex items-center gap-4 mt-2 text-xs text-gray-500"
+                      >
+                        <span
+                          >Costo:
+                          {{
+                            asset.acquisition_cost
+                              | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                          }}</span
+                        >
+                        <span class="font-semibold text-text-primary"
+                          >VL:
+                          {{
+                            asset.book_value ?? 0
+                              | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                          }}</span
+                        >
                       </div>
                     </div>
-                    <app-icon name="chevron-right" [size]="16" class="text-gray-400 ml-2"></app-icon>
+                    <app-icon
+                      name="chevron-right"
+                      [size]="16"
+                      class="text-gray-400 ml-2"
+                    ></app-icon>
                   </div>
                 </div>
 
                 <!-- Desktop Row -->
-                <div class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-gray-50 transition-colors cursor-pointer"
-                     (click)="openDetailModal(asset)">
-                  <div class="col-span-1 text-sm font-mono text-gray-600">{{ asset.asset_number }}</div>
-                  <div class="col-span-2 text-sm text-text-primary font-medium truncate">{{ asset.name }}</div>
-                  <div class="col-span-2 text-xs text-gray-500">{{ asset.category?.name || '—' }}</div>
-                  <div class="col-span-2 text-sm text-right font-mono">{{ asset.acquisition_cost | currency:'COP':'symbol-narrow':'1.0-0' }}</div>
-                  <div class="col-span-2 text-sm text-right font-mono text-red-500">{{ asset.accumulated_depreciation | currency:'COP':'symbol-narrow':'1.0-0' }}</div>
-                  <div class="col-span-1 text-sm text-right font-mono font-semibold">{{ (asset.book_value ?? 0) | currency:'COP':'symbol-narrow':'1.0-0' }}</div>
+                <div
+                  class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-gray-50 transition-colors cursor-pointer"
+                  (click)="openDetailModal(asset)"
+                >
+                  <div class="col-span-1 text-sm font-mono text-gray-600">
+                    {{ asset.asset_number }}
+                  </div>
+                  <div
+                    class="col-span-2 text-sm text-text-primary font-medium truncate"
+                  >
+                    {{ asset.name }}
+                  </div>
+                  <div class="col-span-2 text-xs text-gray-500">
+                    {{ asset.category?.name || '—' }}
+                  </div>
+                  <div class="col-span-2 text-sm text-right font-mono">
+                    {{
+                      asset.acquisition_cost
+                        | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                    }}
+                  </div>
+                  <div
+                    class="col-span-2 text-sm text-right font-mono text-red-500"
+                  >
+                    {{
+                      asset.accumulated_depreciation
+                        | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                    }}
+                  </div>
+                  <div
+                    class="col-span-1 text-sm text-right font-mono font-semibold"
+                  >
+                    {{
+                      asset.book_value ?? 0
+                        | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                    }}
+                  </div>
                   <div class="col-span-1 text-center">
-                    <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
-                          [class]="getStatusClass(asset.status)">
+                    <span
+                      class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
+                      [class]="getStatusClass(asset.status)"
+                    >
                       {{ getStatusLabel(asset.status) }}
                     </span>
                   </div>
                   <div class="col-span-1 flex items-center justify-end gap-1">
                     @if (asset.status === 'active') {
-                      <button (click)="openEditModal(asset); $event.stopPropagation()"
-                              class="p-1.5 hover:bg-gray-100 rounded text-gray-500 hover:text-primary">
+                      <button
+                        (click)="openEditModal(asset); $event.stopPropagation()"
+                        class="p-1.5 hover:bg-gray-100 rounded text-gray-500 hover:text-primary"
+                      >
                         <app-icon name="edit" [size]="14"></app-icon>
                       </button>
                     }
@@ -214,28 +315,47 @@ interface AssetStats {
             </div>
           }
         </div>
-      </div>
+      </app-card>
 
       <!-- Depreciation Run Dialog -->
       @if (show_depreciation_dialog) {
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" (click)="show_depreciation_dialog = false">
-          <div class="bg-surface rounded-xl shadow-xl p-6 w-full max-w-sm mx-4" (click)="$event.stopPropagation()">
-            <h3 class="text-lg font-semibold text-text-primary mb-4">Ejecutar Depreciacion</h3>
-            <p class="text-sm text-gray-500 mb-4">Selecciona el periodo para ejecutar la depreciacion mensual de todos los activos activos.</p>
+        <div
+          class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          (click)="show_depreciation_dialog = false"
+        >
+          <div
+            class="bg-surface rounded-xl shadow-xl p-6 w-full max-w-sm mx-4"
+            (click)="$event.stopPropagation()"
+          >
+            <h3 class="text-lg font-semibold text-text-primary mb-4">
+              Ejecutar Depreciacion
+            </h3>
+            <p class="text-sm text-gray-500 mb-4">
+              Selecciona el periodo para ejecutar la depreciacion mensual de
+              todos los activos activos.
+            </p>
             <div class="grid grid-cols-2 gap-3 mb-6">
               <div>
-                <label class="text-xs font-medium text-gray-600 mb-1 block">Anio</label>
-                <select [(ngModel)]="depreciation_year"
-                        class="w-full rounded-lg border border-border px-3 py-2 text-sm bg-surface">
+                <label class="text-xs font-medium text-gray-600 mb-1 block"
+                  >Anio</label
+                >
+                <select
+                  [(ngModel)]="depreciation_year"
+                  class="w-full rounded-lg border border-border px-3 py-2 text-sm bg-surface"
+                >
                   @for (y of available_years; track y) {
                     <option [value]="y">{{ y }}</option>
                   }
                 </select>
               </div>
               <div>
-                <label class="text-xs font-medium text-gray-600 mb-1 block">Mes</label>
-                <select [(ngModel)]="depreciation_month"
-                        class="w-full rounded-lg border border-border px-3 py-2 text-sm bg-surface">
+                <label class="text-xs font-medium text-gray-600 mb-1 block"
+                  >Mes</label
+                >
+                <select
+                  [(ngModel)]="depreciation_month"
+                  class="w-full rounded-lg border border-border px-3 py-2 text-sm bg-surface"
+                >
                   @for (m of months; track m.value) {
                     <option [value]="m.value">{{ m.label }}</option>
                   }
@@ -243,8 +363,16 @@ interface AssetStats {
               </div>
             </div>
             <div class="flex justify-end gap-3">
-              <app-button variant="outline" (clicked)="show_depreciation_dialog = false">Cancelar</app-button>
-              <app-button variant="primary" (clicked)="runDepreciation()" [loading]="is_running_depreciation">
+              <app-button
+                variant="outline"
+                (clicked)="show_depreciation_dialog = false"
+                >Cancelar</app-button
+              >
+              <app-button
+                variant="primary"
+                (clicked)="runDepreciation()"
+                [loading]="is_running_depreciation"
+              >
                 Ejecutar
               </app-button>
             </div>
@@ -279,6 +407,7 @@ interface AssetStats {
 export class FixedAssetsComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
   private accounting_service = inject(AccountingService);
+  private currencyService = inject(CurrencyFormatService);
 
   // Data
   assets: FixedAsset[] = [];
@@ -295,7 +424,7 @@ export class FixedAssetsComponent implements OnInit, OnDestroy {
   };
 
   get formatted_book_value(): string {
-    return '$' + this.stats.total_book_value.toLocaleString('es-CO', { maximumFractionDigits: 0 });
+    return this.currencyService.format(this.stats.total_book_value || 0);
   }
 
   // Filters
@@ -388,8 +517,13 @@ export class FixedAssetsComponent implements OnInit, OnDestroy {
     this.stats = {
       total: this.assets.length,
       active: this.assets.filter((a) => a.status === 'active').length,
-      fully_depreciated: this.assets.filter((a) => a.status === 'fully_depreciated').length,
-      total_book_value: this.assets.reduce((sum, a) => sum + (a.book_value ?? 0), 0),
+      fully_depreciated: this.assets.filter(
+        (a) => a.status === 'fully_depreciated',
+      ).length,
+      total_book_value: this.assets.reduce(
+        (sum, a) => sum + (a.book_value ?? 0),
+        0,
+      ),
     };
   }
 
@@ -450,7 +584,10 @@ export class FixedAssetsComponent implements OnInit, OnDestroy {
   runDepreciation(): void {
     this.is_running_depreciation = true;
     this.accounting_service
-      .runDepreciation({ year: this.depreciation_year, month: this.depreciation_month })
+      .runDepreciation({
+        year: this.depreciation_year,
+        month: this.depreciation_month,
+      })
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {

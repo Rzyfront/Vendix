@@ -13,6 +13,8 @@ metadata:
   auto_invoke: "Implementing stats cards or dashboard metrics with mobile scroll"
 ---
 
+> **Tip**: Antes de usar StatsComponent, consulta su README en `apps/frontend/src/app/shared/components/stats/README.md` para conocer sus inputs, outputs y patrones de uso.
+
 ## When to Use
 
 - Creating stats/KPI cards in any admin module (STORE_ADMIN, ORG_ADMIN, SUPER_ADMIN)
@@ -114,15 +116,17 @@ In standard admin modules, stats cards should be sticky on mobile:
 
 ### 4. StatsComponent Props
 
-| Prop          | Type               | Default           | Description                       |
-| ------------- | ------------------ | ----------------- | --------------------------------- |
-| `title`       | `string`           | required          | Card title (e.g., "Orders")       |
-| `value`       | `string \| number` | `''`              | Main value (formatted)            |
-| `smallText`   | `string`           | optional          | Secondary text (e.g., growth rate)|
-| `iconName`    | `string`           | `'info'`          | Lucide icon name                  |
-| `iconBgColor` | `string`           | `'bg-primary/10'` | Tailwind bg class                 |
-| `iconColor`   | `string`           | `'text-primary'`  | Tailwind text class               |
-| `clickable`   | `boolean`          | `true`            | Enable hover effects              |
+| Prop          | Type               | Default           | Description                        |
+| ------------- | ------------------ | ----------------- | ---------------------------------- |
+| `title`       | `string`           | required          | Card title (e.g., "Orders")        |
+| `value`       | `string \| number` | `''`              | Main value (formatted)             |
+| `smallText`   | `string`           | optional          | Secondary text (e.g., growth rate) |
+| `iconName`    | `string`           | `'info'`          | Lucide icon name                   |
+| `iconBgColor` | `string`           | `'bg-primary/10'` | Tailwind bg class                  |
+| `iconColor`   | `string`           | `'text-primary'`  | Tailwind text class                |
+| `clickable`   | `boolean`          | `true`            | Enable hover effects               |
+
+> **REGLA OBLIGATORIA**: `smallText` es OBLIGATORIO en toda instancia de `app-stats`. Puede ser un valor calculado (ej: "+15% vs mes anterior") o un texto informativo (ej: "Productos incluidos", "Fecha acordada"). Nunca dejar una stat card sin `smallText`.
 
 ### 5. Color Palette (Standard)
 
@@ -423,7 +427,7 @@ getGrowthText(rate?: number): string {
 - [ ] Use `stats-container` class on parent div (NOT grid classes)
 - [ ] Maximum 4 stats cards per row (standard)
 - [ ] Use consistent color palette (see table above)
-- [ ] Include `smallText` for growth/comparison metrics
+- [ ] **OBLIGATORIO**: Incluir `smallText` en TODA instancia de `app-stats` (calculado o informativo)
 - [ ] Format large numbers with K/M suffixes
 - [ ] Test horizontal scroll on mobile viewport
 - [ ] Verify cards are swipeable with snap behavior on mobile

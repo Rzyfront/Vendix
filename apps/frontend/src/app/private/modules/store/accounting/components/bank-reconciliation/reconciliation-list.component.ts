@@ -4,18 +4,22 @@ import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import {
   ButtonComponent,
+  CardComponent,
+  DialogService,
   IconComponent,
-  StatsComponent,
+  InputComponent,
   InputsearchComponent,
   ModalComponent,
-  InputComponent,
   SelectorComponent,
-  DialogService,
+  StatsComponent,
   ToastService,
 } from '../../../../../../shared/components';
 import type { SelectorOption } from '../../../../../../shared/components';
 import { BankReconciliationService } from '../../services/bank-reconciliation.service';
-import { BankAccount, BankReconciliation } from '../../interfaces/accounting.interface';
+import {
+  BankAccount,
+  BankReconciliation,
+} from '../../interfaces/accounting.interface';
 
 @Component({
   selector: 'vendix-reconciliation-list',
@@ -24,6 +28,7 @@ import { BankAccount, BankReconciliation } from '../../interfaces/accounting.int
     CommonModule,
     FormsModule,
     ButtonComponent,
+    CardComponent,
     IconComponent,
     StatsComponent,
     InputsearchComponent,
@@ -35,9 +40,10 @@ import { BankAccount, BankReconciliation } from '../../interfaces/accounting.int
   ],
   template: `
     <div class="w-full">
-
       <!-- Stats -->
-      <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         <app-stats
           title="Total"
           [value]="stats().total"
@@ -73,19 +79,26 @@ import { BankAccount, BankReconciliation } from '../../interfaces/accounting.int
       </div>
 
       <!-- Container -->
-      <div class="md:bg-surface md:rounded-xl md:shadow-[0_2px_8px_rgba(0,0,0,0.07)]
-                  md:border md:border-border md:min-h-[400px]">
-
+      <app-card [responsive]="true" [padding]="false" customClasses="md:min-h-[400px]">
         <!-- Search Header -->
-        <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                    md:mt-0 md:static md:bg-transparent md:px-4 md:py-4 md:border-b md:border-border">
-          <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
+        <div
+          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                    md:mt-0 md:static md:bg-transparent md:px-4 md:py-4 md:border-b md:border-border"
+        >
+          <div
+            class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+          >
             <div class="flex items-center gap-2">
-              <button (click)="goBack()" class="p-1.5 hover:bg-gray-100 rounded text-gray-500">
+              <button
+                (click)="goBack()"
+                class="p-1.5 hover:bg-gray-100 rounded text-gray-500"
+              >
                 <app-icon name="arrow-left" [size]="18"></app-icon>
               </button>
-              <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
-                         md:text-lg md:font-semibold md:text-text-primary">
+              <h2
+                class="text-[13px] font-bold text-gray-600 tracking-wide
+                         md:text-lg md:font-semibold md:text-text-primary"
+              >
                 Conciliaciones ({{ filteredReconciliations().length }})
               </h2>
             </div>
@@ -96,7 +109,11 @@ import { BankAccount, BankReconciliation } from '../../interfaces/accounting.int
                 [debounceTime]="300"
                 (searchChange)="onSearch($event)"
               ></app-inputsearch>
-              <app-button variant="primary" size="sm" (clicked)="openCreateModal()">
+              <app-button
+                variant="primary"
+                size="sm"
+                (clicked)="openCreateModal()"
+              >
                 <app-icon name="plus" [size]="16" slot="icon"></app-icon>
                 <span class="hidden sm:inline">Nueva Conciliacion</span>
                 <span class="sm:hidden">Nueva</span>
@@ -108,14 +125,20 @@ import { BankAccount, BankReconciliation } from '../../interfaces/accounting.int
         <!-- Data -->
         <div class="relative p-2 md:p-4">
           @if (loading()) {
-            <div class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
-              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <div
+              class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+            >
+              <div
+                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+              ></div>
             </div>
           }
 
           <!-- Table Header (desktop) -->
-          <div class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-3 bg-gray-50 rounded-lg
-                      text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+          <div
+            class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-3 bg-gray-50 rounded-lg
+                      text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1"
+          >
             <div class="col-span-2">Cuenta</div>
             <div class="col-span-2">Periodo</div>
             <div class="col-span-2 text-right">Saldo Extracto</div>
@@ -126,7 +149,9 @@ import { BankAccount, BankReconciliation } from '../../interfaces/accounting.int
           </div>
 
           @if (filteredReconciliations().length === 0) {
-            <div class="flex flex-col items-center justify-center py-16 text-gray-400">
+            <div
+              class="flex flex-col items-center justify-center py-16 text-gray-400"
+            >
               <app-icon name="git-merge" [size]="48"></app-icon>
               <p class="mt-4 text-base">No se encontraron conciliaciones</p>
               <p class="text-sm">Crea tu primera conciliacion para comenzar.</p>
@@ -135,61 +160,120 @@ import { BankAccount, BankReconciliation } from '../../interfaces/accounting.int
             <div class="divide-y divide-border">
               @for (rec of filteredReconciliations(); track rec.id) {
                 <!-- Mobile Card -->
-                <div class="md:hidden p-3 mx-2 my-1 bg-surface rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] cursor-pointer"
-                     (click)="openWorkspace(rec)">
+                <div
+                  class="md:hidden p-3 mx-2 my-1 bg-surface rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] cursor-pointer"
+                  (click)="openWorkspace(rec)"
+                >
                   <div class="flex items-center justify-between">
                     <div class="min-w-0 flex-1">
                       <div class="flex items-center gap-2">
-                        <span class="text-[15px] font-bold text-text-primary truncate">
-                          {{ rec.bank_account?.name || 'Cuenta #' + rec.bank_account_id }}
+                        <span
+                          class="text-[15px] font-bold text-text-primary truncate"
+                        >
+                          {{
+                            rec.bank_account?.name ||
+                              'Cuenta #' + rec.bank_account_id
+                          }}
                         </span>
-                        <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded"
-                              [class]="getStatusClasses(rec.status)">
+                        <span
+                          class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded"
+                          [class]="getStatusClasses(rec.status)"
+                        >
                           {{ getStatusLabel(rec.status) }}
                         </span>
                       </div>
                       <div class="text-xs text-gray-500 mt-1">
-                        {{ rec.period_start | date:'dd/MM/yyyy' }} - {{ rec.period_end | date:'dd/MM/yyyy' }}
+                        {{ rec.period_start | date: 'dd/MM/yyyy' }} -
+                        {{ rec.period_end | date: 'dd/MM/yyyy' }}
                       </div>
                       <div class="flex items-center gap-3 mt-1">
-                        <span class="text-xs text-gray-500">Extracto:
-                          <span class="font-semibold text-text-primary">{{ rec.statement_balance | currency:'COP':'symbol-narrow':'1.0-0' }}</span>
+                        <span class="text-xs text-gray-500"
+                          >Extracto:
+                          <span class="font-semibold text-text-primary">{{
+                            rec.statement_balance
+                              | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                          }}</span>
                         </span>
-                        <span class="text-xs" [class]="rec.difference === 0 ? 'text-emerald-600' : 'text-red-500'">
-                          Dif: {{ rec.difference | currency:'COP':'symbol-narrow':'1.0-0' }}
+                        <span
+                          class="text-xs"
+                          [class]="
+                            rec.difference === 0
+                              ? 'text-emerald-600'
+                              : 'text-red-500'
+                          "
+                        >
+                          Dif:
+                          {{
+                            rec.difference
+                              | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                          }}
                         </span>
                       </div>
                     </div>
-                    <app-icon name="chevron-right" [size]="18" class="text-gray-400 ml-2"></app-icon>
+                    <app-icon
+                      name="chevron-right"
+                      [size]="18"
+                      class="text-gray-400 ml-2"
+                    ></app-icon>
                   </div>
                 </div>
 
                 <!-- Desktop Row -->
-                <div class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-gray-50 transition-colors cursor-pointer"
-                     (click)="openWorkspace(rec)">
-                  <div class="col-span-2 text-sm text-text-primary font-medium truncate">
-                    {{ rec.bank_account?.name || 'Cuenta #' + rec.bank_account_id }}
+                <div
+                  class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-gray-50 transition-colors cursor-pointer"
+                  (click)="openWorkspace(rec)"
+                >
+                  <div
+                    class="col-span-2 text-sm text-text-primary font-medium truncate"
+                  >
+                    {{
+                      rec.bank_account?.name || 'Cuenta #' + rec.bank_account_id
+                    }}
                   </div>
                   <div class="col-span-2 text-sm text-gray-600">
-                    {{ rec.period_start | date:'dd/MM/yyyy' }} - {{ rec.period_end | date:'dd/MM/yyyy' }}
+                    {{ rec.period_start | date: 'dd/MM/yyyy' }} -
+                    {{ rec.period_end | date: 'dd/MM/yyyy' }}
                   </div>
-                  <div class="col-span-2 text-sm text-right font-mono text-gray-700">
-                    {{ rec.statement_balance | currency:'COP':'symbol-narrow':'1.0-0' }}
+                  <div
+                    class="col-span-2 text-sm text-right font-mono text-gray-700"
+                  >
+                    {{
+                      rec.statement_balance
+                        | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                    }}
                   </div>
-                  <div class="col-span-2 text-sm text-right font-mono text-gray-700">
-                    {{ rec.reconciled_balance | currency:'COP':'symbol-narrow':'1.0-0' }}
+                  <div
+                    class="col-span-2 text-sm text-right font-mono text-gray-700"
+                  >
+                    {{
+                      rec.reconciled_balance
+                        | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                    }}
                   </div>
-                  <div class="col-span-1 text-sm text-right font-semibold"
-                       [class]="rec.difference === 0 ? 'text-emerald-600' : 'text-red-500'">
-                    {{ rec.difference | currency:'COP':'symbol-narrow':'1.0-0' }}
+                  <div
+                    class="col-span-1 text-sm text-right font-semibold"
+                    [class]="
+                      rec.difference === 0 ? 'text-emerald-600' : 'text-red-500'
+                    "
+                  >
+                    {{
+                      rec.difference
+                        | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                    }}
                   </div>
                   <div class="col-span-1 text-center">
-                    <span class="text-xs px-2 py-0.5 rounded-full" [class]="getStatusClasses(rec.status)">
+                    <span
+                      class="text-xs px-2 py-0.5 rounded-full"
+                      [class]="getStatusClasses(rec.status)"
+                    >
                       {{ getStatusLabel(rec.status) }}
                     </span>
                   </div>
                   <div class="col-span-2 flex items-center justify-end gap-1">
-                    <button (click)="onDelete(rec, $event)" class="p-1.5 hover:bg-red-50 rounded text-gray-400 hover:text-red-500">
+                    <button
+                      (click)="onDelete(rec, $event)"
+                      class="p-1.5 hover:bg-red-50 rounded text-gray-400 hover:text-red-500"
+                    >
                       <app-icon name="trash-2" [size]="14"></app-icon>
                     </button>
                   </div>
@@ -198,7 +282,7 @@ import { BankAccount, BankReconciliation } from '../../interfaces/accounting.int
             </div>
           }
         </div>
-      </div>
+      </app-card>
 
       <!-- Create Modal -->
       <app-modal
@@ -226,9 +310,18 @@ import { BankAccount, BankReconciliation } from '../../interfaces/accounting.int
             [(ngModel)]="newRecForm.period_end"
           ></app-input>
         </div>
-        <div slot="footer" class="flex justify-end gap-3 pt-4 border-t border-gray-200 mt-4">
-          <app-button variant="outline" (clicked)="isCreateModalOpen.set(false)">Cancelar</app-button>
-          <app-button variant="primary" (clicked)="createReconciliation()" [disabled]="creating()">
+        <div
+          slot="footer"
+          class="flex justify-end gap-3 pt-4 border-t border-gray-200 mt-4"
+        >
+          <app-button variant="outline" (clicked)="isCreateModalOpen.set(false)"
+            >Cancelar</app-button
+          >
+          <app-button
+            variant="primary"
+            (clicked)="createReconciliation()"
+            [disabled]="creating()"
+          >
             <app-icon name="plus" [size]="16" slot="icon"></app-icon>
             Crear
           </app-button>
@@ -250,7 +343,11 @@ export class ReconciliationListComponent implements OnInit {
   searchTerm = signal('');
   isCreateModalOpen = signal(false);
 
-  newRecForm: { bank_account_id: number | null; period_start: string; period_end: string } = {
+  newRecForm: {
+    bank_account_id: number | null;
+    period_start: string;
+    period_end: string;
+  } = {
     bank_account_id: null,
     period_start: '',
     period_end: '',
@@ -311,12 +408,20 @@ export class ReconciliationListComponent implements OnInit {
   }
 
   openCreateModal(): void {
-    this.newRecForm = { bank_account_id: null, period_start: '', period_end: '' };
+    this.newRecForm = {
+      bank_account_id: null,
+      period_start: '',
+      period_end: '',
+    };
     this.isCreateModalOpen.set(true);
   }
 
   createReconciliation(): void {
-    if (!this.newRecForm.bank_account_id || !this.newRecForm.period_start || !this.newRecForm.period_end) {
+    if (
+      !this.newRecForm.bank_account_id ||
+      !this.newRecForm.period_start ||
+      !this.newRecForm.period_end
+    ) {
       this.toastService.error('Completa todos los campos');
       return;
     }
@@ -332,7 +437,10 @@ export class ReconciliationListComponent implements OnInit {
           this.creating.set(false);
           this.isCreateModalOpen.set(false);
           this.toastService.success('Conciliacion creada');
-          this.router.navigate(['/store/accounting/bank-reconciliation/reconciliations', res.data.id]);
+          this.router.navigate([
+            '/store/accounting/bank-reconciliation/reconciliations',
+            res.data.id,
+          ]);
         },
         error: () => {
           this.creating.set(false);
@@ -342,26 +450,31 @@ export class ReconciliationListComponent implements OnInit {
   }
 
   openWorkspace(rec: BankReconciliation): void {
-    this.router.navigate(['/store/accounting/bank-reconciliation/reconciliations', rec.id]);
+    this.router.navigate([
+      '/store/accounting/bank-reconciliation/reconciliations',
+      rec.id,
+    ]);
   }
 
   onDelete(rec: BankReconciliation, event: MouseEvent): void {
     event.stopPropagation();
-    this.dialogService.confirm({
-      title: 'Eliminar Conciliacion',
-      message: '¿Estas seguro de que deseas eliminar esta conciliacion?',
-      confirmText: 'Eliminar',
-      cancelText: 'Cancelar',
-    }).then((confirmed) => {
-      if (!confirmed) return;
-      this.reconciliationService.deleteReconciliation(rec.id).subscribe({
-        next: () => {
-          this.toastService.success('Conciliacion eliminada');
-          this.loadData();
-        },
-        error: () => this.toastService.error('Error al eliminar'),
+    this.dialogService
+      .confirm({
+        title: 'Eliminar Conciliacion',
+        message: '¿Estas seguro de que deseas eliminar esta conciliacion?',
+        confirmText: 'Eliminar',
+        cancelText: 'Cancelar',
+      })
+      .then((confirmed) => {
+        if (!confirmed) return;
+        this.reconciliationService.deleteReconciliation(rec.id).subscribe({
+          next: () => {
+            this.toastService.success('Conciliacion eliminada');
+            this.loadData();
+          },
+          error: () => this.toastService.error('Error al eliminar'),
+        });
       });
-    });
   }
 
   goBack(): void {

@@ -1,0 +1,76 @@
+<app-modal [isOpen]="isOpen()" (isOpenChange)="$event ? null : closed.emit()"
+  (opened)="onOpen()" title="Reprogramar Reserva" size="md">
+
+  @if (booking()) {
+    <!-- Current booking info -->
+    <div class="current-info">
+      <div class="info-row">
+        <app-icon name="briefcase" [size]="16"></app-icon>
+        <span>{{ booking()!.product?.name }}</span>
+      </div>
+      <div class="info-row">
+        <app-icon name="user" [size]="16"></app-icon>
+        <span>{{ booking()!.customer?.first_name }} {{ booking()!.customer?.last_name }}</span>
+      </div>
+      @if (booking()!.provider) {
+        <div class="info-row">
+          <app-icon name="user-circle" [size]="16"></app-icon>
+          <span>{{ booking()!.provider?.display_name || (booking()!.provider?.employee?.first_name + ' ' + booking()!.provider?.employee?.last_name) }}</span>
+        </div>
+      }
+      <div class="info-row muted">
+        <app-icon name="calendar" [size]="14"></app-icon>
+        <span>Actual: {{ booking()!.date }} {{ formatTime(booking()!.start_time) }} - {{ formatTime(booking()!.end_time) }}</span>
+      </div>
+    </div>
+
+    <!-- Date selector -->
+    <label class="section-label">Seleccionar nueva fecha</label>
+    <div class="date-selector">
+      @for (date of dates(); track date) {
+        <button
+          class="date-chip"
+          [class.selected]="selectedDate() === date"
+          (click)="selectDate(date)">
+          {{ formatDate(date) }}
+        </button>
+      }
+    </div>
+
+    <!-- Time slots -->
+    <label class="section-label">Horarios disponibles</label>
+    @if (loadingSlots()) {
+      <div class="loading-center">
+        <app-spinner size="sm" color="primary"></app-spinner>
+      </div>
+    } @else if (slots().length === 0) {
+      <p class="empty-slots">No hay horarios disponibles para esta fecha</p>
+    } @else {
+      <div class="slots-grid">
+        @for (slot of slots(); track slot.start_time) {
+          <button
+            class="slot-chip"
+            [class.selected]="selectedSlot() === slot"
+            (click)="selectSlot(slot)">
+            {{ formatTime(slot.start_time) }}
+          </button>
+        }
+      </div>
+    }
+  }
+
+  <div slot="footer" class="modal-footer">
+    <app-button variant="ghost" size="sm" (click)="closed.emit()">Cancelar</app-button>
+    <app-button
+      variant="primary"
+      size="sm"
+      [disabled]="!selectedSlot() || submitting()"
+      (click)="submit()">
+      @if (submitting()) {
+        <app-spinner size="sm" color="white"></app-spinner>
+      } @else {
+        Confirmar Reprogramación
+      }
+    </app-button>
+  </div>
+</app-modal>

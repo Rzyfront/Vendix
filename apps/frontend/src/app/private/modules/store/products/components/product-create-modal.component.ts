@@ -104,7 +104,6 @@ export class ProductCreateModalComponent implements OnChanges {
     private cdr: ChangeDetectorRef,
   ) {
     this.productForm = this.createForm();
-    this.loadCategoriesAndBrands();
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -117,8 +116,8 @@ export class ProductCreateModalComponent implements OnChanges {
     }
 
     if (changes['isOpen'] && this.isOpen) {
-      // Asegurar que la moneda esté cargada cuando el modal se abre
       this.currencyService.loadCurrency();
+      this.loadCategoriesAndBrands();
       if (!this.product) {
         this.resetForm();
       }

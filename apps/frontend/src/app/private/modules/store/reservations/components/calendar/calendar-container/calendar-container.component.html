@@ -1,0 +1,46 @@
+<div class="calendar-wrapper">
+  <app-calendar-toolbar
+    [viewMode]="viewMode()"
+    [currentDate]="currentDate()"
+    (viewModeChange)="onViewModeChange($event)"
+    (navigate)="onNavigate($event)"
+    (serviceFilterChange)="onServiceFilterChange($event)"
+    (createNew)="createNew.emit()"
+  />
+
+  <div class="calendar-content" [class.loading]="loading()">
+    @if (loading()) {
+      <div class="loading-overlay">
+        <app-spinner size="md" color="primary"></app-spinner>
+      </div>
+    }
+
+    @switch (viewMode()) {
+      @case ('month') {
+        <app-calendar-month-view
+          [bookingsByDate]="bookingsByDate()"
+          [currentDate]="currentDate()"
+          (dateClicked)="onDateClicked($event)"
+        />
+      }
+      @case ('week') {
+        <app-calendar-week-view
+          [bookingsByDate]="bookingsByDate()"
+          [currentDate]="currentDate()"
+          (slotClicked)="onSlotClicked($event)"
+          (bookingClicked)="onBookingClicked($event)"
+          (bookingDropped)="onBookingDropped($event)"
+        />
+      }
+      @case ('day') {
+        <app-calendar-day-view
+          [bookings]="bookingsByDate()[formatDate(currentDate())] || []"
+          [currentDate]="currentDate()"
+          (slotClicked)="onSlotClicked({ date: formatDate(currentDate()), time: $event.time })"
+          (bookingClicked)="onBookingClicked($event)"
+          (bookingDropped)="onBookingDropped($event)"
+        />
+      }
+    }
+  </div>
+</div>

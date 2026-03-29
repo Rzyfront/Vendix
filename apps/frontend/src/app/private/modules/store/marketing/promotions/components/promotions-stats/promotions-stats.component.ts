@@ -9,7 +9,7 @@ import { PromotionsSummary } from '../../interfaces/promotion.interface';
   standalone: true,
   imports: [CommonModule, StatsComponent],
   template: `
-    <div class="stats-container !mb-0">
+    <div class="stats-container">
       <app-stats
         title="Activas"
         [value]="summary?.total_active ?? 0"

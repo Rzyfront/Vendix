@@ -4,14 +4,15 @@ import { RouterModule, Router } from '@angular/router';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
-import { CartService, Cart } from '../../services/cart.service';
-import { CheckoutService, PaymentMethod, CheckoutRequest } from '../../services/checkout.service';
+import { CartService, Cart, CartItem } from '../../services/cart.service';
+import { CheckoutService, PaymentMethod, CheckoutRequest, BookingSelection } from '../../services/checkout.service';
 import { AccountService, Address } from '../../services/account.service';
 import { CatalogService, EcommerceProduct } from '../../services/catalog.service';
 import { CountryService, Country, Department, City } from '../../../../../services/country.service';
 
 import { ProductCarouselComponent } from '../../components/product-carousel/product-carousel.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal/product-quick-view-modal.component';
+import { BookingSlotPickerComponent } from '../../components/booking-slot-picker/booking-slot-picker.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
@@ -22,7 +23,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
 @Component({
   selector: 'app-checkout',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, ReactiveFormsModule, ProductCarouselComponent, ProductQuickViewModalComponent, InputComponent, CurrencyPipe, ButtonComponent, IconComponent, SelectorComponent],
+  imports: [CommonModule, RouterModule, FormsModule, ReactiveFormsModule, ProductCarouselComponent, ProductQuickViewModalComponent, InputComponent, CurrencyPipe, ButtonComponent, IconComponent, SelectorComponent, BookingSlotPickerComponent],
   templateUrl: './checkout.component.html',
   styleUrls: ['./checkout.component.scss'],
 })
@@ -43,7 +44,46 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   is_submitting = false;
   error_message = '';
 
-  step = 1; // 1: Address, 2: Payment, 3: Confirm
+  step = 1; // Dynamic steps depending on cart content
+
+  // ========== BOOKING ==========
+  /** Booking selections keyed by product_id */
+  bookingSelections = new Map<number, BookingSelection>();
+
+  /** True when cart has at least one bookable service */
+  get cartHasBookableServices(): boolean {
+    return this.cart_service.hasBookableServices();
+  }
+
+  /** Returns the bookable cart items */
+  get bookableItems(): CartItem[] {
+    return this.cart_service.getBookableItems();
+  }
+
+  /**
+   * Dynamic step calculation:
+   * - Services-only + no booking: Payment(1), Confirm(2)
+   * - Services-only + booking: Booking(1), Payment(2), Confirm(3)
+   * - Physical + no booking: Address(1), Payment(2), Confirm(3)
+   * - Physical + booking: Address(1), Booking(2), Payment(3), Confirm(4)
+   */
+  get bookingStep(): number | null {
+    if (!this.cartHasBookableServices) return null;
+    return this.cartHasOnlyServices ? 1 : 2;
+  }
+
+  get totalSteps(): number {
+    let steps = this.cartHasOnlyServices ? 2 : 3; // base steps
+    if (this.cartHasBookableServices) steps++;
+    return steps;
+  }
+
+  /** True when all bookable items have a slot selected */
+  get allBookingSlotsSelected(): boolean {
+    if (!this.cartHasBookableServices) return true;
+    const bookableItems = this.bookableItems;
+    return bookableItems.every(item => this.bookingSelections.has(item.product_id));
+  }
 
   /** True when all cart items are services (no physical products) */
   get cartHasOnlyServices(): boolean {
@@ -350,8 +390,15 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   }
 
   /** The step number that corresponds to Payment in the current flow */
-  private get paymentStep(): number {
-    return this.cartHasOnlyServices ? 1 : 2;
+  get paymentStep(): number {
+    let step = this.cartHasOnlyServices ? 1 : 2;
+    if (this.cartHasBookableServices) step++;
+    return step;
+  }
+
+  /** The step number that corresponds to Confirm in the current flow */
+  get confirmStep(): number {
+    return this.paymentStep + 1;
   }
 
   // Override nextStep to load shipping if moving from Step 1
@@ -381,6 +428,17 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       return;
     }
 
+    // Booking step validation
+    if (this.bookingStep !== null && this.step === this.bookingStep) {
+      if (!this.allBookingSlotsSelected) {
+        this.error_message = 'Por favor selecciona un horario para todos los servicios';
+        return;
+      }
+      this.error_message = '';
+      this.step++;
+      return;
+    }
+
     // Payment step validation
     if (this.step === this.paymentStep) {
       if (!this.selected_payment_method_id) {
@@ -397,6 +455,30 @@ export class CheckoutComponent implements OnInit, OnDestroy {
 
     this.error_message = '';
     this.step++;
+  }
+
+  /** Handle booking slot selection from the picker */
+  onBookingSlotSelected(productId: number, slot: { date: string; start_time: string; end_time: string }): void {
+    this.bookingSelections.set(productId, {
+      product_id: productId,
+      date: slot.date,
+      start_time: slot.start_time,
+      end_time: slot.end_time,
+    });
+  }
+
+  /** Check if a specific product has a booking selection */
+  hasBookingForProduct(productId: number): boolean {
+    return this.bookingSelections.has(productId);
+  }
+
+  /** Get the booking selection summary for a product */
+  getBookingSummary(productId: number): string {
+    const booking = this.bookingSelections.get(productId);
+    if (!booking) return '';
+    const date = new Date(booking.date + 'T12:00:00');
+    const formatted = date.toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' });
+    return `${formatted}, ${booking.start_time} - ${booking.end_time}`;
   }
 
   /**
@@ -489,6 +571,10 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       ...(!this.cartHasOnlyServices ? {
         shipping_method_id: this.selected_shipping_method_id || undefined,
         shipping_rate_id: this.selected_shipping_option_id || undefined,
+      } : {}),
+      // Include booking data if there are bookable services
+      ...(this.cartHasBookableServices && this.bookingSelections.size > 0 ? {
+        bookings: Array.from(this.bookingSelections.values()),
       } : {}),
     };
 

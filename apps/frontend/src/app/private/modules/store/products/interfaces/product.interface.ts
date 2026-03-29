@@ -57,6 +57,8 @@ export interface Product {
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
   service_pricing_type?: 'per_hour' | 'per_session' | 'package' | 'subscription';
   requires_booking?: boolean;
+  booking_mode?: 'provider_required' | 'free_booking';
+  buffer_minutes?: number;
   is_recurring?: boolean;
   service_instructions?: string;
   final_price: number;
@@ -213,6 +215,8 @@ export interface CreateProductDto {
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
   service_pricing_type?: 'per_hour' | 'per_session' | 'package' | 'subscription';
   requires_booking?: boolean;
+  booking_mode?: 'provider_required' | 'free_booking';
+  buffer_minutes?: number;
   is_recurring?: boolean;
   service_instructions?: string;
   brand_id?: number | null;
@@ -228,9 +232,14 @@ export interface UpdateProductDto {
   slug?: string;
   description?: string;
   base_price?: number;
+  cost_price?: number;
+  profit_margin?: number;
+  sale_price?: number;
+  is_on_sale?: boolean;
   sku?: string;
   stock_quantity?: number;
   track_inventory?: boolean;
+  available_for_ecommerce?: boolean;
   weight?: number;
   dimensions?: {
     length: number;
@@ -238,10 +247,22 @@ export interface UpdateProductDto {
     height: number;
   };
   state?: ProductState;
-  brand_id?: number;
+  pricing_type?: 'unit' | 'weight';
+  product_type?: 'physical' | 'service';
+  service_duration_minutes?: number;
+  service_modality?: 'in_person' | 'virtual' | 'hybrid';
+  service_pricing_type?: 'per_hour' | 'per_session' | 'package' | 'subscription';
+  requires_booking?: boolean;
+  booking_mode?: 'provider_required' | 'free_booking';
+  buffer_minutes?: number;
+  is_recurring?: boolean;
+  service_instructions?: string;
+  brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];
   images?: CreateProductImageDto[];
+  variants?: CreateProductVariantDto[];
+  stock_by_location?: StockByLocationDto[];
 }
 
 export interface CreateProductVariantDto {

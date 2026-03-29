@@ -8,14 +8,17 @@ import { LayawayPlan, LayawayInstallment } from '../../interfaces/layaway.interf
 import { FormsModule } from '@angular/forms';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { StickyHeaderComponent } from '../../../../../../shared/components/sticky-header/sticky-header.component';
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
+import { BadgeComponent, BadgeVariant } from '../../../../../../shared/components/badge/badge.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { PaymentMethodsService } from '../../../settings/payments/services/payment-methods.service';
-import { CardComponent } from '../../../../../../shared/components/card/card.component';
+import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { TableColumn, TableComponent } from '../../../../../../shared/components/table/table.component';
 
 @Component({
   selector: 'app-layaway-detail-page',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent, FormsModule, ModalComponent, StatsComponent, StickyHeaderComponent, CardComponent],
+  imports: [CommonModule, RouterModule, IconComponent, FormsModule, ModalComponent, StatsComponent, StickyHeaderComponent, CardComponent, BadgeComponent, CurrencyPipe, TableComponent],
   templateUrl: './layaway-detail-page.component.html',
   styleUrls: ['./layaway-detail-page.component.scss'],
 })
@@ -24,9 +27,19 @@ export class LayawayDetailPageComponent implements OnInit {
   private layaway_service = inject(LayawayApiService);
   private toast = inject(ToastService);
   private payment_methods_service = inject(PaymentMethodsService);
+  private currencyFormat = inject(CurrencyFormatService);
 
   plan = signal<LayawayPlan | null>(null);
   loading = signal(true);
+
+  // Products table columns
+  productColumns: TableColumn[] = [
+    { key: 'product_name', label: 'Producto', align: 'left' },
+    { key: 'sku', label: 'SKU', align: 'left', width: '80px', defaultValue: '—' },
+    { key: 'quantity', label: 'Cant.', align: 'center', width: '60px' },
+    { key: 'unit_price', label: 'Precio', align: 'right', width: '120px', transform: (v: number) => this.currencyFormat.format(v) },
+    { key: 'subtotal', label: 'Subtotal', align: 'right', width: '120px', transform: (v: number) => this.currencyFormat.format(v) },
+  ];
 
   // Header
   headerSubtitle = computed(() => {
@@ -126,6 +139,27 @@ export class LayawayDetailPageComponent implements OnInit {
       cancelled: 'Cancelada',
     };
     return labels[state] || state;
+  }
+
+  getInstallmentBadgeVariant(state: string): BadgeVariant {
+    const variants: Record<string, BadgeVariant> = {
+      pending: 'warning',
+      paid: 'success',
+      overdue: 'error',
+      cancelled: 'neutral',
+    };
+    return variants[state] || 'neutral';
+  }
+
+  getStateBadgeVariant(state: string): BadgeVariant {
+    const variants: Record<string, BadgeVariant> = {
+      active: 'primary',
+      completed: 'success',
+      cancelled: 'neutral',
+      overdue: 'error',
+      defaulted: 'error',
+    };
+    return variants[state] || 'neutral';
   }
 
   getProgressPercentage(): number {

@@ -26,6 +26,8 @@ import {
   notificationsReducer,
   NotificationsEffects,
 } from './core/store/notifications';
+import { aiChatReducer } from './core/store/ai-chat/ai-chat.reducer';
+import { AIChatEffects } from './core/store/ai-chat/ai-chat.effects';
 import { hydrateAuthState } from './core/store/persistence';
 import * as ConfigActions from './core/store/config/config.actions';
 import { ThemeService } from './core/services/theme.service';
@@ -94,7 +96,8 @@ export const appConfig: ApplicationConfig = {
     provideState('auth', authReducer, { initialState: hydrateAuthState() }),
     provideState('config', configReducer),
     provideState('notifications', notificationsReducer),
-    provideEffects([TenantEffects, AuthEffects, ConfigEffects, NotificationsEffects]),
+    provideState('aiChat', aiChatReducer),
+    provideEffects([TenantEffects, AuthEffects, ConfigEffects, NotificationsEffects, AIChatEffects]),
     provideStoreDevtools({
       maxAge: 25,
       logOnly: !isDevMode(),

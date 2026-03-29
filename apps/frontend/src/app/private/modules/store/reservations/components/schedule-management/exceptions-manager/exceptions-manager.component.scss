@@ -1,0 +1,90 @@
+// Exceptions Manager — Layout-only styles
+// Buttons, inputs, toggles, badges, empty states handled by shared components
+// Mobile-first: base styles → @media (min-width: ...) for larger screens
+
+// Header
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+
+  h3 {
+    margin: 0;
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: var(--color-text-primary);
+  }
+}
+
+// Form layout
+.exception-form {
+  padding: 1rem;
+  background: var(--color-background);
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border);
+  margin-bottom: 1rem;
+}
+
+// Exception list
+.exceptions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.exception-card {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  transition: border-color 0.15s ease;
+  min-height: 44px;
+
+  &:hover {
+    border-color: var(--color-text-muted);
+  }
+}
+
+.exception-date {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+.exception-reason {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// Mobile
+@media (max-width: 639px) {
+  .exception-card {
+    flex-wrap: wrap;
+    gap: 0.375rem;
+  }
+
+  .exception-reason {
+    flex-basis: 100%;
+    order: 10;
+  }
+}

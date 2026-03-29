@@ -36,8 +36,13 @@ export class StorePrismaService extends BasePrismaService {
     'cash_register_sessions',
     'cash_register_movements',
     'layaway_plans',
-    'credits',
     'exogenous_reports',
+    'bookings',
+    'service_providers',
+    'reviews',
+    'ai_conversations',
+    'ai_embeddings',
+    'dispatch_notes',
   ];
 
   constructor() {
@@ -97,6 +102,7 @@ export class StorePrismaService extends BasePrismaService {
       'return_orders', // Org scoped
       'sales_order_items', // Relational
       'refunds', // Relational
+      'order_installments', // Relational
       'inventory_adjustments', // Relational
       'inventory_movements', // Relational
       'stock_reservations', // Relational
@@ -125,8 +131,6 @@ export class StorePrismaService extends BasePrismaService {
       'layaway_items', // Relational
       'layaway_installments', // Relational
       'layaway_payments', // Relational
-      'credit_installments', // Relational
-      'credit_installment_payments', // Relational
       'bank_accounts', // Org scoped
       'fixed_asset_categories', // Org scoped
       'fixed_assets', // Org scoped
@@ -142,6 +146,11 @@ export class StorePrismaService extends BasePrismaService {
       'withholding_calculations', // Org scoped (organization_id + optional store_id)
       'withholding_concepts', // Org scoped
       'uvt_values', // Org scoped
+      'review_responses', // Relational
+      'review_votes', // Relational
+      'review_reports', // Relational
+      'ai_messages', // Relational
+      'dispatch_note_items', // Relational
     ];
 
     for (const model of all_scoped_models) {
@@ -220,6 +229,7 @@ export class StorePrismaService extends BasePrismaService {
         sales_orders: { organization_id: context.organization_id },
       }, // Changed to Org Scope
       refunds: { orders: { store_id: context.store_id } },
+      order_installments: { orders: { store_id: context.store_id } },
       inventory_adjustments: {
         inventory_locations: { store_id: context.store_id },
       },
@@ -259,14 +269,17 @@ export class StorePrismaService extends BasePrismaService {
       layaway_items: { layaway_plan: { store_id: context.store_id } },
       layaway_installments: { layaway_plan: { store_id: context.store_id } },
       layaway_payments: { layaway_plan: { store_id: context.store_id } },
-      credit_installments: { credits: { store_id: context.store_id } },
-      credit_installment_payments: { credit_installments: { credits: { store_id: context.store_id } } },
       bank_transactions: { bank_account: { organization_id: context.organization_id } },
       bank_reconciliations: { bank_account: { organization_id: context.organization_id } },
       bank_reconciliation_matches: { reconciliation: { bank_account: { organization_id: context.organization_id } } },
       depreciation_entries: { fixed_asset: { organization_id: context.organization_id } },
       budget_lines: { budget: { organization_id: context.organization_id } },
       consolidation_adjustments: { session: { organization_id: context.organization_id } },
+      review_responses: { reviews: { store_id: context.store_id } },
+      review_votes: { reviews: { store_id: context.store_id } },
+      review_reports: { reviews: { store_id: context.store_id } },
+      ai_messages: { conversation: { store_id: context.store_id, organization_id: context.organization_id } },
+      dispatch_note_items: { dispatch_note: { store_id: context.store_id } },
     };
 
     const security_filter: Record<string, any> = {};
@@ -777,19 +790,6 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.layaway_payments;
   }
 
-  // Credits models
-  get credits() {
-    return this.scoped_client.credits;
-  }
-
-  get credit_installments() {
-    return this.scoped_client.credit_installments;
-  }
-
-  get credit_installment_payments() {
-    return this.scoped_client.credit_installment_payments;
-  }
-
   // Withholding Tax models (org scoped)
   get withholding_concepts() {
     return this.scoped_client.withholding_concepts;
@@ -801,6 +801,71 @@ export class StorePrismaService extends BasePrismaService {
 
   get uvt_values() {
     return this.scoped_client.uvt_values;
+  }
+
+  // Bookings models
+  get bookings() {
+    return this.scoped_client.bookings;
+  }
+
+  get service_providers() {
+    return this.scoped_client.service_providers;
+  }
+
+  get provider_services() {
+    return this.scoped_client.provider_services;
+  }
+
+  get provider_schedules() {
+    return this.scoped_client.provider_schedules;
+  }
+
+  get provider_exceptions() {
+    return this.scoped_client.provider_exceptions;
+  }
+
+  // Reviews models
+  get reviews() {
+    return this.scoped_client.reviews;
+  }
+
+  get review_responses() {
+    return this.scoped_client.review_responses;
+  }
+
+  get review_votes() {
+    return this.scoped_client.review_votes;
+  }
+
+  get review_reports() {
+    return this.scoped_client.review_reports;
+  }
+
+  // AI Chat models
+  get ai_conversations() {
+    return this.scoped_client.ai_conversations;
+  }
+
+  get ai_messages() {
+    return this.scoped_client.ai_messages;
+  }
+
+  get ai_embeddings() {
+    return this.scoped_client.ai_embeddings;
+  }
+
+  // Order Installments
+  get order_installments() {
+    return this.scoped_client.order_installments;
+  }
+
+  // Dispatch Notes models
+  get dispatch_notes() {
+    return this.scoped_client.dispatch_notes;
+  }
+
+  get dispatch_note_items() {
+    return this.scoped_client.dispatch_note_items;
   }
 
   // Global tables (no store scoping)

@@ -1,0 +1,37 @@
+export interface AIGenerationJob {
+  app_key: string;
+  variables?: Record<string, string>;
+  extra_messages?: Array<{ role: string; content: string }>;
+  organization_id?: number;
+  store_id?: number;
+  user_id?: number;
+  callback_event?: string;
+}
+
+export interface AIEmbeddingJob {
+  store_id: number;
+  organization_id: number;
+  entity_type: string;
+  entity_id: number;
+  content: string;
+}
+
+export interface AIAgentJob {
+  goal: string;
+  tools?: string[];
+  organization_id?: number;
+  store_id?: number;
+  user_id?: number;
+  max_iterations?: number;
+  timeout_ms?: number;
+}
+
+export type AIJobStatus = 'waiting' | 'active' | 'completed' | 'failed' | 'delayed';
+
+export interface AIJobResult {
+  job_id: string;
+  status: AIJobStatus;
+  result?: any;
+  error?: string;
+  progress?: number;
+}

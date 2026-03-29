@@ -1,0 +1,67 @@
+<app-card shadow="sm" [padding]="false">
+  <!-- Header -->
+  <div slot="header" class="flex items-center justify-between w-full">
+    <div class="flex items-center gap-2">
+      <app-icon name="calendar-days" [size]="16" class="text-[var(--color-primary)]"></app-icon>
+      <span class="text-sm font-bold text-[var(--color-text-primary)]">{{ todayLabel() }}</span>
+    </div>
+    <span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-[var(--color-primary)]/10 text-[var(--color-primary)]">
+      {{ bookingsCount() }} reservas
+    </span>
+  </div>
+
+  <!-- Loading -->
+  @if (loading()) {
+    <div class="p-8 flex justify-center">
+      <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-[var(--color-primary)]"></div>
+    </div>
+  } @else if (bookings().length === 0) {
+    <!-- Empty -->
+    <div class="p-8 text-center">
+      <app-icon name="calendar-x" [size]="32" class="text-[var(--color-text-tertiary)] mx-auto mb-2"></app-icon>
+      <p class="text-sm text-[var(--color-text-secondary)]">No hay reservas para hoy</p>
+    </div>
+  } @else {
+    <!-- Reservations list -->
+    <div class="divide-y divide-[var(--color-border)]">
+      @for (booking of bookings(); track booking.id) {
+        <button
+          type="button"
+          (click)="bookingClicked.emit(booking)"
+          class="w-full text-left px-4 py-3 hover:bg-[var(--color-surface-hover)] transition-colors flex items-center gap-3 min-h-[52px] border-l-[3px] {{ getStatusColor(booking.status) }}">
+          <!-- Time -->
+          <div class="shrink-0 w-[52px] text-center">
+            <div class="text-sm font-bold text-[var(--color-text-primary)]">{{ formatTime(booking.start_time) }}</div>
+          </div>
+          <!-- Info -->
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-semibold text-[var(--color-text-primary)] truncate">
+              {{ booking.customer?.first_name }} {{ booking.customer?.last_name }}
+            </p>
+            <p class="text-xs text-[var(--color-text-secondary)] truncate">
+              {{ booking.product?.name }}
+              @if (booking.product?.service_duration_minutes) {
+                · {{ booking.product?.service_duration_minutes }}min
+              }
+            </p>
+          </div>
+          <!-- Badge -->
+          <app-badge [variant]="getStatusBadgeVariant(booking.status)" size="sm">
+            {{ getStatusLabel(booking.status) }}
+          </app-badge>
+        </button>
+      }
+    </div>
+
+    <!-- Footer -->
+    <div class="border-t border-[var(--color-border)]">
+      <button
+        type="button"
+        (click)="viewAllClicked.emit()"
+        class="w-full text-center py-3 text-xs font-semibold min-h-[44px] hover:bg-[var(--color-surface-hover)] transition-colors"
+        style="color: var(--color-primary)">
+        Ver todas las reservas del dia →
+      </button>
+    </div>
+  }
+</app-card>

@@ -51,6 +51,8 @@ import { ProductsService } from '../../services/products.service';
 import { CategoriesService } from '../../services/categories.service';
 import { BrandsService } from '../../services/brands.service';
 import { TaxesService } from '../../services/taxes.service';
+import { ReservationsService } from '../../../reservations/services/reservations.service';
+import { ServiceProvider } from '../../../reservations/interfaces/reservation.interface';
 import { CategoryQuickCreateComponent } from '../../components/category-quick-create.component';
 import { BrandQuickCreateComponent } from '../../components/brand-quick-create.component';
 import { TaxQuickCreateComponent } from '../../components/tax-quick-create.component';
@@ -328,6 +330,12 @@ export class ProductCreatePageComponent implements OnInit {
   private currencyService = inject(CurrencyFormatService);
   private cdr = inject(ChangeDetectorRef);
   private promotionsService = inject(PromotionsService);
+  private reservationsService = inject(ReservationsService);
+
+  // Provider assignment (for services with requires_booking)
+  assignedProviders = signal<ServiceProvider[]>([]);
+  allProviders = signal<ServiceProvider[]>([]);
+  loadingProviders = signal(false);
 
   // Promotions
   promotionOptions: MultiSelectorOption[] = [];
@@ -349,6 +357,7 @@ export class ProductCreatePageComponent implements OnInit {
   imageUrls: string[] = [];
   imageIds: (number | null)[] = []; // Parallel array: DB image ID (null for new/unsaved images)
   activeImageIndex = 0;
+  mainImageIndex = 0;
   isStockDetailsOpen = false;
   isReleasingReservations = false;
   categoryOptions: MultiSelectorOption[] = [];
@@ -402,6 +411,7 @@ export class ProductCreatePageComponent implements OnInit {
         service_modality: null,
         service_pricing_type: null,
         requires_booking: false,
+        booking_mode: null,
         is_recurring: false,
         service_instructions: '',
       });
@@ -569,6 +579,7 @@ export class ProductCreatePageComponent implements OnInit {
       service_modality: [null],
       service_pricing_type: [null],
       requires_booking: [false],
+      booking_mode: [null],
       is_recurring: [false],
       service_instructions: [''],
     });
@@ -685,6 +696,7 @@ export class ProductCreatePageComponent implements OnInit {
       service_modality: product.service_modality || null,
       service_pricing_type: product.service_pricing_type || null,
       requires_booking: product.requires_booking || false,
+      booking_mode: product.booking_mode || null,
       is_recurring: product.is_recurring || false,
       service_instructions: product.service_instructions || '',
       weight: product.weight || 0,
@@ -694,6 +706,12 @@ export class ProductCreatePageComponent implements OnInit {
         height: product.dimensions?.height || 0,
       },
     });
+
+    // Load providers if this is a bookable service
+    if (product.requires_booking && product.id) {
+      this.loadProviders(product.id);
+      this.loadAllProviders();
+    }
 
     // Load images
     if (product.product_images && product.product_images.length > 0) {
@@ -1378,12 +1396,24 @@ export class ProductCreatePageComponent implements OnInit {
 
     this.imageUrls.splice(index, 1);
     this.imageIds.splice(index, 1);
-    if (this.activeImageIndex >= this.imageUrls.length) {
+    // Adjust mainImageIndex first since activeImageIndex may depend on it
+    if (index === this.mainImageIndex) {
+      this.mainImageIndex = Math.max(0, index - 1);
+      this.activeImageIndex = this.mainImageIndex;
+    } else if (index < this.mainImageIndex) {
+      this.mainImageIndex--;
+      this.activeImageIndex--;
+    } else if (this.activeImageIndex >= this.imageUrls.length) {
       this.activeImageIndex = Math.max(0, this.imageUrls.length - 1);
     }
   }
 
   setActiveImage(index: number): void {
+    this.activeImageIndex = index;
+  }
+
+  setMainImage(index: number): void {
+    this.mainImageIndex = index;
     this.activeImageIndex = index;
   }
 
@@ -1443,7 +1473,7 @@ export class ProductCreatePageComponent implements OnInit {
     const images: CreateProductImageDto[] = this.imageUrls.map(
       (url, index) => ({
         image_url: url,
-        is_main: index === 0,
+        is_main: index === this.mainImageIndex,
       }),
     );
 
@@ -1484,6 +1514,7 @@ export class ProductCreatePageComponent implements OnInit {
         service_modality: formValue.service_modality || undefined,
         service_pricing_type: formValue.service_pricing_type || undefined,
         requires_booking: !!formValue.requires_booking,
+        booking_mode: formValue.booking_mode || undefined,
         is_recurring: !!formValue.is_recurring,
         service_instructions: formValue.service_instructions || undefined,
       }),
@@ -1539,7 +1570,7 @@ export class ProductCreatePageComponent implements OnInit {
 
     const request$ =
       this.isEditMode() && this.productId
-        ? this.productsService.updateProduct(this.productId, productData as any) // Cast to any to avoid strict UpdateDto mismatch if needed, or fix DTO
+        ? this.productsService.updateProduct(this.productId, productData)
         : this.productsService.createProduct(productData);
 
     request$.subscribe({
@@ -1765,5 +1796,81 @@ export class ProductCreatePageComponent implements OnInit {
   formatStatus(status: string | undefined): string {
     if (!status) return 'Unknown';
     return status.charAt(0).toUpperCase() + status.slice(1);
+  }
+
+  // ─── Provider Assignment (requires_booking services) ───
+
+  loadProviders(productId: number): void {
+    this.loadingProviders.set(true);
+    this.reservationsService.getProvidersForService(productId).subscribe({
+      next: (providers) => {
+        this.assignedProviders.set(providers);
+        this.loadingProviders.set(false);
+      },
+      error: () => {
+        this.loadingProviders.set(false);
+      },
+    });
+  }
+
+  loadAllProviders(): void {
+    this.reservationsService.getProviders().subscribe({
+      next: (providers) => this.allProviders.set(providers),
+      error: () => {},
+    });
+  }
+
+  availableProvidersForProduct(): ServiceProvider[] {
+    const assignedIds = new Set(this.assignedProviders().map((p) => p.id));
+    return this.allProviders().filter((p) => !assignedIds.has(p.id));
+  }
+
+  addProviderToService(providerIdStr: string | number): void {
+    const providerId = Number(providerIdStr);
+    if (!providerId || !this.productId) return;
+    this.reservationsService.assignServiceToProvider(providerId, this.productId).subscribe({
+      next: () => {
+        this.toastService.success('Proveedor asignado al servicio');
+        this.loadProviders(this.productId!);
+      },
+      error: () => {
+        this.toastService.error('Error al asignar proveedor');
+      },
+    });
+  }
+
+  removeProviderFromService(providerId: number): void {
+    if (!this.productId) return;
+    this.reservationsService.removeServiceFromProvider(providerId, this.productId).subscribe({
+      next: () => {
+        this.toastService.success('Proveedor removido del servicio');
+        this.loadProviders(this.productId!);
+      },
+      error: () => {
+        this.toastService.error('Error al remover proveedor');
+      },
+    });
+  }
+
+  getProviderInitials(provider: ServiceProvider): string {
+    if (provider.display_name) {
+      return provider.display_name
+        .split(' ')
+        .map((w) => w[0])
+        .join('')
+        .toUpperCase()
+        .substring(0, 2);
+    }
+    if (provider.employee) {
+      return (
+        (provider.employee.first_name?.[0] || '') +
+        (provider.employee.last_name?.[0] || '')
+      ).toUpperCase();
+    }
+    return '??';
+  }
+
+  goToScheduleConfig(): void {
+    this.router.navigate(['/admin/reservations/schedules']);
   }
 }

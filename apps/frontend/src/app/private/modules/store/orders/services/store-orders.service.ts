@@ -381,6 +381,26 @@ export class StoreOrdersService {
     );
   }
 
+  flowCreditPayment(orderId: string, dto: PayOrderDto): Observable<PayOrderResponse> {
+    return this.http.post<any>(
+      `${this.apiUrl}/store/orders/${orderId}/flow/credit-payment`,
+      dto,
+    ).pipe(
+      map((response: any) => response.data || response),
+      catchError((error) => throwError(() => error)),
+    );
+  }
+
+  flowForgiveInstallment(orderId: string, installmentId: number): Observable<any> {
+    return this.http.post<any>(
+      `${this.apiUrl}/store/orders/${orderId}/flow/installments/${installmentId}/forgive`,
+      {},
+    ).pipe(
+      map((response: any) => response.data || response),
+      catchError((error) => throwError(() => error)),
+    );
+  }
+
   flowShipOrder(orderId: string, dto: ShipOrderDto): Observable<Order> {
     const url = `${this.apiUrl}/store/orders/${orderId}/flow/ship`;
     return this.http.post<any>(url, dto).pipe(

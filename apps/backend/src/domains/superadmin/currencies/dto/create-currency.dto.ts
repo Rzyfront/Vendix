@@ -11,6 +11,12 @@ export enum currency_position_enum {
   AFTER = 'after',
 }
 
+export enum currency_format_style_enum {
+  COMMA_DOT = 'comma_dot',
+  DOT_COMMA = 'dot_comma',
+  SPACE_COMMA = 'space_comma',
+}
+
 export class CreateCurrencyDto {
   @IsString()
   @MinLength(3)
@@ -36,6 +42,10 @@ export class CreateCurrencyDto {
   @IsEnum(currency_position_enum)
   @IsOptional()
   position?: currency_position_enum;  // Viene de AppNexus (opcional, usa valor de API si no se proporciona)
+
+  @IsEnum(currency_format_style_enum)
+  @IsOptional()
+  format_style?: currency_format_style_enum;
 
   @IsOptional()
   @IsEnum(currency_state_enum)
