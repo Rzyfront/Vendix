@@ -9,6 +9,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
+import { ImageContext } from '@common/config/image-presets';
 import { StoreSettings, EcommerceSettings } from '../settings/interfaces/store-settings.interface';
 
 @Injectable()
@@ -355,6 +356,7 @@ export class EcommerceService {
     // Cargar y optimizar imagen (S3Service se encarga de convertir a WebP y hacer el thumb)
     const result = await this.s3Service.uploadImage(file, key, {
       generateThumbnail: true,
+      context: ImageContext.SLIDER,
     });
 
     // Generar URL firmada temporal para previsualización inmediata en el frontend

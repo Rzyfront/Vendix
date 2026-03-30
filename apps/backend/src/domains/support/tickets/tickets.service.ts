@@ -13,6 +13,7 @@ import {
 } from '@prisma/client';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
+import { ImageContext } from '@common/config/image-presets';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
@@ -708,7 +709,7 @@ export class TicketsService {
           attachment.base64_data,
           s3Key,
           attachment.mime_type,
-          { generateThumbnail: attachment.mime_type.startsWith('image/') },
+          { generateThumbnail: attachment.mime_type.startsWith('image/'), context: ImageContext.SUPPORT },
         );
 
         // Get file size from base64

@@ -39,31 +39,9 @@ Reglas importantes:
 4. Si un campo no es legible o no esta presente, usa null en lugar de inventar datos.
 5. La confianza (confidence) debe reflejar tu seguridad general en la extraccion (0-100).
 6. SIEMPRE retorna JSON valido, sin markdown, sin texto adicional.`,
-      prompt_template: `Analiza la siguiente imagen de factura de compra y extrae todos los datos estructurados. Retorna UNICAMENTE un JSON valido con esta estructura exacta:
-{
-  "supplier": {
-    "name": "nombre del proveedor",
-    "tax_id": "NIT o identificacion fiscal",
-    "address": "direccion si es visible",
-    "phone": "telefono si es visible"
-  },
-  "invoice_number": "numero de factura",
-  "invoice_date": "YYYY-MM-DD",
-  "payment_terms": "condiciones de pago si son visibles",
-  "line_items": [
-    {
-      "description": "descripcion del producto/servicio",
-      "quantity": 0,
-      "unit_price": 0.00,
-      "total": 0.00,
-      "sku_if_visible": "codigo del producto si es visible"
-    }
-  ],
-  "subtotal": 0.00,
-  "tax_amount": 0.00,
-  "total": 0.00,
-  "confidence": 85
-}`,
+      // prompt_template is null — for vision apps, text instructions must be
+      // in the same message as the image (handled by scanInvoice()).
+      prompt_template: null,
     },
   ];
 

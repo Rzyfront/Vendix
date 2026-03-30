@@ -9,6 +9,7 @@ import {
 import { Observable, of } from 'rxjs';
 import { catchError, switchMap, take } from 'rxjs/operators';
 import { AuthFacade } from '../store/auth/auth.facade';
+import { ConfigFacade } from '../store/config';
 import { ToastService } from '../../shared/components/toast/toast.service';
 import { SessionService } from '../services/session.service';
 
@@ -17,6 +18,7 @@ import { SessionService } from '../services/session.service';
 })
 export class AuthGuard implements CanActivate {
   private authFacade = inject(AuthFacade);
+  private configFacade = inject(ConfigFacade);
   private router = inject(Router);
   private toastService = inject(ToastService);
   private sessionService = inject(SessionService);
@@ -132,23 +134,17 @@ export class AuthGuard implements CanActivate {
       return userRoles.includes('super_admin');
     }
 
-    // Admin routes - roles administrativos de organización
-    if (path.startsWith('/admin')) {
-      const adminRoles = ['super_admin', 'admin', 'owner', 'manager'];
-      return adminRoles.some((role) => userRoles.includes(role));
-    }
+    // Admin & Store routes
+    if (path.startsWith('/admin') || path.startsWith('/store')) {
+      const env = this.configFacade.getCurrentConfig()?.domainConfig?.environment;
 
-    // Store routes - roles de tienda
-    if (path.startsWith('/store')) {
-      const storeRoles = [
-        'super_admin',
-        'admin',
-        'owner',
-        'manager',
-        'supervisor',
-        'employee',
-      ];
-      return storeRoles.some((role) => userRoles.includes(role));
+      // ORG_ADMIN: only owner and admin
+      if (env === 'ORG_ADMIN') {
+        return userRoles.some((r) => ['super_admin', 'admin', 'owner'].includes(r));
+      }
+
+      // STORE_ADMIN: any role except customer (panel_ui handles granular visibility)
+      return !userRoles.includes('customer');
     }
 
     // Por defecto, permitir si está autenticado
@@ -165,11 +161,8 @@ export class AuthGuard implements CanActivate {
       return this.router.createUrlTree(['/superadmin/dashboard']);
     }
 
-    if (userRoles.some((r) => ['admin', 'owner', 'manager'].includes(r))) {
-      return this.router.createUrlTree(['/admin/dashboard']);
-    }
-
-    if (userRoles.some((r) => ['supervisor', 'employee'].includes(r))) {
+    // Any non-customer role goes to admin dashboard (custom roles included)
+    if (!userRoles.includes('customer')) {
       return this.router.createUrlTree(['/admin/dashboard']);
     }
 

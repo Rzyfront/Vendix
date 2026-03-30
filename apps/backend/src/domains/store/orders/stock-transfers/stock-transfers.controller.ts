@@ -22,6 +22,11 @@ export class StockTransfersController {
     return this.stockTransfersService.create(createTransferDto);
   }
 
+  @Post('complete')
+  createAndComplete(@Body() createTransferDto: CreateTransferDto) {
+    return this.stockTransfersService.createAndComplete(createTransferDto);
+  }
+
   @Get('stats')
   getStats() {
     return this.stockTransfersService.getStats();
@@ -90,11 +95,6 @@ export class StockTransfersController {
   @Patch(':id/approve')
   approve(@Param('id') id: string) {
     return this.stockTransfersService.approve(+id);
-  }
-
-  @Patch(':id/start')
-  startTransfer(@Param('id') id: string) {
-    return this.stockTransfersService.startTransfer(+id);
   }
 
   @Patch(':id/complete')

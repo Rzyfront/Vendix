@@ -10,6 +10,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Upload } from '@aws-sdk/lib-storage';
 import * as sharp from 'sharp';
+import { ImageContext, IMAGE_PRESETS } from '../config/image-presets';
 import { extractS3KeyFromUrl, isS3Key } from '../helpers/s3-url.helper';
 
 @Injectable()
@@ -46,31 +47,46 @@ export class S3Service {
     async uploadImage(
         file: Buffer,
         key: string,
-        options: { generateThumbnail?: boolean } = {},
+        options: { generateThumbnail?: boolean; context?: ImageContext } = {},
     ): Promise<{ key: string; thumbKey?: string }> {
         try {
-            // 1. Optimize Main Image (WebP, Max 1000px)
+            const preset = IMAGE_PRESETS[options.context ?? ImageContext.DEFAULT];
+            const mainKey = key.endsWith('.webp') ? key : `${key.split('.')[0]}.webp`;
+
+            // Detect already-optimized images to avoid double compression
+            if (preset.skipIfAlreadyOptimized) {
+                const metadata = await sharp(file).metadata();
+                const isAlreadyOptimal =
+                    metadata.format === 'webp' &&
+                    (metadata.width ?? 0) <= preset.maxWidth &&
+                    (metadata.height ?? 0) <= preset.maxHeight;
+
+                if (isAlreadyOptimal) {
+                    await this.uploadToS3(file, mainKey, 'image/webp');
+
+                    let thumbKey: string | undefined;
+                    if (options.generateThumbnail && preset.thumbnail) {
+                        thumbKey = await this.generateThumbnail(file, mainKey, preset.thumbnail);
+                    }
+
+                    return { key: mainKey, thumbKey };
+                }
+            }
+
+            // Optimize main image using context-specific preset
             const optimizedMain = await sharp(file)
-                .resize(1000, 1000, { fit: 'inside', withoutEnlargement: true })
-                .webp({ quality: 80 })
+                .resize(preset.maxWidth, preset.maxHeight, {
+                    fit: preset.fit,
+                    withoutEnlargement: true,
+                })
+                .webp({ quality: preset.quality })
                 .toBuffer();
 
-            const mainKey = key.endsWith('.webp') ? key : `${key.split('.')[0]}.webp`;
             await this.uploadToS3(optimizedMain, mainKey, 'image/webp');
 
             let thumbKey: string | undefined;
-            if (options.generateThumbnail) {
-                // 2. Generate Thumbnail (WebP, Max 200px)
-                const optimizedThumb = await sharp(file)
-                    .resize(200, 200, { fit: 'cover' })
-                    .webp({ quality: 70 })
-                    .toBuffer();
-
-                const pathParts = mainKey.split('/');
-                const fileName = pathParts.pop();
-                thumbKey = [...pathParts, `thumb_${fileName}`].join('/');
-
-                await this.uploadToS3(optimizedThumb, thumbKey, 'image/webp');
+            if (options.generateThumbnail && preset.thumbnail) {
+                thumbKey = await this.generateThumbnail(file, mainKey, preset.thumbnail);
             }
 
             return { key: mainKey, thumbKey };
@@ -94,6 +110,24 @@ export class S3Service {
         this.logger.log(`File uploaded successfully to ${key}`);
     }
 
+    private async generateThumbnail(
+        file: Buffer,
+        mainKey: string,
+        thumbPreset: { width: number; height: number; quality: number; fit: 'inside' | 'cover' | 'contain' },
+    ): Promise<string> {
+        const optimizedThumb = await sharp(file)
+            .resize(thumbPreset.width, thumbPreset.height, { fit: thumbPreset.fit })
+            .webp({ quality: thumbPreset.quality })
+            .toBuffer();
+
+        const pathParts = mainKey.split('/');
+        const fileName = pathParts.pop();
+        const thumbKey = [...pathParts, `thumb_${fileName}`].join('/');
+
+        await this.uploadToS3(optimizedThumb, thumbKey, 'image/webp');
+        return thumbKey;
+    }
+
     /**
      * Uploads a base64 encoded image to S3
      */
@@ -101,7 +135,7 @@ export class S3Service {
         base64: string,
         key: string,
         contentType?: string,
-        options: { generateThumbnail?: boolean } = {}
+        options: { generateThumbnail?: boolean; context?: ImageContext } = {}
     ): Promise<{ key: string; thumbKey?: string }> {
         const matches = base64.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
 
@@ -176,23 +210,34 @@ export class S3Service {
      * If the URL is already an absolute HTTP(S) URL, returns it as is.
      */
     async signUrl(keyOrUrl: string | null | undefined, useThumbnail = false): Promise<string | undefined> {
-        if (!keyOrUrl || keyOrUrl.startsWith('http')) {
-            return keyOrUrl || undefined;
+        if (!keyOrUrl) {
+            return undefined;
         }
 
         const EXPIRATION_TIME = 24 * 60 * 60; // 24 hours
 
+        // If it's an HTTP URL, check if it's an S3 URL that needs re-signing
         let targetKey = keyOrUrl;
+        if (keyOrUrl.startsWith('http')) {
+            const extractedKey = extractS3KeyFromUrl(keyOrUrl);
+            if (!extractedKey || extractedKey === keyOrUrl) {
+                // External URL (not S3) — return as-is
+                return keyOrUrl;
+            }
+            // It was an S3 URL (signed or unsigned) — use the extracted key
+            targetKey = extractedKey;
+        }
+
         if (useThumbnail) {
-            const pathParts = keyOrUrl.split('/');
+            const pathParts = targetKey.split('/');
             const fileName = pathParts.pop();
-            targetKey = [...pathParts, `thumb_${fileName}`].join('/');
+            const thumbKey = [...pathParts, `thumb_${fileName}`].join('/');
 
             try {
-                return await this.getPresignedUrl(targetKey, EXPIRATION_TIME);
+                return await this.getPresignedUrl(thumbKey, EXPIRATION_TIME);
             } catch {
                 // Return original key signature as fallback
-                return this.getPresignedUrl(keyOrUrl, EXPIRATION_TIME);
+                return this.getPresignedUrl(targetKey, EXPIRATION_TIME);
             }
         }
 
@@ -279,14 +324,17 @@ export class S3Service {
             return content;
         }
 
+        // First, sanitize: replace any signed/expired S3 URLs with their S3 keys
+        const sanitized = this.sanitizeMarkdownContent(content);
+
         const markdownImageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
-        const matches = [...content.matchAll(markdownImageRegex)];
+        const matches = [...sanitized.matchAll(markdownImageRegex)];
 
         if (matches.length === 0) {
-            return content;
+            return sanitized;
         }
 
-        let result = content;
+        let result = sanitized;
 
         for (const match of matches) {
             const [fullMatch, alt, url] = match;

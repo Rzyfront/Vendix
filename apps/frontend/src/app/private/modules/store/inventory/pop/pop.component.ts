@@ -50,6 +50,11 @@ import {
 } from './components/pop-product-config-modal.component';
 import { PopOrderConfirmationModalComponent } from './components/pop-order-confirmation-modal.component';
 import { InvoiceScannerModalComponent } from './components/invoice-scanner/invoice-scanner-modal.component';
+import {
+  InvoiceScanResult,
+  InvoiceMatchResult,
+  MatchedLineItem,
+} from './interfaces/invoice-scanner.interface';
 
 /**
  * POP (Point of Purchase) Main Component
@@ -550,12 +555,80 @@ export class PopComponent implements OnInit, OnDestroy {
     this.prebulkModalOpen = true;
   }
 
-  onInvoiceScanConfirmed(po: any): void {
+  onInvoiceScanConfirmed(data: {
+    scanResult: InvoiceScanResult;
+    matchResult: InvoiceMatchResult;
+    editedItems: MatchedLineItem[];
+    invoiceNumber?: string;
+    invoiceDate?: string;
+  }): void {
     this.showInvoiceScanner.set(false);
-    this.toastService.success('Orden de compra creada desde factura escaneada');
-    if (po?.id) {
-      this.router.navigate(['/admin/products']);
+
+    // 1. Set supplier if matched
+    if (data.matchResult.supplier_match.matched_id) {
+      this.popCartService.setSupplier(data.matchResult.supplier_match.matched_id);
     }
+
+    // 2. Add each item to cart
+    let addedCount = 0;
+    for (const item of data.editedItems) {
+      const candidate = item.selected_product_id
+        ? item.candidates.find((c) => c.id === item.selected_product_id)
+        : null;
+
+      if (candidate) {
+        // Matched product → regular cart item
+        this.popCartService.addToCart({
+          product: {
+            id: candidate.id,
+            name: candidate.name,
+            code: candidate.sku || '',
+            cost: item.unit_price,
+            price: 0,
+            stock: 0,
+            is_active: true,
+          },
+          quantity: item.quantity,
+          unit_cost: item.unit_price,
+        }).subscribe();
+      } else {
+        // Unmatched → prebulk item
+        this.popCartService.addToCart({
+          product: {
+            id: 0,
+            name: item.description,
+            code: item.sku_if_visible || '',
+            cost: item.unit_price,
+            price: 0,
+            stock: 0,
+            is_active: true,
+          },
+          quantity: item.quantity,
+          unit_cost: item.unit_price,
+          is_prebulk: true,
+          prebulk_data: {
+            name: item.description,
+            code: item.sku_if_visible || '',
+            description: item.description,
+          },
+        }).subscribe();
+      }
+      addedCount++;
+    }
+
+    // 3. Invoice metadata as notes
+    if (data.invoiceNumber) {
+      const currentNotes = this.popCartService.currentState.notes || '';
+      const invoiceNote = `Factura escaneada: ${data.invoiceNumber}`;
+      this.popCartService.setNotes(
+        currentNotes ? `${currentNotes}\n${invoiceNote}` : invoiceNote,
+      );
+    }
+
+    // 4. Toast — stay on page, don't navigate
+    this.toastService.success(
+      `${addedCount} producto(s) agregados al carrito desde factura`,
+    );
   }
 
   onBulkDataReceived(items: any[]): void {

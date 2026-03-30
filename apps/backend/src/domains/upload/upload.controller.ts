@@ -14,6 +14,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { S3Service } from '@common/services/s3.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
+import { ImageContext } from '@common/config/image-presets';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 
@@ -21,6 +22,16 @@ import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiBearerAuth } from '@nes
 @ApiBearerAuth()
 @Controller('upload')
 export class UploadController {
+    private readonly ENTITY_TO_CONTEXT: Record<string, ImageContext> = {
+        products: ImageContext.PRODUCT,
+        avatars: ImageContext.AVATAR,
+        brands: ImageContext.LOGO,
+        categories: ImageContext.CATEGORY,
+        logos: ImageContext.LOGO,
+        store_logos: ImageContext.LOGO,
+        receipts: ImageContext.RECEIPT,
+    };
+
     constructor(
         private readonly s3Service: S3Service,
         private readonly s3PathHelper: S3PathHelper,
@@ -135,10 +146,11 @@ export class UploadController {
             ['avatars', 'brands', 'categories', 'store_logos'].includes(entityType);
 
         if (file.mimetype.startsWith('image/')) {
+            const context = this.ENTITY_TO_CONTEXT[entityType] ?? ImageContext.DEFAULT;
             const { key: uploadedKey, thumbKey } = await this.s3Service.uploadImage(
                 file.buffer,
                 key,
-                { generateThumbnail: isMain },
+                { generateThumbnail: isMain, context },
             );
 
             return {

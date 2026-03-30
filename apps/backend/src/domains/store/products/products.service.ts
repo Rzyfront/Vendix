@@ -33,6 +33,7 @@ import {
 } from '@common/helpers/s3-path.helper';
 import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { ImageContext } from '@common/config/image-presets';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { GenerateProductDescriptionDto } from './dto';
 
@@ -272,7 +273,7 @@ export class ProductsService {
                   variant_image_url,
                   `${basePath}/${slug}-variant-${createdVariant.id}-${Date.now()}`,
                   undefined,
-                  { generateThumbnail: true },
+                  { generateThumbnail: true, context: ImageContext.PRODUCT },
                 );
                 const variantImage = await prisma.product_images.create({
                   data: {
@@ -1354,7 +1355,7 @@ export class ProductsService {
                   variant_image_url,
                   `${basePath}/${product.slug}-variant-${variantId}-${Date.now()}`,
                   undefined,
-                  { generateThumbnail: true },
+                  { generateThumbnail: true, context: ImageContext.PRODUCT },
                 );
                 const variantImage = await prisma.product_images.create({
                   data: {
@@ -1812,7 +1813,7 @@ export class ProductsService {
           imageUrl,
           `${basePath}/${productSlug}-${Date.now()}-${index}`,
           undefined,
-          { generateThumbnail: true },
+          { generateThumbnail: true, context: ImageContext.PRODUCT },
         );
         imageUrl = result.key;
       } else {

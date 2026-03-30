@@ -34,10 +34,6 @@ export class CreateTransferItemDto {
 export class CreateTransferDto {
   @IsNumber()
   @IsNotEmpty()
-  organization_id: number;
-
-  @IsNumber()
-  @IsNotEmpty()
   from_location_id: number;
 
   @IsNumber()
@@ -52,14 +48,6 @@ export class CreateTransferDto {
   @IsOptional()
   @IsString()
   notes?: string;
-
-  @IsOptional()
-  @IsNumber()
-  created_by_user_id?: number;
-
-  @IsOptional()
-  @IsNumber()
-  approved_by_user_id?: number;
 
   @IsArray()
   @ValidateNested({ each: true })

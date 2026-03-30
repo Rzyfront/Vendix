@@ -26,7 +26,6 @@ import {
   InvoiceScanResult,
   InvoiceMatchResult,
   MatchedLineItem,
-  ConfirmScannedInvoiceDto,
 } from '../../interfaces/invoice-scanner.interface';
 
 @Component({
@@ -51,7 +50,7 @@ import {
       (cancel)="onCancel()"
       size="xl"
       title="Escanear Factura de Compra"
-      subtitle="Escanea una factura para crear una orden de compra automáticamente"
+      subtitle="Escanea una factura para agregar productos al carrito"
     >
       <!-- Steps indicator -->
       <div class="mb-6">
@@ -178,10 +177,10 @@ import {
             <div class="flex items-center justify-between mb-2">
               <h4 class="text-sm font-semibold text-text-primary">Proveedor</h4>
               <app-badge
-                [variant]="matchResult()!.supplier_match.is_new ? 'error' : (matchResult()!.supplier_match.confidence >= 0.8 ? 'success' : 'warning')"
+                [variant]="matchResult()!.supplier_match.is_new ? 'warning' : (matchResult()!.supplier_match.confidence >= 80 ? 'success' : 'warning')"
                 size="xsm"
               >
-                {{ matchResult()!.supplier_match.is_new ? 'Nuevo' : (matchResult()!.supplier_match.confidence >= 0.8 ? 'Encontrado' : 'Parcial') }}
+                {{ matchResult()!.supplier_match.is_new ? 'Nuevo' : (matchResult()!.supplier_match.confidence >= 80 ? 'Encontrado' : 'Parcial') }}
               </app-badge>
             </div>
             <p class="text-base font-medium text-text-primary">
@@ -416,10 +415,10 @@ import {
           @if (currentStep() === 3) {
             <app-button
               variant="primary"
-              [disabled]="isConfirming() || editableItems().length === 0"
+              [disabled]="editableItems().length === 0"
               (clicked)="onConfirm()"
             >
-              {{ isConfirming() ? 'Creando...' : 'Crear Orden de Compra' }}
+              Agregar al Carrito
             </app-button>
           }
         </div>
@@ -446,7 +445,13 @@ import {
 export class InvoiceScannerModalComponent {
   @Input() isOpen = false;
   @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() confirmed = new EventEmitter<any>();
+  @Output() confirmed = new EventEmitter<{
+    scanResult: InvoiceScanResult;
+    matchResult: InvoiceMatchResult;
+    editedItems: MatchedLineItem[];
+    invoiceNumber?: string;
+    invoiceDate?: string;
+  }>();
 
   // Wizard state
   currentStep = signal<1 | 2 | 3>(1);
@@ -457,8 +462,6 @@ export class InvoiceScannerModalComponent {
   isScanning = signal(false);
   scanResult = signal<InvoiceScanResult | null>(null);
   matchResult = signal<InvoiceMatchResult | null>(null);
-  isConfirming = signal(false);
-
   // Editable items (mutable copy of match result items)
   editableItems = signal<MatchedLineItem[]>([]);
 
@@ -677,55 +680,18 @@ export class InvoiceScannerModalComponent {
 
   onConfirm(): void {
     const match = this.matchResult();
-    if (!match) return;
+    const scan = this.scanResult();
+    if (!match || !scan) return;
 
-    this.isConfirming.set(true);
+    this.confirmed.emit({
+      scanResult: scan,
+      matchResult: match,
+      editedItems: this.editableItems(),
+      invoiceNumber: this.editInvoiceNumber || undefined,
+      invoiceDate: this.editInvoiceDate || undefined,
+    });
 
-    const data: ConfirmScannedInvoiceDto = {
-      supplier_id: match.supplier_match.matched_id,
-      location_id: 0, // Will be set by the POP header context
-      items: this.editableItems().map((item) => {
-        const candidate = item.selected_product_id
-          ? item.candidates.find((c) => c.id === item.selected_product_id)
-          : item.candidates[0];
-
-        return {
-          product_id: item.selected_product_id || candidate?.id,
-          product_name: candidate?.name || item.description,
-          sku: candidate?.sku || item.sku_if_visible,
-          quantity: item.quantity,
-          unit_cost: item.unit_price,
-          description: item.description,
-        };
-      }),
-      invoice_number: this.editInvoiceNumber || undefined,
-      invoice_date: this.editInvoiceDate || undefined,
-      tax_amount: this.scanResult()?.tax_amount,
-      save_attachment: true,
-    };
-
-    this.invoiceScannerService
-      .confirmAndCreate(data, this.selectedFile() || undefined)
-      .subscribe({
-        next: (response) => {
-          this.isConfirming.set(false);
-          if (response.success) {
-            this.toastService.success('Orden de compra creada exitosamente');
-            this.confirmed.emit(response.data);
-            this.closeAndReset();
-          } else {
-            this.toastService.error(
-              response.message || 'Error al crear la orden',
-            );
-          }
-        },
-        error: (err) => {
-          this.isConfirming.set(false);
-          this.toastService.error(
-            err?.error?.message || 'Error al crear la orden de compra',
-          );
-        },
-      });
+    this.closeAndReset();
   }
 
   // ============================================================
@@ -754,7 +720,6 @@ export class InvoiceScannerModalComponent {
     this.editableItems.set([]);
     this.editInvoiceNumber = '';
     this.editInvoiceDate = '';
-    this.isConfirming.set(false);
   }
 
   private closeAndReset(): void {

@@ -36,8 +36,4 @@ export class QueryEmployeeDto {
   @MaxLength(100)
   department?: string;
 
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  store_id?: number;
 }

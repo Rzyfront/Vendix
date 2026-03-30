@@ -50,11 +50,6 @@ export class CreateEmployeeDto {
   @IsOptional()
   @IsInt()
   @Type(() => Number)
-  store_id?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Type(() => Number)
   user_id?: number;
 
   @IsOptional()

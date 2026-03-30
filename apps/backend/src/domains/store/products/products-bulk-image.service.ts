@@ -6,6 +6,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper, S3OrgContext, S3StoreContext } from '@common/helpers/s3-path.helper';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { ImageContext } from '@common/config/image-presets';
 import {
   BulkImageUploadResultDto,
   BulkImageSkuResultDto,
@@ -494,6 +495,7 @@ export class ProductsBulkImageService {
 
       const uploadResult = await this.s3Service.uploadImage(imageBuffer, imageKey, {
         generateThumbnail: true,
+        context: ImageContext.PRODUCT,
       });
 
       await this.prisma.product_images.create({

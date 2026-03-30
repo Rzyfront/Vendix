@@ -3349,7 +3349,7 @@ model accounting_entry_lines {
 model employees {
   id                  Int                      @id @default(autoincrement())
   organization_id     Int
-  store_id            Int?
+  store_id            Int
   user_id             Int?
   employee_code       String                   @db.VarChar(50)
   first_name          String                   @db.VarChar(100)
@@ -3378,7 +3378,7 @@ model employees {
   updated_at          DateTime?                @default(now()) @db.Timestamp(6)
 
   organization        organizations         @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store               stores?               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store               stores                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   user                users?                @relation("employees_user", fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   payroll_items       payroll_items[]
   payroll_settlements payroll_settlements[]
