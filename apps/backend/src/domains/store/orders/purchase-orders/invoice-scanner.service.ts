@@ -28,7 +28,13 @@ export class InvoiceScannerService {
   ) {}
 
   async scanInvoice(file: Express.Multer.File): Promise<InvoiceScanResult> {
+    this.logger.debug(
+      `[InvoiceScan] File: mimetype=${file.mimetype}, size=${file.size}, buffer=${file.buffer?.length ?? 'NO BUFFER'}`,
+    );
+
     const dataUri = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+
+    this.logger.debug(`[InvoiceScan] DataURI length: ${dataUri.length} chars`);
 
     const imageMessage: AIMessage = {
       role: 'user',
@@ -48,7 +54,16 @@ export class InvoiceScannerService {
   "tax_amount": number,
   "total": number,
   "confidence": number between 0 and 100
-}`,
+}
+
+Important rules:
+- Extract ALL visible information. Use null ONLY when the field is truly absent from the document.
+- For numbers, extract the raw numeric value even if formatting is unusual (dots as thousands, commas as decimals, spaces, etc). Always return numbers without formatting (e.g., 1234567.89).
+- For supplier name, use the FULL business name exactly as shown on the invoice.
+- For dates, convert to YYYY-MM-DD format when possible.
+- Include ALL line items visible on the document, even if some fields are unclear — estimate values when necessary and set a lower confidence score.
+- If unit_price or total seems inconsistent, still extract both as-is — do not attempt to correct them.
+- Set confidence (0-100) reflecting overall extraction quality.`,
         },
         {
           type: 'image_url',
@@ -57,7 +72,13 @@ export class InvoiceScannerService {
       ],
     };
 
+    this.logger.debug(`[InvoiceScan] Sending to AI engine...`);
     const response = await this.aiEngine.run('invoice_ocr', {}, [imageMessage]);
+
+    this.logger.debug(
+      `[InvoiceScan] AI response: success=${response.success}, contentLength=${response.content?.length ?? 0}, model=${response.model}, error=${response.error}`,
+    );
+    this.logger.debug(`[InvoiceScan] AI content preview: ${response.content?.substring(0, 300)}`);
 
     if (!response.success || !response.content) {
       this.logger.error(`AI OCR failed: ${response.error}`);
@@ -80,45 +101,67 @@ export class InvoiceScannerService {
 
   async matchProducts(scanResult: InvoiceScanResult): Promise<InvoiceMatchResult> {
     const warnings: string[] = [];
+    let supplierMatch: SupplierMatch;
 
-    // --- Match supplier ---
-    const supplierMatch = await this.matchSupplier(scanResult);
-    if (supplierMatch.is_new) {
-      warnings.push(`Proveedor "${scanResult.supplier.name}" no encontrado en el sistema.`);
+    // Supplier match — never throw
+    try {
+      supplierMatch = await this.matchSupplier(scanResult);
+      if (supplierMatch.is_new) {
+        warnings.push(`Proveedor "${scanResult.supplier?.name || 'Desconocido'}" no encontrado en el sistema. Puedes seleccionarlo manualmente.`);
+      }
+    } catch (err) {
+      this.logger.warn(`Supplier matching failed: ${err.message}`);
+      supplierMatch = {
+        name: scanResult.supplier?.name || 'Desconocido',
+        confidence: 0,
+        is_new: true,
+      };
+      warnings.push('No se pudo buscar el proveedor. Puedes seleccionarlo manualmente.');
     }
 
-    // --- Match line items ---
+    // Item matching — each item individually wrapped
     const matchedItems: MatchedLineItem[] = [];
 
-    for (const item of scanResult.line_items) {
-      const candidates = await this.findProductCandidates(item, supplierMatch.matched_id);
-      const topCandidate = candidates.length > 0 ? candidates[0] : null;
+    for (const item of scanResult.line_items || []) {
+      try {
+        const candidates = await this.findProductCandidates(item, supplierMatch.matched_id);
+        const topCandidate = candidates.length > 0 ? candidates[0] : null;
 
-      let matchStatus: 'matched' | 'partial' | 'new' = 'new';
-      let selectedProductId: number | undefined;
+        let matchStatus: 'matched' | 'partial' | 'new' = 'new';
+        let selectedProductId: number | undefined;
 
-      if (topCandidate) {
-        if (topCandidate.confidence >= 90) {
-          matchStatus = 'matched';
-          selectedProductId = topCandidate.id;
-        } else if (topCandidate.confidence >= 50) {
-          matchStatus = 'partial';
-          if (topCandidate.confidence >= 80) {
+        if (topCandidate) {
+          if (topCandidate.confidence >= 90) {
+            matchStatus = 'matched';
             selectedProductId = topCandidate.id;
+          } else if (topCandidate.confidence >= 50) {
+            matchStatus = 'partial';
+            if (topCandidate.confidence >= 80) {
+              selectedProductId = topCandidate.id;
+            }
           }
         }
-      }
 
-      if (matchStatus === 'new') {
-        warnings.push(`Producto "${item.description}" sin coincidencias en el catálogo.`);
-      }
+        if (matchStatus === 'new') {
+          warnings.push(`Producto "${item.description}" sin coincidencias en el catálogo.`);
+        }
 
-      matchedItems.push({
-        ...item,
-        match_status: matchStatus,
-        selected_product_id: selectedProductId,
-        candidates: candidates.slice(0, 5),
-      });
+        matchedItems.push({
+          ...item,
+          match_status: matchStatus,
+          selected_product_id: selectedProductId,
+          candidates: candidates.slice(0, 5),
+        });
+      } catch (err) {
+        this.logger.warn(`Item matching failed for "${item.description}": ${err.message}`);
+        warnings.push(`No se pudo buscar "${item.description}".`);
+        matchedItems.push({
+          ...item,
+          match_status: 'new',
+          selected_product_id: undefined,
+          candidates: [],
+        });
+      }
     }
 
     return {
@@ -128,6 +171,7 @@ export class InvoiceScannerService {
     };
   }
 
+  /** @deprecated Use frontend cart injection instead. Kept for backward compatibility. */
   async confirmAndCreatePO(
     dto: ConfirmScannedInvoiceDto,
     file?: Express.Multer.File,
@@ -178,36 +222,95 @@ export class InvoiceScannerService {
   private async matchSupplier(scanResult: InvoiceScanResult): Promise<SupplierMatch> {
     const { supplier } = scanResult;
 
-    // Tier 1: Match by tax_id (exact, case-insensitive)
-    if (supplier.tax_id) {
-      const byTax = await this.prisma.suppliers.findFirst({
-        where: { tax_id: { equals: supplier.tax_id, mode: 'insensitive' } },
-      });
-      if (byTax) {
-        return {
-          matched_id: byTax.id,
-          name: byTax.name,
-          tax_id: byTax.tax_id,
-          confidence: 95,
-          is_new: false,
-        };
+    try {
+      // Tier 1: Match by tax_id (exact, case-insensitive)
+      if (supplier.tax_id) {
+        const byTax = await this.prisma.suppliers.findFirst({
+          where: { tax_id: { equals: supplier.tax_id, mode: 'insensitive' } },
+        });
+        if (byTax) {
+          return {
+            matched_id: byTax.id,
+            name: byTax.name,
+            tax_id: byTax.tax_id,
+            confidence: 95,
+            is_new: false,
+          };
+        }
       }
-    }
 
-    // Tier 2: Match by name (contains, case-insensitive)
-    if (supplier.name) {
-      const byName = await this.prisma.suppliers.findFirst({
-        where: { name: { contains: supplier.name, mode: 'insensitive' } },
-      });
-      if (byName) {
-        return {
-          matched_id: byName.id,
-          name: byName.name,
-          tax_id: byName.tax_id,
-          confidence: 70,
-          is_new: false,
-        };
+      // Tier 2 & 3: Load suppliers and do bidirectional + word matching
+      if (supplier.name) {
+        const allSuppliers = await this.prisma.suppliers.findMany({
+          select: { id: true, name: true, tax_id: true },
+          take: 200,
+        });
+
+        const extractedLower = supplier.name.toLowerCase().trim();
+        let bestMatch: { id: number; name: string; tax_id: string | null } | null = null;
+        let bestScore = 0;
+
+        // Tier 2: Bidirectional contains
+        for (const s of allSuppliers) {
+          const dbLower = s.name.toLowerCase().trim();
+          if (dbLower.includes(extractedLower) || extractedLower.includes(dbLower)) {
+            const ratio = Math.min(extractedLower.length, dbLower.length) / Math.max(extractedLower.length, dbLower.length);
+            const score = 65 + ratio * 20; // 65-85 range
+            if (score > bestScore) {
+              bestScore = score;
+              bestMatch = s;
+            }
+          }
+        }
+
+        if (bestMatch && bestScore >= 65) {
+          return {
+            matched_id: bestMatch.id,
+            name: bestMatch.name,
+            tax_id: bestMatch.tax_id ?? undefined,
+            confidence: Math.round(bestScore),
+            is_new: false,
+          };
+        }
+
+        // Tier 3: Word-level overlap
+        const extractedWords = extractedLower.split(/\s+/).filter((w) => w.length > 2);
+
+        if (extractedWords.length > 0) {
+          for (const s of allSuppliers) {
+            const dbWords = s.name.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+            if (dbWords.length === 0) continue;
+
+            let matches = 0;
+            for (const ew of extractedWords) {
+              for (const dw of dbWords) {
+                if (dw.includes(ew) || ew.includes(dw)) {
+                  matches++;
+                  break;
+                }
+              }
+            }
+
+            const score = (matches / Math.max(extractedWords.length, dbWords.length)) * 60;
+            if (score > bestScore && score >= 30) {
+              bestScore = score;
+              bestMatch = s;
+            }
+          }
+
+          if (bestMatch && bestScore >= 30) {
+            return {
+              matched_id: bestMatch.id,
+              name: bestMatch.name,
+              tax_id: bestMatch.tax_id ?? undefined,
+              confidence: Math.round(bestScore),
+              is_new: false,
+            };
+          }
+        }
       }
+    } catch (err) {
+      this.logger.warn(`Supplier matching failed gracefully: ${err.message}`);
     }
 
     return {

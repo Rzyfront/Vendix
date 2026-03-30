@@ -772,24 +772,24 @@
 
                     } <!-- end @else track_inventory -->
                 </section>
+
+                <!-- Promotions Section (Desktop sidebar, edit mode only) -->
+                @if (isEditMode()) {
+                <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4">
+                    <div class="flex items-center gap-2">
+                        <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
+                        <h2 class="text-base font-bold text-gray-900">Promociones</h2>
+                    </div>
+                    <p class="text-sm text-gray-500">Asocia promociones activas a este producto.</p>
+                    <app-multi-selector label="Promociones" [options]="promotionOptions"
+                        [ngModel]="productPromotionIds" [ngModelOptions]="{standalone: true}"
+                        (valueChange)="onPromotionsChange($event)"
+                        placeholder="Seleccionar promociones...">
+                    </app-multi-selector>
+                </section>
+                }
             </div>
         </div>
-
-        <!-- Promotions Section (edit mode only) -->
-        @if (isEditMode()) {
-        <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4">
-            <div class="flex items-center gap-2">
-                <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
-                <h2 class="text-base font-bold text-gray-900">Promociones</h2>
-            </div>
-            <p class="text-sm text-gray-500">Asocia promociones activas a este producto.</p>
-            <app-multi-selector label="Promociones" [options]="promotionOptions"
-                [ngModel]="productPromotionIds" [ngModelOptions]="{standalone: true}"
-                (valueChange)="onPromotionsChange($event)"
-                placeholder="Seleccionar promociones...">
-            </app-multi-selector>
-        </section>
-        }
 
         <!-- MOBILE: Inventario Section (visible only on mobile) -->
         @if (productForm.get('track_inventory')?.value) {
@@ -841,6 +841,22 @@
                 <app-icon name="list" size="14"></app-icon>
                 Ver detalle completo
             </button>
+        </section>
+        }
+
+        <!-- MOBILE: Promotions Section (edit mode only) -->
+        @if (isEditMode()) {
+        <section class="lg:hidden bg-white rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4">
+            <div class="flex items-center gap-2">
+                <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
+                <h2 class="text-base font-bold text-gray-900">Promociones</h2>
+            </div>
+            <p class="text-sm text-gray-500">Asocia promociones activas a este producto.</p>
+            <app-multi-selector label="Promociones" [options]="promotionOptions"
+                [ngModel]="productPromotionIds" [ngModelOptions]="{standalone: true}"
+                (valueChange)="onPromotionsChange($event)"
+                placeholder="Seleccionar promociones...">
+            </app-multi-selector>
         </section>
         }
 

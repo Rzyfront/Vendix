@@ -37,7 +37,6 @@ export class EmployeesService {
       sort_order = 'desc',
       status,
       department,
-      store_id,
     } = query;
 
     const skip = (page - 1) * limit;
@@ -53,7 +52,6 @@ export class EmployeesService {
       }),
       ...(status && { status: status as any }),
       ...(department && { department: { contains: department, mode: 'insensitive' as const } }),
-      ...(store_id && { store_id }),
     };
 
     const [data, total] = await Promise.all([
@@ -98,7 +96,6 @@ export class EmployeesService {
     if (!dto.employee_code) {
       const last_employee = await this.prisma.employees.findMany({
         where: {
-          organization_id: context.organization_id,
           employee_code: { startsWith: 'EMP-' },
         },
         select: { employee_code: true },
@@ -155,7 +152,6 @@ export class EmployeesService {
     const employee = await this.prisma.employees.create({
       data: {
         organization_id: context.organization_id,
-        store_id: dto.store_id || context.store_id || null,
         user_id: dto.user_id || null,
         employee_code: dto.employee_code,
         first_name: dto.first_name,
@@ -243,12 +239,8 @@ export class EmployeesService {
     }
 
     // Remove fields that should not be passed directly
-    delete update_data.store_id;
     delete update_data.user_id;
 
-    if (dto.store_id !== undefined) {
-      update_data.store_id = dto.store_id;
-    }
     if (dto.user_id !== undefined) {
       update_data.user_id = dto.user_id;
     }

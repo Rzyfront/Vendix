@@ -1,5 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { RequestContextService } from '../../../../common/context/request-context.service';
+import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { CreateTransferDto } from './dto/create-transfer.dto';
 import { UpdateTransferDto } from './dto/update-transfer.dto';
 import { TransferQueryDto } from './dto/transfer-query.dto';
@@ -7,7 +9,10 @@ import { transfer_status_enum } from '@prisma/client';
 
 @Injectable()
 export class StockTransfersService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    private stockLevelManager: StockLevelManager,
+  ) {}
 
   async getStats() {
     const [total, draft, in_transit, completed, cancelled] = await Promise.all([
@@ -26,7 +31,11 @@ export class StockTransfersService {
 
   async create(createTransferDto: CreateTransferDto) {
     return this.prisma.$transaction(async (tx) => {
-      // Validate source and destination locations are different
+      const context = RequestContextService.getContext();
+      if (!context?.organization_id) {
+        throw new BadRequestException('Organization context is required');
+      }
+
       if (
         createTransferDto.from_location_id === createTransferDto.to_location_id
       ) {
@@ -37,13 +46,11 @@ export class StockTransfersService {
 
       // Validate stock availability for all items
       for (const item of createTransferDto.items) {
-        const stockLevel = await tx.stock_levels.findUnique({
+        const stockLevel = await tx.stock_levels.findFirst({
           where: {
-            product_id_product_variant_id_location_id: {
-              product_id: item.product_id,
-              product_variant_id: item.product_variant_id || null,
-              location_id: createTransferDto.from_location_id,
-            },
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id ?? null,
+            location_id: createTransferDto.from_location_id,
           },
         });
 
@@ -54,16 +61,26 @@ export class StockTransfersService {
         }
       }
 
-      // Generate transfer number
       const transferNumber = await this.generateTransferNumber(tx);
 
-      // Create stock transfer
       const stockTransfer = await tx.stock_transfers.create({
         data: {
-          ...createTransferDto,
+          organization_id: context.organization_id,
+          from_location_id: createTransferDto.from_location_id,
+          to_location_id: createTransferDto.to_location_id,
+          notes: createTransferDto.notes,
           transfer_number: transferNumber,
           transfer_date: new Date(),
           expected_date: createTransferDto.expected_date,
+          created_by_user_id: context.user_id,
+          stock_transfer_items: {
+            create: createTransferDto.items.map((item) => ({
+              product_id: item.product_id,
+              product_variant_id: item.product_variant_id,
+              quantity: item.quantity,
+              notes: item.notes,
+            })),
+          },
         },
         include: {
           from_location: true,
@@ -81,6 +98,111 @@ export class StockTransfersService {
     });
   }
 
+  async createAndComplete(createTransferDto: CreateTransferDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const context = RequestContextService.getContext();
+      if (!context?.organization_id) {
+        throw new BadRequestException('Organization context is required');
+      }
+
+      if (createTransferDto.from_location_id === createTransferDto.to_location_id) {
+        throw new BadRequestException('Source and destination locations must be different');
+      }
+
+      // Validate stock availability for all items
+      for (const item of createTransferDto.items) {
+        const stockLevel = await tx.stock_levels.findFirst({
+          where: {
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id ?? null,
+            location_id: createTransferDto.from_location_id,
+          },
+        });
+
+        if (!stockLevel || stockLevel.quantity_available < item.quantity) {
+          throw new BadRequestException(
+            `Insufficient stock for product ${item.product_id} at source location`,
+          );
+        }
+      }
+
+      const transferNumber = await this.generateTransferNumber(tx);
+
+      const stockTransfer = await tx.stock_transfers.create({
+        data: {
+          organization_id: context.organization_id,
+          from_location_id: createTransferDto.from_location_id,
+          to_location_id: createTransferDto.to_location_id,
+          notes: createTransferDto.notes,
+          transfer_number: transferNumber,
+          transfer_date: new Date(),
+          expected_date: createTransferDto.expected_date,
+          created_by_user_id: context.user_id,
+          approved_by_user_id: context.user_id,
+          completed_date: new Date(),
+          status: transfer_status_enum.completed,
+          stock_transfer_items: {
+            create: createTransferDto.items.map((item) => ({
+              product_id: item.product_id,
+              product_variant_id: item.product_variant_id,
+              quantity: item.quantity,
+              quantity_received: item.quantity,
+              notes: item.notes,
+            })),
+          },
+        },
+        include: {
+          from_location: true,
+          to_location: true,
+          stock_transfer_items: true,
+        },
+      });
+
+      // Move stock using StockLevelManager
+      for (const item of stockTransfer.stock_transfer_items) {
+        await this.stockLevelManager.updateStock({
+          product_id: item.product_id,
+          variant_id: item.product_variant_id ?? undefined,
+          location_id: stockTransfer.from_location_id,
+          quantity_change: -item.quantity,
+          movement_type: 'transfer',
+          reason: `Stock transfer ${stockTransfer.transfer_number} - source`,
+          user_id: context?.user_id,
+          create_movement: true,
+          from_location_id: stockTransfer.from_location_id,
+          to_location_id: stockTransfer.to_location_id,
+        }, tx);
+
+        await this.stockLevelManager.updateStock({
+          product_id: item.product_id,
+          variant_id: item.product_variant_id ?? undefined,
+          location_id: stockTransfer.to_location_id,
+          quantity_change: item.quantity,
+          movement_type: 'transfer',
+          reason: `Stock transfer ${stockTransfer.transfer_number} - destination`,
+          user_id: context?.user_id,
+          create_movement: true,
+          from_location_id: stockTransfer.from_location_id,
+          to_location_id: stockTransfer.to_location_id,
+        }, tx);
+      }
+
+      return tx.stock_transfers.findUnique({
+        where: { id: stockTransfer.id },
+        include: {
+          from_location: true,
+          to_location: true,
+          stock_transfer_items: {
+            include: {
+              products: true,
+              product_variants: true,
+            },
+          },
+        },
+      });
+    });
+  }
+
   findAll(query: TransferQueryDto) {
     const where: any = {
       from_location_id: query.from_location_id,
@@ -88,7 +210,6 @@ export class StockTransfersService {
       status: query.status,
     };
 
-    // Add date range filter
     if (query.transfer_date_from || query.transfer_date_to) {
       where.transfer_date = {};
       if (query.transfer_date_from) {
@@ -99,7 +220,6 @@ export class StockTransfersService {
       }
     }
 
-    // Add search filter
     if (query.search) {
       where.OR = [
         { transfer_number: { contains: query.search } },
@@ -109,7 +229,6 @@ export class StockTransfersService {
       ];
     }
 
-    // Add product filter
     if (query.product_id) {
       where.stock_transfer_items = {
         some: {
@@ -174,7 +293,6 @@ export class StockTransfersService {
   }
 
   async update(id: number, updateTransferDto: UpdateTransferDto) {
-    // Only allow updates if status is draft
     const existingTransfer = await this.prisma.stock_transfers.findUnique({
       where: { id },
     });
@@ -210,14 +328,20 @@ export class StockTransfersService {
         throw new BadRequestException('Only draft transfers can be approved');
       }
 
-      // Reserve stock at source location
+      const context = RequestContextService.getContext();
+
+      // Reserve stock at source location using StockLevelManager
       for (const item of stockTransfer.stock_transfer_items) {
-        await this.reserveStock(
-          tx,
+        await this.stockLevelManager.reserveStock(
           item.product_id,
+          item.product_variant_id ?? undefined,
           stockTransfer.from_location_id,
           item.quantity,
-          item.product_variant_id,
+          'transfer',
+          stockTransfer.id,
+          context?.user_id,
+          true,
+          tx,
         );
       }
 
@@ -225,7 +349,6 @@ export class StockTransfersService {
         where: { id },
         data: {
           status: transfer_status_enum.in_transit,
-          approved_date: new Date(),
         },
         include: {
           from_location: true,
@@ -241,132 +364,75 @@ export class StockTransfersService {
     });
   }
 
-  async startTransfer(id: number) {
-    const stockTransfer = await this.prisma.stock_transfers.findUnique({
-      where: { id },
-    });
-
-    if (stockTransfer.status !== transfer_status_enum.in_transit) {
-      throw new BadRequestException('Only in-transit transfers can be started');
-    }
-
-    return this.prisma.stock_transfers.update({
-      where: { id },
-      data: {
-        started_date: new Date(),
-      },
-      include: {
-        from_location: true,
-        to_location: true,
-        stock_transfer_items: {
-          include: {
-            products: true,
-            product_variants: true,
-          },
-        },
-      },
-    });
-  }
-
   async complete(
     id: number,
     items: Array<{ id: number; quantity_received: number }>,
   ) {
     return this.prisma.$transaction(async (tx) => {
-      // Update stock transfer items with received quantities
       for (const item of items) {
         await tx.stock_transfer_items.update({
           where: { id: item.id },
           data: {
             quantity_received: item.quantity_received,
-            received_date: new Date(),
           },
         });
       }
 
-      // Create inventory movements and update stock levels
       const stockTransfer = await tx.stock_transfers.findUnique({
         where: { id },
-        include: {
-          stock_transfer_items: true,
-        },
+        include: { stock_transfer_items: true },
       });
+
+      const context = RequestContextService.getContext();
 
       for (const item of stockTransfer.stock_transfer_items) {
         const receivedItem = items.find((i) => i.id === item.id);
         if (receivedItem && receivedItem.quantity_received > 0) {
-          // Create inventory movement from source
-          await tx.inventory_movements.create({
-            data: {
-              organization_id: stockTransfer.organization_id,
-              product_id: item.product_id,
-              product_variant_id: item.product_variant_id,
-              from_location_id: stockTransfer.from_location_id,
-              quantity: receivedItem.quantity_received,
-              movement_type: 'transfer',
-              source_order_type: 'stock_transfer',
-              source_order_id: id,
-              reason: 'Stock transfer - source',
-              created_at: new Date(),
-            },
-          });
+          // Subtract from source
+          await this.stockLevelManager.updateStock({
+            product_id: item.product_id,
+            variant_id: item.product_variant_id ?? undefined,
+            location_id: stockTransfer.from_location_id,
+            quantity_change: -receivedItem.quantity_received,
+            movement_type: 'transfer',
+            reason: `Stock transfer ${stockTransfer.transfer_number} - source`,
+            user_id: context?.user_id,
+            create_movement: true,
+            from_location_id: stockTransfer.from_location_id,
+            to_location_id: stockTransfer.to_location_id,
+          }, tx);
 
-          // Create inventory movement to destination
-          await tx.inventory_movements.create({
-            data: {
-              organization_id: stockTransfer.organization_id,
-              product_id: item.product_id,
-              product_variant_id: item.product_variant_id,
-              to_location_id: stockTransfer.to_location_id,
-              quantity: receivedItem.quantity_received,
-              movement_type: 'transfer',
-              source_order_type: 'stock_transfer',
-              source_order_id: id,
-              reason: 'Stock transfer - destination',
-              created_at: new Date(),
-            },
-          });
-
-          // Update stock levels at source
-          await this.updateStockLevel(
-            tx,
-            item.product_id,
-            stockTransfer.from_location_id,
-            -receivedItem.quantity_received,
-            item.product_variant_id,
-          );
-
-          // Update stock levels at destination
-          await this.updateStockLevel(
-            tx,
-            item.product_id,
-            stockTransfer.to_location_id,
-            receivedItem.quantity_received,
-            item.product_variant_id,
-          );
-
-          // Release reserved stock at source
-          await this.releaseStock(
-            tx,
-            item.product_id,
-            stockTransfer.from_location_id,
-            receivedItem.quantity_received,
-            item.product_variant_id,
-          );
+          // Add to destination
+          await this.stockLevelManager.updateStock({
+            product_id: item.product_id,
+            variant_id: item.product_variant_id ?? undefined,
+            location_id: stockTransfer.to_location_id,
+            quantity_change: receivedItem.quantity_received,
+            movement_type: 'transfer',
+            reason: `Stock transfer ${stockTransfer.transfer_number} - destination`,
+            user_id: context?.user_id,
+            create_movement: true,
+            from_location_id: stockTransfer.from_location_id,
+            to_location_id: stockTransfer.to_location_id,
+          }, tx);
         }
       }
 
-      // Check if all items are received
+      // Release reservations created during approve
+      await this.stockLevelManager.releaseReservationsByReference(
+        'transfer',
+        stockTransfer.id,
+        'consumed',
+        tx,
+      );
+
       const allItemsReceived = stockTransfer.stock_transfer_items.every(
         (item) => {
           const receivedItem = items.find((i) => i.id === item.id);
-          return (
-            receivedItem && receivedItem.quantity_received >= item.quantity
-          );
+          return receivedItem && receivedItem.quantity_received >= item.quantity;
         },
       );
 
-      // Update stock transfer status
       const newStatus = allItemsReceived
         ? transfer_status_enum.completed
         : transfer_status_enum.in_transit;
@@ -404,24 +470,20 @@ export class StockTransfersService {
         );
       }
 
-      // Release any reserved stock
+      // Release any reservations if transfer was in_transit
       if (stockTransfer.status === transfer_status_enum.in_transit) {
-        for (const item of stockTransfer.stock_transfer_items) {
-          await this.releaseStock(
-            tx,
-            item.product_id,
-            stockTransfer.from_location_id,
-            item.quantity,
-            item.product_variant_id,
-          );
-        }
+        await this.stockLevelManager.releaseReservationsByReference(
+          'transfer',
+          stockTransfer.id,
+          'cancelled',
+          tx,
+        );
       }
 
       return tx.stock_transfers.update({
         where: { id },
         data: {
           status: transfer_status_enum.cancelled,
-          cancelled_date: new Date(),
         },
         include: {
           from_location: true,
@@ -504,7 +566,6 @@ export class StockTransfersService {
     const day = String(today.getDate()).padStart(2, '0');
     const prefix = `TRF-${year}${month}${day}`;
 
-    // Find the last transfer number for today
     const lastTransfer = await tx.stock_transfers.findFirst({
       where: {
         transfer_number: {
@@ -523,129 +584,5 @@ export class StockTransfersService {
     }
 
     return `${prefix}-${String(sequence).padStart(4, '0')}`;
-  }
-
-  private async reserveStock(
-    tx: any,
-    productId: number,
-    locationId: number,
-    quantity: number,
-    productVariantId?: number,
-  ) {
-    const existingStock = await tx.stock_levels.findUnique({
-      where: {
-        product_id_product_variant_id_location_id: {
-          product_id: productId,
-          product_variant_id: productVariantId || null,
-          location_id: locationId,
-        },
-      },
-    });
-
-    if (existingStock) {
-      const newQuantityReserved = existingStock.quantity_reserved + quantity;
-      const newQuantityAvailable = existingStock.quantity_available - quantity;
-
-      return tx.stock_levels.update({
-        where: {
-          product_id_product_variant_id_location_id: {
-            product_id: productId,
-            product_variant_id: productVariantId || null,
-            location_id: locationId,
-          },
-        },
-        data: {
-          quantity_reserved: Math.max(0, newQuantityReserved),
-          quantity_available: Math.max(0, newQuantityAvailable),
-          last_updated: new Date(),
-        },
-      });
-    }
-  }
-
-  private async releaseStock(
-    tx: any,
-    productId: number,
-    locationId: number,
-    quantity: number,
-    productVariantId?: number,
-  ) {
-    const existingStock = await tx.stock_levels.findUnique({
-      where: {
-        product_id_product_variant_id_location_id: {
-          product_id: productId,
-          product_variant_id: productVariantId || null,
-          location_id: locationId,
-        },
-      },
-    });
-
-    if (existingStock) {
-      const newQuantityReserved = existingStock.quantity_reserved - quantity;
-      const newQuantityAvailable = existingStock.quantity_available + quantity;
-
-      return tx.stock_levels.update({
-        where: {
-          product_id_product_variant_id_location_id: {
-            product_id: productId,
-            product_variant_id: productVariantId || null,
-            location_id: locationId,
-          },
-        },
-        data: {
-          quantity_reserved: Math.max(0, newQuantityReserved),
-          quantity_available: Math.max(0, newQuantityAvailable),
-          last_updated: new Date(),
-        },
-      });
-    }
-  }
-
-  private async updateStockLevel(
-    tx: any,
-    productId: number,
-    locationId: number,
-    quantityChange: number,
-    productVariantId?: number,
-  ) {
-    const existingStock = await tx.stock_levels.findUnique({
-      where: {
-        product_id_product_variant_id_location_id: {
-          product_id: productId,
-          product_variant_id: productVariantId || null,
-          location_id: locationId,
-        },
-      },
-    });
-
-    if (existingStock) {
-      const newQuantityOnHand = existingStock.quantity_on_hand + quantityChange;
-
-      return tx.stock_levels.update({
-        where: {
-          product_id_product_variant_id_location_id: {
-            product_id: productId,
-            product_variant_id: productVariantId || null,
-            location_id: locationId,
-          },
-        },
-        data: {
-          quantity_on_hand: Math.max(0, newQuantityOnHand),
-          last_updated: new Date(),
-        },
-      });
-    } else {
-      return tx.stock_levels.create({
-        data: {
-          product_id: productId,
-          product_variant_id: productVariantId,
-          location_id: locationId,
-          quantity_on_hand: Math.max(0, quantityChange),
-          quantity_reserved: 0,
-          quantity_available: Math.max(0, quantityChange),
-          last_updated: new Date(),
-        },
-      });
-    }
   }
 }

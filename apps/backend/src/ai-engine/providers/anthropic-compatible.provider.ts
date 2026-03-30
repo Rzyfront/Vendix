@@ -66,13 +66,26 @@ export class AnthropicCompatibleProvider implements AIProvider {
         (systemMsg ? (typeof systemMsg.content === 'string' ? systemMsg.content : undefined) : undefined);
       const userMessages = messages.filter((m) => m.role !== 'system');
 
+      const transformedMessages = userMessages.map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: this.transformContentForAnthropic(m.content) as any,
+      }));
+
+      // Debug: log message structure for multimodal requests
+      for (const msg of transformedMessages) {
+        if (Array.isArray(msg.content)) {
+          const types = msg.content.map((c: any) => c.type);
+          const imagePart = msg.content.find((c: any) => c.type === 'image');
+          console.log(
+            `[AnthropicProvider] Message role=${msg.role}, content types=${JSON.stringify(types)}, hasImage=${!!imagePart}, imageSourceType=${imagePart?.source?.type}, mediaType=${imagePart?.source?.media_type}, dataLength=${imagePart?.source?.data?.length ?? 0}`,
+          );
+        }
+      }
+
       const response = await this.client.messages.create({
         model: options?.model || this.config.modelId,
         ...(systemPrompt && { system: systemPrompt }),
-        messages: userMessages.map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: this.transformContentForAnthropic(m.content) as any,
-        })),
+        messages: transformedMessages,
         max_tokens:
           options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
         temperature:

@@ -6,6 +6,7 @@ import {
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { S3Service } from '../../../common/services/s3.service';
 import { S3PathHelper } from '../../../common/helpers/s3-path.helper';
+import { ImageContext } from '@common/config/image-presets';
 import {
   CreateArticleDto,
   UpdateArticleDto,
@@ -127,7 +128,7 @@ export class HelpCenterAdminService {
       ? this.s3Service.sanitizeForStorage(dto.cover_image_url)
       : null;
 
-    return this.globalPrisma.help_articles.create({
+    const article = await this.globalPrisma.help_articles.create({
       data: {
         title: dto.title,
         slug: finalSlug,
@@ -149,6 +150,14 @@ export class HelpCenterAdminService {
         },
       },
     });
+
+    return {
+      ...article,
+      cover_image_url: article.cover_image_url
+        ? await this.s3Service.signUrl(article.cover_image_url)
+        : null,
+      content: await this.s3Service.signMarkdownContent(article.content),
+    };
   }
 
   async updateArticle(id: number, dto: UpdateArticleDto) {
@@ -185,7 +194,7 @@ export class HelpCenterAdminService {
       ? this.s3Service.sanitizeForStorage(dto.cover_image_url)
       : undefined;
 
-    return this.globalPrisma.help_articles.update({
+    const updated = await this.globalPrisma.help_articles.update({
       where: { id },
       data: {
         ...(dto.title && { title: dto.title }),
@@ -208,6 +217,14 @@ export class HelpCenterAdminService {
         },
       },
     });
+
+    return {
+      ...updated,
+      cover_image_url: updated.cover_image_url
+        ? await this.s3Service.signUrl(updated.cover_image_url)
+        : null,
+      content: await this.s3Service.signMarkdownContent(updated.content),
+    };
   }
 
   async deleteArticle(id: number) {
@@ -350,7 +367,9 @@ export class HelpCenterAdminService {
     const fileName = `${Date.now()}-${file.originalname.replace(/\s+/g, '_')}`;
     const key = `${path}/${fileName}`;
 
-    const result = await this.s3Service.uploadImage(file.buffer, key);
+    const result = await this.s3Service.uploadImage(file.buffer, key, {
+      context: ImageContext.HELP_CENTER,
+    });
 
     return {
       key: result.key,

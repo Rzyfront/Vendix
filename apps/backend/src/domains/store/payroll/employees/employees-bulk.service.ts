@@ -333,7 +333,6 @@ export class EmployeesBulkService {
         // Check document doesn't already exist in DB
         const existingEmployee = await this.prisma.employees.findFirst({
           where: {
-            store_id: storeId,
             document_type: docType,
             document_number: docNumber,
           },
@@ -372,7 +371,6 @@ export class EmployeesBulkService {
             // Check user isn't already linked to another employee
             const linkedEmployee = await this.prisma.employees.findFirst({
               where: {
-                store_id: storeId,
                 user_id: existingUser.id,
               },
             });
@@ -451,7 +449,6 @@ export class EmployeesBulkService {
           severance_fund: empData.severance_fund?.trim() || undefined,
           compensation_fund: empData.compensation_fund?.trim() || undefined,
           user_id: userId,
-          store_id: storeId,
         };
 
         const employee = await this.employeesService.create(createDto);

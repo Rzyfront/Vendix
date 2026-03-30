@@ -161,10 +161,7 @@ export class StockLevelManager {
       {
         productId: params.product_id,
         variantId: params.variant_id,
-        type:
-          params.movement_type === 'adjustment'
-            ? 'adjustment_damage'
-            : params.movement_type,
+        type: this.mapMovementToTransactionType(params.movement_type),
         quantityChange: params.quantity_change,
         reason: params.reason,
         userId: params.user_id,
@@ -677,6 +674,26 @@ export class StockLevelManager {
       return execute(tx);
     }
     return this.prisma.$transaction(async (prisma) => execute(prisma));
+  }
+
+  /**
+   * Maps movement_type_enum to inventory_transaction_type_enum
+   * movement_type_enum: stock_in, stock_out, transfer, adjustment, sale, return, damage, expiration
+   * inventory_transaction_type_enum: stock_in, sale, return, adjustment_damage, initial
+   */
+  private mapMovementToTransactionType(movementType: string): any {
+    const map: Record<string, string> = {
+      stock_in: 'stock_in',
+      stock_out: 'stock_in',
+      transfer: 'stock_in',
+      adjustment: 'adjustment_damage',
+      sale: 'sale',
+      return: 'return',
+      damage: 'adjustment_damage',
+      expiration: 'adjustment_damage',
+      initial: 'initial',
+    };
+    return map[movementType] || 'stock_in';
   }
 
   /**

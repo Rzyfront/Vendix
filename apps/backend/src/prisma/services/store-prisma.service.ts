@@ -43,6 +43,7 @@ export class StorePrismaService extends BasePrismaService {
     'ai_conversations',
     'ai_embeddings',
     'dispatch_notes',
+    'employees',
   ];
 
   constructor() {
@@ -126,7 +127,7 @@ export class StorePrismaService extends BasePrismaService {
       'chart_of_accounts', // Org scoped
       'fiscal_periods', // Org scoped
       'accounting_entries', // Org scoped
-      'employees', // Org scoped
+      'employees', // Store scoped
       'payroll_runs', // Org scoped
       'layaway_items', // Relational
       'layaway_installments', // Relational
@@ -294,7 +295,6 @@ export class StorePrismaService extends BasePrismaService {
       'chart_of_accounts',
       'fiscal_periods',
       'accounting_entries',
-      'employees',
       'payroll_runs',
       'payroll_settlements',
       'employee_advances',
