@@ -199,6 +199,15 @@ import {
   Images,
   // Invoice scanner icons
   ScanLine,
+  // Markdown editor icons
+  Bold,
+  Italic,
+  ListOrdered,
+  Heading2,
+  Heading3,
+  Code,
+  TextQuote,
+  Strikethrough,
 } from 'lucide-angular';
 
 /**
@@ -465,6 +474,16 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // Invoice scanner icons
   'scan-line': ScanLine,
+
+  // Markdown editor icons
+  'bold': Bold,
+  'italic': Italic,
+  'list-ordered': ListOrdered,
+  'heading-2': Heading2,
+  'heading-3': Heading3,
+  'code': Code,
+  'text-quote': TextQuote,
+  'strikethrough': Strikethrough,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

@@ -358,9 +358,18 @@ export class HelpCenterAdminService {
       throw new BadRequestException('Image file is required');
     }
 
-    const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const allowedMimes = [
+      'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+      'image/bmp', 'image/tiff', 'image/svg+xml',
+      'image/heic', 'image/heif', 'image/avif',
+    ];
     if (!allowedMimes.includes(file.mimetype)) {
-      throw new BadRequestException('Only image files are allowed (JPEG, PNG, WebP, GIF)');
+      throw new BadRequestException('Only image files are allowed (JPEG, PNG, WebP, GIF, BMP, TIFF, SVG, HEIC, AVIF)');
+    }
+
+    const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+    if (file.size > MAX_SIZE) {
+      throw new BadRequestException('Image file must be smaller than 10MB');
     }
 
     const path = this.s3PathHelper.buildHelpCenterPath();

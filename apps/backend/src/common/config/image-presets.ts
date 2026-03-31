@@ -82,6 +82,13 @@ export const IMAGE_PRESETS: Record<ImageContext, ImagePreset> = {
     maxHeight: 800,
     quality: 82,
     fit: 'inside',
+    skipIfAlreadyOptimized: true,
+    thumbnail: {
+      width: 400,
+      height: 267,
+      quality: 75,
+      fit: 'cover',
+    },
   },
   [ImageContext.SUPPORT]: {
     maxWidth: 1200,
