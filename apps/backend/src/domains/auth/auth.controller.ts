@@ -28,6 +28,7 @@ import {
   ResetPasswordDto,
 } from './dto/password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { SwitchEnvironmentDto } from './dto/switch-environment.dto';
 import { Public } from './decorators/public.decorator';
 import { Roles } from './decorators/roles.decorator';
 import { RolesGuard } from './guards/roles.guard';
@@ -585,7 +586,7 @@ export class AuthController {
   })
   async switchEnvironment(
     @Req() req: AuthenticatedRequest,
-    @Body() switchDto: any,
+    @Body() switchDto: SwitchEnvironmentDto,
   ) {
     const expressReq = req as any;
     const raw_ip = expressReq.headers['x-forwarded-for'] || expressReq.ip || '';
