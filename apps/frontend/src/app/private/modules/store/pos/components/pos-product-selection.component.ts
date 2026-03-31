@@ -244,6 +244,7 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
               <!-- Product Name -->
               <h3
                 class="text-text-primary font-medium text-xs sm:text-sm leading-tight line-clamp-2 mb-1 sm:mb-2 group-hover:text-primary transition-colors"
+                [class.mb-4]="product.name.length <= 15"
                 [title]="product.name"
               >
                 {{ product.name }}
