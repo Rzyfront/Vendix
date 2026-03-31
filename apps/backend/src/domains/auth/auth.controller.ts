@@ -600,7 +600,7 @@ export class AuthController {
     try {
       const result = await this.environmentSwitchService.switchEnvironment(
         req.user.id,
-        switchDto.target_environment,
+        switchDto.target_environment as 'ORG_ADMIN' | 'STORE_ADMIN',
         switchDto.store_slug,
         client_info,
       );
