@@ -1,4 +1,4 @@
-import { IsBoolean, IsNumber, IsOptional } from 'class-validator';
+import { IsBoolean, IsNumber, IsOptional, Min } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
 export class QueryTransactionsDto {
