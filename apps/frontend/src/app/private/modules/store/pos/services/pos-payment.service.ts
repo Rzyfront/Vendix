@@ -137,7 +137,7 @@ export class PosPaymentService {
               type: type,
               icon: this.getPaymentIcon(type),
               enabled: method.state === 'enabled',
-              requiresReference: type !== 'cash',
+              requiresReference: type !== 'cash' && type !== 'voucher' && type !== 'wallet',
               referenceLabel: this.getReferenceLabel(type),
               dian_code: method.system_payment_method?.dian_code || undefined,
               // Preservar metadata original
@@ -163,6 +163,9 @@ export class PosPaymentService {
       paypal: 'paypal',
       bank_transfer: 'bank',
       digital_wallet: 'smartphone',
+      wompi: 'smartphone',
+      voucher: 'wallet',
+      wallet: 'wallet',
     };
     return iconMap[type] || 'credit-card';
   }
@@ -173,6 +176,8 @@ export class PosPaymentService {
       paypal: 'Email de PayPal',
       bank_transfer: 'Número de referencia',
       digital_wallet: 'Referencia de pago',
+      wompi: 'Teléfono Nequi o referencia',
+      wallet: 'Saldo disponible',
     };
     return labelMap[type] || 'Referencia';
   }
@@ -216,6 +221,11 @@ export class PosPaymentService {
         ),
       ),
       payment_reference: request.reference || '',
+      wompi_payment_method: request.paymentMethod?.original?.system_payment_method?.type === 'wompi'
+        ? request.metadata?.wompiPaymentMethod
+        : undefined,
+      wallet_id: request.metadata?.walletId,
+      return_url: window.location.origin + '/pos/payment-callback',
       register_id: register_id,
       seller_user_id: user_id,
       internal_notes: '',
@@ -234,6 +244,7 @@ export class PosPaymentService {
               this.generateTransactionId(),
             message: data.message || 'Pago procesado correctamente',
             change: data.payment?.change,
+            nextAction: data.payment?.nextAction || data.nextAction,
           };
         } else {
           return {
@@ -319,6 +330,11 @@ export class PosPaymentService {
         ).toFixed(2),
       ),
       payment_reference: paymentRequest.reference || '',
+      wompi_payment_method: paymentRequest.paymentMethod?.original?.system_payment_method?.type === 'wompi'
+        ? paymentRequest.metadata?.wompiPaymentMethod
+        : undefined,
+      wallet_id: paymentRequest.metadata?.walletId,
+      return_url: window.location.origin + '/pos/payment-callback',
       register_id: register_id,
       seller_user_id: user_id,
       internal_notes: cartState.notes || '',
@@ -357,6 +373,7 @@ export class PosPaymentService {
             payment: mappedPayment,
             message: data.message,
             change: data.payment?.change,
+            nextAction: data.payment?.nextAction || data.nextAction,
           };
         } else {
           throw new Error(data.message || 'Error al procesar la venta');

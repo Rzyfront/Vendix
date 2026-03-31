@@ -170,6 +170,66 @@ export async function seedSystemPaymentMethods(
       processing_fee_value: 0,
       processing_mode: 'ONLINE', // Digital vouchers
     },
+    {
+      name: 'wompi',
+      display_name: 'Wompi (Nequi, PSE, Tarjetas, Bancolombia)',
+      description: 'Gateway de pagos colombiano. Incluye Nequi, PSE, tarjetas locales y transferencias Bancolombia.',
+      type: 'wompi',
+      provider: 'wompi',
+      is_active: true,
+      requires_config: true,
+      config_schema: {
+        type: 'object',
+        required: ['public_key', 'private_key', 'events_secret'],
+        properties: {
+          public_key: {
+            type: 'string',
+            title: 'Public Key',
+            description: 'Llave pública de Wompi (pub_test_ o pub_prod_)',
+          },
+          private_key: {
+            type: 'string',
+            title: 'Private Key',
+            description: 'Llave privada de Wompi (prv_test_ o prv_prod_)',
+          },
+          events_secret: {
+            type: 'string',
+            title: 'Events Secret',
+            description: 'Secret para validar webhooks de Wompi',
+          },
+          integrity_secret: {
+            type: 'string',
+            title: 'Integrity Secret',
+            description: 'Secret para firmas de integridad',
+          },
+          environment: {
+            type: 'string',
+            enum: ['SANDBOX', 'PRODUCTION'],
+            title: 'Ambiente',
+            default: 'SANDBOX',
+            description: 'Ambiente de Wompi (sandbox para pruebas, production para producción)',
+          },
+        },
+      },
+      default_config: { environment: 'SANDBOX' },
+      supported_currencies: ['COP'],
+      processing_fee_type: 'percentage',
+      processing_fee_value: 2.99,
+      processing_mode: 'ONLINE',
+      dian_code: '48',
+    },
+    {
+      name: 'wallet',
+      display_name: 'Saldo Wallet (Prepago)',
+      description: 'Permite a los clientes pagar con saldo precargado en su wallet interna de la tienda.',
+      type: 'wallet',
+      provider: 'internal',
+      is_active: true,
+      requires_config: false,
+      supported_currencies: ['COP'],
+      processing_mode: 'DIRECT',
+      dian_code: '99',
+    },
   ];
 
   let methodsCreated = 0;

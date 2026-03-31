@@ -36,6 +36,7 @@ import { BankTransactionsService } from './bank-reconciliation/bank-transactions
 import { ReconciliationController } from './bank-reconciliation/reconciliation.controller';
 import { ReconciliationService } from './bank-reconciliation/reconciliation.service';
 import { ReconciliationMatchingService } from './bank-reconciliation/reconciliation-matching.service';
+import { DigitalPaymentMatcherService } from './bank-reconciliation/digital-payment-matcher.service';
 
 // Bank Reconciliation Parsers
 import { StatementParserFactory } from './bank-reconciliation/parsers/statement-parser.factory';
@@ -90,6 +91,7 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
     BankTransactionsService,
     ReconciliationService,
     ReconciliationMatchingService,
+    DigitalPaymentMatcherService,
     StatementParserFactory,
     CsvStatementParser,
     OfxStatementParser,
@@ -115,6 +117,7 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
     BankTransactionsService,
     ReconciliationService,
     ReconciliationMatchingService,
+    DigitalPaymentMatcherService,
     BudgetsService,
     BudgetVarianceService,
     ConsolidationService,

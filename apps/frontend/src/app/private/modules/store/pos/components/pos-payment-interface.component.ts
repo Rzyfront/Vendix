@@ -40,6 +40,7 @@ import {
   PaymentMethod,
 } from '../services/pos-payment.service';
 import { PosCustomerService } from '../services/pos-customer.service';
+import { PosWalletService, WalletInfo } from '../services/pos-wallet.service';
 import { CartState } from '../models/cart.model';
 import { PosCustomer } from '../models/customer.model';
 import * as fromAuth from '../../../../../core/store/auth';
@@ -257,6 +258,13 @@ interface PaymentState {
         font-weight: 500;
         cursor: pointer;
         text-decoration: underline;
+      }
+
+      /* Wallet Section */
+      .wallet-section {
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid var(--color-border);
       }
 
       /* Cash Section */
@@ -1227,6 +1235,10 @@ export class PosPaymentInterfaceComponent
     paymentForm: 'contado',
   };
 
+  // Wallet
+  walletInfo: WalletInfo | null = null;
+  walletLoading: boolean = false;
+
   // Store settings
   storeSettingsSubscription: any;
   allowAnonymousSales = false;
@@ -1346,6 +1358,7 @@ export class PosPaymentInterfaceComponent
     private store: Store,
     private cdr: ChangeDetectorRef,
     private currencyService: CurrencyFormatService,
+    private walletService: PosWalletService,
   ) {
     this.paymentForm = this.createPaymentForm();
     this.customerForm = this.createCustomerForm();
@@ -1531,6 +1544,36 @@ export class PosPaymentInterfaceComponent
   }
 
   selectPaymentMethod(method: PaymentMethod): void {
+    // Wallet requires customer selection
+    if (method.type === 'wallet') {
+      if (!this.cartState?.customer) {
+        this.toastService.info('Seleccione un cliente para pagar con Wallet');
+        this.requestCustomer.emit();
+        return;
+      }
+      // Load wallet balance
+      this.walletLoading = true;
+      this.walletInfo = null;
+      this.walletService.getCustomerWallet(this.cartState.customer.id).subscribe({
+        next: (wallet) => {
+          this.walletInfo = wallet;
+          this.walletLoading = false;
+          if (!wallet || wallet.available <= 0) {
+            this.toastService.warning('El cliente no tiene saldo disponible en su wallet');
+          }
+        },
+        error: () => {
+          this.walletInfo = null;
+          this.walletLoading = false;
+          this.toastService.error('Error al consultar wallet del cliente');
+        },
+      });
+    } else {
+      // Reset wallet info when switching to other method
+      this.walletInfo = null;
+      this.walletLoading = false;
+    }
+
     this.paymentState.selectedMethod = method;
     this.paymentMethodCollapsed = true;
     this.paymentForm.reset();
@@ -1630,6 +1673,14 @@ export class PosPaymentInterfaceComponent
     // Modo contado: lógica actual
     if (!this.paymentState.selectedMethod) return false;
 
+    // Wallet validation
+    if (this.paymentState.selectedMethod.type === 'wallet') {
+      if (!this.cartState?.customer) return false;
+      if (!this.walletInfo) return false;
+      const total = this.cartState?.summary?.total || 0;
+      return this.walletInfo.available >= total;
+    }
+
     if (!this.paymentState.isAnonymousSale && !this.cartState?.customer) {
       return false;
     }
@@ -1696,7 +1747,7 @@ export class PosPaymentInterfaceComponent
 
     this.paymentState.isProcessing = true;
 
-    const payment_request = {
+    const payment_request: any = {
       orderId: 'ORDER_' + Date.now(),
       amount: this.cartState.summary.total,
       paymentMethod: this.paymentState.selectedMethod,
@@ -1704,6 +1755,11 @@ export class PosPaymentInterfaceComponent
       reference: this.paymentState.reference,
       isAnonymousSale: this.paymentState.isAnonymousSale,
     };
+
+    // Pass wallet metadata
+    if (this.paymentState.selectedMethod?.type === 'wallet' && this.walletInfo) {
+      payment_request.metadata = { walletId: this.walletInfo.wallet_id };
+    }
 
     this.paymentService
       .processSaleWithPayment(this.cartState, payment_request, 'current_user')

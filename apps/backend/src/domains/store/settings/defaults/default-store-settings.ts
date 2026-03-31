@@ -54,6 +54,7 @@ export function getDefaultStoreSettings(): StoreSettings {
       out_of_stock_action: 'hide',
       track_inventory: true,
       allow_negative_stock: false,
+      costing_method: 'cpp',
     },
     checkout: {
       require_customer_data: true,
@@ -169,6 +170,12 @@ export function getDefaultStoreSettings(): StoreSettings {
         accounting_fiscal_periods: true,
         accounting_chart_of_accounts: true,
         accounting_reports: true,
+        accounting_account_mappings: true,
+        accounting_flows_dashboard: true,
+        cartera_dashboard: true,
+        cartera_receivables: true,
+        cartera_payables: true,
+        cartera_aging: true,
 
         // Nómina
         payroll: true,
@@ -204,6 +211,28 @@ export function getDefaultStoreSettings(): StoreSettings {
         orders: true,
         settings: true,
       },
+    },
+
+    // Accounting flows — controls which flows generate auto-entries
+    accounting_flows: {
+      invoicing: true,
+      payments: true,
+      expenses: true,
+      payroll: true,
+      credit_sales: true,
+      inventory: true,
+      returns: true,
+      purchases: true,
+      layaway: true,
+      fixed_assets: true,
+      withholding: true,
+      settlements: true,
+      wallet: true,
+      cash_register: true,
+      stock_transfers: true,
+      commissions: true,
+      ar_ap: true,
+      installments: true,
     },
 
     // Legacy: Mantener por compatibilidad (redundante con branding)

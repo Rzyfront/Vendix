@@ -44,6 +44,11 @@ export class StorePrismaService extends BasePrismaService {
     'ai_embeddings',
     'dispatch_notes',
     'employees',
+    'accounts_receivable',
+    'payment_agreements',
+    'wallets',
+    'commission_rules',
+    'commission_calculations',
   ];
 
   constructor() {
@@ -152,6 +157,12 @@ export class StorePrismaService extends BasePrismaService {
       'review_reports', // Relational
       'ai_messages', // Relational
       'dispatch_note_items', // Relational
+      'ar_payments', // Relational
+      'agreement_installments', // Relational
+      'wallet_transactions', // Relational
+      'accounts_payable', // Org scoped
+      'ap_payments', // Relational
+      'ap_payment_schedules', // Relational
     ];
 
     for (const model of all_scoped_models) {
@@ -281,6 +292,11 @@ export class StorePrismaService extends BasePrismaService {
       review_reports: { reviews: { store_id: context.store_id } },
       ai_messages: { conversation: { store_id: context.store_id, organization_id: context.organization_id } },
       dispatch_note_items: { dispatch_note: { store_id: context.store_id } },
+      ar_payments: { accounts_receivable: { store_id: context.store_id } },
+      agreement_installments: { payment_agreement: { store_id: context.store_id } },
+      wallet_transactions: { wallet: { store_id: context.store_id } },
+      ap_payments: { accounts_payable: { organization_id: context.organization_id } },
+      ap_payment_schedules: { accounts_payable: { organization_id: context.organization_id } },
     };
 
     const security_filter: Record<string, any> = {};
@@ -307,6 +323,7 @@ export class StorePrismaService extends BasePrismaService {
       'withholding_concepts',
       'withholding_calculations',
       'uvt_values',
+      'accounts_payable',
     ];
 
     if (this.store_scoped_models.includes(model)) {
@@ -866,6 +883,54 @@ export class StorePrismaService extends BasePrismaService {
 
   get dispatch_note_items() {
     return this.scoped_client.dispatch_note_items;
+  }
+
+  // Accounts Receivable models
+  get accounts_receivable() {
+    return this.scoped_client.accounts_receivable;
+  }
+
+  get ar_payments() {
+    return this.scoped_client.ar_payments;
+  }
+
+  get payment_agreements() {
+    return this.scoped_client.payment_agreements;
+  }
+
+  get agreement_installments() {
+    return this.scoped_client.agreement_installments;
+  }
+
+  // Wallet models
+  get wallets() {
+    return this.scoped_client.wallets;
+  }
+
+  get wallet_transactions() {
+    return this.scoped_client.wallet_transactions;
+  }
+
+  // Accounts Payable models
+  get accounts_payable() {
+    return this.scoped_client.accounts_payable;
+  }
+
+  get ap_payments() {
+    return this.scoped_client.ap_payments;
+  }
+
+  get ap_payment_schedules() {
+    return this.scoped_client.ap_payment_schedules;
+  }
+
+  // Commission models
+  get commission_rules() {
+    return this.scoped_client.commission_rules;
+  }
+
+  get commission_calculations() {
+    return this.scoped_client.commission_calculations;
   }
 
   // Global tables (no store scoping)

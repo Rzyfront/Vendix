@@ -1,6 +1,7 @@
 import {
   Injectable,
   BadRequestException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -76,6 +77,39 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<string, { code: string; descriptio
   'settlement.paid.indemnification': { code: '5105', description: 'Gastos de Personal (Indemnización)' },
   'settlement.paid.social_deductions': { code: '2370', description: 'Retenciones y Aportes de Nómina' },
   'settlement.paid.bank': { code: '1110', description: 'Bancos (Pago Liquidación)' },
+  // Wompi Gateway (Nequi, PSE, Tarjetas locales, Bancolombia)
+  'payment.received.wompi': { code: '1110', description: 'Banco (Wompi - Nequi/PSE/Tarjeta)' },
+  // Accounts Receivable - Write-off (Castigo de Cartera)
+  'ar.write_off.bad_debt': { code: '5199', description: 'Provisión Cartera Dudosa' },
+  'ar.write_off.accounts_receivable': { code: '1305', description: 'Cuentas por Cobrar (castigo)' },
+  // Wallet Interna (Anticipos de Clientes)
+  'wallet.topup.customer_advance': { code: '2805', description: 'Anticipos de Clientes (Wallet)' },
+  'wallet.topup.cash_bank': { code: '1105', description: 'Caja (recarga wallet)' },
+  'wallet.debit.customer_advance': { code: '2805', description: 'Anticipos de Clientes (uso wallet)' },
+  'wallet.debit.revenue': { code: '4135', description: 'Ingresos por Ventas (pago con wallet)' },
+  // Accounts Payable (CxP)
+  'ap.payment.accounts_payable': { code: '2205', description: 'Proveedores (pago CxP)' },
+  'ap.payment.cash_bank': { code: '1110', description: 'Banco (pago a proveedor)' },
+  'ap.write_off.accounts_payable': { code: '2205', description: 'Proveedores (castigo CxP)' },
+  'ap.write_off.other_income': { code: '4295', description: 'Otros Ingresos (castigo CxP a favor)' },
+  // Stock Transfers
+  'stock_transfer.completed.inventory_origin': { code: '1435', description: 'Inventario (tienda origen)' },
+  'stock_transfer.completed.inventory_destination': { code: '1435', description: 'Inventario (tienda destino)' },
+  // Comisiones (Pasarelas de Pago)
+  'commission.calculated.commission_expense': { code: '5295', description: 'Gastos por Comisiones' },
+  'commission.calculated.commission_payable': { code: '2335', description: 'Comisiones por Pagar' },
+  // Commissions
+  'commission.calculated.expense': { code: '5295', description: 'Gastos Diversos - Comisiones' },
+  'commission.calculated.payable': { code: '2335', description: 'Costos y Gastos por Pagar - Comisiones' },
+  // Cash Register
+  'cash_register.opened.cash': { code: '1105', description: 'Caja (apertura)' },
+  'cash_register.opened.cash_base': { code: '1110', description: 'Banco/Fondo base (apertura)' },
+  'cash_register.closed.cash': { code: '1105', description: 'Caja (cierre)' },
+  'cash_register.closed.bank': { code: '1110', description: 'Banco (cierre/consignación)' },
+  'cash_register.closed.surplus': { code: '4295', description: 'Sobrante de caja' },
+  'cash_register.closed.shortage': { code: '5295', description: 'Faltante de caja' },
+  'cash_register.movement.cash': { code: '1105', description: 'Caja (movimiento manual)' },
+  'cash_register.movement.other': { code: '2805', description: 'Otros (movimiento manual caja)' },
 };
 
 interface CacheEntry {
@@ -87,6 +121,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 @Injectable()
 export class AccountMappingService {
+  private readonly logger = new Logger(AccountMappingService.name);
   private cache = new Map<string, CacheEntry>();
 
   constructor(private readonly prisma: StorePrismaService) {}
@@ -122,7 +157,7 @@ export class AccountMappingService {
     org_id: number,
     mapping_key: string,
     store_id?: number,
-  ): Promise<{ account_code: string; account_id?: number; source: 'store' | 'organization' | 'default' }> {
+  ): Promise<{ account_code: string; account_id?: number; source: 'store' | 'organization' | 'default' } | null> {
     const base_client = this.prisma.withoutScope();
 
     // 1. Check store override
@@ -168,7 +203,8 @@ export class AccountMappingService {
     // 3. Fallback to defaults
     const default_mapping = DEFAULT_ACCOUNT_MAPPINGS[mapping_key];
     if (!default_mapping) {
-      throw new NotFoundException(`Mapping key '${mapping_key}' not found`);
+      this.logger.debug(`Mapping key '${mapping_key}' not found, skipping`);
+      return null;
     }
 
     return {

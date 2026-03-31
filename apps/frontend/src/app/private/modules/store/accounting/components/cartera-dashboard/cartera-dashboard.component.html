@@ -1,0 +1,230 @@
+@if (is_loading) {
+  <div class="p-8 text-center">
+    <div
+      class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+    ></div>
+    <p class="mt-2 text-text-secondary">Cargando dashboard de cartera...</p>
+  </div>
+} @else {
+  <div class="space-y-6">
+    <!-- ══════ CUENTAS POR COBRAR ══════ -->
+    <div>
+      <h2 class="text-lg font-semibold text-text-primary mb-3 flex items-center gap-2">
+        <app-icon name="file-input" [size]="20" class="text-blue-600"></app-icon>
+        Cuentas por Cobrar
+      </h2>
+
+      <!-- AR Stats -->
+      @if (ar_dashboard) {
+        <div class="stats-container mb-4">
+          <app-stats
+            title="Pendiente"
+            [value]="ar_total_pending"
+            smallText="Total por cobrar"
+            iconName="wallet"
+            iconBgColor="bg-blue-100"
+            iconColor="text-blue-600"
+          ></app-stats>
+          <app-stats
+            title="Vencido"
+            [value]="ar_total_overdue"
+            smallText="Requiere atencion"
+            iconName="alert-triangle"
+            iconBgColor="bg-red-100"
+            iconColor="text-red-600"
+          ></app-stats>
+          <app-stats
+            title="Proximo a Vencer"
+            [value]="ar_due_soon"
+            smallText="Proximos 7 dias"
+            iconName="calendar-clock"
+            iconBgColor="bg-amber-100"
+            iconColor="text-amber-600"
+          ></app-stats>
+          <app-stats
+            title="Cobrado este Mes"
+            [value]="ar_collected_month"
+            smallText="Total cobrado"
+            iconName="check-circle"
+            iconBgColor="bg-emerald-100"
+            iconColor="text-emerald-600"
+          ></app-stats>
+        </div>
+      }
+
+      <!-- AR Aging -->
+      @if (ar_aging && ar_aging.buckets.length > 0) {
+        <app-card [responsive]="true">
+          <div class="p-4">
+            <h3 class="text-sm font-semibold text-text-primary mb-3">
+              Antiguedad de Cartera (CxC)
+            </h3>
+            <div class="space-y-2">
+              @for (bucket of ar_aging.buckets; track bucket.label; let i = $index) {
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-gray-500 w-24 shrink-0">{{ bucket.label }}</span>
+                  <div class="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
+                    <div
+                      class="h-full rounded-full transition-all duration-300"
+                      [class]="getAgingBarColor(i)"
+                      [style.width]="getAgingBarWidth(bucket, ar_aging!)"
+                    ></div>
+                  </div>
+                  <span class="text-xs font-mono font-medium w-28 text-right shrink-0">
+                    {{ format(bucket.total) }}
+                  </span>
+                  <span class="text-xs text-gray-400 w-8 text-right shrink-0">
+                    {{ bucket.count }}
+                  </span>
+                </div>
+              }
+            </div>
+            <div class="flex justify-between mt-3 pt-3 border-t border-border text-sm">
+              <span class="font-semibold">Total</span>
+              <span class="font-bold font-mono">{{ format(ar_aging.totals.grand_total) }}</span>
+            </div>
+          </div>
+        </app-card>
+      }
+
+      <!-- AR Upcoming -->
+      @if (ar_upcoming.length > 0) {
+        <app-card [responsive]="true" class="mt-4">
+          <div class="p-4">
+            <h3 class="text-sm font-semibold text-text-primary mb-3">
+              Proximos Vencimientos (CxC)
+            </h3>
+            <div class="space-y-2">
+              @for (item of ar_upcoming; track item.id) {
+                <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium truncate">
+                      {{ item.customer?.name || '—' }}
+                    </p>
+                    <p class="text-xs text-gray-500">
+                      {{ item.document_number || '—' }} · Vence:
+                      {{ item.due_date | date : 'dd/MM/yyyy' }}
+                    </p>
+                  </div>
+                  <span class="text-sm font-semibold font-mono text-primary shrink-0 ml-3">
+                    {{ format(item.balance) }}
+                  </span>
+                </div>
+              }
+            </div>
+          </div>
+        </app-card>
+      }
+    </div>
+
+    <!-- ══════ CUENTAS POR PAGAR ══════ -->
+    <div>
+      <h2 class="text-lg font-semibold text-text-primary mb-3 flex items-center gap-2">
+        <app-icon name="file-output" [size]="20" class="text-orange-600"></app-icon>
+        Cuentas por Pagar
+      </h2>
+
+      <!-- AP Stats -->
+      @if (ap_dashboard) {
+        <div class="stats-container mb-4">
+          <app-stats
+            title="Pendiente"
+            [value]="ap_total_pending"
+            smallText="Total por pagar"
+            iconName="wallet"
+            iconBgColor="bg-orange-100"
+            iconColor="text-orange-600"
+          ></app-stats>
+          <app-stats
+            title="Vencido"
+            [value]="ap_total_overdue"
+            smallText="Requiere atencion"
+            iconName="alert-triangle"
+            iconBgColor="bg-red-100"
+            iconColor="text-red-600"
+          ></app-stats>
+          <app-stats
+            title="Proximo a Vencer"
+            [value]="ap_due_soon"
+            smallText="Proximos 7 dias"
+            iconName="calendar-clock"
+            iconBgColor="bg-amber-100"
+            iconColor="text-amber-600"
+          ></app-stats>
+          <app-stats
+            title="Pagado este Mes"
+            [value]="ap_paid_month"
+            smallText="Total pagado"
+            iconName="check-circle"
+            iconBgColor="bg-emerald-100"
+            iconColor="text-emerald-600"
+          ></app-stats>
+        </div>
+      }
+
+      <!-- AP Aging -->
+      @if (ap_aging && ap_aging.buckets.length > 0) {
+        <app-card [responsive]="true">
+          <div class="p-4">
+            <h3 class="text-sm font-semibold text-text-primary mb-3">
+              Antiguedad de Cartera (CxP)
+            </h3>
+            <div class="space-y-2">
+              @for (bucket of ap_aging.buckets; track bucket.label; let i = $index) {
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-gray-500 w-24 shrink-0">{{ bucket.label }}</span>
+                  <div class="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
+                    <div
+                      class="h-full rounded-full transition-all duration-300"
+                      [class]="getAgingBarColor(i)"
+                      [style.width]="getAgingBarWidth(bucket, ap_aging!)"
+                    ></div>
+                  </div>
+                  <span class="text-xs font-mono font-medium w-28 text-right shrink-0">
+                    {{ format(bucket.total) }}
+                  </span>
+                  <span class="text-xs text-gray-400 w-8 text-right shrink-0">
+                    {{ bucket.count }}
+                  </span>
+                </div>
+              }
+            </div>
+            <div class="flex justify-between mt-3 pt-3 border-t border-border text-sm">
+              <span class="font-semibold">Total</span>
+              <span class="font-bold font-mono">{{ format(ap_aging.totals.grand_total) }}</span>
+            </div>
+          </div>
+        </app-card>
+      }
+
+      <!-- AP Upcoming -->
+      @if (ap_upcoming.length > 0) {
+        <app-card [responsive]="true" class="mt-4">
+          <div class="p-4">
+            <h3 class="text-sm font-semibold text-text-primary mb-3">
+              Proximos Vencimientos (CxP)
+            </h3>
+            <div class="space-y-2">
+              @for (item of ap_upcoming; track item.id) {
+                <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium truncate">
+                      {{ item.supplier?.name || '—' }}
+                    </p>
+                    <p class="text-xs text-gray-500">
+                      {{ item.document_number || '—' }} · Vence:
+                      {{ item.due_date | date : 'dd/MM/yyyy' }}
+                    </p>
+                  </div>
+                  <span class="text-sm font-semibold font-mono text-primary shrink-0 ml-3">
+                    {{ format(item.balance) }}
+                  </span>
+                </div>
+              }
+            </div>
+          </div>
+        </app-card>
+      }
+    </div>
+  </div>
+}

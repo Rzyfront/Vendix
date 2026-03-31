@@ -3,6 +3,7 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { OpenSessionDto } from '../dto/open-session.dto';
@@ -15,6 +16,7 @@ export class SessionsService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly movements_service: MovementsService,
+    private readonly event_emitter: EventEmitter2,
   ) {}
 
   async getActiveSession(user_id?: number) {
@@ -77,8 +79,8 @@ export class SessionsService {
     }
 
     // Create session + opening_balance movement in transaction
-    return this.prisma.$transaction(async (tx: any) => {
-      const session = await tx.cash_register_sessions.create({
+    const session = await this.prisma.$transaction(async (tx: any) => {
+      const created_session = await tx.cash_register_sessions.create({
         data: {
           cash_register_id: dto.cash_register_id,
           store_id: context.store_id,
@@ -97,7 +99,7 @@ export class SessionsService {
       // Create opening balance movement
       await tx.cash_register_movements.create({
         data: {
-          session_id: session.id,
+          session_id: created_session.id,
           store_id: context.store_id,
           user_id: context.user_id,
           type: 'opening_balance',
@@ -106,8 +108,25 @@ export class SessionsService {
         },
       });
 
-      return session;
+      return created_session;
     });
+
+    // Emit accounting event
+    const store = await this.prisma.stores.findUnique({
+      where: { id: session.store_id },
+      select: { organization_id: true },
+    });
+    if (store && Number(dto.opening_amount) > 0) {
+      this.event_emitter.emit('cash_register.opened', {
+        session_id: session.id,
+        store_id: session.store_id,
+        organization_id: store.organization_id,
+        opening_amount: Number(dto.opening_amount),
+        user_id: session.opened_by,
+      });
+    }
+
+    return session;
   }
 
   async closeSession(session_id: number, dto: CloseSessionDto) {
@@ -145,7 +164,7 @@ export class SessionsService {
     // Generate summary grouped by payment method
     const summary = this.generateSessionSummary(movements);
 
-    return this.prisma.$transaction(async (tx: any) => {
+    const closed_session = await this.prisma.$transaction(async (tx: any) => {
       // Create closing balance movement
       await tx.cash_register_movements.create({
         data: {
@@ -159,7 +178,7 @@ export class SessionsService {
       });
 
       // Update session
-      const closed_session = await tx.cash_register_sessions.update({
+      const updated_session = await tx.cash_register_sessions.update({
         where: { id: session_id },
         data: {
           status: 'closed',
@@ -182,8 +201,27 @@ export class SessionsService {
         },
       });
 
-      return closed_session;
+      return updated_session;
     });
+
+    // Emit accounting event
+    const store = await this.prisma.stores.findUnique({
+      where: { id: closed_session.store_id },
+      select: { organization_id: true },
+    });
+    if (store) {
+      this.event_emitter.emit('cash_register.closed', {
+        session_id: closed_session.id,
+        store_id: closed_session.store_id,
+        organization_id: store.organization_id,
+        expected_amount: Number(closed_session.expected_closing_amount),
+        actual_amount: Number(closed_session.actual_closing_amount),
+        difference: Number(closed_session.difference),
+        user_id: closed_session.closed_by,
+      });
+    }
+
+    return closed_session;
   }
 
   async suspendSession(session_id: number) {

@@ -316,6 +316,18 @@ export class CreatePosPaymentDto {
   @IsString()
   @MaxLength(2)
   payment_form?: string; // '1' = contado, '2' = crédito (DIAN)
+
+  // Digital payment gateway fields
+  @IsOptional()
+  wompi_payment_method?: any;
+
+  @IsOptional()
+  @IsNumber()
+  wallet_id?: number;
+
+  @IsOptional()
+  @IsString()
+  return_url?: string;
 }
 
 // DTO para actualizar una orden existente con pago
@@ -371,6 +383,16 @@ export class PosPaymentResponseDto {
     status: string;
     transaction_id?: string;
     change?: number;
+    nextAction?: {
+      type: 'redirect' | '3ds' | 'await' | 'none';
+      url?: string;
+      data?: any;
+    };
+  };
+  nextAction?: {
+    type: 'redirect' | '3ds' | 'await' | 'none';
+    url?: string;
+    data?: any;
   };
   errors?: string[];
   warnings?: string[];

@@ -138,6 +138,27 @@ export const accountingRoutes: Routes = [
         ],
       },
       {
+        path: 'receivables',
+        loadComponent: () =>
+          import('./components/receivables/receivables.component').then(
+            (c) => c.ReceivablesComponent,
+          ),
+      },
+      {
+        path: 'payables',
+        loadComponent: () =>
+          import('./components/payables/payables.component').then(
+            (c) => c.PayablesComponent,
+          ),
+      },
+      {
+        path: 'cartera-dashboard',
+        loadComponent: () =>
+          import('./components/cartera-dashboard/cartera-dashboard.component').then(
+            (c) => c.CarteraDashboardComponent,
+          ),
+      },
+      {
         path: 'reports',
         loadComponent: () =>
           import('./components/reports/reports.component').then(

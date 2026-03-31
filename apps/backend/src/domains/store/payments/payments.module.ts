@@ -28,11 +28,15 @@ import {
   StripeModule,
   PaypalModule,
   BankTransferModule,
+  WompiModule,
 } from './processors';
 import { CashPaymentProcessor } from './processors/cash/cash.processor';
 import { StripeProcessor } from './processors/stripe/stripe.processor';
 import { PaypalProcessor } from './processors/paypal/paypal.processor';
 import { BankTransferProcessor } from './processors/bank-transfer/bank-transfer.processor';
+import { WompiProcessor } from './processors/wompi/wompi.processor';
+import { WalletModule } from '../wallet/wallet.module';
+import { WalletPaymentProcessor } from '../wallet/services/wallet-payment.processor';
 
 @Module({
   imports: [
@@ -42,6 +46,8 @@ import { BankTransferProcessor } from './processors/bank-transfer/bank-transfer.
     StripeModule,
     PaypalModule,
     BankTransferModule,
+    WompiModule,
+    WalletModule,
     forwardRef(() => OrdersModule),
     forwardRef(() => OrderFlowModule),
     TaxesModule,
@@ -86,6 +92,8 @@ export class PaymentsModule implements OnModuleInit {
     private stripeProcessor: StripeProcessor,
     private paypalProcessor: PaypalProcessor,
     private bankTransferProcessor: BankTransferProcessor,
+    private wompiProcessor: WompiProcessor,
+    private walletProcessor: WalletPaymentProcessor,
   ) { }
 
   onModuleInit() {
@@ -96,5 +104,7 @@ export class PaymentsModule implements OnModuleInit {
       'bank_transfer',
       this.bankTransferProcessor,
     );
+    this.paymentGateway.registerProcessor('wompi', this.wompiProcessor);
+    this.paymentGateway.registerProcessor('wallet', this.walletProcessor);
   }
 }

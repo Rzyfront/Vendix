@@ -439,4 +439,52 @@ export class GlobalPrismaService extends BasePrismaService {
   get dian_configurations() {
     return this.baseClient.dian_configurations;
   }
+
+  // Accounts Receivable models
+  get accounts_receivable() {
+    return this.baseClient.accounts_receivable;
+  }
+
+  get ar_payments() {
+    return this.baseClient.ar_payments;
+  }
+
+  get payment_agreements() {
+    return this.baseClient.payment_agreements;
+  }
+
+  get agreement_installments() {
+    return this.baseClient.agreement_installments;
+  }
+
+  // Wallet models
+  get wallets() {
+    return this.baseClient.wallets;
+  }
+
+  get wallet_transactions() {
+    return this.baseClient.wallet_transactions;
+  }
+
+  // Accounts Payable models
+  get accounts_payable() {
+    return this.baseClient.accounts_payable;
+  }
+
+  get ap_payments_records() {
+    return this.baseClient.ap_payments;
+  }
+
+  get ap_payment_schedules() {
+    return this.baseClient.ap_payment_schedules;
+  }
+
+  // Commission models
+  get commission_rules() {
+    return this.baseClient.commission_rules;
+  }
+
+  get commission_calculations() {
+    return this.baseClient.commission_calculations;
+  }
 }

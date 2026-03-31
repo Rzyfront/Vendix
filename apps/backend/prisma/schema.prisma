@@ -145,6 +145,12 @@ model users {
   dispatch_notes_delivered_by dispatch_notes[] @relation("dispatch_notes_delivered_by")
   dispatch_notes_voided_by    dispatch_notes[] @relation("dispatch_notes_voided_by")
 
+  // Accounts Receivable
+  accounts_receivable_as_customer accounts_receivable[] @relation("ar_customer")
+
+  // Wallet
+  wallets wallets[] @relation("wallet_owner")
+
   @@index([email_verified])
   @@index([state])
   @@index([document_number])
@@ -386,6 +392,15 @@ model organizations {
   // Invoice Retry Queue
   invoice_retry_queue invoice_retry_queue[]
 
+  // Accounts Receivable
+  accounts_receivable accounts_receivable[]
+
+  // Wallet
+  wallets wallets[] @relation("org_wallets")
+
+  // Accounts Payable
+  accounts_payable accounts_payable[] @relation("org_accounts_payable")
+
   @@index([onboarding])
   @@index([account_type])
   @@index([mode])
@@ -510,6 +525,17 @@ model stores {
 
   // Dispatch Notes
   dispatch_notes dispatch_notes[]
+
+  // Accounts Receivable
+  accounts_receivable accounts_receivable[]
+  payment_agreements  payment_agreements[]
+
+  // Wallet
+  wallets wallets[] @relation("store_wallets")
+
+  // Commissions
+  commission_rules        commission_rules[]        @relation("store_commission_rules")
+  commission_calculations commission_calculations[] @relation("store_commission_calcs")
 
   @@unique([organization_id, slug])
   @@index([onboarding])
@@ -1281,6 +1307,7 @@ model suppliers {
   addresses                addresses?                 @relation("supplier_addresses", fields: [address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   invoices                 invoices[]
   withholding_calculations withholding_calculations[]
+  accounts_payable         accounts_payable[]         @relation("supplier_accounts_payable")
 
   @@unique([organization_id, code])
   @@index([organization_id, name])
@@ -2108,6 +2135,8 @@ enum payment_methods_type_enum {
   paypal
   bank_transfer
   voucher
+  wompi
+  wallet
 }
 
 enum fee_type_enum {
@@ -4768,4 +4797,266 @@ model dispatch_note_items {
   @@index([dispatch_note_id])
   @@index([product_id])
   @@index([sales_order_item_id])
+}
+
+// ──── Accounts Receivable (Cartera) ────────────
+
+enum payment_agreement_state_enum {
+  active
+  completed
+  defaulted
+  cancelled
+}
+
+model accounts_receivable {
+  id                Int       @id @default(autoincrement())
+  store_id          Int
+  organization_id   Int
+  customer_id       Int
+  source_type       String    @db.VarChar(50)
+  source_id         Int?
+  document_number   String?   @db.VarChar(100)
+  original_amount   Decimal   @db.Decimal(12, 2)
+  paid_amount       Decimal   @default(0.00) @db.Decimal(12, 2)
+  balance           Decimal   @db.Decimal(12, 2)
+  currency          String    @default("COP") @db.VarChar(10)
+  issue_date        DateTime  @db.Date
+  due_date          DateTime  @db.Date
+  status            String    @default("open") @db.VarChar(20)
+  days_overdue      Int       @default(0)
+  last_payment_date DateTime? @db.Timestamp(6)
+  notes             String?   @db.Text
+  created_at        DateTime  @default(now()) @db.Timestamp(6)
+  updated_at        DateTime  @default(now()) @db.Timestamp(6)
+
+  stores             stores               @relation(fields: [store_id], references: [id])
+  organizations      organizations        @relation(fields: [organization_id], references: [id])
+  customer           users                @relation("ar_customer", fields: [customer_id], references: [id])
+  ar_payments        ar_payments[]
+  payment_agreements payment_agreements[]
+
+  @@index([store_id, customer_id])
+  @@index([store_id, status])
+  @@index([due_date, status])
+}
+
+model ar_payments {
+  id                     Int      @id @default(autoincrement())
+  accounts_receivable_id Int
+  payment_id             Int?
+  amount                 Decimal  @db.Decimal(12, 2)
+  payment_date           DateTime @db.Timestamp(6)
+  payment_method         String?  @db.VarChar(50)
+  reference              String?  @db.VarChar(255)
+  notes                  String?  @db.Text
+  created_by             Int?
+  created_at             DateTime @default(now()) @db.Timestamp(6)
+
+  accounts_receivable accounts_receivable @relation(fields: [accounts_receivable_id], references: [id])
+
+  @@index([accounts_receivable_id])
+}
+
+model payment_agreements {
+  id                     Int                          @id @default(autoincrement())
+  accounts_receivable_id Int
+  store_id               Int
+  agreement_number       String                       @db.VarChar(50)
+  total_amount           Decimal                      @db.Decimal(12, 2)
+  num_installments       Int
+  interest_rate          Decimal                      @default(0) @db.Decimal(5, 4)
+  state                  payment_agreement_state_enum @default(active)
+  start_date             DateTime                     @db.Date
+  notes                  String?                      @db.Text
+  created_by             Int?
+  created_at             DateTime                     @default(now()) @db.Timestamp(6)
+  updated_at             DateTime                     @default(now()) @db.Timestamp(6)
+
+  stores                 stores                   @relation(fields: [store_id], references: [id])
+  accounts_receivable    accounts_receivable      @relation(fields: [accounts_receivable_id], references: [id])
+  agreement_installments agreement_installments[]
+
+  @@index([accounts_receivable_id])
+  @@index([store_id])
+}
+
+model agreement_installments {
+  id                   Int       @id @default(autoincrement())
+  payment_agreement_id Int
+  installment_number   Int
+  amount               Decimal   @db.Decimal(12, 2)
+  due_date             DateTime  @db.Date
+  state                String    @default("pending") @db.VarChar(20)
+  paid_amount          Decimal   @default(0) @db.Decimal(12, 2)
+  paid_at              DateTime? @db.Timestamp(6)
+  created_at           DateTime  @default(now()) @db.Timestamp(6)
+
+  payment_agreement payment_agreements @relation(fields: [payment_agreement_id], references: [id])
+
+  @@unique([payment_agreement_id, installment_number])
+  @@index([due_date, state])
+}
+
+// ──── Wallet Interna ────────────────────────
+
+enum wallet_transaction_type_enum {
+  credit
+  debit
+  hold
+  release
+}
+
+enum wallet_transaction_state_enum {
+  pending
+  completed
+  failed
+  reversed
+}
+
+model wallets {
+  id              Int      @id @default(autoincrement())
+  store_id        Int
+  organization_id Int
+  customer_id     Int
+  balance         Decimal  @default(0.00) @db.Decimal(12, 2)
+  held_balance    Decimal  @default(0.00) @db.Decimal(12, 2)
+  currency        String   @default("COP") @db.VarChar(10)
+  is_active       Boolean  @default(true)
+  created_at      DateTime @default(now()) @db.Timestamp(6)
+  updated_at      DateTime @default(now()) @db.Timestamp(6)
+
+  stores              stores                @relation("store_wallets", fields: [store_id], references: [id])
+  organizations       organizations         @relation("org_wallets", fields: [organization_id], references: [id])
+  customer            users                 @relation("wallet_owner", fields: [customer_id], references: [id])
+  wallet_transactions wallet_transactions[]
+
+  @@unique([store_id, customer_id])
+  @@index([store_id])
+}
+
+model wallet_transactions {
+  id             Int                           @id @default(autoincrement())
+  wallet_id      Int
+  type           wallet_transaction_type_enum
+  state          wallet_transaction_state_enum @default(pending)
+  amount         Decimal                       @db.Decimal(12, 2)
+  balance_before Decimal                       @db.Decimal(12, 2)
+  balance_after  Decimal                       @db.Decimal(12, 2)
+  reference_type String?                       @db.VarChar(50)
+  reference_id   Int?
+  description    String?                       @db.VarChar(500)
+  metadata       Json?
+  created_by     Int?
+  created_at     DateTime                      @default(now()) @db.Timestamp(6)
+
+  wallet wallets @relation(fields: [wallet_id], references: [id])
+
+  @@index([wallet_id, created_at])
+  @@index([reference_type, reference_id])
+}
+
+// ──── Accounts Payable (CxP) ────────────────
+
+model accounts_payable {
+  id              Int      @id @default(autoincrement())
+  organization_id Int
+  store_id        Int?
+  supplier_id     Int
+  source_type     String   @db.VarChar(50)
+  source_id       Int?
+  document_number String?  @db.VarChar(100)
+  original_amount Decimal  @db.Decimal(12, 2)
+  paid_amount     Decimal  @default(0.00) @db.Decimal(12, 2)
+  balance         Decimal  @db.Decimal(12, 2)
+  currency        String   @default("COP") @db.VarChar(10)
+  issue_date      DateTime @db.Date
+  due_date        DateTime @db.Date
+  status          String   @default("open") @db.VarChar(20)
+  days_overdue    Int      @default(0)
+  priority        String   @default("normal") @db.VarChar(20)
+  notes           String?  @db.Text
+  created_at      DateTime @default(now()) @db.Timestamp(6)
+  updated_at      DateTime @default(now()) @db.Timestamp(6)
+
+  organizations        organizations          @relation("org_accounts_payable", fields: [organization_id], references: [id])
+  supplier             suppliers              @relation("supplier_accounts_payable", fields: [supplier_id], references: [id])
+  ap_payments          ap_payments[]
+  ap_payment_schedules ap_payment_schedules[]
+
+  @@index([organization_id, supplier_id])
+  @@index([due_date, status])
+}
+
+model ap_payments {
+  id                  Int      @id @default(autoincrement())
+  accounts_payable_id Int
+  amount              Decimal  @db.Decimal(12, 2)
+  payment_date        DateTime @db.Timestamp(6)
+  payment_method      String   @db.VarChar(50)
+  reference           String?  @db.VarChar(255)
+  bank_export_ref     String?  @db.VarChar(100)
+  notes               String?  @db.Text
+  created_by          Int?
+  created_at          DateTime @default(now()) @db.Timestamp(6)
+
+  accounts_payable accounts_payable @relation(fields: [accounts_payable_id], references: [id])
+
+  @@index([accounts_payable_id])
+}
+
+model ap_payment_schedules {
+  id                  Int       @id @default(autoincrement())
+  accounts_payable_id Int
+  scheduled_date      DateTime  @db.Date
+  amount              Decimal   @db.Decimal(12, 2)
+  status              String    @default("scheduled") @db.VarChar(20)
+  processed_at        DateTime? @db.Timestamp(6)
+  created_at          DateTime  @default(now()) @db.Timestamp(6)
+
+  accounts_payable accounts_payable @relation(fields: [accounts_payable_id], references: [id])
+
+  @@index([scheduled_date, status])
+}
+
+// ──── Comisiones ────────────────────────────
+
+model commission_rules {
+  id              Int       @id @default(autoincrement())
+  store_id        Int
+  name            String    @db.VarChar(100)
+  description     String?   @db.Text
+  rule_type       String    @db.VarChar(30)
+  conditions      Json
+  commission_type String    @db.VarChar(20)
+  value           Decimal?  @db.Decimal(12, 4)
+  tiers           Json?
+  is_active       Boolean   @default(true)
+  priority        Int       @default(0)
+  valid_from      DateTime? @db.Date
+  valid_to        DateTime? @db.Date
+  created_at      DateTime  @default(now()) @db.Timestamp(6)
+  updated_at      DateTime  @default(now()) @db.Timestamp(6)
+
+  stores                  stores                   @relation("store_commission_rules", fields: [store_id], references: [id])
+  commission_calculations commission_calculations[]
+
+  @@index([store_id, is_active])
+}
+
+model commission_calculations {
+  id                 Int      @id @default(autoincrement())
+  store_id           Int
+  commission_rule_id Int
+  source_type        String   @db.VarChar(50)
+  source_id          Int
+  base_amount        Decimal  @db.Decimal(12, 2)
+  commission_amount  Decimal  @db.Decimal(12, 2)
+  calculation_detail Json?
+  created_at         DateTime @default(now()) @db.Timestamp(6)
+
+  stores          stores           @relation("store_commission_calcs", fields: [store_id], references: [id])
+  commission_rule commission_rules @relation(fields: [commission_rule_id], references: [id])
+
+  @@index([store_id, created_at])
+  @@index([source_type, source_id])
 }

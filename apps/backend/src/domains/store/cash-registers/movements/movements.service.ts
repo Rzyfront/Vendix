@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 
 @Injectable()
 export class MovementsService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly event_emitter: EventEmitter2,
+  ) {}
 
   async findBySession(session_id: number) {
     return this.prisma.cash_register_movements.findMany({
@@ -28,7 +32,7 @@ export class MovementsService {
   ) {
     const context = RequestContextService.getContext()!;
 
-    return this.prisma.cash_register_movements.create({
+    const movement = await this.prisma.cash_register_movements.create({
       data: {
         session_id,
         store_id: context.store_id,
@@ -40,6 +44,27 @@ export class MovementsService {
         notes: data.notes,
       },
     });
+
+    // Emit accounting event for manual cash movement
+    const store = await this.prisma.stores.findUnique({
+      where: { id: movement.store_id },
+      select: { organization_id: true },
+    });
+    if (store) {
+      this.event_emitter.emit('cash_register.movement', {
+        movement_id: movement.id,
+        session_id: session_id,
+        store_id: movement.store_id,
+        organization_id: store.organization_id,
+        type: data.type,
+        amount: Number(data.amount),
+        reference: data.reference,
+        notes: data.notes,
+        user_id: movement.user_id,
+      });
+    }
+
+    return movement;
   }
 
   /**
