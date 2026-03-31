@@ -580,6 +580,41 @@ export interface PurchaseOrderTimelineEntry {
 export type PurchaseOrderPaymentStatus = 'unpaid' | 'partial' | 'paid';
 
 // ============================================================
+// COST PREVIEW INTERFACES
+// ============================================================
+
+export interface CostPreviewItem {
+  product_id: number;
+  product_variant_id: number | null;
+  product_name: string;
+  variant_name?: string;
+  current_stock: number;
+  current_cost_per_unit: number;
+  new_stock: number;
+  new_cost_per_unit: number;
+  incoming_quantity: number;
+  incoming_cost: number;
+  global_stock: number;
+  global_cost_per_unit: number;
+  is_reactivation: boolean;
+}
+
+export interface CostPreviewResponse {
+  costing_method: 'cpp' | 'fifo';
+  items: CostPreviewItem[];
+}
+
+export interface CostPreviewRequest {
+  location_id: number;
+  items: Array<{
+    product_id: number;
+    product_variant_id?: number;
+    quantity: number;
+    unit_cost: number;
+  }>;
+}
+
+// ============================================================
 // API RESPONSE WRAPPERS
 // ============================================================
 

@@ -35,6 +35,7 @@ export interface InventorySettings {
   out_of_stock_action: 'hide' | 'show' | 'disable' | 'allow_backorder';
   track_inventory: boolean;
   allow_negative_stock: boolean;
+  costing_method: 'cpp' | 'fifo';
 }
 
 export interface CheckoutSettings {

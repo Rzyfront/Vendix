@@ -55,6 +55,7 @@ import {
   InvoiceMatchResult,
   MatchedLineItem,
 } from './interfaces/invoice-scanner.interface';
+import { CostPreviewResponse } from '../interfaces';
 
 /**
  * POP (Point of Purchase) Main Component
@@ -188,8 +189,11 @@ import {
       [supplierName]="currentSupplierName"
       [locationName]="currentLocationName"
       [actionType]="confirmOrderAction"
+      [costPreview]="costPreview"
+      [loadingPreview]="loadingCostPreview"
       (confirmed)="onOrderConfirmed()"
       (cancelled)="showOrderConfirmModal = false"
+      (navigateToSettings)="onNavigateToSettings()"
     ></app-pop-order-confirmation-modal>
 
     <app-pop-product-config-modal
@@ -286,6 +290,10 @@ export class PopComponent implements OnInit, OnDestroy {
   // Order confirmation modal
   showOrderConfirmModal = false;
   confirmOrderAction: 'create' | 'create-receive' = 'create';
+
+  // Cost preview
+  costPreview: CostPreviewResponse | null = null;
+  loadingCostPreview = false;
 
   // Cart state for mobile components
   cartState: PopCartState | null = null;
@@ -975,6 +983,7 @@ export class PopComponent implements OnInit, OnDestroy {
 
     this.showCartModal = false;
     this.confirmOrderAction = 'create-receive';
+    this.loadCostPreview();
     this.showOrderConfirmModal = true;
   }
 
@@ -1058,6 +1067,7 @@ export class PopComponent implements OnInit, OnDestroy {
     }
 
     this.confirmOrderAction = 'create-receive';
+    this.loadCostPreview();
     this.showOrderConfirmModal = true;
   }
 
@@ -1072,6 +1082,47 @@ export class PopComponent implements OnInit, OnDestroy {
     } else {
       this._executeCreateAndReceive();
     }
+  }
+
+  onNavigateToSettings(): void {
+    this.showOrderConfirmModal = false;
+    this.router.navigate(['/store/settings/general']);
+  }
+
+  private loadCostPreview(): void {
+    const state = this.popCartService.currentState;
+    if (!state.locationId || state.items.length === 0) return;
+
+    this.costPreview = null;
+    this.loadingCostPreview = true;
+
+    const request = {
+      location_id: state.locationId,
+      items: state.items
+        .filter(item => !item.is_prebulk && item.product?.id)
+        .map(item => ({
+          product_id: item.product.id,
+          product_variant_id: item.variant?.id,
+          quantity: item.quantity,
+          unit_cost: item.unit_cost,
+        })),
+    };
+
+    if (request.items.length === 0) {
+      this.loadingCostPreview = false;
+      return;
+    }
+
+    this.purchaseOrdersService.getCostPreview(request).subscribe({
+      next: (response) => {
+        this.costPreview = response.success ? response.data : null;
+        this.loadingCostPreview = false;
+      },
+      error: () => {
+        this.costPreview = null;
+        this.loadingCostPreview = false;
+      },
+    });
   }
 
   private _executeSubmitOrder(): void {

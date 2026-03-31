@@ -13,6 +13,8 @@ import {
     PurchaseOrderPayment,
     PurchaseOrderTimelineEntry,
     ApiResponse,
+    CostPreviewRequest,
+    CostPreviewResponse,
 } from '../interfaces';
 
 @Injectable({
@@ -113,6 +115,12 @@ export class PurchaseOrdersService {
     getPurchaseOrderCostSummary(id: number): Observable<ApiResponse<unknown[]>> {
         return this.http
             .get<ApiResponse<unknown[]>>(`${this.api_url}/${id}/cost-summary`)
+            .pipe(catchError(this.handleError));
+    }
+
+    getCostPreview(data: CostPreviewRequest): Observable<ApiResponse<CostPreviewResponse>> {
+        return this.http
+            .post<ApiResponse<CostPreviewResponse>>(`${this.api_url}/cost-preview`, data)
             .pipe(catchError(this.handleError));
     }
 

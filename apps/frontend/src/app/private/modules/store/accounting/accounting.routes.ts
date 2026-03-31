@@ -152,10 +152,24 @@ export const accountingRoutes: Routes = [
           ),
       },
       {
-        path: 'cartera-dashboard',
+        path: 'flows',
+        loadComponent: () =>
+          import('./components/accounting-flows/accounting-flows.component').then(
+            (c) => c.AccountingFlowsComponent,
+          ),
+      },
+      {
+        path: 'cartera',
         loadComponent: () =>
           import('./components/cartera-dashboard/cartera-dashboard.component').then(
             (c) => c.CarteraDashboardComponent,
+          ),
+      },
+      {
+        path: 'aging',
+        loadComponent: () =>
+          import('./components/aging-report/aging-report.component').then(
+            (c) => c.AgingReportComponent,
           ),
       },
       {

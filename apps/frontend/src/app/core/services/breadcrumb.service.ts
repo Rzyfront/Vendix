@@ -865,6 +865,36 @@ export class BreadcrumbService {
       icon: 'link',
     },
     {
+      path: '/admin/accounting/flows',
+      title: 'Flujos Contables',
+      parent: 'Contabilidad',
+      icon: 'activity',
+    },
+    {
+      path: '/admin/accounting/cartera',
+      title: 'Cartera',
+      parent: 'Contabilidad',
+      icon: 'briefcase',
+    },
+    {
+      path: '/admin/accounting/receivables',
+      title: 'Cuentas por Cobrar',
+      parent: 'Contabilidad',
+      icon: 'file-input',
+    },
+    {
+      path: '/admin/accounting/payables',
+      title: 'Cuentas por Pagar',
+      parent: 'Contabilidad',
+      icon: 'file-output',
+    },
+    {
+      path: '/admin/accounting/aging',
+      title: 'Aging Report',
+      parent: 'Contabilidad',
+      icon: 'bar-chart-2',
+    },
+    {
       path: '/admin/accounting/reports/trial-balance',
       title: 'Balance de Comprobación',
       parent: 'Reportes',

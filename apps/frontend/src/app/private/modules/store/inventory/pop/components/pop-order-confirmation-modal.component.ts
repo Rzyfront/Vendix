@@ -5,6 +5,7 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { PopCartState } from '../interfaces/pop-cart.interface';
+import { CostPreviewResponse } from '../../interfaces';
 
 @Component({
   selector: 'app-pop-order-confirmation-modal',
@@ -65,6 +66,70 @@ import { PopCartState } from '../interfaces/pop-cart.interface';
             }
           </div>
         </section>
+
+        @if (actionType === 'create-receive' && (loadingPreview || (costPreview?.items?.length ?? 0) > 0)) {
+          <section class="border-l-2 border-amber-400 rounded-r-lg bg-[var(--color-surface)] p-3">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-2">
+                <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                  Valoración de Inventario
+                </p>
+                @if (costPreview?.costing_method) {
+                  <span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                        [class]="costPreview!.costing_method === 'cpp'
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'bg-purple-100 text-purple-700'">
+                    {{ costPreview!.costing_method === 'cpp' ? 'CPP' : 'FIFO' }}
+                  </span>
+                }
+              </div>
+              <button type="button"
+                      class="text-[10px] text-[var(--color-primary)] hover:underline font-medium"
+                      (click)="navigateToSettings.emit()">
+                Cambiar estrategia →
+              </button>
+            </div>
+            @if (loadingPreview) {
+              <div class="space-y-2">
+                <div class="h-8 bg-gray-100 rounded animate-pulse"></div>
+                <div class="h-8 bg-gray-100 rounded animate-pulse w-3/4"></div>
+              </div>
+            } @else {
+              <div class="rounded-md overflow-hidden border border-[var(--color-border)]">
+                @for (item of costPreview?.items; track item.product_id + '-' + (item.product_variant_id || 0); let idx = $index) {
+                  <div class="px-2.5 py-2 text-xs"
+                       [class]="idx % 2 === 0 ? 'bg-[var(--color-surface)]' : 'bg-[var(--color-surface-elevated)]'">
+                    <div class="font-medium text-[var(--color-text-primary)] mb-0.5">
+                      {{ item.product_name }}
+                      @if (item.variant_name) {
+                        <span class="text-[var(--color-text-muted)]"> · {{ item.variant_name }}</span>
+                      }
+                    </div>
+                    @if (item.is_reactivation) {
+                      <div class="text-[var(--color-text-secondary)]">
+                        <span class="inline-flex items-center gap-1 text-amber-600 font-medium">
+                          <app-icon name="rotate-ccw" [size]="11"></app-icon>
+                          Reactivación
+                        </span>
+                        — {{ item.incoming_quantity }} uds @ {{ item.incoming_cost | currency }}
+                      </div>
+                    } @else if (costPreview?.costing_method === 'cpp') {
+                      <div class="flex items-center gap-3 text-[var(--color-text-secondary)]">
+                        <span>Stock: {{ item.global_stock }} → <span class="font-medium text-[var(--color-text-primary)]">{{ item.new_stock }}</span></span>
+                        <span class="text-[var(--color-border)]">|</span>
+                        <span>Costo: {{ item.global_cost_per_unit | currency }} → <span class="font-medium text-[var(--color-text-primary)]">{{ item.new_cost_per_unit | currency }}</span></span>
+                      </div>
+                    } @else {
+                      <div class="text-[var(--color-text-secondary)]">
+                        Nueva capa: {{ item.incoming_quantity }} uds @ {{ item.incoming_cost | currency }}
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+            }
+          </section>
+        }
 
         <!-- Detalles -->
         <section class="border-l-2 border-[var(--color-primary)] rounded-r-lg bg-[var(--color-surface)] p-3">
@@ -148,8 +213,11 @@ export class PopOrderConfirmationModalComponent {
   @Input() supplierName = '';
   @Input() locationName = '';
   @Input() actionType: 'create' | 'create-receive' = 'create';
+  @Input() costPreview: CostPreviewResponse | null = null;
+  @Input() loadingPreview = false;
   @Output() confirmed = new EventEmitter<void>();
   @Output() cancelled = new EventEmitter<void>();
+  @Output() navigateToSettings = new EventEmitter<void>();
 
   get modalTitle(): string {
     return this.actionType === 'create-receive'

@@ -316,6 +316,36 @@ const APP_MODULES = {
           label: 'Reportes',
           description: 'Reportes contables y financieros',
         },
+        {
+          key: 'accounting_account_mappings',
+          label: 'Mapeo de Cuentas',
+          description: 'Configuración de cuentas contables por flujo',
+        },
+        {
+          key: 'accounting_flows_dashboard',
+          label: 'Flujos Contables',
+          description: 'Dashboard de flujos contables automáticos',
+        },
+        {
+          key: 'cartera_dashboard',
+          label: 'Cartera',
+          description: 'Dashboard de cartera con CxC y CxP',
+        },
+        {
+          key: 'cartera_receivables',
+          label: 'Cuentas por Cobrar',
+          description: 'Gestión de cuentas por cobrar',
+        },
+        {
+          key: 'cartera_payables',
+          label: 'Cuentas por Pagar',
+          description: 'Gestión de cuentas por pagar',
+        },
+        {
+          key: 'cartera_aging',
+          label: 'Aging Report',
+          description: 'Reporte de antigüedad de cartera',
+        },
       ],
     },
 

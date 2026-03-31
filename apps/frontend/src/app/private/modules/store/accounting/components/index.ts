@@ -36,3 +36,4 @@ export * from './receivables/receivables.component';
 export * from './receivables/receivable-payment-modal.component';
 export * from './receivables/receivable-detail-modal.component';
 export * from './cartera-dashboard/cartera-dashboard.component';
+export * from './accounting-flows/accounting-flows.component';
