@@ -1,5 +1,6 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Router } from '@angular/router';
 import { Subject, takeUntil, finalize } from 'rxjs';
 import { CustomerListComponent, CustomerModalComponent, CustomerBulkUploadModalComponent } from './components';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
@@ -77,6 +78,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
         (create)="openCreateModal()"
         (edit)="openEditModal($event)"
         (delete)="onDelete($event)"
+        (viewDetail)="onViewDetail($event)"
         (bulkUpload)="openBulkUploadModal()"
       ></app-customer-list>
 
@@ -128,6 +130,7 @@ export class CustomersComponent implements OnInit, OnDestroy {
     private toastService: ToastService,
     private dialogService: DialogService,
     private authFacade: AuthFacade,
+    private router: Router,
   ) { }
 
   ngOnInit(): void {
@@ -246,6 +249,10 @@ export class CustomersComponent implements OnInit, OnDestroy {
 
   formatRevenue(value: number): string {
     return this.currencyService.format(value || 0);
+  }
+
+  onViewDetail(customer: Customer) {
+    this.router.navigate(['/admin/customers', customer.id]);
   }
 
   onDelete(customer: Customer) {

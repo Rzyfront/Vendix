@@ -1970,6 +1970,98 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/stores',
       method: 'PATCH',
     },
+
+    // ──── Cuentas por Cobrar (Cartera) ────
+    {
+      name: 'store:accounts_receivable:read',
+      description: 'Ver cuentas por cobrar',
+      path: '/api/store/accounts-receivable',
+      method: 'GET',
+    },
+    {
+      name: 'store:accounts_receivable:payment',
+      description: 'Registrar cobro en cartera',
+      path: '/api/store/accounts-receivable/:id/payment',
+      method: 'POST',
+    },
+    {
+      name: 'store:accounts_receivable:agreement',
+      description: 'Crear acuerdo de pago',
+      path: '/api/store/accounts-receivable/:id/agreement',
+      method: 'POST',
+    },
+    {
+      name: 'store:accounts_receivable:write_off',
+      description: 'Castigo de cartera',
+      path: '/api/store/accounts-receivable/:id/write-off',
+      method: 'POST',
+    },
+
+    // ──── Cuentas por Pagar (CxP) ────
+    {
+      name: 'store:accounts_payable:read',
+      description: 'Ver cuentas por pagar',
+      path: '/api/store/accounts-payable',
+      method: 'GET',
+    },
+    {
+      name: 'store:accounts_payable:payment',
+      description: 'Registrar pago a proveedor',
+      path: '/api/store/accounts-payable/:id/payment',
+      method: 'POST',
+    },
+    {
+      name: 'store:accounts_payable:schedule',
+      description: 'Programar pago a proveedor',
+      path: '/api/store/accounts-payable/:id/schedule',
+      method: 'POST',
+    },
+    {
+      name: 'store:accounts_payable:export',
+      description: 'Exportar lote bancario de CxP',
+      path: '/api/store/accounts-payable/batch-export',
+      method: 'POST',
+    },
+    {
+      name: 'store:accounts_payable:write_off',
+      description: 'Castigo de CxP',
+      path: '/api/store/accounts-payable/:id/write-off',
+      method: 'POST',
+    },
+
+    // ──── Wallets ────
+    {
+      name: 'store:wallets:read',
+      description: 'Ver wallets de clientes',
+      path: '/api/store/wallets',
+      method: 'GET',
+    },
+    {
+      name: 'store:wallets:topup',
+      description: 'Recargar wallet de cliente',
+      path: '/api/store/wallets/:customerId/topup',
+      method: 'POST',
+    },
+    {
+      name: 'store:wallets:adjust',
+      description: 'Ajustar wallet de cliente',
+      path: '/api/store/wallets/:customerId/adjust',
+      method: 'POST',
+    },
+
+    // ──── Comisiones ────
+    {
+      name: 'store:commissions:read',
+      description: 'Ver reglas y cálculos de comisiones',
+      path: '/api/store/commissions',
+      method: 'GET',
+    },
+    {
+      name: 'store:commissions:manage',
+      description: 'Gestionar reglas de comisiones',
+      path: '/api/store/commissions/rules',
+      method: 'POST',
+    },
   ];
 
   // Get valid permission names from our list

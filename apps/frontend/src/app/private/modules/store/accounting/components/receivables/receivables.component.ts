@@ -14,9 +14,7 @@ import {
 import { ReceivablePaymentModalComponent } from './receivable-payment-modal.component';
 import { ReceivableDetailModalComponent } from './receivable-detail-modal.component';
 import {
-  ButtonComponent,
   CardComponent,
-  IconComponent,
   StatsComponent,
   InputsearchComponent,
   ResponsiveDataViewComponent,
@@ -43,9 +41,7 @@ import type {
     FormsModule,
     ReceivablePaymentModalComponent,
     ReceivableDetailModalComponent,
-    ButtonComponent,
     CardComponent,
-    IconComponent,
     StatsComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,

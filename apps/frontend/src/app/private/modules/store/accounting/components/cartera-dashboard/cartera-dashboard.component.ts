@@ -16,7 +16,6 @@ import {
   CardComponent,
   IconComponent,
   StatsComponent,
-  EmptyStateComponent,
 } from '../../../../../../shared/components/index';
 
 @Component({
@@ -27,7 +26,6 @@ import {
     CardComponent,
     IconComponent,
     StatsComponent,
-    EmptyStateComponent,
   ],
   templateUrl: './cartera-dashboard.component.html',
 })

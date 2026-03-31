@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { RequestContextService } from '../../../common/context/request-context.service';
 import { WalletBalanceService } from './services/wallet-balance.service';
 import { WalletQueryDto } from './dto/wallet-query.dto';
 import { TopUpWalletDto } from './dto/top-up-wallet.dto';
@@ -25,9 +26,12 @@ export class WalletService {
 
     if (existing) return existing;
 
+    const context = RequestContextService.getContext();
+
     return this.prisma.wallets.create({
       data: {
         customer_id: customerId,
+        organization_id: context?.organization_id!,
         balance: 0,
         held_balance: 0,
         is_active: true,

@@ -14,9 +14,7 @@ import {
 import { PayablePaymentModalComponent } from './payable-payment-modal.component';
 import { PayableDetailModalComponent } from './payable-detail-modal.component';
 import {
-  ButtonComponent,
   CardComponent,
-  IconComponent,
   StatsComponent,
   InputsearchComponent,
   ResponsiveDataViewComponent,
@@ -43,9 +41,7 @@ import type {
     FormsModule,
     PayablePaymentModalComponent,
     PayableDetailModalComponent,
-    ButtonComponent,
     CardComponent,
-    IconComponent,
     StatsComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
