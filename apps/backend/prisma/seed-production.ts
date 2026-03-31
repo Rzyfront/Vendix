@@ -12,6 +12,7 @@ import { seedPermissionsAndRoles } from './seeds/permissions-roles.seed';
 import { seedDefaultAccountMappings } from './seeds/default-account-mappings.seed';
 import { seedDefaultPayrollRules } from './seeds/default-payroll-rules.seed';
 import { seedAIEngineApps } from './seeds/ai-engine-apps.seed';
+import { seedSystemPaymentMethods } from './seeds/system-payment-methods.seed';
 
 const seeds = [
   { name: 'Default Templates', fn: seedDefaultTemplates },
@@ -19,6 +20,7 @@ const seeds = [
   { name: 'Default Account Mappings', fn: seedDefaultAccountMappings },
   { name: 'Default Payroll Rules', fn: seedDefaultPayrollRules },
   { name: 'AI Engine Applications', fn: seedAIEngineApps },
+  { name: 'System Payment Methods', fn: seedSystemPaymentMethods },
 ];
 
 async function main() {
