@@ -13,11 +13,13 @@ export class QuerySessionDto {
 
   @IsOptional()
   @IsNumber()
+  @Min(1)
   @Type(() => Number)
   page?: number;
 
   @IsOptional()
   @IsNumber()
+  @Min(1)
   @Type(() => Number)
   limit?: number;
 }
