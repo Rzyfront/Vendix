@@ -62,7 +62,7 @@ const QUICK_LINKS: QuickLink[] = [
     OptionsDropdownComponent,
   ],
   template: `
-    <div class="w-full space-y-4">
+    <div class="w-full space-y-4 pb-6">
       <!-- 4 Stats Cards -->
       <div class="stats-container">
         <app-stats
