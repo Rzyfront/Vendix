@@ -113,7 +113,7 @@ export class HelpCenterAdminController {
   // ==========================================
 
   @Post('upload-image')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
   async uploadImage(@UploadedFile() file: Express.Multer.File) {
     const data = await this.helpCenterService.uploadArticleImage(file);
     return this.responseService.success(data, 'Image uploaded successfully');

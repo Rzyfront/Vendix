@@ -648,8 +648,10 @@ export class PaymentsService {
                 status: payment.status,
                 transaction_id: payment.transaction_id,
                 change: payment.change,
+                nextAction: (payment as any)?.nextAction,
               }
             : undefined,
+          nextAction: (payment as any)?.nextAction,
         };
       });
 
@@ -961,6 +963,49 @@ export class PaymentsService {
       throw new Error('Payment method not found');
     }
 
+    // Check if method requires gateway processing (digital/async methods)
+    const methodType = paymentMethod.system_payment_method.type;
+    const digitalMethods = ['wompi', 'wallet'];
+
+    if (digitalMethods.includes(methodType)) {
+      // Delegate to PaymentGateway for async/digital methods
+      const gatewayResult = await this.paymentGateway.processPayment({
+        orderId: order.id,
+        customerId: dto.customer_id,
+        amount: dto.total_amount,
+        currency: dto.currency || 'COP',
+        storePaymentMethodId: dto.store_payment_method_id,
+        storeId: dto.store_id,
+        metadata: {
+          paymentMethod: dto.wompi_payment_method,
+          wompiConfig: paymentMethod.custom_config,
+          walletId: dto.wallet_id,
+          customerEmail: dto.customer_email,
+          is_pos_payment: true,
+        },
+        returnUrl: dto.return_url,
+      });
+
+      // Gateway already created the payment record, fetch it
+      const payment = await tx.payments.findFirst({
+        where: { order_id: order.id },
+        orderBy: { created_at: 'desc' },
+        include: {
+          store_payment_method: {
+            include: { system_payment_method: true },
+          },
+        },
+      });
+
+      if (payment) {
+        (payment as any).nextAction = gatewayResult.nextAction;
+        (payment as any).change = 0;
+      }
+
+      return payment;
+    }
+
+    // Direct methods (cash, card, bank_transfer) - existing flow continues below
     // Calculate change for cash payments
     let change = 0;
     if (

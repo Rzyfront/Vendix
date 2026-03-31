@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
+import { FormsModule, ReactiveFormsModule } from '@angular/forms';
+import { FormBuilder, FormGroup } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
 import { PaymentMethodsService } from './services/payment-methods.service';
 import {
@@ -30,6 +31,7 @@ import {
   imports: [
     CommonModule,
     FormsModule,
+    ReactiveFormsModule,
     StatsComponent,
     ButtonComponent,
     ModalComponent,
@@ -253,6 +255,60 @@ import {
         </app-button>
       </div>
     </app-modal>
+
+    <!-- Configure Payment Method Modal -->
+    <app-modal
+      [isOpen]="show_config_modal()"
+      [title]="'Configurar ' + (config_method?.display_name || '')"
+      subtitle="Ingresa las credenciales para este método de pago"
+      size="md"
+      (closed)="closeConfigModal()"
+    >
+      <div slot="header">
+        <div class="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center border border-purple-100">
+          <app-icon name="settings" [size]="20" class="text-purple-600"></app-icon>
+        </div>
+      </div>
+
+      <form [formGroup]="config_form" (ngSubmit)="saveConfigAndEnable()">
+        <div class="space-y-4">
+          @for (field of config_fields; track field.key) {
+            <div>
+              <label class="block text-sm font-medium mb-1" style="color: var(--color-text-primary)">
+                {{ field.title }}
+                @if (field.required) { <span class="text-red-500">*</span> }
+              </label>
+              @if (field.description) {
+                <p class="text-xs mb-1" style="color: var(--color-text-muted)">{{ field.description }}</p>
+              }
+              @if (field.enum_values) {
+                <select [formControlName]="field.key"
+                        class="w-full px-3 py-2 rounded-lg border text-sm"
+                        style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary)">
+                  @for (opt of field.enum_values; track opt) {
+                    <option [value]="opt">{{ opt }}</option>
+                  }
+                </select>
+              } @else {
+                <input [formControlName]="field.key"
+                       [type]="field.key.includes('secret') || field.key.includes('private') ? 'password' : 'text'"
+                       [placeholder]="field.description || field.title"
+                       class="w-full px-3 py-2 rounded-lg border text-sm"
+                       style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary)"
+                />
+              }
+            </div>
+          }
+        </div>
+      </form>
+
+      <div slot="footer" class="flex justify-end gap-3">
+        <app-button variant="ghost" (clicked)="closeConfigModal()">Cancelar</app-button>
+        <app-button variant="primary" [loading]="config_saving()" (clicked)="saveConfigAndEnable()">
+          Configurar y Agregar
+        </app-button>
+      </div>
+    </app-modal>
   `,
   styles: [
     `
@@ -277,6 +333,13 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
   is_loading_available = signal(false);
   is_enabling = signal(false);
   enabling_method_id = signal<string | null>(null);
+
+  // Config modal state
+  show_config_modal = signal(false);
+  config_method: SystemPaymentMethod | null = null;
+  config_form: FormGroup = new FormGroup({});
+  config_fields: Array<{ key: string; title: string; type: string; required: boolean; description: string; enum_values?: string[]; default_value?: any }> = [];
+  config_saving = signal(false);
 
   // UI State
   search_term = signal('');
@@ -505,6 +568,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     private payment_methods_service: PaymentMethodsService,
     private toast_service: ToastService,
     private dialog_service: DialogService,
+    private fb: FormBuilder,
   ) {}
 
   ngOnInit(): void {
@@ -598,6 +662,15 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
   }
 
   enableMethod(method: SystemPaymentMethod): void {
+    if (method.requires_config && method.config_schema) {
+      // Open config modal for methods that need configuration
+      this.config_method = method;
+      this.buildConfigForm(method.config_schema);
+      this.show_config_modal.set(true);
+      return;
+    }
+
+    // Simple confirmation for methods without config
     this.dialog_service
       .confirm({
         title: 'Agregar Método de Pago',
@@ -616,23 +689,85 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
             .pipe(takeUntil(this.destroy$))
             .subscribe({
               next: () => {
-                this.toast_service.success(
-                  'Método de pago agregado correctamente',
-                );
+                this.toast_service.success('Método de pago agregado correctamente');
                 this.enabling_method_id.set(null);
                 this.loadPaymentMethods();
                 this.loadPaymentMethodStats();
                 this.loadAvailablePaymentMethods();
               },
               error: (error: any) => {
-                this.toast_service.error(
-                  'Error al agregar método de pago: ' + error.message,
-                );
+                this.toast_service.error('Error al agregar método de pago: ' + error.message);
                 this.enabling_method_id.set(null);
               },
             });
         }
       });
+  }
+
+  buildConfigForm(schema: any): void {
+    const properties = schema.properties || {};
+    const required_fields = schema['required'] || [];
+    const controls: Record<string, any> = {};
+    this.config_fields = [];
+
+    for (const [key, prop] of Object.entries(properties) as [string, any][]) {
+      const is_required = required_fields.includes(key);
+      const default_value = this.config_method?.default_config?.[key] ?? prop.default ?? '';
+      controls[key] = [default_value];
+      this.config_fields.push({
+        key,
+        title: prop.title || key.replace(/_/g, ' '),
+        type: prop.type || 'string',
+        required: is_required,
+        description: prop.description || '',
+        enum_values: prop.enum,
+        default_value,
+      });
+    }
+
+    this.config_form = this.fb.group(controls);
+  }
+
+  saveConfigAndEnable(): void {
+    if (!this.config_method || !this.config_form.valid) return;
+
+    // Validate required fields
+    const required = this.config_method.config_schema?.['required'] || [];
+    for (const key of required) {
+      if (!this.config_form.value[key]) {
+        this.toast_service.error(`El campo "${key}" es requerido`);
+        return;
+      }
+    }
+
+    this.config_saving.set(true);
+    this.payment_methods_service
+      .enablePaymentMethod(this.config_method.id, {
+        display_name: this.config_method.display_name,
+        custom_config: this.config_form.value,
+      })
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.toast_service.success('Método de pago configurado y agregado correctamente');
+          this.config_saving.set(false);
+          this.show_config_modal.set(false);
+          this.config_method = null;
+          this.loadPaymentMethods();
+          this.loadPaymentMethodStats();
+          this.loadAvailablePaymentMethods();
+        },
+        error: (error: any) => {
+          this.toast_service.error('Error: ' + (error.error?.message || error.message));
+          this.config_saving.set(false);
+        },
+      });
+  }
+
+  closeConfigModal(): void {
+    this.show_config_modal.set(false);
+    this.config_method = null;
+    this.config_fields = [];
   }
 
   toggleMethod(method: CombinedPaymentMethod): void {

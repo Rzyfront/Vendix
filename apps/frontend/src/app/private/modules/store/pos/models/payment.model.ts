@@ -21,6 +21,10 @@ export interface PaymentRequest {
   customerId?: number | string;
   customerName?: string;
   isAnonymousSale?: boolean;
+  metadata?: {
+    wompiPaymentMethod?: any;
+    walletId?: number;
+  };
 }
 
 export interface PaymentResponse {
@@ -29,6 +33,11 @@ export interface PaymentResponse {
   message: string;
   change?: number;
   receiptUrl?: string;
+  nextAction?: {
+    type: 'redirect' | '3ds' | 'await' | 'none';
+    url?: string;
+    data?: any;
+  };
 }
 
 export interface CashPaymentDetails {

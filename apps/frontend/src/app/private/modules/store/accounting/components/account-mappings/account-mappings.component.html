@@ -69,22 +69,49 @@
       @for (group of mapping_groups; track group.key) {
         <div class="mb-4 last:mb-0">
           <!-- Group Header -->
-          <div
-            class="flex items-center gap-2 px-2 py-2 md:px-4 md:py-3 bg-gray-50 rounded-lg mb-1"
-          >
-            <app-icon
-              [name]="group.icon"
-              [size]="16"
-              class="text-gray-500"
-            ></app-icon>
-            <h3
-              class="text-xs font-semibold text-gray-500 uppercase tracking-wider"
-            >
-              {{ group.label }}
-            </h3>
+          <div class="flex items-center justify-between gap-2 px-2 py-2 md:px-4 md:py-3 bg-gray-50 rounded-lg mb-1">
+            <div class="flex items-center gap-2">
+              <app-icon
+                [name]="group.icon"
+                [size]="16"
+                [ngClass]="isFlowEnabled(group.key) ? 'text-gray-500' : 'text-gray-300'"
+              ></app-icon>
+              <h3
+                class="text-xs font-semibold uppercase tracking-wider"
+                [ngClass]="isFlowEnabled(group.key) ? 'text-gray-500' : 'text-gray-300 line-through'"
+              >
+                {{ group.label }}
+              </h3>
+              @if (!isFlowEnabled(group.key)) {
+                <span class="text-[10px] text-amber-500 font-medium bg-amber-50 px-1.5 py-0.5 rounded">
+                  Desactivado
+                </span>
+              }
+            </div>
+            @if (flows_loaded) {
+              <button
+                type="button"
+                class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary/30"
+                [ngClass]="{
+                  'bg-emerald-500 border-emerald-500': isFlowEnabled(group.key),
+                  'bg-gray-300 border-gray-300': !isFlowEnabled(group.key)
+                }"
+                (click)="toggleFlow(group.key)"
+                [attr.aria-label]="'Toggle ' + group.label"
+              >
+                <span
+                  class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out"
+                  [ngClass]="{
+                    'translate-x-5': isFlowEnabled(group.key),
+                    'translate-x-0': !isFlowEnabled(group.key)
+                  }"
+                ></span>
+              </button>
+            }
           </div>
 
           <!-- Mapping Rows -->
+          <div [ngClass]="isFlowEnabled(group.key) ? '' : 'opacity-40 pointer-events-none'">
           @for (mapping of group.mappings; track mapping.mapping_key) {
             <!-- Mobile Card -->
             <div
@@ -169,6 +196,7 @@
               </div>
             </div>
           }
+          </div>
         </div>
       }
     </div>

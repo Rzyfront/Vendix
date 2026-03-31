@@ -109,6 +109,22 @@ import {
         </div>
       </div>
 
+      <div class="payment-awaiting" *ngIf="awaitingConfirmation">
+        <div class="awaiting-content">
+          <div class="spinner"></div>
+          <p class="text-lg font-semibold">{{ awaitingMessage }}</p>
+          <p class="text-sm text-gray-500 mt-2">El estado se actualizará automáticamente cuando el pago sea confirmado.</p>
+          <div class="awaiting-actions mt-4">
+            <button class="btn btn-secondary" (click)="cancelAwaitingPayment()">
+              Cancelar espera
+            </button>
+            <button class="btn btn-primary" (click)="checkPaymentStatus()">
+              Verificar estado
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div class="payment-result" *ngIf="paymentResult">
         <div
           class="result-content"
@@ -318,6 +334,26 @@ import {
         }
       }
 
+      .payment-awaiting {
+        text-align: center;
+        padding: 32px 20px;
+      }
+
+      .awaiting-content {
+        max-width: 400px;
+        margin: 0 auto;
+        padding: 24px;
+        border-radius: 8px;
+        border: 1px solid var(--color-border);
+        background: var(--color-surface);
+      }
+
+      .awaiting-actions {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+      }
+
       .payment-result {
         text-align: center;
         padding: 32px 20px;
@@ -377,6 +413,8 @@ export class PosPaymentComponent implements OnInit {
   paymentForm: FormGroup;
   processing: boolean = false;
   paymentResult: PaymentResponse | null = null;
+  awaitingConfirmation: boolean = false;
+  awaitingMessage: string = '';
 
   constructor(
     private paymentService: PosPaymentService,
@@ -407,6 +445,10 @@ export class PosPaymentComponent implements OnInit {
           Validators.required,
           Validators.min(this.totalAmount),
         ]);
+      this.paymentForm.get('reference')?.clearValidators();
+    } else if (method.type === 'wallet') {
+      // Wallet: no requiere cash ni referencia
+      this.paymentForm.get('cashReceived')?.clearValidators();
       this.paymentForm.get('reference')?.clearValidators();
     } else {
       this.paymentForm.get('cashReceived')?.clearValidators();
@@ -452,8 +494,21 @@ export class PosPaymentComponent implements OnInit {
 
     this.paymentService.processPayment(paymentRequest).subscribe({
       next: (result) => {
-        this.paymentResult = result;
-        this.processing = false;
+        if (result.nextAction?.type === 'redirect' && result.nextAction.url) {
+          // PSE / Bancolombia: abrir URL de redirección
+          window.open(result.nextAction.url, '_blank');
+          this.processing = false;
+          this.awaitingConfirmation = true;
+          this.awaitingMessage = 'Se abrió la página del banco. Completa el pago y vuelve aquí.';
+        } else if (result.nextAction?.type === 'await') {
+          // Nequi: esperar confirmación del usuario en su celular
+          this.processing = false;
+          this.awaitingConfirmation = true;
+          this.awaitingMessage = 'Esperando confirmación en la app de Nequi del cliente...';
+        } else {
+          this.paymentResult = result;
+          this.processing = false;
+        }
       },
       error: (error) => {
         this.paymentResult = {
@@ -475,6 +530,23 @@ export class PosPaymentComponent implements OnInit {
     }
   }
 
+  cancelAwaitingPayment(): void {
+    this.awaitingConfirmation = false;
+    this.paymentResult = {
+      success: false,
+      message: 'Espera cancelada. Verifica el estado del pago manualmente.',
+    };
+  }
+
+  checkPaymentStatus(): void {
+    // TODO: Implementar polling con getPaymentStatus cuando el backend lo soporte
+    this.awaitingConfirmation = false;
+    this.paymentResult = {
+      success: true,
+      message: 'Verifica el estado del pago en el historial de órdenes.',
+    };
+  }
+
   getProcessingText(): string {
     if (!this.selectedMethod) return 'Procesar Pago';
 
@@ -487,6 +559,10 @@ export class PosPaymentComponent implements OnInit {
         return 'Procesar Transferencia';
       case 'digital_wallet':
         return 'Procesar Billetera Digital';
+      case 'wompi':
+        return 'Procesar con Wompi';
+      case 'voucher':
+        return 'Pagar con Wallet';
       default:
         return 'Procesar Pago';
     }
@@ -504,6 +580,10 @@ export class PosPaymentComponent implements OnInit {
         return 'Verificando transferencia...';
       case 'digital_wallet':
         return 'Procesando billetera digital...';
+      case 'wompi':
+        return 'Conectando con Wompi...';
+      case 'voucher':
+        return 'Procesando pago con wallet...';
       default:
         return 'Procesando pago...';
     }

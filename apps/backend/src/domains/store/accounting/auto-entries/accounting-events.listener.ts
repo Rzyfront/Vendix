@@ -1,12 +1,41 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { AutoEntryService } from './auto-entry.service';
+import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 
 @Injectable()
 export class AccountingEventsListener {
   private readonly logger = new Logger(AccountingEventsListener.name);
 
-  constructor(private readonly auto_entry_service: AutoEntryService) {}
+  private flow_cache = new Map<string, { value: Record<string, boolean>; expires: number }>();
+
+  constructor(
+    private readonly auto_entry_service: AutoEntryService,
+    private readonly prisma: StorePrismaService,
+  ) {}
+
+  private async isFlowEnabled(store_id: number | undefined, flow_key: string): Promise<boolean> {
+    if (!store_id) return true; // If no store context, default to enabled
+
+    const cache_key = `flows_${store_id}`;
+    const cached = this.flow_cache.get(cache_key);
+    if (cached && cached.expires > Date.now()) {
+      return cached.value[flow_key] !== false;
+    }
+
+    try {
+      const settings = await this.prisma.withoutScope().store_settings.findUnique({
+        where: { store_id },
+        select: { settings: true },
+      });
+
+      const flows = (settings?.settings as any)?.accounting_flows || {};
+      this.flow_cache.set(cache_key, { value: flows, expires: Date.now() + 5 * 60 * 1000 }); // 5 min cache
+      return flows[flow_key] !== false; // Default true if not configured
+    } catch {
+      return true; // On error, default to enabled
+    }
+  }
 
   @OnEvent('invoice.validated')
   async handleInvoiceValidated(event: {
@@ -20,6 +49,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
+      if (!await this.isFlowEnabled(event.store_id, 'invoicing')) return;
       await this.auto_entry_service.onInvoiceValidated({
         invoice_id: event.invoice_id,
         organization_id: event.organization_id,
@@ -54,6 +84,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
+      if (!await this.isFlowEnabled(event.store_id, 'payments')) return;
       await this.auto_entry_service.onPaymentReceived({
         payment_id: event.payment_id,
         organization_id: event.organization_id,
@@ -89,6 +120,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
+      if (!await this.isFlowEnabled(event.store_id, 'credit_sales')) return;
       await this.auto_entry_service.onCreditSaleCreated({
         order_id: event.order_id,
         organization_id: event.organization_id,
@@ -118,6 +150,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
+      if (!await this.isFlowEnabled(event.store_id, 'expenses')) return;
       await this.auto_entry_service.onExpenseApproved({
         expense_id: event.expense_id,
         organization_id: event.organization_id,
@@ -143,6 +176,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
+      if (!await this.isFlowEnabled(event.store_id, 'expenses')) return;
       await this.auto_entry_service.onExpensePaid({
         expense_id: event.expense_id,
         organization_id: event.organization_id,
@@ -174,6 +208,7 @@ export class AccountingEventsListener {
     cost_center_breakdown?: Record<string, { earnings: number; employer_costs: number }>;
   }) {
     try {
+      if (!await this.isFlowEnabled(event.store_id, 'payroll')) return;
       await this.auto_entry_service.onPayrollApproved({
         payroll_run_id: event.payroll_run_id,
         organization_id: event.organization_id,
@@ -206,6 +241,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
+      if (!await this.isFlowEnabled(event.store_id, 'payroll')) return;
       await this.auto_entry_service.onPayrollPaid({
         payroll_run_id: event.payroll_run_id,
         organization_id: event.organization_id,
@@ -232,6 +268,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
+      if (!await this.isFlowEnabled(event.store_id, 'inventory')) return;
       await this.auto_entry_service.onOrderCompleted({
         order_id: event.order_id,
         organization_id: event.organization_id,
@@ -259,6 +296,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
+      if (!await this.isFlowEnabled(event.store_id, 'returns')) return;
       await this.auto_entry_service.onRefundCompleted({
         refund_id: event.refund_id,
         organization_id: event.organization_id,
@@ -286,6 +324,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
+      if (!await this.isFlowEnabled(event.store_id, 'purchases')) return;
       await this.auto_entry_service.onPurchaseOrderReceived({
         purchase_order_id: event.purchase_order_id,
         organization_id: event.organization_id,
@@ -311,6 +350,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
+      if (!await this.isFlowEnabled((event as any).store_id, 'purchases')) return;
       await this.auto_entry_service.onPurchaseOrderPayment({
         purchase_order_id: event.purchase_order_id,
         organization_id: event.organization_id,
@@ -337,6 +377,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
+      if (!await this.isFlowEnabled(event.store_id, 'inventory')) return;
       await this.auto_entry_service.onInventoryAdjusted({
         adjustment_id: event.adjustment_id,
         organization_id: event.organization_id,
@@ -368,6 +409,7 @@ export class AccountingEventsListener {
     organization_id?: number;
   }) {
     try {
+      if (!await this.isFlowEnabled(event.store_id, 'layaway')) return;
       const organization_id = event.organization_id || await this.resolveOrgId(event.store_id);
       await this.auto_entry_service.onLayawayPaymentReceived({
         payment_id: event.payment_id,
@@ -396,6 +438,7 @@ export class AccountingEventsListener {
     organization_id?: number;
   }) {
     try {
+      if (!await this.isFlowEnabled(event.store_id, 'layaway')) return;
       const organization_id = event.organization_id || await this.resolveOrgId(event.store_id);
       await this.auto_entry_service.onLayawayCompleted({
         plan_id: event.plan_id,
@@ -430,6 +473,7 @@ export class AccountingEventsListener {
     organization_id?: number;
   }) {
     try {
+      if (!await this.isFlowEnabled(event.store_id, 'installments')) return;
       const organization_id = event.organization_id || await this.resolveOrgId(event.store_id);
       await this.auto_entry_service.onInstallmentPaymentReceived({
         credit_id: event.credit_id,
@@ -474,6 +518,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
+      if (!await this.isFlowEnabled(event.store_id, 'settlements')) return;
       await this.auto_entry_service.onSettlementPaid({
         settlement_id: event.settlement_id,
         settlement_number: event.settlement_number,
@@ -513,6 +558,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
+      if (!await this.isFlowEnabled(event.store_id, 'fixed_assets')) return;
       await this.auto_entry_service.onDepreciationPosted({
         asset_id: event.asset_id,
         asset_number: event.asset_number,
@@ -545,6 +591,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
+      if (!await this.isFlowEnabled(event.store_id, 'fixed_assets')) return;
       await this.auto_entry_service.onFixedAssetDisposed({
         asset_id: event.asset_id,
         asset_number: event.asset_number,
@@ -581,6 +628,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
+      if (!await this.isFlowEnabled(event.store_id, 'withholding')) return;
       await this.auto_entry_service.onWithholdingApplied({
         organization_id: event.organization_id,
         store_id: event.store_id,
@@ -596,6 +644,309 @@ export class AccountingEventsListener {
     } catch (error) {
       this.logger.error(
         `Failed to create withholding auto-entry: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  // ===== STOCK TRANSFERS =====
+
+  @OnEvent('stock_transfer.completed')
+  async handleStockTransferCompleted(event: {
+    transfer_id: number;
+    transfer_number: string;
+    organization_id: number;
+    from_location_id: number;
+    to_location_id: number;
+    total_cost: number;
+    user_id?: number;
+  }) {
+    try {
+      if (!await this.isFlowEnabled((event as any).store_id, 'stock_transfers')) return;
+      await this.auto_entry_service.onStockTransferCompleted({
+        transfer_id: event.transfer_id,
+        transfer_number: event.transfer_number,
+        organization_id: event.organization_id,
+        from_location_id: event.from_location_id,
+        to_location_id: event.to_location_id,
+        total_cost: Number(event.total_cost),
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for stock_transfer.completed #${event.transfer_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for stock_transfer.completed #${event.transfer_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  // ===== CASH REGISTER =====
+
+  @OnEvent('cash_register.opened')
+  async handleCashRegisterOpened(event: {
+    session_id: number;
+    store_id: number;
+    organization_id: number;
+    opening_amount: number;
+    user_id: number;
+  }) {
+    try {
+      if (!await this.isFlowEnabled(event.store_id, 'cash_register')) return;
+      await this.auto_entry_service.onCashRegisterOpened({
+        session_id: event.session_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        opening_amount: Number(event.opening_amount),
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for cash_register.opened session #${event.session_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for cash_register.opened session #${event.session_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  @OnEvent('cash_register.closed')
+  async handleCashRegisterClosed(event: {
+    session_id: number;
+    store_id: number;
+    organization_id: number;
+    expected_amount: number;
+    actual_amount: number;
+    difference: number;
+    user_id: number;
+  }) {
+    try {
+      if (!await this.isFlowEnabled(event.store_id, 'cash_register')) return;
+      await this.auto_entry_service.onCashRegisterClosed({
+        session_id: event.session_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        expected_amount: Number(event.expected_amount),
+        actual_amount: Number(event.actual_amount),
+        difference: Number(event.difference),
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for cash_register.closed session #${event.session_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for cash_register.closed session #${event.session_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  @OnEvent('cash_register.movement')
+  async handleCashRegisterMovement(event: {
+    movement_id: number;
+    session_id: number;
+    store_id: number;
+    organization_id: number;
+    type: 'cash_in' | 'cash_out';
+    amount: number;
+    reference?: string;
+    notes?: string;
+    user_id: number;
+  }) {
+    try {
+      if (!await this.isFlowEnabled(event.store_id, 'cash_register')) return;
+      await this.auto_entry_service.onCashRegisterMovement({
+        movement_id: event.movement_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        type: event.type,
+        amount: Number(event.amount),
+        reference: event.reference,
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for cash_register.movement #${event.movement_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for cash_register.movement #${event.movement_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  // ===== ACCOUNTS RECEIVABLE =====
+
+  @OnEvent('ar.written_off')
+  async handleArWrittenOff(event: {
+    ar_id: number;
+    store_id: number;
+    organization_id: number;
+    customer_id: number;
+    amount: number;
+    document_number?: string;
+    user_id: number;
+  }) {
+    try {
+      if (!await this.isFlowEnabled(event.store_id, 'ar_ap')) return;
+      await this.auto_entry_service.onArWrittenOff({
+        ar_id: event.ar_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        document_number: event.document_number,
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for ar.written_off AR #${event.ar_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for ar.written_off AR #${event.ar_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  // ===== ACCOUNTS PAYABLE =====
+
+  @OnEvent('ap.payment_registered')
+  async handleApPaymentRegistered(event: {
+    ap_id: number;
+    organization_id: number;
+    store_id: number;
+    supplier_id: number;
+    amount: number;
+    payment_method?: string;
+    document_number?: string;
+    user_id: number;
+  }) {
+    try {
+      if (!await this.isFlowEnabled(event.store_id, 'ar_ap')) return;
+      await this.auto_entry_service.onApPaymentRegistered({
+        ap_id: event.ap_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        payment_method: event.payment_method,
+        document_number: event.document_number,
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for ap.payment_registered AP #${event.ap_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for ap.payment_registered AP #${event.ap_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  @OnEvent('ap.written_off')
+  async handleApWrittenOff(event: {
+    ap_id: number;
+    organization_id: number;
+    store_id: number;
+    supplier_id: number;
+    amount: number;
+    document_number?: string;
+    user_id: number;
+  }) {
+    try {
+      if (!await this.isFlowEnabled(event.store_id, 'ar_ap')) return;
+      await this.auto_entry_service.onApWrittenOff({
+        ap_id: event.ap_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        document_number: event.document_number,
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for ap.written_off AP #${event.ap_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for ap.written_off AP #${event.ap_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  // ===== COMMISSIONS =====
+
+  @OnEvent('commission.calculated')
+  async handleCommissionCalculated(event: {
+    store_id: number;
+    organization_id: number;
+    payment_id: number;
+    commission_amount: number;
+    rule_id: number;
+  }) {
+    try {
+      if (!await this.isFlowEnabled(event.store_id, 'commissions')) return;
+      await this.auto_entry_service.onCommissionCalculated({
+        payment_id: event.payment_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        commission_amount: Number(event.commission_amount),
+        rule_id: event.rule_id,
+      });
+      this.logger.log(`Auto-entry created for commission.calculated payment #${event.payment_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for commission.calculated payment #${event.payment_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  // ===== WALLET =====
+
+  @OnEvent('wallet.credited')
+  async handleWalletCredited(event: {
+    wallet_id: number;
+    store_id: number;
+    organization_id: number;
+    amount: number;
+    reference_type: string;
+    user_id?: number;
+  }) {
+    try {
+      if (!await this.isFlowEnabled(event.store_id, 'wallet')) return;
+      await this.auto_entry_service.onWalletCredited({
+        wallet_id: event.wallet_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        reference_type: event.reference_type,
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for wallet.credited wallet #${event.wallet_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for wallet.credited wallet #${event.wallet_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  @OnEvent('wallet.debited')
+  async handleWalletDebited(event: {
+    wallet_id: number;
+    store_id: number;
+    organization_id: number;
+    amount: number;
+    reference_type: string;
+    order_id?: number;
+    user_id?: number;
+  }) {
+    try {
+      if (!await this.isFlowEnabled(event.store_id, 'wallet')) return;
+      await this.auto_entry_service.onWalletDebited({
+        wallet_id: event.wallet_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        reference_type: event.reference_type,
+        order_id: event.order_id,
+        user_id: event.user_id,
+      });
+      this.logger.log(`Auto-entry created for wallet.debited wallet #${event.wallet_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for wallet.debited wallet #${event.wallet_id}: ${error.message}`,
         error.stack,
       );
     }

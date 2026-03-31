@@ -39,6 +39,10 @@ import { ReviewsModule } from './reviews/reviews.module';
 import { AIChatModule } from './ai-chat/ai-chat.module';
 import { DispatchNotesModule } from './dispatch-notes/dispatch-notes.module';
 import { McpModule } from './mcp/mcp.module';
+import { AccountsReceivableModule } from './accounts-receivable/accounts-receivable.module';
+import { WalletModule } from './wallet/wallet.module';
+import { AccountsPayableModule } from './accounts-payable/accounts-payable.module';
+import { CommissionsModule } from './commissions/commissions.module';
 
 @Module({
   imports: [
@@ -80,6 +84,10 @@ import { McpModule } from './mcp/mcp.module';
     AIChatModule,
     DispatchNotesModule,
     McpModule,
+    AccountsReceivableModule,
+    WalletModule,
+    AccountsPayableModule,
+    CommissionsModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],

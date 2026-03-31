@@ -370,6 +370,36 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy, AfterViewIn
           icon: 'circle',
           route: '/admin/taxes/ica',
         },
+        {
+          label: 'Mapeo de Cuentas',
+          icon: 'circle',
+          route: '/admin/accounting/account-mappings',
+        },
+        {
+          label: 'Flujos Contables',
+          icon: 'circle',
+          route: '/admin/accounting/flows',
+        },
+        {
+          label: 'Cartera',
+          icon: 'circle',
+          route: '/admin/accounting/cartera',
+        },
+        {
+          label: 'Cuentas por Cobrar',
+          icon: 'circle',
+          route: '/admin/accounting/receivables',
+        },
+        {
+          label: 'Cuentas por Pagar',
+          icon: 'circle',
+          route: '/admin/accounting/payables',
+        },
+        {
+          label: 'Aging Report',
+          icon: 'circle',
+          route: '/admin/accounting/aging',
+        },
       ],
     },
     {

@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
@@ -12,6 +13,7 @@ export class StockTransfersService {
   constructor(
     private prisma: StorePrismaService,
     private stockLevelManager: StockLevelManager,
+    private readonly event_emitter: EventEmitter2,
   ) {}
 
   async getStats() {
@@ -99,7 +101,7 @@ export class StockTransfersService {
   }
 
   async createAndComplete(createTransferDto: CreateTransferDto) {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const context = RequestContextService.getContext();
       if (!context?.organization_id) {
         throw new BadRequestException('Organization context is required');
@@ -201,6 +203,19 @@ export class StockTransfersService {
         },
       });
     });
+
+    // Emit accounting event for completed stock transfer
+    this.event_emitter.emit('stock_transfer.completed', {
+      transfer_id: result.id,
+      transfer_number: result.transfer_number,
+      organization_id: result.organization_id,
+      from_location_id: result.from_location_id,
+      to_location_id: result.to_location_id,
+      total_cost: result.stock_transfer_items?.reduce((sum, item) => sum + Number(item.quantity) * Number(item.unit_cost || 0), 0) || 0,
+      user_id: RequestContextService.getUserId(),
+    });
+
+    return result;
   }
 
   findAll(query: TransferQueryDto) {
@@ -368,7 +383,7 @@ export class StockTransfersService {
     id: number,
     items: Array<{ id: number; quantity_received: number }>,
   ) {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       for (const item of items) {
         await tx.stock_transfer_items.update({
           where: { id: item.id },
@@ -455,6 +470,21 @@ export class StockTransfersService {
         },
       });
     });
+
+    // Emit accounting event only if transfer is fully completed
+    if (result.status === transfer_status_enum.completed) {
+      this.event_emitter.emit('stock_transfer.completed', {
+        transfer_id: result.id,
+        transfer_number: result.transfer_number,
+        organization_id: result.organization_id,
+        from_location_id: result.from_location_id,
+        to_location_id: result.to_location_id,
+        total_cost: result.stock_transfer_items?.reduce((sum, item) => sum + Number(item.quantity_received) * Number(item.unit_cost || 0), 0) || 0,
+        user_id: RequestContextService.getUserId(),
+      });
+    }
+
+    return result;
   }
 
   async cancel(id: number) {

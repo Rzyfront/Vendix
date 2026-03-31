@@ -89,6 +89,11 @@ export class InventorySettingsDto {
   @IsOptional()
   @IsBoolean()
   allow_negative_stock?: boolean;
+
+  @ApiProperty({ enum: ['cpp', 'fifo'], example: 'cpp', required: false })
+  @IsOptional()
+  @IsIn(['cpp', 'fifo'])
+  costing_method?: 'cpp' | 'fifo';
 }
 
 export class CheckoutSettingsDto {
@@ -487,4 +492,78 @@ export class PanelUISettingsDto {
 
   @IsOptional()
   STORE_ECOMMERCE?: Record<string, boolean>;
+}
+
+export class AccountingFlowsSettingsDto {
+  @IsOptional()
+  @IsBoolean()
+  invoicing?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  payments?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  expenses?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  payroll?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  credit_sales?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  inventory?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  returns?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  purchases?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  layaway?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  fixed_assets?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  withholding?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  settlements?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  wallet?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  cash_register?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  stock_transfers?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  commissions?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  ar_ap?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  installments?: boolean;
 }

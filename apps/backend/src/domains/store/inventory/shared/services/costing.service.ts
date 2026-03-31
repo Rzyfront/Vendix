@@ -58,6 +58,21 @@ export class CostingService {
     const existingQty = stockLevel?.quantity_on_hand ?? 0;
     const existingCost = Number(stockLevel?.cost_per_unit ?? 0);
 
+    // Global stock across all locations (for product-level cost_price)
+    const allStockLevels = await prisma.stock_levels.findMany({
+      where: {
+        product_id: params.product_id,
+        product_variant_id: params.variant_id || null,
+        quantity_on_hand: { gt: 0 },
+      },
+    });
+    const globalQty = allStockLevels.reduce((sum, sl) => sum + (sl.quantity_on_hand ?? 0), 0);
+    const globalValue = allStockLevels.reduce(
+      (sum, sl) => sum + ((sl.quantity_on_hand ?? 0) * Number(sl.cost_per_unit ?? 0)),
+      0,
+    );
+    const globalCost = globalQty > 0 ? globalValue / globalQty : 0;
+
     let newCostPerUnit: number;
 
     switch (params.costing_method) {
@@ -79,6 +94,19 @@ export class CostingService {
 
       default:
         newCostPerUnit = params.unit_cost;
+    }
+
+    // Calculate global cost per unit for product-level cost_price
+    let globalCostPerUnit: number;
+    if (params.costing_method === 'weighted_average') {
+      globalCostPerUnit = this.calculateWeightedAverage(
+        globalQty,
+        globalCost,
+        params.quantity_received,
+        params.unit_cost,
+      );
+    } else {
+      globalCostPerUnit = params.unit_cost;
     }
 
     // Always create a cost layer (useful for FIFO/LIFO, and for audit in weighted avg)
@@ -109,16 +137,16 @@ export class CostingService {
       });
     }
 
-    // Update product or variant cost_price
+    // Update product or variant cost_price (global weighted average across all locations)
     if (params.variant_id) {
       await prisma.product_variants.update({
         where: { id: params.variant_id },
-        data: { cost_price: new Prisma.Decimal(newCostPerUnit) },
+        data: { cost_price: new Prisma.Decimal(globalCostPerUnit) },
       });
     } else {
       await prisma.products.update({
         where: { id: params.product_id },
-        data: { cost_price: new Prisma.Decimal(newCostPerUnit) },
+        data: { cost_price: new Prisma.Decimal(globalCostPerUnit) },
       });
     }
 

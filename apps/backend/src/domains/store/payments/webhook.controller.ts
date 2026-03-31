@@ -82,4 +82,23 @@ export class WebhookController {
       throw new BadRequestException(error.message);
     }
   }
+
+  @Post('wompi')
+  @ApiOperation({ summary: 'Handle Wompi webhooks (Nequi, PSE, Cards, Bancolombia)' })
+  @ApiResponse({ status: 200, description: 'Webhook processed successfully' })
+  async handleWompiWebhook(@Body() body: any) {
+    try {
+      const event: WebhookEvent = {
+        processor: 'wompi',
+        eventType: body.event || 'transaction.updated',
+        data: body.data,
+        rawBody: JSON.stringify(body),
+      };
+
+      await this.webhookHandler.handleWebhook(event);
+      return { received: true };
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
 }

@@ -169,6 +169,7 @@ export class CustomerListComponent implements OnInit {
   @Output() create = new EventEmitter<void>();
   @Output() edit = new EventEmitter<Customer>();
   @Output() delete = new EventEmitter<Customer>();
+  @Output() viewDetail = new EventEmitter<Customer>();
   @Output() bulkUpload = new EventEmitter<void>();
   @Output() pageChange = new EventEmitter<number>();
 
@@ -242,6 +243,12 @@ export class CustomerListComponent implements OnInit {
   };
 
   actions: TableAction[] = [
+    {
+      label: 'Ver',
+      icon: 'eye',
+      variant: 'ghost',
+      action: (row: any) => this.viewDetail.emit(row),
+    },
     {
       label: 'Editar',
       icon: 'edit',

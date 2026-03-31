@@ -755,7 +755,7 @@ export class OrderFlowService {
     const transactionId = `credit_pay_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
     // Create payment record
-    await this.prisma.payments.create({
+    const payment = await this.prisma.payments.create({
       data: {
         order_id: orderId,
         store_payment_method_id: dto.store_payment_method_id,
@@ -870,6 +870,22 @@ export class OrderFlowService {
       amount: paymentAmount,
       remaining_balance: newRemainingBalance,
       is_fully_paid: newRemainingBalance <= 0.01,
+    });
+
+    // Emit for accounting auto-entry (installment payment)
+    this.eventEmitter.emit('installment_payment.received', {
+      credit_id: orderId,
+      installment_id: 0,
+      payment_id: payment.id,
+      amount: paymentAmount,
+      store_id: order.store_id,
+      organization_id: order.organization_id,
+      store_payment_method_id: dto.store_payment_method_id,
+      credit_number: order.order_number,
+      installment_number: 0,
+      customer_id: order.customer_id,
+      order_id: orderId,
+      user_id: RequestContextService.getUserId(),
     });
 
     // Return updated order

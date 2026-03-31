@@ -14,6 +14,8 @@ import { StockLevelManager } from '../../inventory/shared/services/stock-level-m
 import { CostingService } from '../../inventory/shared/services/costing.service';
 import { AuditService } from '@common/audit/audit.service';
 import { S3Service } from '@common/services/s3.service';
+import { SettingsService } from '../../settings/settings.service';
+import { CostPreviewDto } from './dto/cost-preview.dto';
 
 @Injectable()
 export class PurchaseOrdersService {
@@ -25,6 +27,7 @@ export class PurchaseOrdersService {
     private costingService: CostingService,
     private auditService: AuditService,
     private s3Service: S3Service,
+    private settingsService: SettingsService,
     private eventEmitter: EventEmitter2,
   ) {}
 
@@ -590,6 +593,11 @@ export class PurchaseOrdersService {
         throw new NotFoundException('Purchase order not found');
       }
 
+      // Read costing method from store settings
+      const settings = await this.settingsService.getSettings();
+      const costingMethod: 'weighted_average' | 'fifo' | 'lifo' =
+        settings.inventory?.costing_method === 'fifo' ? 'fifo' : 'weighted_average';
+
       // Create inventory movements, update stock, and calculate cost for received items
       for (const item of dto.items) {
         if (item.quantity_received <= 0) continue;
@@ -622,7 +630,7 @@ export class PurchaseOrdersService {
                 location_id: purchaseOrder.location_id!,
                 quantity_received: item.quantity_received,
                 unit_cost: Number(orderItem.unit_cost || 0),
-                costing_method: 'weighted_average',
+                costing_method: costingMethod,
                 purchase_order_id: id,
                 batch_number: orderItem.batch_number || undefined,
                 manufacturing_date: orderItem.manufacturing_date || undefined,
@@ -933,6 +941,100 @@ export class PurchaseOrdersService {
       include: { created_by: { select: { id: true, username: true, first_name: true, last_name: true } } },
       orderBy: { created_at: 'desc' },
     });
+  }
+
+  async getCostPreview(dto: CostPreviewDto) {
+    const settings = await this.settingsService.getSettings();
+    const costingMethod = settings.inventory?.costing_method || 'cpp';
+
+    const items: Array<{
+      product_id: number;
+      product_variant_id: number | null;
+      product_name: string;
+      variant_name?: string;
+      current_stock: number;
+      current_cost_per_unit: number;
+      global_stock: number;
+      global_cost_per_unit: number;
+      new_stock: number;
+      new_cost_per_unit: number;
+      incoming_quantity: number;
+      incoming_cost: number;
+      is_reactivation: boolean;
+    }> = [];
+
+    for (const item of dto.items) {
+      const stockLevel = await this.prisma.stock_levels.findFirst({
+        where: {
+          product_id: item.product_id,
+          product_variant_id: item.product_variant_id || null,
+          location_id: dto.location_id,
+        },
+      });
+
+      const currentStock = Number(stockLevel?.quantity_on_hand ?? 0);
+      const currentCost = Number(stockLevel?.cost_per_unit ?? 0);
+
+      // Global stock across all locations
+      const allStockLevels = await this.prisma.stock_levels.findMany({
+        where: {
+          product_id: item.product_id,
+          product_variant_id: item.product_variant_id || null,
+          quantity_on_hand: { gt: 0 },
+        },
+      });
+      const globalStock = allStockLevels.reduce((sum, sl) => sum + (sl.quantity_on_hand ?? 0), 0);
+      const globalValue = allStockLevels.reduce((sum, sl) => sum + ((sl.quantity_on_hand ?? 0) * Number(sl.cost_per_unit ?? 0)), 0);
+      const globalCostPerUnit = globalStock > 0 ? globalValue / globalStock : 0;
+
+      const newStock = globalStock + item.quantity;
+      const isReactivation = globalStock <= 0;
+
+      let newCostPerUnit: number;
+      if (isReactivation || costingMethod === 'fifo') {
+        // Stock at zero: previous CPP is orphaned, new cost = purchase price directly
+        newCostPerUnit = item.unit_cost;
+      } else {
+        // CPP (weighted average) using global stock across all locations
+        newCostPerUnit = ((globalStock * globalCostPerUnit) + (item.quantity * item.unit_cost)) / newStock;
+      }
+
+      // Round to 2 decimals for display
+      newCostPerUnit = Math.round(newCostPerUnit * 100) / 100;
+
+      // Fetch product name
+      const product = await this.prisma.products.findUnique({
+        where: { id: item.product_id },
+        select: { name: true },
+      });
+
+      let variantName: string | undefined;
+      if (item.product_variant_id) {
+        const variant = await this.prisma.product_variants.findUnique({
+          where: { id: item.product_variant_id },
+          select: { name: true },
+        });
+        variantName = variant?.name || undefined;
+      }
+
+      items.push({
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id || null,
+        product_name: product?.name || 'Producto desconocido',
+        variant_name: variantName,
+        current_stock: currentStock,
+        current_cost_per_unit: isReactivation ? 0 : Math.round(currentCost * 100) / 100,
+        global_stock: globalStock,
+        global_cost_per_unit: Math.round(globalCostPerUnit * 100) / 100,
+        new_stock: newStock,
+        new_cost_per_unit: newCostPerUnit,
+        incoming_quantity: item.quantity,
+        incoming_cost: item.unit_cost,
+        is_reactivation: isReactivation,
+      });
+    }
+
+    return { costing_method: costingMethod, items };
   }
 
   remove(id: number) {

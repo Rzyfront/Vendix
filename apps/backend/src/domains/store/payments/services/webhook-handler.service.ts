@@ -29,6 +29,9 @@ export class WebhookHandlerService {
         case 'bank_transfer':
           await this.handleBankTransferWebhook(event);
           break;
+        case 'wompi':
+          await this.handleWompiWebhook(event);
+          break;
         default:
           this.logger.warn(`Unknown processor: ${event.processor}`);
       }
@@ -176,6 +179,37 @@ export class WebhookHandlerService {
         `Error updating order status: ${error.message}`,
         error.stack,
       );
+    }
+  }
+
+  private async handleWompiWebhook(event: WebhookEvent): Promise<void> {
+    const { eventType, data } = event;
+
+    switch (eventType) {
+      case 'transaction.updated': {
+        const txn = data?.transaction;
+        if (!txn?.id) {
+          this.logger.warn('Wompi webhook missing transaction data');
+          return;
+        }
+
+        const statusMap: Record<string, string> = {
+          APPROVED: 'succeeded',
+          DECLINED: 'failed',
+          VOIDED: 'cancelled',
+          ERROR: 'failed',
+        };
+
+        const mappedStatus = statusMap[txn.status];
+        if (mappedStatus) {
+          await this.updatePaymentStatus(txn.id, mappedStatus, data);
+        } else {
+          this.logger.log(`Wompi transaction ${txn.id} still PENDING`);
+        }
+        break;
+      }
+      default:
+        this.logger.log(`Unhandled Wompi event: ${eventType}`);
     }
   }
 

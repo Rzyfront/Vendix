@@ -360,6 +360,7 @@ export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnCh
       out_of_stock_action: 'hide',
       track_inventory: true,
       allow_negative_stock: false,
+      costing_method: 'cpp',
     },
     checkout: {
       require_customer_data: false,

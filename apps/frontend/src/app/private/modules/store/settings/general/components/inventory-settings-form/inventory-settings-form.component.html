@@ -15,4 +15,13 @@
       </div>
     </div>
   </div>
+
+  <div class="col-span-1 md:col-span-2 mt-2">
+    <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Valoraci&oacute;n de Inventario</h4>
+    <div class="space-y-4">
+      <app-selector [formControl]="costingMethodControl" label="M&eacute;todo de costeo" [options]="costingMethods"
+        (valueChange)="onFieldChange()" size="sm"></app-selector>
+      <p class="text-xs text-amber-600 mt-2">Cambiar el m&eacute;todo de costeo puede tener implicaciones contables. Consulte con su contador antes de modificar esta configuraci&oacute;n.</p>
+    </div>
+  </div>
 </div>

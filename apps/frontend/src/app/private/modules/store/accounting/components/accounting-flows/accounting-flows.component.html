@@ -1,0 +1,92 @@
+<div class="w-full">
+  <app-card [responsive]="true" [padding]="false">
+    <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-4 md:py-4 md:border-b md:border-border">
+      <div class="flex flex-col gap-1 md:flex-row md:justify-between md:items-center">
+        <div>
+          <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">Flujos Contables</h2>
+          <p class="text-xs text-gray-400 mt-0.5 md:text-sm">Estado de los flujos de contabilidad automatica</p>
+        </div>
+        <app-button variant="outline" size="sm" (clicked)="loadData()">
+          <app-icon name="refresh-cw" [size]="14" slot="icon"></app-icon>
+          Actualizar
+        </app-button>
+      </div>
+    </div>
+
+    <div class="px-2 py-2 md:px-4 md:py-3">
+      <div class="flex gap-2 overflow-x-auto pb-2 md:grid md:grid-cols-3 md:gap-4 md:overflow-visible md:pb-0">
+        <div class="flex-shrink-0 w-[140px] md:w-auto bg-emerald-50 rounded-xl p-3 md:p-4">
+          <div class="flex items-center gap-2 mb-1">
+            <app-icon name="check-circle" [size]="16" class="text-emerald-500"></app-icon>
+            <span class="text-[11px] md:text-xs text-emerald-600 font-medium">Flujos Activos</span>
+          </div>
+          <span class="text-xl md:text-2xl font-bold text-emerald-700">{{ total_active_flows }}</span>
+        </div>
+        <div class="flex-shrink-0 w-[140px] md:w-auto bg-gray-50 rounded-xl p-3 md:p-4">
+          <div class="flex items-center gap-2 mb-1">
+            <app-icon name="pause-circle" [size]="16" class="text-gray-400"></app-icon>
+            <span class="text-[11px] md:text-xs text-gray-500 font-medium">Desactivados</span>
+          </div>
+          <span class="text-xl md:text-2xl font-bold text-gray-600">{{ total_disabled_flows }}</span>
+        </div>
+        <div class="flex-shrink-0 w-[140px] md:w-auto bg-blue-50 rounded-xl p-3 md:p-4">
+          <div class="flex items-center gap-2 mb-1">
+            <app-icon name="file-plus" [size]="16" class="text-blue-500"></app-icon>
+            <span class="text-[11px] md:text-xs text-blue-600 font-medium">Asientos Hoy</span>
+          </div>
+          <span class="text-xl md:text-2xl font-bold text-blue-700">{{ total_entries_today }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="px-2 pb-2 md:px-4 md:pb-4">
+      <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider px-2 py-2">Estado por Flujo</h3>
+      @if (loading) {
+        <div class="flex items-center justify-center py-8">
+          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        </div>
+      } @else {
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 md:gap-3">
+          @for (flow of flows; track flow.key) {
+            <div class="rounded-xl p-3 border transition-all"
+              [ngClass]="{ 'border-emerald-200 bg-emerald-50/50': flow.enabled, 'border-gray-200 bg-gray-50/50 opacity-60': !flow.enabled }">
+              <div class="flex items-center gap-2 mb-2">
+                <div class="w-7 h-7 rounded-lg flex items-center justify-center"
+                  [ngClass]="{ 'bg-emerald-100': flow.enabled, 'bg-gray-100': !flow.enabled }">
+                  <app-icon [name]="flow.icon" [size]="14"
+                    [class]="flow.enabled ? 'text-emerald-600' : 'text-gray-400'"></app-icon>
+                </div>
+                <div class="w-2 h-2 rounded-full"
+                  [ngClass]="{ 'bg-emerald-400': flow.enabled, 'bg-gray-300': !flow.enabled }"></div>
+              </div>
+              <div class="text-sm font-medium text-text-primary truncate">{{ flow.label }}</div>
+              <div class="text-[10px] mt-0.5" [ngClass]="flow.enabled ? 'text-emerald-600' : 'text-gray-400'">
+                {{ flow.enabled ? 'Activo' : 'Desactivado' }}
+              </div>
+            </div>
+          }
+        </div>
+      }
+    </div>
+
+    @if (recent_entries.length > 0) {
+      <div class="px-2 pb-3 md:px-4 md:pb-4 border-t border-border pt-3">
+        <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider px-2 py-2">Ultimos Asientos Automaticos</h3>
+        <div class="space-y-1">
+          @for (entry of recent_entries; track entry.id) {
+            <div class="flex items-center justify-between px-2 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+              <div class="flex items-center gap-3 min-w-0">
+                <span class="text-[10px] font-mono text-gray-400 flex-shrink-0">{{ entry.entry_number }}</span>
+                <span class="text-sm text-text-primary truncate">{{ entry.description }}</span>
+              </div>
+              <div class="flex items-center gap-2 flex-shrink-0 ml-2">
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-medium">{{ getEntryTypeLabel(entry.entry_type) }}</span>
+                <span class="text-[10px] text-gray-400">{{ formatDate(entry.created_at) }}</span>
+              </div>
+            </div>
+          }
+        </div>
+      </div>
+    }
+  </app-card>
+</div>

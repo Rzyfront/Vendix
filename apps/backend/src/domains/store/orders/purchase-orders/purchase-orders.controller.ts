@@ -21,6 +21,7 @@ import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
 import { ConfirmScannedInvoiceDto } from './dto/scan-invoice.dto';
+import { CostPreviewDto } from './dto/cost-preview.dto';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 
@@ -220,6 +221,21 @@ export class PurchaseOrdersController {
       if (error instanceof VendixHttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al confirmar la factura escaneada',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Post('cost-preview')
+  @Permissions('store:orders:purchase_orders:read')
+  async getCostPreview(@Body() dto: CostPreviewDto) {
+    try {
+      const result = await this.purchaseOrdersService.getCostPreview(dto);
+      return this.responseService.success(result, 'Preview de costos obtenido');
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener preview de costos',
         error.response?.message || error.message,
         error.status || 400,
       );

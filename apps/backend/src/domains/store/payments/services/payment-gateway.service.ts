@@ -30,7 +30,7 @@ export class PaymentGatewayService {
       const paymentMethod = await this.getPaymentMethod(
         paymentData.storePaymentMethodId,
       );
-      const processor = this.getProcessor(paymentMethod.type);
+      const processor = this.getProcessor(paymentMethod.system_payment_method?.type || paymentMethod.type);
 
       if (!processor.isEnabled()) {
         throw new PaymentError(
@@ -103,7 +103,7 @@ export class PaymentGatewayService {
     try {
       const payment = await this.prisma.payments.findFirst({
         where: { transaction_id: paymentId },
-        include: { payment_methods: true },
+        include: { payment_methods: { include: { system_payment_method: true } } },
       });
 
       if (!payment) {
@@ -121,7 +121,7 @@ export class PaymentGatewayService {
       }
 
       const processor = this.getProcessor(
-        payment.payment_methods?.type || 'card',
+        payment.payment_methods?.system_payment_method?.type || payment.payment_methods?.type || 'card',
       );
       const result = await processor.refundPayment(paymentId, amount);
 
@@ -143,7 +143,7 @@ export class PaymentGatewayService {
     try {
       const payment = await this.prisma.payments.findFirst({
         where: { transaction_id: transactionId },
-        include: { payment_methods: true },
+        include: { payment_methods: { include: { system_payment_method: true } } },
       });
 
       if (!payment) {
@@ -154,7 +154,7 @@ export class PaymentGatewayService {
       }
 
       const processor = this.getProcessor(
-        payment.payment_methods?.type || 'card',
+        payment.payment_methods?.system_payment_method?.type || payment.payment_methods?.type || 'card',
       );
       return await processor.getPaymentStatus(transactionId);
     } catch (error) {

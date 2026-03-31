@@ -10,7 +10,7 @@ export interface AutoEntryEventData {
   store_id?: number;
   entry_date: Date;
   description: string;
-  lines: AutoEntryLine[];
+  lines: (AutoEntryLine | null)[];
   user_id?: number;
 }
 
@@ -50,8 +50,9 @@ export class AutoEntryService {
     debit_amount: number,
     credit_amount: number,
     store_id?: number,
-  ): Promise<AutoEntryLine> {
+  ): Promise<AutoEntryLine | null> {
     const mapping = await this.account_mapping_service.getMapping(org_id, mapping_key, store_id);
+    if (!mapping) return null;
     return {
       account_code: mapping.account_code,
       description,
@@ -77,9 +78,20 @@ export class AutoEntryService {
       user_id,
     } = event_data;
 
+    // Filter out null lines (from unconfigured mappings)
+    const valid_lines = lines.filter(Boolean) as AutoEntryLine[];
+
+    // Need at least 2 lines for a valid entry (debit + credit)
+    if (valid_lines.length < 2) {
+      this.logger.warn(
+        `Skipping auto-entry for ${source_type} #${source_id}: insufficient configured mappings (${valid_lines.length} lines)`,
+      );
+      return null;
+    }
+
     // Validate lines balance
-    const total_debit = lines.reduce((sum, l) => sum + Number(l.debit_amount), 0);
-    const total_credit = lines.reduce((sum, l) => sum + Number(l.credit_amount), 0);
+    const total_debit = valid_lines.reduce((sum, l) => sum + Number(l.debit_amount), 0);
+    const total_credit = valid_lines.reduce((sum, l) => sum + Number(l.credit_amount), 0);
 
     if (Math.abs(total_debit - total_credit) > 0.001) {
       this.logger.error(
@@ -112,7 +124,7 @@ export class AutoEntryService {
     }
 
     // Resolve account codes to IDs
-    const account_codes = lines.map((l) => l.account_code);
+    const account_codes = valid_lines.map((l) => l.account_code);
     const accounts = await this.prisma.chart_of_accounts.findMany({
       where: {
         organization_id,
@@ -153,6 +165,14 @@ export class AutoEntryService {
       'disposal.fixed_asset': 'auto_depreciation',
       'withholding.applied': 'auto_expense',
       'settlement.paid': 'auto_payroll',
+      'ar_write_off': 'adjustment',
+      'ap_payment': 'auto_purchase',
+      'ap_write_off': 'adjustment',
+      'commission': 'auto_expense',
+      'stock_transfer': 'auto_inventory',
+      'cash_register_opened': 'adjustment',
+      'cash_register_closed': 'adjustment',
+      'cash_register_movement': 'adjustment',
     };
     const entry_type = entry_type_map[source_type] || 'manual';
 
@@ -199,7 +219,7 @@ export class AutoEntryService {
       });
 
       await tx.accounting_entry_lines.createMany({
-        data: lines.map((line) => {
+        data: valid_lines.map((line) => {
           const account: any = account_map.get(line.account_code);
           return {
             entry_id: created_entry.id,
@@ -237,7 +257,7 @@ export class AutoEntryService {
     total: number;
     user_id?: number;
   }) {
-    const lines: AutoEntryLine[] = await Promise.all([
+    const lines: (AutoEntryLine | null)[] = await Promise.all([
       this.resolveAccountLine(
         data.organization_id, 'invoice.validated.accounts_receivable',
         'Accounts Receivable', data.total, 0, data.store_id,
@@ -320,7 +340,7 @@ export class AutoEntryService {
       : '';
 
     const cash_bank_key = this.resolveCashBankKey(data.payment_method);
-    let lines: AutoEntryLine[];
+    let lines: (AutoEntryLine | null)[];
 
     if (has_invoice) {
       // Invoice exists: Debit Cash/Bank, Credit AR (invoice.validated already recognized revenue+IVA)
@@ -411,7 +431,7 @@ export class AutoEntryService {
     const order_ref = data.order_number ? ` - Orden ${data.order_number}` : '';
     const discount = Number(data.discount_amount || 0);
 
-    const lines: AutoEntryLine[] = [
+    const lines: (AutoEntryLine | null)[] = [
       await this.resolveAccountLine(
         data.organization_id, 'credit_sale.created.accounts_receivable',
         `CxC venta a crédito${order_ref}`, data.total_amount, 0, data.store_id,
@@ -545,7 +565,7 @@ export class AutoEntryService {
     user_id?: number;
     cost_center_breakdown?: Record<string, { earnings: number; employer_costs: number }>;
   }) {
-    const lines: AutoEntryLine[] = [];
+    const lines: (AutoEntryLine | null)[] = [];
 
     // === DEBIT LINES: Split by cost center ===
     const cc_labels: Record<string, string> = {
@@ -751,7 +771,7 @@ export class AutoEntryService {
     const tax = Number(data.tax_amount || 0);
     const revenue_amount = tax > 0 ? data.amount - tax : data.amount;
 
-    const lines: AutoEntryLine[] = [
+    const lines: (AutoEntryLine | null)[] = [
       await this.resolveAccountLine(
         data.organization_id, 'refund.completed.revenue',
         'Ingresos (reversa)', revenue_amount, 0, data.store_id,
@@ -871,7 +891,7 @@ export class AutoEntryService {
     quantity_change: number;
     user_id?: number;
   }) {
-    let lines: AutoEntryLine[];
+    let lines: (AutoEntryLine | null)[];
 
     if (data.quantity_change < 0) {
       // Shrinkage: DR Shrinkage, CR Inventory
@@ -1103,7 +1123,7 @@ export class AutoEntryService {
     gain_loss: number;
     user_id?: number;
   }) {
-    const lines: AutoEntryLine[] = [];
+    const lines: (AutoEntryLine | null)[] = [];
 
     // DR: Reverse accumulated depreciation
     if (data.accumulated_depreciation > 0) {
@@ -1185,7 +1205,7 @@ export class AutoEntryService {
     supplier_name: string;
     user_id?: number;
   }) {
-    const lines: AutoEntryLine[] = [
+    const lines: (AutoEntryLine | null)[] = [
       // DR: Expense / Purchase (base amount)
       await this.resolveAccountLine(
         data.organization_id, 'withholding.applied.expense',
@@ -1248,7 +1268,7 @@ export class AutoEntryService {
     net_settlement: number;
     user_id?: number;
   }) {
-    const lines: AutoEntryLine[] = [];
+    const lines: (AutoEntryLine | null)[] = [];
     const desc = (concept: string) => `${concept} - ${data.employee_name} (${data.settlement_number})`;
 
     // DEBIT lines (provisions and expenses)
@@ -1311,6 +1331,401 @@ export class AutoEntryService {
       store_id: data.store_id,
       entry_date: new Date(),
       description: `Liquidación pagada ${data.settlement_number} - ${data.employee_name}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  // ===== CASH REGISTER =====
+
+  /**
+   * cash_register.opened: DR Caja → CR Banco/Fondo Base
+   * Opening a cash register session with initial cash.
+   */
+  async onCashRegisterOpened(data: {
+    session_id: number;
+    organization_id: number;
+    store_id: number;
+    opening_amount: number;
+    user_id: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'cash_register.opened.cash',
+        'Caja (apertura)', data.opening_amount, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'cash_register.opened.cash_base',
+        'Fondo base (apertura)', 0, data.opening_amount, data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'cash_register_opened',
+      source_id: data.session_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Apertura caja registradora - Sesión #${data.session_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * cash_register.closed: DR Banco → CR Caja + Sobrante/Faltante
+   * Closing a cash register session, recording any surplus or shortage.
+   */
+  async onCashRegisterClosed(data: {
+    session_id: number;
+    organization_id: number;
+    store_id: number;
+    expected_amount: number;
+    actual_amount: number;
+    difference: number;
+    user_id: number;
+  }) {
+    const lines: any[] = [];
+
+    // DR Banco (consignación del cierre)
+    lines.push(
+      await this.resolveAccountLine(
+        data.organization_id, 'cash_register.closed.bank',
+        'Banco (cierre caja)', data.actual_amount, 0, data.store_id,
+      ),
+    );
+
+    // CR Caja (sale dinero de caja)
+    lines.push(
+      await this.resolveAccountLine(
+        data.organization_id, 'cash_register.closed.cash',
+        'Caja (cierre)', 0, data.expected_amount, data.store_id,
+      ),
+    );
+
+    // Difference handling: positive = surplus (sobrante), negative = shortage (faltante)
+    if (data.difference > 0.01) {
+      // Surplus: CR Otros Ingresos
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id, 'cash_register.closed.surplus',
+          'Sobrante de caja', 0, data.difference, data.store_id,
+        ),
+      );
+    } else if (data.difference < -0.01) {
+      // Shortage: DR Faltantes
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id, 'cash_register.closed.shortage',
+          'Faltante de caja', Math.abs(data.difference), 0, data.store_id,
+        ),
+      );
+    }
+
+    return this.createAutoEntry({
+      source_type: 'cash_register_closed',
+      source_id: data.session_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Cierre caja registradora - Sesión #${data.session_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * cash_register.movement: Manual cash in/out
+   * cash_in: DR Caja → CR Otro (fuente)
+   * cash_out: DR Otro (destino) → CR Caja
+   */
+  async onCashRegisterMovement(data: {
+    movement_id: number;
+    organization_id: number;
+    store_id: number;
+    type: 'cash_in' | 'cash_out';
+    amount: number;
+    reference?: string;
+    user_id: number;
+  }) {
+    const is_cash_in = data.type === 'cash_in';
+    const desc = is_cash_in ? 'Ingreso manual a caja' : 'Retiro manual de caja';
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'cash_register.movement.cash',
+        `Caja (${desc.toLowerCase()})`,
+        is_cash_in ? data.amount : 0,
+        is_cash_in ? 0 : data.amount,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'cash_register.movement.other',
+        `${desc}${data.reference ? ` - ${data.reference}` : ''}`,
+        is_cash_in ? 0 : data.amount,
+        is_cash_in ? data.amount : 0,
+        data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'cash_register_movement',
+      source_id: data.movement_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `${desc} #${data.movement_id}${data.reference ? ` - ${data.reference}` : ''}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  // ===== ACCOUNTS RECEIVABLE =====
+
+  /**
+   * ar.written_off: DR Deudas Incobrables → CR Cuentas por Cobrar
+   * Write-off of uncollectable accounts receivable.
+   */
+  async onArWrittenOff(data: {
+    ar_id: number;
+    organization_id: number;
+    store_id: number;
+    amount: number;
+    document_number?: string;
+    user_id: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'ar.write_off.bad_debt',
+        'Deudas Incobrables', data.amount, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'ar.write_off.accounts_receivable',
+        'Cuentas por Cobrar (castigo)', 0, data.amount, data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'ar_write_off',
+      source_id: data.ar_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Castigo CxC${data.document_number ? ` - Doc ${data.document_number}` : ''} #${data.ar_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  // ===== ACCOUNTS PAYABLE =====
+
+  /**
+   * ap.payment_registered: DR Cuentas por Pagar → CR Caja/Banco
+   * Payment of an accounts payable record.
+   */
+  async onApPaymentRegistered(data: {
+    ap_id: number;
+    organization_id: number;
+    store_id: number;
+    amount: number;
+    payment_method?: string;
+    document_number?: string;
+    user_id: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'ap.payment.accounts_payable',
+        'Cuentas por Pagar (pago)', data.amount, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'ap.payment.cash_bank',
+        'Banco (pago CxP)', 0, data.amount, data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'ap_payment',
+      source_id: data.ap_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Pago CxP${data.document_number ? ` - Doc ${data.document_number}` : ''} #${data.ap_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * ap.written_off: DR Cuentas por Pagar → CR Otros Ingresos
+   * Write-off of an accounts payable (supplier forgave the debt).
+   */
+  async onApWrittenOff(data: {
+    ap_id: number;
+    organization_id: number;
+    store_id: number;
+    amount: number;
+    document_number?: string;
+    user_id: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'ap.write_off.accounts_payable',
+        'Cuentas por Pagar (castigo)', data.amount, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'ap.write_off.other_income',
+        'Otros Ingresos (castigo CxP)', 0, data.amount, data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'ap_write_off',
+      source_id: data.ap_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Castigo CxP${data.document_number ? ` - Doc ${data.document_number}` : ''} #${data.ap_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  // ===== COMMISSIONS =====
+
+  /**
+   * commission.calculated: DR Gasto por Comisiones → CR Comisiones por Pagar
+   * When a commission is calculated for a salesperson.
+   */
+  async onCommissionCalculated(data: {
+    payment_id: number;
+    organization_id: number;
+    store_id: number;
+    commission_amount: number;
+    rule_id: number;
+    user_id?: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'commission.calculated.expense',
+        'Gasto por Comisiones', data.commission_amount, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'commission.calculated.payable',
+        'Comisiones por Pagar', 0, data.commission_amount, data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'commission',
+      source_id: data.payment_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Comisión calculada - Pago #${data.payment_id} (Regla #${data.rule_id})`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  // ===== WALLET =====
+
+  async onWalletCredited(data: {
+    wallet_id: number;
+    organization_id: number;
+    store_id: number;
+    amount: number;
+    reference_type: string;
+    user_id?: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'wallet.topup.cash_bank',
+        'Caja/Banco (recarga wallet)', data.amount, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'wallet.topup.customer_advance',
+        'Anticipos de Clientes (wallet)', 0, data.amount, data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'wallet.credited',
+      source_id: data.wallet_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Recarga wallet #${data.wallet_id} - ${data.reference_type}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  async onWalletDebited(data: {
+    wallet_id: number;
+    organization_id: number;
+    store_id: number;
+    amount: number;
+    reference_type: string;
+    order_id?: number;
+    user_id?: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'wallet.debit.customer_advance',
+        'Anticipos de Clientes (uso wallet)', data.amount, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'wallet.debit.revenue',
+        'Ingresos (pago con wallet)', 0, data.amount, data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'wallet.debited',
+      source_id: data.wallet_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Pago con wallet #${data.wallet_id}${data.order_id ? ` - Orden #${data.order_id}` : ''}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  // ===== STOCK TRANSFERS =====
+
+  /**
+   * stock_transfer.completed: DR Inventario Destino → CR Inventario Origen
+   * Inter-location stock transfer at cost.
+   */
+  async onStockTransferCompleted(data: {
+    transfer_id: number;
+    transfer_number: string;
+    organization_id: number;
+    from_location_id: number;
+    to_location_id: number;
+    total_cost: number;
+    user_id?: number;
+  }) {
+    if (data.total_cost <= 0) return; // Skip zero-cost transfers
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id, 'stock_transfer.completed.inventory_destination',
+        `Inventario destino (transferencia ${data.transfer_number})`, data.total_cost, 0,
+      ),
+      this.resolveAccountLine(
+        data.organization_id, 'stock_transfer.completed.inventory_origin',
+        `Inventario origen (transferencia ${data.transfer_number})`, 0, data.total_cost,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'stock_transfer',
+      source_id: data.transfer_id,
+      organization_id: data.organization_id,
+      entry_date: new Date(),
+      description: `Transferencia de inventario ${data.transfer_number}`,
       lines,
       user_id: data.user_id,
     });

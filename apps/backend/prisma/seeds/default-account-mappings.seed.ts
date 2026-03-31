@@ -89,6 +89,20 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'settlement.paid.indemnification': '5105',
   'settlement.paid.social_deductions': '2370',
   'settlement.paid.bank': '1110',
+  // Stock Transfers
+  'stock_transfer.completed.inventory_origin': '1435',
+  'stock_transfer.completed.inventory_destination': '1435',
+  'commission.calculated.expense': '5295',
+  'commission.calculated.payable': '2335',
+  // Cash Register
+  'cash_register.opened.cash': '1105',
+  'cash_register.opened.cash_base': '1110',
+  'cash_register.closed.cash': '1105',
+  'cash_register.closed.bank': '1110',
+  'cash_register.closed.surplus': '4295',
+  'cash_register.closed.shortage': '5295',
+  'cash_register.movement.cash': '1105',
+  'cash_register.movement.other': '2805',
 };
 
 /**

@@ -28,11 +28,15 @@ export class CatalogQueryDto {
   brand_id?: number;
 
   @IsOptional()
+  @IsInt()
   @Type(() => Number)
+  @Min(0)
   min_price?: number;
 
   @IsOptional()
+  @IsInt()
   @Type(() => Number)
+  @Min(0)
   max_price?: number;
 
   @IsOptional()

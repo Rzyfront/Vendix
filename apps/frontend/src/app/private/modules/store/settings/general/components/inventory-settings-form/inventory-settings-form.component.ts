@@ -17,6 +17,7 @@ export interface InventorySettings {
   out_of_stock_action: 'hide' | 'show' | 'disable' | 'allow_backorder';
   track_inventory: boolean;
   allow_negative_stock: boolean;
+  costing_method: 'cpp' | 'fifo';
 }
 
 import { IconComponent } from '../../../../../../../shared/components/index';
@@ -38,6 +39,7 @@ export class InventorySettingsForm implements OnInit, OnChanges {
     out_of_stock_action: new FormControl('hide'),
     track_inventory: new FormControl(true),
     allow_negative_stock: new FormControl(false),
+    costing_method: new FormControl('cpp'),
   });
 
   outOfStockActions: SelectorOption[] = [
@@ -45,6 +47,11 @@ export class InventorySettingsForm implements OnInit, OnChanges {
     { value: 'show', label: 'Mostrar como agotado' },
     { value: 'disable', label: 'Deshabilitar compras' },
     { value: 'allow_backorder', label: 'Permitir pedidos pendientes' },
+  ];
+
+  costingMethods: SelectorOption[] = [
+    { value: 'cpp', label: 'CPP (Costo Promedio Ponderado)' },
+    { value: 'fifo', label: 'FIFO (Primero en Entrar, Primero en Salir)' },
   ];
 
   // Typed getters for FormControls
@@ -62,6 +69,10 @@ export class InventorySettingsForm implements OnInit, OnChanges {
 
   get allowNegativeStockControl(): FormControl<boolean> {
     return this.form.get('allow_negative_stock') as FormControl<boolean>;
+  }
+
+  get costingMethodControl(): FormControl<string> {
+    return this.form.get('costing_method') as FormControl<string>;
   }
 
   ngOnInit() {

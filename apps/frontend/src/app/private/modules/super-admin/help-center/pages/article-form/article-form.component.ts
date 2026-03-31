@@ -1,11 +1,9 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, ActivatedRoute } from '@angular/router';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Observable } from 'rxjs';
 import { HelpCenterAdminService } from '../../services/help-center-admin.service';
-import { HelpArticle, HelpCategory } from '../../../../../modules/store/help/models/help-article.model';
-import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import {
@@ -17,6 +15,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 import { FileUploadDropzoneComponent } from '../../../../../../shared/components/file-upload-dropzone/file-upload-dropzone.component';
 import { MarkdownEditorComponent } from '../../../../../../shared/components/markdown-editor/markdown-editor.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { StickyHeaderComponent } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 
 @Component({
   selector: 'app-article-form',
@@ -24,7 +23,6 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
   imports: [
     CommonModule,
     ReactiveFormsModule,
-    ButtonComponent,
     InputComponent,
     TextareaComponent,
     SelectorComponent,
@@ -32,27 +30,21 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
     FileUploadDropzoneComponent,
     MarkdownEditorComponent,
     IconComponent,
+    StickyHeaderComponent,
   ],
   template: `
-    <div class="flex flex-col gap-6 p-6 max-w-5xl mx-auto">
-      <!-- Header -->
-      <div class="flex items-center gap-4">
-        <button
-          type="button"
-          class="p-2 rounded-lg hover:bg-gray-100 transition-colors"
-          (click)="goBack()"
-        >
-          <app-icon name="arrow-left" size="20"></app-icon>
-        </button>
-        <div>
-          <h1 class="text-xl font-semibold text-text-primary">
-            {{ isEditMode() ? 'Editar Artículo' : 'Nuevo Artículo' }}
-          </h1>
-          <p class="text-sm text-text-secondary">
-            {{ isEditMode() ? 'Modifica el contenido del artículo' : 'Crea un nuevo artículo para el centro de ayuda' }}
-          </p>
-        </div>
-      </div>
+    <div class="flex flex-col gap-4 md:gap-6">
+      <!-- Sticky Header -->
+      <app-sticky-header
+        [title]="isEditMode() ? 'Editar Artículo' : 'Nuevo Artículo'"
+        [subtitle]="isEditMode() ? 'Modifica el contenido del artículo' : 'Crea un nuevo artículo para el centro de ayuda'"
+        [icon]="isEditMode() ? 'file-text' : 'plus-circle'"
+        [showBackButton]="true"
+        backRoute="/super-admin/help-center"
+        variant="glass"
+        [actions]="headerActions()"
+        (actionClicked)="onHeaderAction($event)"
+      ></app-sticky-header>
 
       <!-- Loading -->
       <div *ngIf="loadingArticle()" class="flex items-center justify-center py-20">
@@ -60,10 +52,13 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
       </div>
 
       <!-- Form -->
-      <form *ngIf="!loadingArticle()" [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-6">
+      <form *ngIf="!loadingArticle()" [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4 md:gap-6 p-3 md:p-4 max-w-5xl mx-auto w-full">
         <!-- Section 1: Basic Info -->
-        <div class="bg-surface border border-border rounded-xl p-6">
-          <h2 class="text-base font-semibold text-text-primary mb-4">Información básica</h2>
+        <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
+          <div class="flex items-center gap-2 mb-4">
+            <app-icon name="info" size="18" class="text-primary-600"></app-icon>
+            <h2 class="text-base font-bold text-gray-900">Información básica</h2>
+          </div>
           <div class="flex flex-col gap-4">
             <app-input
               label="Título"
@@ -80,12 +75,15 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
               [required]="true"
             ></app-textarea>
           </div>
-        </div>
+        </section>
 
         <!-- Section 2: Classification -->
-        <div class="bg-surface border border-border rounded-xl p-6">
-          <h2 class="text-base font-semibold text-text-primary mb-4">Clasificación</h2>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
+          <div class="flex items-center gap-2 mb-4">
+            <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
+            <h2 class="text-base font-bold text-gray-900">Clasificación</h2>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
             <app-selector
               label="Tipo"
               placeholder="Selecciona un tipo"
@@ -113,11 +111,14 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
               [formControl]="$any(form.get('module'))"
             ></app-input>
           </div>
-        </div>
+        </section>
 
         <!-- Section 3: Cover Image -->
-        <div class="bg-surface border border-border rounded-xl p-6">
-          <h2 class="text-base font-semibold text-text-primary mb-4">Imagen de portada</h2>
+        <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
+          <div class="flex items-center gap-2 mb-4">
+            <app-icon name="image" size="18" class="text-primary-600"></app-icon>
+            <h2 class="text-base font-bold text-gray-900">Imagen de portada</h2>
+          </div>
           <app-file-upload-dropzone
             label="Subir imagen de portada"
             helperText="JPG, PNG o WebP"
@@ -129,21 +130,28 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
           <div *ngIf="existingCoverUrl() && !coverFile()" class="mt-3">
             <img [src]="existingCoverUrl()" alt="Cover" class="max-h-32 rounded-lg border border-border object-contain" />
           </div>
-        </div>
+        </section>
 
         <!-- Section 4: Content -->
-        <div class="bg-surface border border-border rounded-xl p-6">
-          <h2 class="text-base font-semibold text-text-primary mb-4">Contenido</h2>
+        <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
+          <div class="flex items-center gap-2 mb-4">
+            <app-icon name="file-text" size="18" class="text-primary-600"></app-icon>
+            <h2 class="text-base font-bold text-gray-900">Contenido</h2>
+          </div>
           <app-markdown-editor
             [content]="contentValue()"
             [uploadFn]="imageUploadFn"
             (contentChange)="onContentChange($event)"
+            (uploadError)="toast.error($event)"
           ></app-markdown-editor>
-        </div>
+        </section>
 
         <!-- Section 5: Extra -->
-        <div class="bg-surface border border-border rounded-xl p-6">
-          <h2 class="text-base font-semibold text-text-primary mb-4">Opciones adicionales</h2>
+        <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
+          <div class="flex items-center gap-2 mb-4">
+            <app-icon name="settings" size="18" class="text-primary-600"></app-icon>
+            <h2 class="text-base font-bold text-gray-900">Opciones adicionales</h2>
+          </div>
           <div class="flex flex-col gap-4">
             <app-input
               label="Tags (separados por coma)"
@@ -165,23 +173,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
               [formControl]="$any(form.get('sort_order'))"
             ></app-input>
           </div>
-        </div>
-
-        <!-- Footer Actions -->
-        <div class="flex items-center justify-end gap-3 pb-6">
-          <app-button variant="outline" size="md" (clicked)="goBack()">
-            Cancelar
-          </app-button>
-          <app-button
-            variant="primary"
-            size="md"
-            type="submit"
-            [disabled]="submitting() || form.invalid"
-            iconName="save"
-          >
-            {{ submitting() ? 'Guardando...' : (isEditMode() ? 'Guardar cambios' : 'Crear artículo') }}
-          </app-button>
-        </div>
+        </section>
       </form>
     </div>
   `,
@@ -189,7 +181,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 export class ArticleFormComponent implements OnInit {
   private fb = inject(FormBuilder);
   private service = inject(HelpCenterAdminService);
-  private toast = inject(ToastService);
+  toast = inject(ToastService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
 
@@ -200,6 +192,28 @@ export class ArticleFormComponent implements OnInit {
   existingCoverUrl = signal<string | null>(null);
   coverFile = signal<File | null>(null);
   categoryOptions = signal<SelectorOption[]>([]);
+  formValid = signal(false);
+
+  headerActions = computed(() => [
+    {
+      id: 'cancel',
+      label: 'Cancelar',
+      variant: 'outline' as const,
+      icon: 'x',
+    },
+    {
+      id: 'save',
+      label: this.submitting()
+        ? 'Guardando...'
+        : this.isEditMode()
+          ? 'Guardar cambios'
+          : 'Crear artículo',
+      variant: 'primary' as const,
+      icon: 'save',
+      loading: this.submitting(),
+      disabled: this.submitting() || !this.formValid(),
+    },
+  ]);
 
   private articleId: number | null = null;
 
@@ -243,6 +257,15 @@ export class ArticleFormComponent implements OnInit {
       this.isEditMode.set(true);
       this.loadArticle(this.articleId);
     }
+
+    this.form.statusChanges.subscribe(() => {
+      this.formValid.set(this.form.valid);
+    });
+  }
+
+  onHeaderAction(id: string): void {
+    if (id === 'cancel') this.goBack();
+    if (id === 'save') this.onSubmit();
   }
 
   loadCategories() {
