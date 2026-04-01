@@ -1,4 +1,5 @@
-import { Component, OnInit, OnDestroy, signal, computed } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, computed, inject } from '@angular/core';
+import { environment } from '../../../../../../environments/environment';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup } from '@angular/forms';
@@ -312,6 +313,32 @@ import {
         }
 
         @if (isWompiConfig()) {
+          <!-- Webhook URL Guide -->
+          <div class="wompi-webhook-guide">
+            <div class="wompi-webhook-header">
+              <app-icon name="webhook" [size]="18"></app-icon>
+              <span>URL de Eventos (Webhook)</span>
+            </div>
+            <p class="wompi-webhook-desc">
+              Copia esta URL y pégala en tu dashboard de Wompi para recibir notificaciones de pago.
+            </p>
+            <div class="wompi-webhook-url-box">
+              <code class="wompi-webhook-url">{{ wompiWebhookUrl }}</code>
+              <button type="button" class="wompi-copy-btn" (click)="copyWompiWebhookUrl()" [title]="wompiUrlCopied ? 'Copiado' : 'Copiar'">
+                <app-icon [name]="wompiUrlCopied ? 'check' : 'copy'" [size]="16"></app-icon>
+              </button>
+            </div>
+            <div class="wompi-webhook-steps">
+              <p><strong>Pasos:</strong></p>
+              <ol>
+                <li>Ingresa a <a href="https://comercios.wompi.co" target="_blank" rel="noopener">comercios.wompi.co</a></li>
+                <li>Ve a <strong>Configuraciones avanzadas</strong> > <strong>Seguimiento de transacciones</strong></li>
+                <li>Pega la URL de arriba en el campo <strong>"URL de Eventos"</strong></li>
+                <li>Haz clic en <strong>Guardar</strong></li>
+              </ol>
+            </div>
+          </div>
+
           <div class="wompi-test-section">
             <app-button
               label="Probar Conexión"
@@ -388,6 +415,89 @@ import {
       .wompi-test-result.error {
         color: var(--danger);
       }
+
+      .wompi-webhook-guide {
+        margin-top: 1rem;
+        padding: 1rem;
+        border: 1px solid var(--color-border);
+        border-radius: 0.75rem;
+        background: var(--color-surface);
+      }
+
+      .wompi-webhook-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-weight: 600;
+        font-size: 0.875rem;
+        margin-bottom: 0.5rem;
+        color: var(--color-text-primary);
+      }
+
+      .wompi-webhook-desc {
+        font-size: 0.8125rem;
+        color: var(--color-text-muted);
+        margin-bottom: 0.75rem;
+      }
+
+      .wompi-webhook-url-box {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.625rem 0.75rem;
+        background: var(--color-bg, #f5f5f5);
+        border: 1px solid var(--color-border);
+        border-radius: 0.5rem;
+        margin-bottom: 0.75rem;
+      }
+
+      .wompi-webhook-url {
+        flex: 1;
+        font-size: 0.75rem;
+        font-family: monospace;
+        word-break: break-all;
+        color: var(--color-text-primary);
+      }
+
+      .wompi-copy-btn {
+        flex-shrink: 0;
+        background: none;
+        border: 1px solid var(--color-border);
+        border-radius: 0.375rem;
+        padding: 0.375rem;
+        cursor: pointer;
+        color: var(--color-text-muted);
+        transition: all 0.15s;
+      }
+
+      .wompi-copy-btn:hover {
+        background: var(--color-surface);
+        color: var(--color-text-primary);
+      }
+
+      .wompi-webhook-steps {
+        font-size: 0.8125rem;
+        color: var(--color-text-muted);
+      }
+
+      .wompi-webhook-steps p {
+        margin-bottom: 0.375rem;
+      }
+
+      .wompi-webhook-steps ol {
+        margin: 0;
+        padding-left: 1.25rem;
+      }
+
+      .wompi-webhook-steps li {
+        margin-bottom: 0.25rem;
+        line-height: 1.5;
+      }
+
+      .wompi-webhook-steps a {
+        color: var(--accent);
+        text-decoration: underline;
+      }
     `,
   ],
 })
@@ -423,6 +533,8 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
   };
   wompiTestLoading = false;
   wompiTestResult: { success: boolean; message: string } | null = null;
+  wompiWebhookUrl = `${environment.apiUrl}/store/webhooks/wompi`;
+  wompiUrlCopied = false;
 
   // UI State
   search_term = signal('');
@@ -874,6 +986,13 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     }
 
     return null;
+  }
+
+  copyWompiWebhookUrl(): void {
+    navigator.clipboard.writeText(this.wompiWebhookUrl).then(() => {
+      this.wompiUrlCopied = true;
+      setTimeout(() => (this.wompiUrlCopied = false), 2000);
+    });
   }
 
   testWompiConnection(): void {
