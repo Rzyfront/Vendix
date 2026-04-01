@@ -75,6 +75,18 @@ export interface WhatsappCheckoutResponse extends CheckoutResponse {
     } | null;
 }
 
+export interface WompiWidgetConfig {
+    public_key: string;
+    currency: string;
+    amount_in_cents: number;
+    reference: string;
+    signature_integrity: string;
+    redirect_url: string;
+    acceptance_token: string;
+    accept_personal_auth: string;
+    customer_email: string;
+}
+
 @Injectable({
     providedIn: 'root',
 })
@@ -109,6 +121,24 @@ export class CheckoutService {
         return this.http.post<{ success: boolean; data: CheckoutResponse }>(
             this.api_url,
             request,
+            { headers: this.getHeaders() },
+        );
+    }
+
+    prepareWompiPayment(
+        orderId: number,
+        amount: number,
+        customerEmail?: string,
+        redirectUrl?: string,
+    ): Observable<{ success: boolean; data: WompiWidgetConfig }> {
+        return this.http.post<{ success: boolean; data: WompiWidgetConfig }>(
+            `${environment.apiUrl}/store/payments/wompi/prepare`,
+            {
+                order_id: orderId,
+                amount,
+                customer_email: customerEmail || '',
+                redirect_url: redirectUrl || `${window.location.origin}/account/orders`,
+            },
             { headers: this.getHeaders() },
         );
     }

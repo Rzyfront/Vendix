@@ -207,6 +207,20 @@
                     </div>
                     }
                 </div>
+
+                <!-- Wompi Info Panel -->
+                @if (isWompiPayment) {
+                <div class="wompi-info-panel">
+                    <div class="wompi-info-header">
+                        <app-icon name="shield-check" [size]="20"></app-icon>
+                        <span>Pago seguro con Wompi</span>
+                    </div>
+                    <p class="wompi-info-text">
+                        Al confirmar, se abrira la ventana de pago seguro de Wompi.
+                        Podras elegir entre Tarjeta, Nequi, PSE o Bancolombia.
+                    </p>
+                </div>
+                }
             </div>
             }
 
@@ -301,11 +315,11 @@
                     <app-icon slot="icon" name="arrow-right" [size]="16"></app-icon>
                 </app-button>
                 } @else if (step >= confirmStep) {
-                <app-button variant="primary" (clicked)="placeOrder()" [loading]="is_submitting" [disabled]="is_submitting">
-                    @if (!is_submitting) {
-                    <app-icon slot="icon" name="check" [size]="16"></app-icon>
+                <app-button variant="primary" (clicked)="placeOrder()" [loading]="is_submitting || wompiWidgetLoading" [disabled]="is_submitting || wompiWidgetLoading">
+                    @if (!is_submitting && !wompiWidgetLoading) {
+                    <app-icon slot="icon" [name]="isWompiPayment ? 'shield-check' : 'check'" [size]="16"></app-icon>
                     }
-                    {{ is_submitting ? 'Procesando...' : 'Confirmar Pedido' }}
+                    {{ (is_submitting || wompiWidgetLoading) ? 'Procesando...' : (isWompiPayment ? 'Pagar con Wompi' : 'Confirmar Pedido') }}
                 </app-button>
                 }
             </div>
@@ -361,4 +375,11 @@
 
     <app-product-quick-view-modal [isOpen]="quickViewOpen" [productSlug]="selectedProductSlug"
         (closed)="quickViewOpen = false" (addedToCart)="onAddToCartFromSlider($event)" />
+
+    @if (wompiWidgetLoading) {
+    <div class="wompi-loading-overlay">
+        <div class="spinner"></div>
+        <p>Preparando pago seguro...</p>
+    </div>
+    }
 </div>

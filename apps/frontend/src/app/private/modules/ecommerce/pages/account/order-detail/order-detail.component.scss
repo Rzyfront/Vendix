@@ -23,6 +23,54 @@
 }
 
 // ─── Success Banner ──────────────────────────
+// Wompi verifying banner
+.wompi-verifying-banner {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.25rem;
+    background: var(--color-warning-light, rgba(251, 191, 36, 0.1));
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    border-radius: var(--radius-lg);
+    margin-bottom: 1.5rem;
+
+    .spinner-small {
+        flex-shrink: 0;
+        width: 32px;
+        height: 32px;
+        border: 3px solid var(--color-border);
+        border-top-color: var(--color-warning, #f59e0b);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+
+    .verifying-text {
+        h2 {
+            font-size: var(--fs-base);
+            font-weight: var(--fw-semibold);
+            color: var(--color-text-primary);
+            margin-bottom: 0.25rem;
+        }
+
+        p {
+            font-size: var(--fs-sm);
+            color: var(--color-text-secondary);
+        }
+    }
+
+    @media (max-width: 480px) {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+    }
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 .success-banner {
     display: flex;
     align-items: flex-start;

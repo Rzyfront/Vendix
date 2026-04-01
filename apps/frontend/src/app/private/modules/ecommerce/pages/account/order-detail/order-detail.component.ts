@@ -1,6 +1,8 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, ActivatedRoute } from '@angular/router';
+import { Subject } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
 import { AccountService, OrderDetail } from '../../../services/account.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
@@ -12,10 +14,16 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
   templateUrl: './order-detail.component.html',
   styleUrls: ['./order-detail.component.scss'],
 })
-export class OrderDetailComponent implements OnInit {
+export class OrderDetailComponent implements OnInit, OnDestroy {
   order: OrderDetail | null = null;
   is_loading = true;
   is_new_order = false;
+
+  // Wompi callback state
+  verifyingWompiPayment = false;
+  wompiPaymentVerified = false;
+  private wompiPollTimer: ReturnType<typeof setInterval> | null = null;
+  private destroy$ = new Subject<void>();
 
   constructor(
     private account_service: AccountService,
@@ -25,7 +33,74 @@ export class OrderDetailComponent implements OnInit {
   ngOnInit(): void {
     const order_id = this.route.snapshot.params['id'];
     this.is_new_order = this.route.snapshot.queryParams['success'] === 'true';
+
+    // Handle Wompi payment callback
+    this.route.queryParams.pipe(takeUntil(this.destroy$)).subscribe(params => {
+      if (params['wompi_callback'] === 'true' && !this.wompiPaymentVerified) {
+        this.verifyingWompiPayment = true;
+        this.pollOrderPaymentStatus(+order_id);
+      }
+    });
+
     this.loadOrder(+order_id);
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+    if (this.wompiPollTimer) {
+      clearInterval(this.wompiPollTimer);
+    }
+  }
+
+  /**
+   * Polls the order detail to check if payment status has been updated by the webhook.
+   * Stops polling after payment is no longer pending or after 60 attempts (5 minutes).
+   */
+  private pollOrderPaymentStatus(orderId: number): void {
+    let attempts = 0;
+    const maxAttempts = 60;
+
+    this.wompiPollTimer = setInterval(() => {
+      attempts++;
+
+      this.account_service.getOrderDetail(orderId).subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.order = response.data;
+
+            // Check if any payment is no longer pending
+            const hasCompletedPayment = this.order.payments?.some(
+              (p: any) => p.state === 'completed' || p.state === 'paid'
+            );
+            const hasFailedPayment = this.order.payments?.some(
+              (p: any) => p.state === 'failed' || p.state === 'declined'
+            );
+
+            if (hasCompletedPayment || hasFailedPayment || attempts >= maxAttempts) {
+              this.verifyingWompiPayment = false;
+              this.wompiPaymentVerified = true;
+              if (hasCompletedPayment) {
+                this.is_new_order = true;
+              }
+              if (this.wompiPollTimer) {
+                clearInterval(this.wompiPollTimer);
+                this.wompiPollTimer = null;
+              }
+            }
+          }
+        },
+        error: () => {
+          if (attempts >= maxAttempts) {
+            this.verifyingWompiPayment = false;
+            if (this.wompiPollTimer) {
+              clearInterval(this.wompiPollTimer);
+              this.wompiPollTimer = null;
+            }
+          }
+        },
+      });
+    }, 5000); // Poll every 5 seconds
   }
 
   loadOrder(order_id: number): void {

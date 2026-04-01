@@ -19,7 +19,7 @@ import {
   FormsModule,
 } from '@angular/forms';
 import { CommonModule } from '@angular/common';
-import { Subject, takeUntil, debounceTime } from 'rxjs';
+import { Subject, Subscription, takeUntil, debounceTime } from 'rxjs';
 import { Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 
@@ -28,6 +28,8 @@ import {
   InputComponent,
   IconComponent,
   SelectorComponent,
+  SpinnerComponent,
+  ButtonComponent,
 } from '../../../../../shared/components';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import {
@@ -41,6 +43,13 @@ import {
 } from '../services/pos-payment.service';
 import { PosCustomerService } from '../services/pos-customer.service';
 import { PosWalletService, WalletInfo } from '../services/pos-wallet.service';
+import {
+  WompiService,
+  WompiSubMethod,
+  WompiSubMethodConfig,
+  WompiPaymentStatusUpdate,
+  PseFinancialInstitution,
+} from '../../../../../shared/services/wompi.service';
 import { CartState } from '../models/cart.model';
 import { PosCustomer } from '../models/customer.model';
 import * as fromAuth from '../../../../../core/store/auth';
@@ -66,6 +75,8 @@ interface PaymentState {
     InputComponent,
     IconComponent,
     SelectorComponent,
+    SpinnerComponent,
+    ButtonComponent,
     CurrencyPipe,
     CurrencyInputDirective,
   ],
@@ -1208,6 +1219,173 @@ interface PaymentState {
           font-size: 15px;
         }
       }
+
+      /* ─── Wompi ──────────────────────────────────── */
+      .wompi-section {
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid var(--color-border);
+      }
+
+      .section-label {
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        color: var(--color-text-muted);
+        margin: 0 0 8px 0;
+      }
+
+      .wompi-submethods-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+        margin-top: 8px;
+      }
+
+      .wompi-submethod-btn {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        padding: 16px 8px;
+        border: 2px solid var(--color-border);
+        border-radius: 12px;
+        background: var(--color-surface);
+        cursor: pointer;
+        transition: all 0.2s;
+        min-height: 80px;
+        color: var(--color-text-primary);
+      }
+
+      .wompi-submethod-btn:hover {
+        border-color: var(--wompi-color, var(--color-primary));
+        background: color-mix(in srgb, var(--wompi-color, var(--color-primary)) 8%, transparent);
+      }
+
+      .wompi-submethod-btn .submethod-label {
+        font-weight: 600;
+        font-size: 14px;
+      }
+
+      .wompi-submethod-btn .submethod-desc {
+        font-size: 12px;
+        color: var(--color-text-muted);
+        text-align: center;
+      }
+
+      .wompi-form {
+        margin-top: 12px;
+      }
+
+      .wompi-form-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px;
+        border-left: 3px solid;
+        background: var(--color-muted);
+        border-radius: 8px;
+        margin-bottom: 12px;
+        font-weight: 600;
+        font-size: 14px;
+        color: var(--color-text-primary);
+      }
+
+      .wompi-back-btn {
+        margin-left: auto;
+        background: none;
+        border: none;
+        cursor: pointer;
+        opacity: 0.6;
+        color: var(--color-text-muted);
+        padding: 4px;
+      }
+
+      .wompi-back-btn:hover {
+        opacity: 1;
+      }
+
+      .wompi-form-fields {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .wompi-form-fields .form-row {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .wompi-form-fields .form-label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--color-text-muted);
+        text-transform: uppercase;
+      }
+
+      .wompi-info-text {
+        font-size: 14px;
+        color: var(--color-text-secondary);
+        padding: 8px 0;
+        margin: 0;
+      }
+
+      .toggle-buttons {
+        display: flex;
+        gap: 8px;
+      }
+
+      .toggle-buttons button {
+        flex: 1;
+        padding: 8px;
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        background: var(--color-surface);
+        cursor: pointer;
+        font-size: 14px;
+        color: var(--color-text-primary);
+        transition: all 0.2s;
+      }
+
+      .toggle-buttons button.active {
+        background: var(--color-primary);
+        color: white;
+        border-color: var(--color-primary);
+      }
+
+      .field-error {
+        font-size: 12px;
+        color: var(--color-error);
+        margin-top: 4px;
+        display: block;
+      }
+
+      .wompi-awaiting {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        padding: 32px;
+        text-align: center;
+        min-height: 192px;
+        margin-top: 16px;
+        border-top: 1px solid var(--color-border);
+      }
+
+      .awaiting-message {
+        font-size: 15px;
+        color: var(--color-text-primary);
+        max-width: 320px;
+        margin: 0;
+      }
+
+      .awaiting-actions {
+        display: flex;
+        gap: 12px;
+        margin-top: 8px;
+      }
     `,
   ],
 })
@@ -1238,6 +1416,32 @@ export class PosPaymentInterfaceComponent
   // Wallet
   walletInfo: WalletInfo | null = null;
   walletLoading: boolean = false;
+
+  // Wompi state
+  wompiService = inject(WompiService);
+  selectedWompiSubMethod: WompiSubMethod | null = null;
+  wompiSubMethods: WompiSubMethodConfig[] = WompiService.SUB_METHODS;
+  wompiAwaitingPayment = false;
+  wompiAwaitingMessage = '';
+  wompiPollingSubscription: Subscription | null = null;
+  wompiPaymentId: string | null = null;
+
+  // Nequi form
+  nequiPhoneControl = new FormControl('', [
+    Validators.required,
+    Validators.pattern(/^3\d{9}$/),
+  ]);
+
+  // PSE form
+  pseForm = new FormGroup({
+    userType: new FormControl<number>(0, [Validators.required]),
+    userLegalIdType: new FormControl('CC', [Validators.required]),
+    userLegalId: new FormControl('', [Validators.required]),
+    financialInstitutionCode: new FormControl('', [Validators.required]),
+    paymentDescription: new FormControl(''),
+  });
+  pseFinancialInstitutions: PseFinancialInstitution[] = [];
+  pseBankOptions: { value: string; label: string }[] = [];
 
   // Store settings
   storeSettingsSubscription: any;
@@ -1378,6 +1582,7 @@ export class PosPaymentInterfaceComponent
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
+    this.wompiPollingSubscription?.unsubscribe();
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -1544,6 +1749,9 @@ export class PosPaymentInterfaceComponent
   }
 
   selectPaymentMethod(method: PaymentMethod): void {
+    // Reset Wompi state when changing payment method
+    this.resetWompiState();
+
     // Wallet requires customer selection
     if (method.type === 'wallet') {
       if (!this.cartState?.customer) {
@@ -1690,6 +1898,11 @@ export class PosPaymentInterfaceComponent
       return this.paymentState.cashReceived >= total;
     }
 
+    // Wompi: requires sub-method selection and valid form
+    if (this.isWompiSelected()) {
+      return this.isWompiFormValid();
+    }
+
     if (this.paymentState.selectedMethod.requiresReference) {
       const reference = this.referenceControl.value;
       return reference && reference.trim().length >= 4;
@@ -1761,13 +1974,31 @@ export class PosPaymentInterfaceComponent
       payment_request.metadata = { walletId: this.walletInfo.wallet_id };
     }
 
+    // Pass Wompi payment method data
+    if (this.isWompiSelected()) {
+      payment_request.metadata = {
+        ...payment_request.metadata,
+        wompiPaymentMethod: this.buildWompiPaymentMethodData(),
+      };
+    }
+
     this.paymentService
       .processSaleWithPayment(this.cartState, payment_request, 'current_user')
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
-          this.paymentState.isProcessing = false;
           if (response.success) {
+            // Handle Wompi async payment flows (redirect, await, 3ds)
+            if (
+              this.isWompiSelected() &&
+              response.nextAction &&
+              response.nextAction.type !== 'none'
+            ) {
+              this.handleWompiNextAction(response);
+              return; // Don't close modal, wait for async confirmation
+            }
+
+            this.paymentState.isProcessing = false;
             this.paymentCompleted.emit({
               success: true,
               order: response.order,
@@ -1778,6 +2009,7 @@ export class PosPaymentInterfaceComponent
             });
             this.onModalClosed();
           } else {
+            this.paymentState.isProcessing = false;
             console.error('Payment failed:', response.message);
             this.toastService.show({
               variant: 'error',
@@ -2023,6 +2255,8 @@ export class PosPaymentInterfaceComponent
     this.showCreateCustomerForm = false;
     this.paymentFormCollapsed = false;
     this.paymentMethodCollapsed = false;
+    // Reset Wompi state
+    this.resetWompiState();
     // Reset credit state
     this.creditNumInstallments = 3;
     this.creditFrequency = 'monthly';
@@ -2308,6 +2542,167 @@ export class PosPaymentInterfaceComponent
       return total - received;
     }
     return 0;
+  }
+
+  // ─── Wompi Methods ───────────────────────────────────────────────────
+
+  isWompiSelected(): boolean {
+    return this.wompiService.isWompiMethod(this.paymentState?.selectedMethod);
+  }
+
+  selectWompiSubMethod(sub: WompiSubMethod): void {
+    this.selectedWompiSubMethod = sub;
+
+    // Load PSE banks if needed
+    if (sub === WompiSubMethod.PSE && this.pseFinancialInstitutions.length === 0) {
+      this.wompiService.getPseFinancialInstitutions().subscribe({
+        next: (institutions) => {
+          this.pseFinancialInstitutions = institutions;
+          this.pseBankOptions = institutions.map((i) => ({
+            value: i.financial_institution_code,
+            label: i.financial_institution_name,
+          }));
+        },
+        error: () => {}, // Silently fail, user can retry
+      });
+    }
+  }
+
+  buildWompiPaymentMethodData(): any {
+    switch (this.selectedWompiSubMethod) {
+      case WompiSubMethod.NEQUI:
+        return { type: 'NEQUI', phone_number: this.nequiPhoneControl.value };
+      case WompiSubMethod.PSE:
+        return {
+          type: 'PSE',
+          user_type: this.pseForm.value.userType,
+          user_legal_id_type: this.pseForm.value.userLegalIdType,
+          user_legal_id: this.pseForm.value.userLegalId,
+          financial_institution_code: this.pseForm.value.financialInstitutionCode,
+          payment_description: this.pseForm.value.paymentDescription || 'Pago Vendix',
+        };
+      case WompiSubMethod.CARD:
+        return { type: 'CARD' };
+      case WompiSubMethod.BANCOLOMBIA_TRANSFER:
+        return { type: 'BANCOLOMBIA_TRANSFER' };
+      default:
+        return { type: this.selectedWompiSubMethod };
+    }
+  }
+
+  isWompiFormValid(): boolean {
+    if (!this.selectedWompiSubMethod) return false;
+    switch (this.selectedWompiSubMethod) {
+      case WompiSubMethod.NEQUI:
+        return this.nequiPhoneControl.valid;
+      case WompiSubMethod.PSE:
+        return this.pseForm.valid;
+      default:
+        return true; // Card and Bancolombia don't need extra input
+    }
+  }
+
+  resetWompiState(): void {
+    this.selectedWompiSubMethod = null;
+    this.wompiAwaitingPayment = false;
+    this.wompiAwaitingMessage = '';
+    this.nequiPhoneControl.reset();
+    this.pseForm.reset({ userType: 0, userLegalIdType: 'CC' });
+    this.wompiPollingSubscription?.unsubscribe();
+    this.wompiPollingSubscription = null;
+    this.wompiPaymentId = null;
+  }
+
+  handleWompiNextAction(response: any): void {
+    const nextAction = response?.nextAction || response?.data?.nextAction;
+    if (!nextAction) return;
+
+    this.wompiPaymentId =
+      response?.transactionId ||
+      response?.data?.transactionId ||
+      response?.data?.payment_id;
+
+    switch (nextAction.type) {
+      case 'redirect':
+        if (nextAction.url) {
+          window.open(nextAction.url, '_blank');
+        }
+        this.wompiAwaitingPayment = true;
+        this.wompiAwaitingMessage =
+          'Se abrió la página del banco. Completa el pago y regresa aquí.';
+        this.startWompiPolling();
+        break;
+      case 'await':
+        this.wompiAwaitingPayment = true;
+        this.wompiAwaitingMessage =
+          this.selectedWompiSubMethod === WompiSubMethod.NEQUI
+            ? 'Esperando confirmación en la app de Nequi...'
+            : 'Esperando confirmación del pago...';
+        this.startWompiPolling();
+        break;
+      case '3ds':
+        if (nextAction.url) {
+          window.open(nextAction.url, '_blank');
+        }
+        this.wompiAwaitingPayment = true;
+        this.wompiAwaitingMessage =
+          'Completa la verificación 3D Secure en la ventana abierta.';
+        this.startWompiPolling();
+        break;
+      case 'none':
+        // Payment completed or failed synchronously, handled by existing flow
+        break;
+    }
+  }
+
+  startWompiPolling(): void {
+    if (!this.wompiPaymentId) return;
+
+    this.wompiPollingSubscription?.unsubscribe();
+    this.wompiPollingSubscription = this.wompiService
+      .pollPaymentStatus(this.wompiPaymentId)
+      .subscribe({
+        next: (update: WompiPaymentStatusUpdate) => {
+          if (update.status === 'succeeded') {
+            this.wompiAwaitingPayment = false;
+            this.wompiAwaitingMessage = '';
+            this.paymentState.isProcessing = false;
+            this.paymentCompleted.emit({
+              success: true,
+              message: 'Pago con Wompi procesado correctamente',
+              isAnonymousSale: this.paymentState.isAnonymousSale,
+            });
+            this.onModalClosed();
+          } else if (
+            update.status === 'failed' ||
+            update.status === 'cancelled'
+          ) {
+            this.wompiAwaitingPayment = false;
+            this.wompiAwaitingMessage =
+              update.message || 'El pago fue rechazado.';
+            this.paymentState.isProcessing = false;
+            this.toastService.show({
+              variant: 'error',
+              title: 'Pago rechazado',
+              description: update.message || 'El pago fue rechazado.',
+            });
+          }
+        },
+        error: () => {
+          this.wompiAwaitingPayment = false;
+          this.wompiAwaitingMessage =
+            'Error al verificar el estado del pago.';
+          this.paymentState.isProcessing = false;
+        },
+      });
+  }
+
+  cancelWompiAwait(): void {
+    this.wompiPollingSubscription?.unsubscribe();
+    this.wompiPollingSubscription = null;
+    this.wompiAwaitingPayment = false;
+    this.wompiAwaitingMessage = '';
+    this.paymentState.isProcessing = false;
   }
 
   navigateToSettings(): void {

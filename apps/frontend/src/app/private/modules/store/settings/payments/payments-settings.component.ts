@@ -1,4 +1,5 @@
-import { Component, OnInit, OnDestroy, signal, computed } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, computed, inject } from '@angular/core';
+import { environment } from '../../../../../../environments/environment';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup } from '@angular/forms';
@@ -291,15 +292,69 @@ import {
                 </select>
               } @else {
                 <input [formControlName]="field.key"
-                       [type]="field.key.includes('secret') || field.key.includes('private') ? 'password' : 'text'"
+                       [type]="field.type === 'password' ? 'password' : 'text'"
                        [placeholder]="field.description || field.title"
                        class="w-full px-3 py-2 rounded-lg border text-sm"
                        style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary)"
                 />
               }
+              @if (isWompiConfig() && wompiFieldHelp[field.key]) {
+                <span class="field-help">{{ wompiFieldHelp[field.key] }}</span>
+              }
             </div>
           }
         </div>
+
+        @if (getWompiKeyWarning()) {
+          <div class="wompi-warning">
+            <app-icon name="alert-triangle" [size]="16"></app-icon>
+            <span>{{ getWompiKeyWarning() }}</span>
+          </div>
+        }
+
+        @if (isWompiConfig()) {
+          <!-- Webhook URL Guide -->
+          <div class="wompi-webhook-guide">
+            <div class="wompi-webhook-header">
+              <app-icon name="webhook" [size]="18"></app-icon>
+              <span>URL de Eventos (Webhook)</span>
+            </div>
+            <p class="wompi-webhook-desc">
+              Copia esta URL y pégala en tu dashboard de Wompi para recibir notificaciones de pago.
+            </p>
+            <div class="wompi-webhook-url-box">
+              <code class="wompi-webhook-url">{{ wompiWebhookUrl }}</code>
+              <button type="button" class="wompi-copy-btn" (click)="copyWompiWebhookUrl()" [title]="wompiUrlCopied ? 'Copiado' : 'Copiar'">
+                <app-icon [name]="wompiUrlCopied ? 'check' : 'copy'" [size]="16"></app-icon>
+              </button>
+            </div>
+            <div class="wompi-webhook-steps">
+              <p><strong>Pasos:</strong></p>
+              <ol>
+                <li>Ingresa a <a href="https://comercios.wompi.co" target="_blank" rel="noopener">comercios.wompi.co</a></li>
+                <li>Ve a <strong>Configuraciones avanzadas</strong> > <strong>Seguimiento de transacciones</strong></li>
+                <li>Pega la URL de arriba en el campo <strong>"URL de Eventos"</strong></li>
+                <li>Haz clic en <strong>Guardar</strong></li>
+              </ol>
+            </div>
+          </div>
+
+          <div class="wompi-test-section">
+            <app-button
+              label="Probar Conexión"
+              variant="outline"
+              size="sm"
+              [loading]="wompiTestLoading"
+              (clicked)="testWompiConnection()">
+            </app-button>
+            @if (wompiTestResult) {
+              <div class="wompi-test-result" [class.success]="wompiTestResult.success" [class.error]="!wompiTestResult.success">
+                <app-icon [name]="wompiTestResult.success ? 'check-circle' : 'x-circle'" [size]="16"></app-icon>
+                <span>{{ wompiTestResult.message }}</span>
+              </div>
+            }
+          </div>
+        }
       </form>
 
       <div slot="footer" class="flex justify-end gap-3">
@@ -315,6 +370,133 @@ import {
       :host {
         display: block;
         width: 100%;
+      }
+
+      .field-help {
+        display: block;
+        font-size: 0.75rem;
+        color: var(--text-tertiary);
+        margin-top: 0.25rem;
+        line-height: 1.4;
+      }
+
+      .wompi-warning {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem;
+        background: color-mix(in srgb, var(--warning) 10%, transparent);
+        border: 1px solid var(--warning);
+        border-radius: 0.5rem;
+        font-size: 0.8125rem;
+        color: var(--warning);
+        margin-top: 0.75rem;
+      }
+
+      .wompi-test-section {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-top: 1rem;
+        flex-wrap: wrap;
+      }
+
+      .wompi-test-result {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        font-size: 0.8125rem;
+      }
+
+      .wompi-test-result.success {
+        color: var(--success);
+      }
+
+      .wompi-test-result.error {
+        color: var(--danger);
+      }
+
+      .wompi-webhook-guide {
+        margin-top: 1rem;
+        padding: 1rem;
+        border: 1px solid var(--color-border);
+        border-radius: 0.75rem;
+        background: var(--color-surface);
+      }
+
+      .wompi-webhook-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-weight: 600;
+        font-size: 0.875rem;
+        margin-bottom: 0.5rem;
+        color: var(--color-text-primary);
+      }
+
+      .wompi-webhook-desc {
+        font-size: 0.8125rem;
+        color: var(--color-text-muted);
+        margin-bottom: 0.75rem;
+      }
+
+      .wompi-webhook-url-box {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.625rem 0.75rem;
+        background: var(--color-bg, #f5f5f5);
+        border: 1px solid var(--color-border);
+        border-radius: 0.5rem;
+        margin-bottom: 0.75rem;
+      }
+
+      .wompi-webhook-url {
+        flex: 1;
+        font-size: 0.75rem;
+        font-family: monospace;
+        word-break: break-all;
+        color: var(--color-text-primary);
+      }
+
+      .wompi-copy-btn {
+        flex-shrink: 0;
+        background: none;
+        border: 1px solid var(--color-border);
+        border-radius: 0.375rem;
+        padding: 0.375rem;
+        cursor: pointer;
+        color: var(--color-text-muted);
+        transition: all 0.15s;
+      }
+
+      .wompi-copy-btn:hover {
+        background: var(--color-surface);
+        color: var(--color-text-primary);
+      }
+
+      .wompi-webhook-steps {
+        font-size: 0.8125rem;
+        color: var(--color-text-muted);
+      }
+
+      .wompi-webhook-steps p {
+        margin-bottom: 0.375rem;
+      }
+
+      .wompi-webhook-steps ol {
+        margin: 0;
+        padding-left: 1.25rem;
+      }
+
+      .wompi-webhook-steps li {
+        margin-bottom: 0.25rem;
+        line-height: 1.5;
+      }
+
+      .wompi-webhook-steps a {
+        color: var(--accent);
+        text-decoration: underline;
       }
     `,
   ],
@@ -340,6 +522,19 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
   config_form: FormGroup = new FormGroup({});
   config_fields: Array<{ key: string; title: string; type: string; required: boolean; description: string; enum_values?: string[]; default_value?: any }> = [];
   config_saving = signal(false);
+
+  // Wompi UX enhancements
+  readonly wompiFieldHelp: Record<string, string> = {
+    public_key: 'Se encuentra en tu dashboard de Wompi > Desarrolladores > Llaves del API',
+    private_key: 'Se encuentra en tu dashboard de Wompi > Desarrolladores > Llaves del API. Nunca se comparte con el frontend.',
+    events_secret: 'Se encuentra en tu dashboard de Wompi > Desarrolladores > Secretos para integración técnica > Eventos',
+    integrity_secret: 'Se encuentra en tu dashboard de Wompi > Desarrolladores > Secretos para integración técnica > Integridad',
+    environment: 'Usa SANDBOX para pruebas con llaves pub_test_/prv_test_. Usa PRODUCTION para pagos reales con llaves pub_prod_/prv_prod_.',
+  };
+  wompiTestLoading = false;
+  wompiTestResult: { success: boolean; message: string } | null = null;
+  wompiWebhookUrl = `${environment.apiUrl}/store/webhooks/wompi`;
+  wompiUrlCopied = false;
 
   // UI State
   search_term = signal('');
@@ -717,7 +912,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
       this.config_fields.push({
         key,
         title: prop.title || key.replace(/_/g, ' '),
-        type: prop.type || 'string',
+        type: prop.format === 'password' ? 'password' : (prop.type || 'string'),
         required: is_required,
         description: prop.description || '',
         enum_values: prop.enum,
@@ -768,6 +963,62 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     this.show_config_modal.set(false);
     this.config_method = null;
     this.config_fields = [];
+    this.wompiTestResult = null;
+  }
+
+  isWompiConfig(): boolean {
+    return this.config_method?.provider === 'wompi' || (this.config_method?.type as string) === 'wompi';
+  }
+
+  getWompiKeyWarning(): string | null {
+    if (!this.config_form || !this.isWompiConfig()) return null;
+
+    const env = this.config_form.value.environment || 'SANDBOX';
+    const pubKey = this.config_form.value.public_key || '';
+    const prvKey = this.config_form.value.private_key || '';
+
+    if (env === 'SANDBOX') {
+      if (pubKey && !pubKey.startsWith('pub_test_')) return 'La llave pública debe iniciar con pub_test_ para el ambiente SANDBOX';
+      if (prvKey && !prvKey.startsWith('prv_test_')) return 'La llave privada debe iniciar con prv_test_ para el ambiente SANDBOX';
+    } else if (env === 'PRODUCTION') {
+      if (pubKey && !pubKey.startsWith('pub_prod_')) return 'La llave pública debe iniciar con pub_prod_ para el ambiente PRODUCTION';
+      if (prvKey && !prvKey.startsWith('prv_prod_')) return 'La llave privada debe iniciar con prv_prod_ para el ambiente PRODUCTION';
+    }
+
+    return null;
+  }
+
+  copyWompiWebhookUrl(): void {
+    navigator.clipboard.writeText(this.wompiWebhookUrl).then(() => {
+      this.wompiUrlCopied = true;
+      setTimeout(() => (this.wompiUrlCopied = false), 2000);
+    });
+  }
+
+  testWompiConnection(): void {
+    if (!this.config_method) return;
+    this.wompiTestLoading = true;
+    this.wompiTestResult = null;
+
+    this.payment_methods_service
+      .testPaymentMethodConfiguration(this.config_method.id, this.config_form.value)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (res) => {
+          this.wompiTestLoading = false;
+          this.wompiTestResult = {
+            success: res.success,
+            message: res.message || (res.success ? 'Conexión exitosa con Wompi' : 'Error de conexión'),
+          };
+        },
+        error: (err) => {
+          this.wompiTestLoading = false;
+          this.wompiTestResult = {
+            success: false,
+            message: err?.message || 'Error al probar la conexión',
+          };
+        },
+      });
   }
 
   toggleMethod(method: CombinedPaymentMethod): void {

@@ -8,12 +8,16 @@ import {
   WompiMerchantResponse,
   WompiFinancialInstitution,
   WompiWebhookEvent,
+  WompiCreatePaymentLinkRequest,
+  WompiPaymentLinkResponse,
 } from './wompi.types';
 
 @Injectable()
 export class WompiClient {
   private readonly logger = new Logger(WompiClient.name);
   private config: WompiConfig;
+  private readonly tokenCache = new Map<string, { tokens: { acceptance_token: string; personal_auth_token: string }; expiresAt: number }>();
+  private readonly TOKEN_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   // ── Configuración ───────────────────────────
 
@@ -102,8 +106,15 @@ export class WompiClient {
 
   // ── Merchant / Acceptance Token ─────────────
 
-  async getAcceptanceToken(): Promise<string> {
+  async getAcceptanceTokens(): Promise<{ acceptance_token: string; personal_auth_token: string }> {
     this.ensureConfigured();
+
+    // Check cache first
+    const cacheKey = this.config.public_key;
+    const cached = this.tokenCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.tokens;
+    }
 
     const response = await this.request<WompiMerchantResponse>(
       'GET',
@@ -111,7 +122,23 @@ export class WompiClient {
       { bearerToken: this.config.public_key },
     );
 
-    return response.data.presigned_acceptance.acceptance_token;
+    const tokens = {
+      acceptance_token: response.data.presigned_acceptance.acceptance_token,
+      personal_auth_token: response.data.presigned_personal_data_auth.acceptance_token,
+    };
+
+    // Cache the tokens
+    this.tokenCache.set(cacheKey, { tokens, expiresAt: Date.now() + this.TOKEN_CACHE_TTL });
+
+    return tokens;
+  }
+
+  // ── Integrity signature ──────────────────────
+
+  generateIntegritySignature(reference: string, amountInCents: number, currency: string): string {
+    this.ensureConfigured();
+    const concatenated = `${reference}${amountInCents}${currency}${this.config.integrity_secret}`;
+    return crypto.createHash('sha256').update(concatenated).digest('hex');
   }
 
   // ── PSE: Instituciones financieras ──────────
@@ -126,6 +153,24 @@ export class WompiClient {
     );
 
     return response.data;
+  }
+
+  // ── Payment Links ────────────────────────────
+
+  async createPaymentLink(
+    data: WompiCreatePaymentLinkRequest,
+  ): Promise<WompiPaymentLinkResponse> {
+    return this.request<WompiPaymentLinkResponse>('POST', '/payment_links', {
+      body: data,
+    });
+  }
+
+  async getPaymentLink(linkId: string): Promise<WompiPaymentLinkResponse> {
+    return this.request<WompiPaymentLinkResponse>(
+      'GET',
+      `/payment_links/${linkId}`,
+      { bearerToken: this.config.public_key },
+    );
   }
 
   // ── Webhook signature validation ────────────
@@ -158,7 +203,10 @@ export class WompiClient {
         .update(concatenated)
         .digest('hex');
 
-      return hash === checksum;
+      const hashBuffer = Buffer.from(hash, 'hex');
+      const checksumBuffer = Buffer.from(checksum, 'hex');
+      if (hashBuffer.length !== checksumBuffer.length) return false;
+      return crypto.timingSafeEqual(hashBuffer, checksumBuffer);
     } catch (error) {
       this.logger.error('Webhook signature validation failed', error);
       return false;

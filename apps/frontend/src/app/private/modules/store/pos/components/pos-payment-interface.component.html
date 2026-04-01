@@ -337,7 +337,7 @@
         </div>
 
         <!-- Reference Input (visible even when grid collapsed) -->
-        <div *ngIf="paymentState.selectedMethod?.requiresReference" class="reference-section">
+        <div *ngIf="paymentState.selectedMethod?.requiresReference && !isWompiSelected()" class="reference-section">
           <div class="reference-header">
             <app-icon [name]="paymentState.selectedMethod?.icon || 'credit-card'" [size]="28"></app-icon>
             <p>Ingresa el número de referencia</p>
@@ -349,6 +349,134 @@
             [size]="'lg'"
             [error]="getReferenceError()"
           ></app-input>
+        </div>
+
+        <!-- Wompi Sub-Method Selector -->
+        <div *ngIf="isWompiSelected() && !wompiAwaitingPayment" class="wompi-section">
+          <ng-container *ngIf="!selectedWompiSubMethod">
+            <p class="section-label">Selecciona el método de pago</p>
+            <div class="wompi-submethods-grid">
+              <button
+                *ngFor="let sub of wompiSubMethods"
+                type="button"
+                class="wompi-submethod-btn"
+                [style.--wompi-color]="sub.color"
+                (click)="selectWompiSubMethod(sub.key)">
+                <app-icon [name]="sub.icon" [size]="24"></app-icon>
+                <span class="submethod-label">{{ sub.label }}</span>
+                <span class="submethod-desc">{{ sub.description }}</span>
+              </button>
+            </div>
+          </ng-container>
+
+          <!-- Nequi Phone Input -->
+          <div *ngIf="selectedWompiSubMethod === 'NEQUI'" class="wompi-form">
+            <div class="wompi-form-header" style="border-color: #E6007E">
+              <app-icon name="smartphone" [size]="20"></app-icon>
+              <span>Pago con Nequi</span>
+              <button type="button" class="wompi-back-btn" (click)="selectedWompiSubMethod = null">
+                <app-icon name="arrow-left" [size]="16"></app-icon>
+              </button>
+            </div>
+            <app-input
+              label="Número de celular"
+              placeholder="3001234567"
+              [formControl]="nequiPhoneControl">
+            </app-input>
+            <span *ngIf="nequiPhoneControl.touched && nequiPhoneControl.invalid" class="field-error">
+              Ingresa un número de celular colombiano válido (10 dígitos, inicia con 3)
+            </span>
+          </div>
+
+          <!-- PSE Form -->
+          <div *ngIf="selectedWompiSubMethod === 'PSE'" class="wompi-form">
+            <div class="wompi-form-header" style="border-color: #003DA5">
+              <app-icon name="landmark" [size]="20"></app-icon>
+              <span>Transferencia PSE</span>
+              <button type="button" class="wompi-back-btn" (click)="selectedWompiSubMethod = null">
+                <app-icon name="arrow-left" [size]="16"></app-icon>
+              </button>
+            </div>
+            <div class="wompi-form-fields">
+              <div class="form-row">
+                <label class="form-label">Tipo de persona</label>
+                <div class="toggle-buttons">
+                  <button type="button"
+                    [class.active]="pseForm.value.userType === 0"
+                    (click)="pseForm.patchValue({ userType: 0 })">Natural</button>
+                  <button type="button"
+                    [class.active]="pseForm.value.userType === 1"
+                    (click)="pseForm.patchValue({ userType: 1 })">Jurídica</button>
+                </div>
+              </div>
+              <div class="form-row">
+                <app-selector
+                  label="Tipo de documento"
+                  [options]="[{value: 'CC', label: 'CC'}, {value: 'CE', label: 'CE'}, {value: 'NIT', label: 'NIT'}, {value: 'PP', label: 'PP'}, {value: 'TI', label: 'TI'}]"
+                  [formControl]="pseForm.controls.userLegalIdType">
+                </app-selector>
+              </div>
+              <div class="form-row">
+                <app-input
+                  label="Número de documento"
+                  placeholder="123456789"
+                  [formControl]="pseForm.controls.userLegalId">
+                </app-input>
+              </div>
+              <div class="form-row">
+                <app-selector
+                  label="Banco"
+                  [options]="pseBankOptions"
+                  placeholder="Selecciona tu banco"
+                  [formControl]="pseForm.controls.financialInstitutionCode">
+                </app-selector>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card — no extra form needed -->
+          <div *ngIf="selectedWompiSubMethod === 'CARD'" class="wompi-form">
+            <div class="wompi-form-header" style="border-color: #1A9C8B">
+              <app-icon name="credit-card" [size]="20"></app-icon>
+              <span>Pago con Tarjeta</span>
+              <button type="button" class="wompi-back-btn" (click)="selectedWompiSubMethod = null">
+                <app-icon name="arrow-left" [size]="16"></app-icon>
+              </button>
+            </div>
+            <p class="wompi-info-text">El pago con tarjeta será procesado de forma segura a través de Wompi.</p>
+          </div>
+
+          <!-- Bancolombia Transfer -->
+          <div *ngIf="selectedWompiSubMethod === 'BANCOLOMBIA_TRANSFER'" class="wompi-form">
+            <div class="wompi-form-header" style="border-color: #FDDA24">
+              <app-icon name="building-2" [size]="20"></app-icon>
+              <span>Transferencia Bancolombia</span>
+              <button type="button" class="wompi-back-btn" (click)="selectedWompiSubMethod = null">
+                <app-icon name="arrow-left" [size]="16"></app-icon>
+              </button>
+            </div>
+            <p class="wompi-info-text">Serás redirigido a Bancolombia para completar el pago.</p>
+          </div>
+        </div>
+
+        <!-- Wompi Awaiting Payment UI -->
+        <div *ngIf="wompiAwaitingPayment" class="wompi-awaiting">
+          <app-spinner></app-spinner>
+          <p class="awaiting-message">{{ wompiAwaitingMessage }}</p>
+          <div class="awaiting-actions">
+            <app-button
+              label="Verificar Estado"
+              variant="outline"
+              size="sm"
+              (clicked)="startWompiPolling()">
+            </app-button>
+            <app-button
+              label="Cancelar Espera"
+              variant="ghost"
+              size="sm"
+              (clicked)="cancelWompiAwait()">
+            </app-button>
+          </div>
         </div>
       </div>
     </section>
@@ -501,7 +629,7 @@
     >
       <app-icon *ngIf="!paymentState.isProcessing" name="check-circle" [size]="20"></app-icon>
       <span *ngIf="paymentState.isProcessing" class="spinner"></span>
-      {{ paymentState.paymentForm === 'credito' ? 'Crear Venta a Crédito' : paymentState.selectedMethod?.type === 'cash' ? 'Cobrar' : paymentState.selectedMethod?.type === 'wallet' ? 'Pagar con Wallet' : 'Confirmar Pago' }}
+      {{ paymentState.paymentForm === 'credito' ? 'Crear Venta a Crédito' : isWompiSelected() ? 'Pagar con Wompi' : paymentState.selectedMethod?.type === 'cash' ? 'Cobrar' : paymentState.selectedMethod?.type === 'wallet' ? 'Pagar con Wallet' : 'Confirmar Pago' }}
     </button>
   </div>
 </app-modal>

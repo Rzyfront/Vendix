@@ -537,6 +537,9 @@ model stores {
   commission_rules        commission_rules[]        @relation("store_commission_rules")
   commission_calculations commission_calculations[] @relation("store_commission_calcs")
 
+  // Payment Links
+  payment_links payment_links[]
+
   @@unique([organization_id, slug])
   @@index([onboarding])
 }
@@ -757,6 +760,9 @@ model orders {
   cash_register_movements                         cash_register_movements[]
   // Bookings
   booking                                         bookings?
+
+  // Payment Links
+  payment_links                                   payment_links[]
 
   @@unique([store_id, order_number])
   @@index([store_id, order_number])
@@ -2482,6 +2488,13 @@ enum payment_processing_mode_enum {
   DIRECT // Requires physical presence (cash at store, POS terminal)
   ONLINE // Processed via gateway or transfer (Stripe, PayPal, bank)
   ON_DELIVERY // Payment at delivery time (cash or card to courier)
+}
+
+enum payment_link_status_enum {
+  active
+  expired
+  paid
+  cancelled
 }
 
 enum expenses_state_enum {
@@ -5059,4 +5072,36 @@ model commission_calculations {
 
   @@index([store_id, created_at])
   @@index([source_type, source_id])
+}
+
+model payment_links {
+  id                Int                      @id @default(autoincrement())
+  store_id          Int
+  wompi_link_id     String                   @unique @db.VarChar(20)
+  name              String                   @db.VarChar(255)
+  description       String                   @db.Text
+  amount_in_cents   Int?
+  currency          String                   @default("COP") @db.VarChar(10)
+  single_use        Boolean                  @default(true)
+  collect_shipping  Boolean                  @default(false)
+  checkout_url      String                   @db.Text
+  status            payment_link_status_enum @default(active)
+  expires_at        DateTime?                @db.Timestamp(6)
+  redirect_url      String?                  @db.Text
+  image_url         String?                  @db.Text
+  sku               String?                  @db.VarChar(36)
+  order_id          Int?
+  wompi_response    Json?
+  transaction_id    String?                  @db.VarChar(255)
+  paid_at           DateTime?                @db.Timestamp(6)
+  created_by        Int?
+  created_at        DateTime                 @default(now()) @db.Timestamp(6)
+  updated_at        DateTime                 @default(now()) @db.Timestamp(6)
+
+  stores  stores  @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  orders  orders? @relation(fields: [order_id], references: [id], onDelete: SetNull)
+
+  @@index([store_id, status])
+  @@index([store_id, created_at])
+  @@index([wompi_link_id])
 }

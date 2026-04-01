@@ -180,7 +180,7 @@ export async function seedSystemPaymentMethods(
       requires_config: true,
       config_schema: {
         type: 'object',
-        required: ['public_key', 'private_key', 'events_secret'],
+        required: ['public_key', 'private_key', 'events_secret', 'integrity_secret'],
         properties: {
           public_key: {
             type: 'string',
@@ -191,23 +191,26 @@ export async function seedSystemPaymentMethods(
             type: 'string',
             title: 'Private Key',
             description: 'Llave privada de Wompi (prv_test_ o prv_prod_)',
+            format: 'password',
           },
           events_secret: {
             type: 'string',
             title: 'Events Secret',
             description: 'Secret para validar webhooks de Wompi',
+            format: 'password',
           },
           integrity_secret: {
             type: 'string',
             title: 'Integrity Secret',
             description: 'Secret para firmas de integridad',
+            format: 'password',
           },
           environment: {
             type: 'string',
-            enum: ['SANDBOX', 'PRODUCTION'],
             title: 'Ambiente',
-            default: 'SANDBOX',
             description: 'Ambiente de Wompi (sandbox para pruebas, production para producción)',
+            enum: ['SANDBOX', 'PRODUCTION'],
+            default: 'SANDBOX',
           },
         },
       },
@@ -240,6 +243,20 @@ export async function seedSystemPaymentMethods(
     });
 
     if (existing) {
+      // Update config_schema and description if changed
+      const updateData: any = {};
+      if ((method as any).config_schema) {
+        updateData.config_schema = (method as any).config_schema;
+      }
+      if ((method as any).description) {
+        updateData.description = (method as any).description;
+      }
+      if (Object.keys(updateData).length > 0) {
+        await client.system_payment_methods.update({
+          where: { name: method.name },
+          data: updateData,
+        });
+      }
       continue;
     }
 

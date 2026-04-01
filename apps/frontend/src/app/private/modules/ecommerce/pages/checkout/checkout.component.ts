@@ -5,7 +5,8 @@ import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators } 
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
-import { CheckoutService, PaymentMethod, CheckoutRequest, BookingSelection } from '../../services/checkout.service';
+import { CheckoutService, PaymentMethod, CheckoutRequest, BookingSelection, WompiWidgetConfig } from '../../services/checkout.service';
+import { WompiService } from '../../../../../shared/services/wompi.service';
 import { AccountService, Address } from '../../services/account.service';
 import { CatalogService, EcommerceProduct } from '../../services/catalog.service';
 import { CountryService, Country, Department, City } from '../../../../../services/country.service';
@@ -43,6 +44,10 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   is_loading = true;
   is_submitting = false;
   error_message = '';
+
+  // Wompi Widget
+  isWompiPayment = false;
+  wompiWidgetLoading = false;
 
   step = 1; // Dynamic steps depending on cart content
 
@@ -113,6 +118,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   private cdr = inject(ChangeDetectorRef);
   private currencyService = inject(CurrencyFormatService);
   private toast = inject(ToastService);
+  private wompiService = inject(WompiService);
 
   constructor(
     private cart_service: CartService,
@@ -267,6 +273,10 @@ export class CheckoutComponent implements OnInit, OnDestroy {
 
   selectPaymentMethod(method_id: number): void {
     this.selected_payment_method_id = method_id;
+
+    // Check if selected method is Wompi
+    const selectedMethod = this.payment_methods.find(m => m.id === method_id);
+    this.isWompiPayment = selectedMethod?.type === 'wompi' || selectedMethod?.provider === 'wompi';
   }
 
   // Shipping
@@ -369,6 +379,14 @@ export class CheckoutComponent implements OnInit, OnDestroy {
             }
           } else if (this.payment_methods.length > 0) {
             this.selected_payment_method_id = this.payment_methods[0].id;
+          }
+
+          // Update Wompi flag based on current selection
+          if (this.selected_payment_method_id) {
+            const selectedMethod = this.payment_methods.find(m => m.id === this.selected_payment_method_id);
+            this.isWompiPayment = selectedMethod?.type === 'wompi' || selectedMethod?.provider === 'wompi';
+          } else {
+            this.isWompiPayment = false;
           }
         }
         this.loading_payment_methods = false;
@@ -608,6 +626,50 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       request.shipping_address_id = this.selected_address_id;
     }
 
+    // Wompi payment flow: create order first, then open widget
+    if (this.isWompiPayment) {
+      this.wompiWidgetLoading = true;
+      this.is_submitting = false;
+
+      this.checkout_service.checkout(request).subscribe({
+        next: (response) => {
+          if (response.success) {
+            const orderId = response.data.order_id;
+            const totalAmount = (this.cart?.subtotal || 0) + this.shipping_cost;
+
+            this.checkout_service.prepareWompiPayment(
+              orderId,
+              totalAmount,
+              undefined,
+              `${window.location.origin}/account/orders/${orderId}?wompi_callback=true`,
+            ).subscribe({
+              next: (res) => {
+                this.wompiWidgetLoading = false;
+                this.cdr.markForCheck();
+                this.openWompiWidget(res.data, orderId);
+              },
+              error: (err) => {
+                this.wompiWidgetLoading = false;
+                this.cdr.markForCheck();
+                const msg = this.extractErrorMessage(err);
+                this.error_message = msg;
+                this.toast.error(msg, 'Error al preparar pago');
+              },
+            });
+          }
+        },
+        error: (err) => {
+          this.wompiWidgetLoading = false;
+          this.cdr.markForCheck();
+          const msg = this.extractErrorMessage(err);
+          this.error_message = msg;
+          this.toast.error(msg, 'Error al procesar el pedido');
+        },
+      });
+
+      return;
+    }
+
     this.checkout_service.checkout(request).subscribe({
       next: (response) => {
         if (response.success) {
@@ -623,6 +685,41 @@ export class CheckoutComponent implements OnInit, OnDestroy {
         this.toast.error(msg, 'Error al procesar el pedido');
       },
     });
+  }
+
+  async openWompiWidget(config: WompiWidgetConfig, orderId: number): Promise<void> {
+    try {
+      await this.wompiService.loadWidgetScript();
+
+      const checkout = new (window as any).WidgetCheckout({
+        currency: config.currency,
+        amountInCents: config.amount_in_cents,
+        reference: config.reference,
+        publicKey: config.public_key,
+        signature: { integrity: config.signature_integrity },
+        redirectUrl: config.redirect_url || `${window.location.origin}/account/orders/${orderId}?wompi_callback=true`,
+        customerData: {
+          email: config.customer_email,
+        },
+      });
+
+      checkout.open((result: any) => {
+        const transaction = result?.transaction;
+        if (transaction) {
+          if (transaction.status === 'APPROVED') {
+            this.router.navigate(['/account/orders', orderId], { queryParams: { success: true } });
+          } else if (transaction.status === 'DECLINED' || transaction.status === 'ERROR') {
+            this.toast.error('El pago fue rechazado. Intenta con otro método de pago.', 'Pago rechazado');
+          } else {
+            // PENDING — redirect to order detail for status check
+            this.router.navigate(['/account/orders', orderId], { queryParams: { wompi_callback: true } });
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Failed to open Wompi widget:', error);
+      this.toast.error('No se pudo abrir el widget de pago. Intenta de nuevo.', 'Error');
+    }
   }
 
   private extractErrorMessage(err: any): string {

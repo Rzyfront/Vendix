@@ -4,6 +4,7 @@ import { WebhookController } from './webhook.controller';
 import { SystemPaymentMethodsController } from './controllers/system-payment-methods.controller';
 import { StorePaymentMethodsController } from './controllers/store-payment-methods.controller';
 import { OrganizationPaymentPoliciesController } from './controllers/organization-payment-policies.controller';
+import { WompiController } from './controllers/wompi.controller';
 import { PaymentsService } from './payments.service';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
@@ -17,10 +18,12 @@ import {
   PaymentGatewayService,
   PaymentValidatorService,
   WebhookHandlerService,
+  WompiWebhookValidatorService,
 } from './services';
 import { SystemPaymentMethodsService } from './services/system-payment-methods.service';
 import { StorePaymentMethodsService } from './services/store-payment-methods.service';
 import { OrganizationPaymentPoliciesService } from './services/organization-payment-policies.service';
+import { PaymentEncryptionService } from './services/payment-encryption.service';
 import { PromotionsModule } from '../promotions/promotions.module';
 import { CashRegistersModule } from '../cash-registers/cash-registers.module';
 import {
@@ -37,6 +40,7 @@ import { BankTransferProcessor } from './processors/bank-transfer/bank-transfer.
 import { WompiProcessor } from './processors/wompi/wompi.processor';
 import { WalletModule } from '../wallet/wallet.module';
 import { WalletPaymentProcessor } from '../wallet/services/wallet-payment.processor';
+import { PaymentLinksModule } from '../payment-links/payment-links.module';
 
 @Module({
   imports: [
@@ -50,6 +54,7 @@ import { WalletPaymentProcessor } from '../wallet/services/wallet-payment.proces
     WalletModule,
     forwardRef(() => OrdersModule),
     forwardRef(() => OrderFlowModule),
+    forwardRef(() => PaymentLinksModule),
     TaxesModule,
     SettingsModule,
     PromotionsModule,
@@ -61,6 +66,7 @@ import { WalletPaymentProcessor } from '../wallet/services/wallet-payment.proces
     SystemPaymentMethodsController,
     StorePaymentMethodsController,
     OrganizationPaymentPoliciesController,
+    WompiController,
   ],
   providers: [
     PaymentsService,
@@ -73,6 +79,8 @@ import { WalletPaymentProcessor } from '../wallet/services/wallet-payment.proces
     SystemPaymentMethodsService,
     StorePaymentMethodsService,
     OrganizationPaymentPoliciesService,
+    PaymentEncryptionService,
+    WompiWebhookValidatorService,
   ],
   exports: [
     PaymentsService,
@@ -83,6 +91,7 @@ import { WalletPaymentProcessor } from '../wallet/services/wallet-payment.proces
     SystemPaymentMethodsService,
     StorePaymentMethodsService,
     OrganizationPaymentPoliciesService,
+    PaymentEncryptionService,
   ],
 })
 export class PaymentsModule implements OnModuleInit {

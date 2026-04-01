@@ -43,6 +43,7 @@ import { AccountsReceivableModule } from './accounts-receivable/accounts-receiva
 import { WalletModule } from './wallet/wallet.module';
 import { AccountsPayableModule } from './accounts-payable/accounts-payable.module';
 import { CommissionsModule } from './commissions/commissions.module';
+import { PaymentLinksModule } from './payment-links/payment-links.module';
 
 @Module({
   imports: [
@@ -88,6 +89,7 @@ import { CommissionsModule } from './commissions/commissions.module';
     WalletModule,
     AccountsPayableModule,
     CommissionsModule,
+    PaymentLinksModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],
