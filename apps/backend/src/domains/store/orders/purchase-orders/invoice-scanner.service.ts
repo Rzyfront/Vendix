@@ -15,6 +15,7 @@ import {
 } from './dto/scan-invoice.dto';
 import { CreatePurchaseOrderDto, PurchaseOrderItemDto } from './dto/create-purchase-order.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
+import * as sharp from 'sharp';
 
 @Injectable()
 export class InvoiceScannerService {
@@ -32,7 +33,8 @@ export class InvoiceScannerService {
       `[InvoiceScan] File: mimetype=${file.mimetype}, size=${file.size}, buffer=${file.buffer?.length ?? 'NO BUFFER'}`,
     );
 
-    const dataUri = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    const { base64, mimeType } = await this.preprocessImage(file);
+    const dataUri = `data:${mimeType};base64,${base64}`;
 
     this.logger.debug(`[InvoiceScan] DataURI length: ${dataUri.length} chars`);
 
@@ -41,29 +43,7 @@ export class InvoiceScannerService {
       content: [
         {
           type: 'text',
-          text: `Analyze this purchase invoice image and extract all data. Return ONLY valid JSON with this exact structure (no markdown, no extra text):
-{
-  "supplier": { "name": "string", "tax_id": "string or null", "address": "string or null", "phone": "string or null" },
-  "invoice_number": "string",
-  "invoice_date": "YYYY-MM-DD",
-  "payment_terms": "string or null",
-  "line_items": [
-    { "description": "string", "quantity": number, "unit_price": number, "total": number, "sku_if_visible": "string or null" }
-  ],
-  "subtotal": number,
-  "tax_amount": number,
-  "total": number,
-  "confidence": number between 0 and 100
-}
-
-Important rules:
-- Extract ALL visible information. Use null ONLY when the field is truly absent from the document.
-- For numbers, extract the raw numeric value even if formatting is unusual (dots as thousands, commas as decimals, spaces, etc). Always return numbers without formatting (e.g., 1234567.89).
-- For supplier name, use the FULL business name exactly as shown on the invoice.
-- For dates, convert to YYYY-MM-DD format when possible.
-- Include ALL line items visible on the document, even if some fields are unclear — estimate values when necessary and set a lower confidence score.
-- If unit_price or total seems inconsistent, still extract both as-is — do not attempt to correct them.
-- Set confidence (0-100) reflecting overall extraction quality.`,
+          text: 'Extract all data from this purchase invoice image. Return ONLY the JSON object matching the schema defined in your system instructions.',
         },
         {
           type: 'image_url',
@@ -91,8 +71,8 @@ Important rules:
       if (content.startsWith('```')) {
         content = content.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
       }
-      const parsed: InvoiceScanResult = JSON.parse(content);
-      return parsed;
+      const parsed = JSON.parse(content);
+      return this.normalizeOcrResponse(parsed);
     } catch {
       this.logger.error(`Failed to parse AI OCR response: ${response.content}`);
       throw new VendixHttpException(ErrorCodes.INV_SCAN_PARSE_FAIL);
@@ -439,5 +419,73 @@ Important rules:
     }
 
     return Math.round((matches / qWords.length) * 80);
+  }
+
+  private async preprocessImage(file: Express.Multer.File): Promise<{ base64: string; mimeType: string }> {
+    const MAX_DIMENSION = 1536;
+    const JPEG_QUALITY = 85;
+
+    try {
+      const metadata = await sharp(file.buffer).metadata();
+      const needsResize = (metadata.width && metadata.width > MAX_DIMENSION) ||
+                          (metadata.height && metadata.height > MAX_DIMENSION);
+
+      let pipeline = sharp(file.buffer);
+
+      if (needsResize) {
+        pipeline = pipeline.resize(MAX_DIMENSION, MAX_DIMENSION, {
+          fit: 'inside',
+          withoutEnlargement: true,
+        });
+      }
+
+      const processedBuffer = await pipeline
+        .jpeg({ quality: JPEG_QUALITY })
+        .toBuffer();
+
+      this.logger.debug(
+        `[InvoiceScan] Image preprocessed: ${file.size} bytes → ${processedBuffer.length} bytes (${metadata.width}x${metadata.height}${needsResize ? ' resized' : ''})`,
+      );
+
+      return {
+        base64: processedBuffer.toString('base64'),
+        mimeType: 'image/jpeg',
+      };
+    } catch (err) {
+      this.logger.warn(`[InvoiceScan] Image preprocessing failed, using raw: ${err.message}`);
+      return {
+        base64: file.buffer.toString('base64'),
+        mimeType: file.mimetype,
+      };
+    }
+  }
+
+  private normalizeOcrResponse(parsed: any): InvoiceScanResult {
+    if (!parsed.supplier || !Array.isArray(parsed.line_items) || parsed.total == null) {
+      throw new Error('AI response missing required fields: supplier, line_items, or total');
+    }
+
+    return {
+      supplier: {
+        name: parsed.supplier?.name || 'Desconocido',
+        tax_id: parsed.supplier?.tax_id || undefined,
+        address: parsed.supplier?.address || undefined,
+        phone: parsed.supplier?.phone || undefined,
+      },
+      invoice_number: String(parsed.invoice_number || ''),
+      invoice_date: String(parsed.invoice_date || ''),
+      payment_terms: parsed.payment_terms || undefined,
+      line_items: (parsed.line_items || []).map((item: any) => ({
+        description: String(item.description || ''),
+        quantity: Number(item.quantity) || 0,
+        unit_price: Number(item.unit_price) || 0,
+        total: Number(item.total) || 0,
+        sku_if_visible: item.sku_if_visible || undefined,
+      })),
+      subtotal: Number(parsed.subtotal) || 0,
+      tax_amount: Number(parsed.tax_amount) || 0,
+      total: Number(parsed.total) || 0,
+      confidence: Number(parsed.confidence) || 0,
+    };
   }
 }
