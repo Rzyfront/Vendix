@@ -277,50 +277,56 @@ import {
       </div>
 
       <form [formGroup]="config_form" class="cfg-form">
-        <div class="cfg-grid">
-          @for (field of config_fields; track field.key) {
-            @if (field.enum_values) {
-              <div class="cfg-cell cfg-env-row">
-                <div class="cfg-env-select">
-                  <app-selector
-                    [label]="field.title"
-                    [options]="getEnumOptions(field.enum_values)"
-                    [formControlName]="field.key"
-                    [required]="field.required"
-                    size="sm">
-                  </app-selector>
-                </div>
-                @if (isWompiConfig() && config_form.value[field.key] === 'SANDBOX') {
-                  <div class="cfg-sandbox-badge">
-                    <app-icon name="flask-conical" [size]="13"></app-icon>
-                    Modo de pruebas activo
-                  </div>
-                }
-              </div>
-            } @else {
-              <div class="cfg-cell">
-                <app-input
-                  [label]="field.title"
-                  [type]="field.type === 'password' ? 'password' : 'text'"
-                  [placeholder]="field.title"
-                  [control]="config_form.get(field.key)!"
-                  [required]="field.required"
-                  [tooltipText]="isWompiConfig() ? wompiFieldHelp[field.key] || '' : ''"
-                  size="sm">
-                </app-input>
-              </div>
-            }
-          }
-        </div>
-
-        @if (getWompiKeyWarning()) {
-          <div class="cfg-warn">
-            <app-icon name="alert-triangle" [size]="13"></app-icon>
-            {{ getWompiKeyWarning() }}
-          </div>
-        }
-
         @if (isWompiConfig()) {
+          <!-- Wompi: explicit layout matching Pencil design -->
+          <div class="cfg-grid">
+            <!-- Row 1: Public Key + Private Key -->
+            <div class="cfg-cell">
+              <app-input label="Public Key" type="text" placeholder="pub_test_ o pub_prod_"
+                [control]="config_form.get('public_key')!" [required]="true" size="sm">
+              </app-input>
+            </div>
+            <div class="cfg-cell">
+              <app-input label="Private Key" type="password" placeholder="prv_test_ o prv_prod_"
+                [control]="config_form.get('private_key')!" [required]="true" size="sm">
+              </app-input>
+            </div>
+            <!-- Row 2: Events Secret + Integrity Secret -->
+            <div class="cfg-cell">
+              <app-input label="Events Secret" type="password" placeholder="Secret de eventos"
+                [control]="config_form.get('events_secret')!" [required]="true" size="sm">
+              </app-input>
+            </div>
+            <div class="cfg-cell">
+              <app-input label="Integrity Secret" type="password" placeholder="Secret de integridad"
+                [control]="config_form.get('integrity_secret')!" [required]="true" size="sm">
+              </app-input>
+            </div>
+            <!-- Row 3: Ambiente + Badge -->
+            <div class="cfg-cell">
+              <app-selector label="Ambiente"
+                [options]="[{value: 'SANDBOX', label: 'SANDBOX'}, {value: 'PRODUCTION', label: 'PRODUCTION'}]"
+                formControlName="environment" size="sm">
+              </app-selector>
+            </div>
+            <div class="cfg-cell cfg-badge-cell">
+              @if (config_form.value.environment === 'SANDBOX') {
+                <div class="cfg-sandbox-badge">
+                  <app-icon name="flask-conical" [size]="13"></app-icon>
+                  Modo de pruebas activo
+                </div>
+              }
+            </div>
+          </div>
+
+          @if (getWompiKeyWarning()) {
+            <div class="cfg-warn">
+              <app-icon name="alert-triangle" [size]="13"></app-icon>
+              {{ getWompiKeyWarning() }}
+            </div>
+          }
+
+          <!-- Webhook URL + Test Connection -->
           <div class="cfg-footer-row">
             <div class="cfg-webhook">
               <span class="cfg-wh-label">
@@ -350,6 +356,27 @@ import {
                 </span>
               }
             </div>
+          </div>
+        } @else {
+          <!-- Generic: other payment methods use dynamic grid -->
+          <div class="cfg-grid">
+            @for (field of config_fields; track field.key) {
+              @if (field.enum_values) {
+                <div class="cfg-cell" style="grid-column: 1 / -1">
+                  <app-selector [label]="field.title" [options]="getEnumOptions(field.enum_values)"
+                    [formControlName]="field.key" [required]="field.required" size="sm">
+                  </app-selector>
+                </div>
+              } @else {
+                <div class="cfg-cell">
+                  <app-input [label]="field.title"
+                    [type]="field.key.includes('secret') || field.key.includes('private') ? 'password' : 'text'"
+                    [placeholder]="field.title" [control]="config_form.get(field.key)!"
+                    [required]="field.required" size="sm">
+                  </app-input>
+                </div>
+              }
+            }
           </div>
         }
       </form>
@@ -389,20 +416,17 @@ import {
       }
       .cfg-cell { min-width: 0; }
 
-      /* Env row: 2 equal columns — select left, badge right */
-      .cfg-env-row {
-        grid-column: 1 / -1;
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-        align-items: end;
+      /* Badge cell: align to bottom so badge sits next to the select input */
+      .cfg-badge-cell {
+        display: flex;
+        align-items: flex-end;
       }
-      .cfg-env-select { min-width: 0; }
       .cfg-sandbox-badge {
         display: flex;
         align-items: center;
         justify-content: center;
         gap: 5px;
+        width: 100%;
         height: 34px;
         padding: 0 10px;
         border-radius: 7px;
