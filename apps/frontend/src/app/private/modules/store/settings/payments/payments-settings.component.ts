@@ -280,14 +280,22 @@ import {
         <div class="cfg-grid">
           @for (field of config_fields; track field.key) {
             @if (field.enum_values) {
-              <div class="cfg-cell cfg-env">
-                <app-selector
-                  [label]="field.title"
-                  [options]="getEnumOptions(field.enum_values)"
-                  [formControlName]="field.key"
-                  [required]="field.required"
-                  size="sm">
-                </app-selector>
+              <div class="cfg-cell cfg-env-row">
+                <div class="cfg-env-select">
+                  <app-selector
+                    [label]="field.title"
+                    [options]="getEnumOptions(field.enum_values)"
+                    [formControlName]="field.key"
+                    [required]="field.required"
+                    size="sm">
+                  </app-selector>
+                </div>
+                @if (isWompiConfig() && config_form.value[field.key] === 'SANDBOX') {
+                  <div class="cfg-sandbox-badge">
+                    <app-icon name="flask-conical" [size]="13"></app-icon>
+                    Modo de pruebas activo
+                  </div>
+                }
               </div>
             } @else {
               <div class="cfg-cell">
@@ -321,8 +329,9 @@ import {
               </span>
               <div class="cfg-wh-box">
                 <code>{{ wompiWebhookUrl }}</code>
-                <button type="button" (click)="copyWompiWebhookUrl()">
-                  <app-icon [name]="wompiUrlCopied ? 'check' : 'copy'" [size]="12"></app-icon>
+                <button type="button" class="cfg-copy-btn" (click)="copyWompiWebhookUrl()">
+                  <app-icon [name]="wompiUrlCopied ? 'check' : 'copy'" [size]="11"></app-icon>
+                  {{ wompiUrlCopied ? 'Copiado' : 'Copiar' }}
                 </button>
               </div>
               <span class="cfg-wh-hint">
@@ -331,6 +340,7 @@ import {
             </div>
             <div class="cfg-test">
               <app-button variant="outline" size="sm" [loading]="wompiTestLoading" (clicked)="testWompiConnection()">
+                <app-icon name="plug" [size]="13"></app-icon>
                 Probar
               </app-button>
               @if (wompiTestResult) {
@@ -368,10 +378,23 @@ import {
         gap: 0.375rem 0.5rem;
       }
       .cfg-cell { min-width: 0; }
-      .cfg-env { grid-column: 1 / -1; max-width: 50%; }
+      .cfg-env-row {
+        grid-column: 1 / -1;
+        display: flex; align-items: flex-end; gap: 0.5rem;
+      }
+      .cfg-env-select { flex: 1; min-width: 0; }
+      .cfg-sandbox-badge {
+        display: flex; align-items: center; gap: 0.3rem;
+        height: 2.125rem; /* match input height */
+        padding: 0 0.625rem;
+        border-radius: 0.4375rem;
+        background: #FEF3C7; border: 1px solid #FCD34D;
+        font-size: 0.6875rem; font-weight: 500; color: #92400E;
+        white-space: nowrap; flex-shrink: 0;
+      }
       @media (max-width: 480px) {
         .cfg-grid { grid-template-columns: 1fr; }
-        .cfg-env { max-width: 100%; }
+        .cfg-env-row { flex-direction: column; align-items: stretch; }
       }
 
       .cfg-warn {
@@ -407,11 +430,15 @@ import {
         flex: 1; font-size: 0.625rem; font-family: monospace;
         word-break: break-all; color: var(--color-text-primary); line-height: 1.2;
       }
-      .cfg-wh-box button {
-        flex-shrink: 0; background: none; border: none;
-        cursor: pointer; color: var(--color-text-muted); padding: 0.125rem;
+      .cfg-copy-btn {
+        flex-shrink: 0; display: flex; align-items: center; gap: 0.2rem;
+        background: #fff; border: 1px solid var(--color-border);
+        border-radius: 0.25rem; padding: 0.125rem 0.375rem;
+        cursor: pointer; color: var(--color-text-muted);
+        font-size: 0.625rem; font-family: inherit;
+        transition: all 0.15s;
       }
-      .cfg-wh-box button:hover { color: var(--color-text-primary); }
+      .cfg-copy-btn:hover { color: var(--color-text-primary); background: #f9fafb; }
 
       .cfg-wh-hint {
         display: block; font-size: 0.625rem;
