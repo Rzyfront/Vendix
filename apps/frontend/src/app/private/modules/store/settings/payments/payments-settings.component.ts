@@ -291,15 +291,43 @@ import {
                 </select>
               } @else {
                 <input [formControlName]="field.key"
-                       [type]="field.key.includes('secret') || field.key.includes('private') ? 'password' : 'text'"
+                       [type]="field.type === 'password' ? 'password' : 'text'"
                        [placeholder]="field.description || field.title"
                        class="w-full px-3 py-2 rounded-lg border text-sm"
                        style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary)"
                 />
               }
+              @if (isWompiConfig() && wompiFieldHelp[field.key]) {
+                <span class="field-help">{{ wompiFieldHelp[field.key] }}</span>
+              }
             </div>
           }
         </div>
+
+        @if (getWompiKeyWarning()) {
+          <div class="wompi-warning">
+            <app-icon name="alert-triangle" [size]="16"></app-icon>
+            <span>{{ getWompiKeyWarning() }}</span>
+          </div>
+        }
+
+        @if (isWompiConfig()) {
+          <div class="wompi-test-section">
+            <app-button
+              label="Probar Conexión"
+              variant="outline"
+              size="sm"
+              [loading]="wompiTestLoading"
+              (clicked)="testWompiConnection()">
+            </app-button>
+            @if (wompiTestResult) {
+              <div class="wompi-test-result" [class.success]="wompiTestResult.success" [class.error]="!wompiTestResult.success">
+                <app-icon [name]="wompiTestResult.success ? 'check-circle' : 'x-circle'" [size]="16"></app-icon>
+                <span>{{ wompiTestResult.message }}</span>
+              </div>
+            }
+          </div>
+        }
       </form>
 
       <div slot="footer" class="flex justify-end gap-3">
@@ -315,6 +343,50 @@ import {
       :host {
         display: block;
         width: 100%;
+      }
+
+      .field-help {
+        display: block;
+        font-size: 0.75rem;
+        color: var(--text-tertiary);
+        margin-top: 0.25rem;
+        line-height: 1.4;
+      }
+
+      .wompi-warning {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem;
+        background: color-mix(in srgb, var(--warning) 10%, transparent);
+        border: 1px solid var(--warning);
+        border-radius: 0.5rem;
+        font-size: 0.8125rem;
+        color: var(--warning);
+        margin-top: 0.75rem;
+      }
+
+      .wompi-test-section {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-top: 1rem;
+        flex-wrap: wrap;
+      }
+
+      .wompi-test-result {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        font-size: 0.8125rem;
+      }
+
+      .wompi-test-result.success {
+        color: var(--success);
+      }
+
+      .wompi-test-result.error {
+        color: var(--danger);
       }
     `,
   ],
@@ -340,6 +412,17 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
   config_form: FormGroup = new FormGroup({});
   config_fields: Array<{ key: string; title: string; type: string; required: boolean; description: string; enum_values?: string[]; default_value?: any }> = [];
   config_saving = signal(false);
+
+  // Wompi UX enhancements
+  readonly wompiFieldHelp: Record<string, string> = {
+    public_key: 'Se encuentra en tu dashboard de Wompi > Desarrolladores > Llaves del API',
+    private_key: 'Se encuentra en tu dashboard de Wompi > Desarrolladores > Llaves del API. Nunca se comparte con el frontend.',
+    events_secret: 'Se encuentra en tu dashboard de Wompi > Desarrolladores > Secretos para integración técnica > Eventos',
+    integrity_secret: 'Se encuentra en tu dashboard de Wompi > Desarrolladores > Secretos para integración técnica > Integridad',
+    environment: 'Usa SANDBOX para pruebas con llaves pub_test_/prv_test_. Usa PRODUCTION para pagos reales con llaves pub_prod_/prv_prod_.',
+  };
+  wompiTestLoading = false;
+  wompiTestResult: { success: boolean; message: string } | null = null;
 
   // UI State
   search_term = signal('');
@@ -717,7 +800,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
       this.config_fields.push({
         key,
         title: prop.title || key.replace(/_/g, ' '),
-        type: prop.type || 'string',
+        type: prop.format === 'password' ? 'password' : (prop.type || 'string'),
         required: is_required,
         description: prop.description || '',
         enum_values: prop.enum,
@@ -768,6 +851,55 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     this.show_config_modal.set(false);
     this.config_method = null;
     this.config_fields = [];
+    this.wompiTestResult = null;
+  }
+
+  isWompiConfig(): boolean {
+    return this.config_method?.provider === 'wompi' || (this.config_method?.type as string) === 'wompi';
+  }
+
+  getWompiKeyWarning(): string | null {
+    if (!this.config_form || !this.isWompiConfig()) return null;
+
+    const env = this.config_form.value.environment || 'SANDBOX';
+    const pubKey = this.config_form.value.public_key || '';
+    const prvKey = this.config_form.value.private_key || '';
+
+    if (env === 'SANDBOX') {
+      if (pubKey && !pubKey.startsWith('pub_test_')) return 'La llave pública debe iniciar con pub_test_ para el ambiente SANDBOX';
+      if (prvKey && !prvKey.startsWith('prv_test_')) return 'La llave privada debe iniciar con prv_test_ para el ambiente SANDBOX';
+    } else if (env === 'PRODUCTION') {
+      if (pubKey && !pubKey.startsWith('pub_prod_')) return 'La llave pública debe iniciar con pub_prod_ para el ambiente PRODUCTION';
+      if (prvKey && !prvKey.startsWith('prv_prod_')) return 'La llave privada debe iniciar con prv_prod_ para el ambiente PRODUCTION';
+    }
+
+    return null;
+  }
+
+  testWompiConnection(): void {
+    if (!this.config_method) return;
+    this.wompiTestLoading = true;
+    this.wompiTestResult = null;
+
+    this.payment_methods_service
+      .testPaymentMethodConfiguration(this.config_method.id, this.config_form.value)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (res) => {
+          this.wompiTestLoading = false;
+          this.wompiTestResult = {
+            success: res.success,
+            message: res.message || (res.success ? 'Conexión exitosa con Wompi' : 'Error de conexión'),
+          };
+        },
+        error: (err) => {
+          this.wompiTestLoading = false;
+          this.wompiTestResult = {
+            success: false,
+            message: err?.message || 'Error al probar la conexión',
+          };
+        },
+      });
   }
 
   toggleMethod(method: CombinedPaymentMethod): void {

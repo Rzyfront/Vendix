@@ -28,6 +28,7 @@ import { SettingsService } from '../settings/settings.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
+import { PaymentEncryptionService } from './services/payment-encryption.service';
 
 @Injectable()
 export class PaymentsService {
@@ -43,6 +44,7 @@ export class PaymentsService {
     private readonly promotionEngine: PromotionEngineService,
     private readonly sessionsService: SessionsService,
     private readonly movementsService: MovementsService,
+    private readonly paymentEncryption: PaymentEncryptionService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -968,6 +970,12 @@ export class PaymentsService {
     const digitalMethods = ['wompi', 'wallet'];
 
     if (digitalMethods.includes(methodType)) {
+      // Decrypt credentials before passing to gateway processor
+      const decryptedConfig = this.paymentEncryption.decryptConfig(
+        (paymentMethod.custom_config || {}) as Record<string, any>,
+        methodType,
+      );
+
       // Delegate to PaymentGateway for async/digital methods
       const gatewayResult = await this.paymentGateway.processPayment({
         orderId: order.id,
@@ -978,7 +986,7 @@ export class PaymentsService {
         storeId: dto.store_id,
         metadata: {
           paymentMethod: dto.wompi_payment_method,
-          wompiConfig: paymentMethod.custom_config,
+          wompiConfig: decryptedConfig,
           walletId: dto.wallet_id,
           customerEmail: dto.customer_email,
           is_pos_payment: true,

@@ -4,6 +4,8 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import {
@@ -11,10 +13,15 @@ import {
   UpdateStorePaymentMethodDto,
   ReorderPaymentMethodsDto,
 } from '../dto';
+import { PaymentEncryptionService } from './payment-encryption.service';
+import { CONFIG_VALIDATORS } from '../validators';
 
 @Injectable()
 export class StorePaymentMethodsService {
-  constructor(private prisma: StorePrismaService) { }
+  constructor(
+    private prisma: StorePrismaService,
+    private paymentEncryption: PaymentEncryptionService,
+  ) { }
 
   /**
    * Get available payment methods for a store to enable
@@ -46,18 +53,30 @@ export class StorePaymentMethodsService {
 
   /**
    * Get enabled payment methods for a store
+   * Masks sensitive fields in custom_config before returning
    */
   async getEnabledForStore() {
-    return this.prisma.store_payment_methods.findMany({
+    const methods = await this.prisma.store_payment_methods.findMany({
       include: {
         system_payment_method: true,
       },
       orderBy: { display_order: 'asc' },
     });
+
+    return methods.map((method) => ({
+      ...method,
+      custom_config: method.custom_config
+        ? this.paymentEncryption.maskConfig(
+            method.custom_config as Record<string, any>,
+            method.system_payment_method?.type || '',
+          )
+        : method.custom_config,
+    }));
   }
 
   /**
    * Get single store payment method
+   * Masks sensitive fields in custom_config before returning
    */
   async findOne(method_id: number) {
     if (!method_id || isNaN(method_id)) {
@@ -77,7 +96,36 @@ export class StorePaymentMethodsService {
       throw new NotFoundException('Payment method not found for this store');
     }
 
-    return method;
+    return {
+      ...method,
+      custom_config: method.custom_config
+        ? this.paymentEncryption.maskConfig(
+            method.custom_config as Record<string, any>,
+            method.system_payment_method?.type || '',
+          )
+        : method.custom_config,
+    };
+  }
+
+  /**
+   * Get decrypted custom_config for internal use (gateway processing, webhooks).
+   * NEVER expose this directly to API responses.
+   */
+  async getDecryptedConfig(
+    storePaymentMethodId: number,
+  ): Promise<Record<string, any>> {
+    const method = await this.prisma.store_payment_methods.findUnique({
+      where: { id: storePaymentMethodId },
+      include: { system_payment_method: true },
+    });
+
+    if (!method?.custom_config) return {};
+
+    const providerType = method.system_payment_method?.type || '';
+    return this.paymentEncryption.decryptConfig(
+      method.custom_config as Record<string, any>,
+      providerType,
+    );
   }
 
   /**
@@ -104,6 +152,8 @@ export class StorePaymentMethodsService {
       throw new BadRequestException('System payment method not available');
     }
 
+    const providerType = system_method.type;
+
     // Check if already enabled (use base client to bypass store filtering)
     const base_client = this.prisma.withoutScope();
     const existing = await base_client.store_payment_methods.findFirst({
@@ -115,13 +165,18 @@ export class StorePaymentMethodsService {
 
     if (existing) {
       if (existing.state !== 'enabled') {
+        // Encrypt custom_config if provided
+        const encryptedConfig = enable_dto.custom_config
+          ? this.paymentEncryption.encryptConfig(enable_dto.custom_config, providerType)
+          : undefined;
+
         return base_client.store_payment_methods.update({
           where: { id: existing.id },
           data: {
             state: 'enabled',
             // Update config if provided, otherwise keep existing
             ...(enable_dto.display_name && { display_name: enable_dto.display_name }),
-            ...(enable_dto.custom_config && { custom_config: enable_dto.custom_config }),
+            ...(encryptedConfig && { custom_config: encryptedConfig }),
           },
           include: {
             system_payment_method: true,
@@ -141,17 +196,22 @@ export class StorePaymentMethodsService {
       );
     }
 
-    // TODO: Validate configuration against schema if exists
-    // if (system_method.config_schema && enable_dto.custom_config) {
-    //   validateJsonSchema(enable_dto.custom_config, system_method.config_schema);
-    // }
+    // Validate configuration against provider-specific validator
+    if (enable_dto.custom_config) {
+      this.validateConfig(providerType, enable_dto.custom_config);
+    }
+
+    // Encrypt sensitive fields in custom_config before storing
+    const configToStore = enable_dto.custom_config
+      ? this.paymentEncryption.encryptConfig(enable_dto.custom_config, providerType)
+      : (system_method.default_config ?? undefined);
 
     return base_client.store_payment_methods.create({
       data: {
         store_id: store_id,
         system_payment_method_id: system_payment_method_id,
         display_name: enable_dto.display_name || system_method.display_name,
-        custom_config: enable_dto.custom_config || system_method.default_config,
+        custom_config: configToStore,
         state: 'enabled',
         display_order: enable_dto.display_order || 0,
         min_amount: enable_dto.min_amount,
@@ -183,14 +243,25 @@ export class StorePaymentMethodsService {
       throw new NotFoundException('Payment method not found for this store');
     }
 
-    // TODO: Validate configuration if provided
-    // if (update_dto.custom_config && method.system_payment_method.config_schema) {
-    //   validateJsonSchema(update_dto.custom_config, method.system_payment_method.config_schema);
-    // }
+    // Validate configuration against provider-specific validator
+    if (update_dto.custom_config) {
+      const providerType = method.system_payment_method?.type || '';
+      this.validateConfig(providerType, update_dto.custom_config as Record<string, any>);
+    }
+
+    // Encrypt sensitive fields in custom_config before storing
+    const dataToUpdate = { ...update_dto };
+    if (dataToUpdate.custom_config) {
+      const providerType = method.system_payment_method?.type || '';
+      dataToUpdate.custom_config = this.paymentEncryption.encryptConfig(
+        dataToUpdate.custom_config as Record<string, any>,
+        providerType,
+      );
+    }
 
     return this.prisma.store_payment_methods.update({
       where: { id: store_payment_method_id },
-      data: update_dto,
+      data: dataToUpdate,
       include: {
         system_payment_method: true,
       },
@@ -377,5 +448,24 @@ export class StorePaymentMethodsService {
       failed_transactions: failed_transactions,
       total_revenue: parseFloat(payment_stats._sum.amount?.toString() || '0'),
     };
+  }
+
+  /**
+   * Validate custom_config against provider-specific validator (if one exists).
+   * Throws BadRequestException with detailed messages on validation failure.
+   */
+  private validateConfig(providerType: string, config: Record<string, any>): void {
+    const ValidatorClass = CONFIG_VALIDATORS[providerType];
+    if (!ValidatorClass) return; // No validator for this type, skip
+
+    const instance = plainToInstance(ValidatorClass, config);
+    const errors = validateSync(instance, { whitelist: false, forbidNonWhitelisted: false });
+
+    if (errors.length > 0) {
+      const messages = errors
+        .map((e) => Object.values(e.constraints || {}).join(', '))
+        .join('; ');
+      throw new BadRequestException(`Configuración inválida: ${messages}`);
+    }
   }
 }

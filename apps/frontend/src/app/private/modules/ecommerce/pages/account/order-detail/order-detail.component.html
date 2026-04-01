@@ -5,6 +5,17 @@
         Mis pedidos
     </a>
 
+    <!-- Wompi Payment Verifying Banner -->
+    @if (verifyingWompiPayment && order) {
+    <div class="wompi-verifying-banner">
+        <div class="spinner-small"></div>
+        <div class="verifying-text">
+            <h2>Verificando tu pago...</h2>
+            <p>Estamos confirmando tu pago con Wompi. Esto puede tomar unos momentos.</p>
+        </div>
+    </div>
+    }
+
     <!-- Success Banner -->
     @if (is_new_order && order) {
     <div class="success-banner">

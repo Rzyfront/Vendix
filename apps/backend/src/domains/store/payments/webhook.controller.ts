@@ -4,15 +4,22 @@ import {
   Body,
   Headers,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { WebhookHandlerService } from './services/webhook-handler.service';
+import { WompiWebhookValidatorService } from './services/wompi-webhook-validator.service';
 import { WebhookEvent } from './interfaces';
 
 @ApiTags('Webhooks')
 @Controller('store/webhooks')
 export class WebhookController {
-  constructor(private readonly webhookHandler: WebhookHandlerService) {}
+  private readonly logger = new Logger(WebhookController.name);
+
+  constructor(
+    private readonly webhookHandler: WebhookHandlerService,
+    private readonly wompiWebhookValidator: WompiWebhookValidatorService,
+  ) {}
 
   @Post('stripe')
   @ApiOperation({ summary: 'Handle Stripe webhooks' })
@@ -88,17 +95,32 @@ export class WebhookController {
   @ApiResponse({ status: 200, description: 'Webhook processed successfully' })
   async handleWompiWebhook(@Body() body: any) {
     try {
+      // Validate webhook signature using store-specific credentials
+      const { valid, storeId } =
+        await this.wompiWebhookValidator.validate(body);
+
+      if (!valid) {
+        this.logger.warn(
+          `Rejected Wompi webhook — invalid signature (storeId: ${storeId ?? 'unknown'})`,
+        );
+        // Wompi requires 200 response; returning received: true prevents retries
+        return { received: true };
+      }
+
       const event: WebhookEvent = {
         processor: 'wompi',
         eventType: body.event || 'transaction.updated',
         data: body.data,
         rawBody: JSON.stringify(body),
+        storeId: storeId ?? undefined,
       };
 
       await this.webhookHandler.handleWebhook(event);
       return { received: true };
     } catch (error) {
-      throw new BadRequestException(error.message);
+      this.logger.error(`Wompi webhook processing error: ${error.message}`);
+      // Always return 200 to Wompi to prevent infinite retries
+      return { received: true };
     }
   }
 }

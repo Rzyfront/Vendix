@@ -40,8 +40,8 @@ export class WompiProcessor extends BasePaymentProcessor {
         return this.simulateTestPayment(paymentData, transactionId);
       }
 
-      // Obtener acceptance token
-      const acceptanceToken = await this.client.getAcceptanceToken();
+      // Obtener acceptance tokens
+      const { acceptance_token: acceptanceToken, personal_auth_token } = await this.client.getAcceptanceTokens();
 
       // Construir payment method data desde metadata
       const paymentMethodData = paymentData.metadata?.paymentMethod as WompiPaymentMethodData;
@@ -55,14 +55,22 @@ export class WompiProcessor extends BasePaymentProcessor {
 
       const reference = `vendix_${paymentData.storeId}_${paymentData.orderId}_${Date.now()}`;
 
+      const integritySignature = this.client.generateIntegritySignature(
+        reference,
+        this.formatAmount(paymentData.amount),
+        paymentData.currency || 'COP',
+      );
+
       const request: WompiCreateTransactionRequest = {
         acceptance_token: acceptanceToken,
+        accept_personal_auth: personal_auth_token,
         amount_in_cents: this.formatAmount(paymentData.amount),
         currency: paymentData.currency || 'COP',
         customer_email: paymentData.metadata?.customerEmail || '',
         reference,
         payment_method: paymentMethodData,
         redirect_url: paymentData.returnUrl,
+        signature: { integrity: integritySignature },
       };
 
       const response = await this.client.createTransaction(request);
@@ -74,7 +82,14 @@ export class WompiProcessor extends BasePaymentProcessor {
         status: this.mapWompiStatus(txn.status),
         message: txn.status_message || `Wompi transaction ${txn.status}`,
         gatewayResponse: txn,
-        nextAction: this.resolveNextAction(paymentMethodData.type, txn),
+        nextAction: {
+          ...this.resolveNextAction(paymentMethodData.type, txn)!,
+          data: {
+            reference,
+            integritySignature,
+            publicKey: wompiConfig.public_key,
+          },
+        },
       };
     } catch (error) {
       return this.handleError(error, 'processPayment');
@@ -218,6 +233,18 @@ export class WompiProcessor extends BasePaymentProcessor {
         return txn.status === WompiTransactionStatus.PENDING
           ? { type: '3ds', url: txn.redirect_url }
           : { type: 'none' };
+
+      case 'BANCOLOMBIA_QR':
+      case 'DAVIPLATA':
+        return { type: 'await' };
+
+      case 'BANCOLOMBIA_BNPL':
+      case 'SU_PLUS':
+      case 'PCOL':
+        return { type: 'redirect', url: txn.redirect_url };
+
+      case 'BANCOLOMBIA_COLLECT':
+        return { type: 'await' };
 
       default:
         return { type: 'none' };
