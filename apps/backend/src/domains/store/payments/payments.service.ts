@@ -704,6 +704,16 @@ export class PaymentsService {
         } catch (err) {
           this.logger.error(`Digital payment processing failed: ${err.message}`, err.stack);
           result.payment = { success: false, message: err.message };
+
+          // Revert order status to 'created' so it can be retried or cancelled
+          try {
+            await this.prisma.orders.update({
+              where: { id: result.order.id },
+              data: { state: 'created', updated_at: new Date() },
+            });
+          } catch (revertErr) {
+            this.logger.error(`Failed to revert order state: ${revertErr.message}`);
+          }
         }
         delete result._digitalPaymentPending;
       }

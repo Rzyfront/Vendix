@@ -2607,7 +2607,7 @@ export class PosPaymentInterfaceComponent
     this.wompiAwaitingPayment = false;
     this.wompiAwaitingMessage = '';
     this.nequiPhoneControl.reset();
-    this.pseForm.reset({ userType: 0, userLegalIdType: 'CC' });
+    this.pseForm.reset({ userType: 0, userLegalIdType: 'CC', userLegalId: '', financialInstitutionCode: '', paymentDescription: '' });
     this.wompiPollingSubscription?.unsubscribe();
     this.wompiPollingSubscription = null;
     this.wompiPaymentId = null;
@@ -2625,7 +2625,13 @@ export class PosPaymentInterfaceComponent
     switch (nextAction.type) {
       case 'redirect':
         if (nextAction.url) {
-          window.open(nextAction.url, '_blank');
+          const popup = window.open(nextAction.url, '_blank');
+          if (!popup) {
+            this.wompiAwaitingMessage =
+              'No se pudo abrir la ventana del banco. Por favor habilita las ventanas emergentes e intenta de nuevo.';
+            this.wompiAwaitingPayment = true;
+            return;
+          }
         }
         this.wompiAwaitingPayment = true;
         this.wompiAwaitingMessage =
@@ -2642,7 +2648,13 @@ export class PosPaymentInterfaceComponent
         break;
       case '3ds':
         if (nextAction.url) {
-          window.open(nextAction.url, '_blank');
+          const popup3ds = window.open(nextAction.url, '_blank');
+          if (!popup3ds) {
+            this.wompiAwaitingMessage =
+              'No se pudo abrir la ventana del banco. Por favor habilita las ventanas emergentes e intenta de nuevo.';
+            this.wompiAwaitingPayment = true;
+            return;
+          }
         }
         this.wompiAwaitingPayment = true;
         this.wompiAwaitingMessage =
@@ -2690,9 +2702,14 @@ export class PosPaymentInterfaceComponent
         },
         error: () => {
           this.wompiAwaitingPayment = false;
-          this.wompiAwaitingMessage =
-            'Error al verificar el estado del pago.';
+          this.wompiAwaitingMessage = '';
           this.paymentState.isProcessing = false;
+          this.toastService.show({
+            variant: 'error',
+            title: 'Error de verificación',
+            description:
+              'No se pudo verificar el estado del pago. Intenta de nuevo.',
+          });
         },
       });
   }

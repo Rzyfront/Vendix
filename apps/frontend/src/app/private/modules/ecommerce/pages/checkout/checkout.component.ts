@@ -720,9 +720,15 @@ export class CheckoutComponent implements OnInit, OnDestroy {
             // PENDING — redirect to order detail for status check
             this.router.navigate(['/account/orders', orderId], { queryParams: { wompi_callback: true } });
           }
+        } else {
+          // User closed widget without paying
+          this.toast.warning('El pago fue cancelado. Tu pedido está pendiente de pago.', 'Pago cancelado');
         }
       });
     } catch (error) {
+      this.wompiWidgetLoading = false;
+      this.is_submitting = false;
+      this.cdr.markForCheck();
       console.error('Failed to open Wompi widget:', error);
       this.toast.error('No se pudo abrir el widget de pago. Intenta de nuevo.', 'Error');
     }
