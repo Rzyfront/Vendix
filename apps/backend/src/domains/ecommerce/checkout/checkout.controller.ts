@@ -34,6 +34,14 @@ export class CheckoutController {
         return { success: true, data };
     }
 
+    @Post('prepare-wompi')
+    async prepareWompiPayment(
+        @Body() dto: { order_id: number; amount: number; currency?: string; customer_email?: string; redirect_url?: string },
+    ) {
+        const data = await this.checkout_service.prepareWompiPayment(dto);
+        return { success: true, data };
+    }
+
     @OptionalAuth()
     @Post('whatsapp')
     async whatsappCheckout(@Body() dto: WhatsappCheckoutDto) {

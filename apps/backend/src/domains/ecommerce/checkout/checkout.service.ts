@@ -11,7 +11,11 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../../store/settings/settings.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../../store/inventory/shared/services/stock-level-manager.service';
-import { Logger } from '@nestjs/common';
+import { Logger, BadRequestException } from '@nestjs/common';
+import { WompiClient } from '../../store/payments/processors/wompi/wompi.client';
+import { WompiEnvironment } from '../../store/payments/processors/wompi/wompi.types';
+import { PaymentEncryptionService } from '../../store/payments/services/payment-encryption.service';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class CheckoutService {
@@ -25,6 +29,8 @@ export class CheckoutService {
     private readonly eventEmitter: EventEmitter2,
     private readonly settingsService: SettingsService,
     private readonly stockLevelManager: StockLevelManager,
+    private readonly wompiClient: WompiClient,
+    private readonly paymentEncryption: PaymentEncryptionService,
   ) {}
 
   async getPaymentMethods(shippingMethodType?: string) {
@@ -780,5 +786,68 @@ export class CheckoutService {
 
     const sequence = String(count + 1).padStart(4, '0');
     return `${store_code}-${date_str}-${sequence}`;
+  }
+
+  /**
+   * Prepare Wompi payment data for the frontend Widget.
+   * This endpoint is accessible from eCommerce context (customer JWT + x-store-id header).
+   */
+  async prepareWompiPayment(dto: {
+    order_id: number;
+    amount: number;
+    currency?: string;
+    customer_email?: string;
+    redirect_url?: string;
+  }) {
+    // Find Wompi payment method for this store
+    const wompiMethod = await this.store_prisma.store_payment_methods.findFirst({
+      where: {
+        state: 'enabled',
+        system_payment_method: { type: 'wompi' },
+      },
+      include: { system_payment_method: true },
+    });
+
+    if (!wompiMethod?.custom_config) {
+      throw new BadRequestException('Wompi no está configurado para esta tienda');
+    }
+
+    const config = this.paymentEncryption.decryptConfig(
+      wompiMethod.custom_config as Record<string, any>,
+      'wompi',
+    );
+
+    this.wompiClient.configure({
+      public_key: config.public_key,
+      private_key: config.private_key,
+      events_secret: config.events_secret || '',
+      integrity_secret: config.integrity_secret || '',
+      environment: (config.environment as WompiEnvironment) || WompiEnvironment.SANDBOX,
+    });
+
+    const storeId = RequestContextService.getStoreId();
+    const reference = `vendix_${storeId}_${dto.order_id}_${Date.now()}`;
+    const amountInCents = Math.round(dto.amount * 100);
+    const currency = dto.currency || 'COP';
+
+    const integritySignature = this.wompiClient.generateIntegritySignature(
+      reference,
+      amountInCents,
+      currency,
+    );
+
+    const tokens = await this.wompiClient.getAcceptanceTokens();
+
+    return {
+      public_key: config.public_key,
+      currency,
+      amount_in_cents: amountInCents,
+      reference,
+      signature_integrity: integritySignature,
+      redirect_url: dto.redirect_url || '',
+      acceptance_token: tokens.acceptance_token,
+      accept_personal_auth: tokens.personal_auth_token,
+      customer_email: dto.customer_email || '',
+    };
   }
 }

@@ -133,7 +133,7 @@ export class CheckoutService {
         redirectUrl?: string,
     ): Observable<{ success: boolean; data: WompiWidgetConfig }> {
         return this.http.post<{ success: boolean; data: WompiWidgetConfig }>(
-            `${environment.apiUrl}/store/payments/wompi/prepare`,
+            `${this.api_url}/prepare-wompi`,
             {
                 order_id: orderId,
                 amount,
