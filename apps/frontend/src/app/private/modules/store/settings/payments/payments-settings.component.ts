@@ -1064,7 +1064,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     this.http
       .post<{ success: boolean; message?: string; environment?: string }>(
         `${environment.apiUrl}/store/payments/wompi/test-connection`,
-        {},
+        this.config_form.value,
       )
       .pipe(takeUntil(this.destroy$))
       .subscribe({
