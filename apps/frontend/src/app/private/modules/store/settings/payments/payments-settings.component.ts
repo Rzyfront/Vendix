@@ -327,35 +327,37 @@ import {
           }
 
           <!-- Webhook URL + Test Connection -->
-          <div class="cfg-footer-row">
-            <div class="cfg-webhook">
-              <span class="cfg-wh-label">
-                <app-icon name="webhook" [size]="13"></app-icon>
-                URL de Eventos
-              </span>
-              <div class="cfg-wh-box">
-                <code>{{ wompiWebhookUrl }}</code>
-                <button type="button" class="cfg-copy-btn" (click)="copyWompiWebhookUrl()">
-                  <app-icon [name]="wompiUrlCopied ? 'check' : 'copy'" [size]="11"></app-icon>
-                  {{ wompiUrlCopied ? 'Copiado' : 'Copiar' }}
-                </button>
-              </div>
-              <span class="cfg-wh-hint">
-                Pega en <a href="https://comercios.wompi.co" target="_blank">comercios.wompi.co</a> > Config. avanzadas > Seguimiento
-              </span>
-            </div>
-            <div class="cfg-test">
-              <app-button variant="outline" size="sm" [loading]="wompiTestLoading" (clicked)="testWompiConnection()">
-                <app-icon name="plug" [size]="13" slot="icon"></app-icon>
-                Probar
-              </app-button>
-              @if (wompiTestResult) {
-                <span class="cfg-test-msg" [class.ok]="wompiTestResult.success" [class.fail]="!wompiTestResult.success">
-                  <app-icon [name]="wompiTestResult.success ? 'check-circle' : 'x-circle'" [size]="13"></app-icon>
-                  {{ wompiTestResult.message }}
+          <div class="cfg-footer-section">
+            <div class="cfg-footer-row">
+              <div class="cfg-webhook">
+                <span class="cfg-wh-label">
+                  <app-icon name="webhook" [size]="13"></app-icon>
+                  URL de Eventos
                 </span>
-              }
+                <div class="cfg-wh-box">
+                  <code>{{ wompiWebhookUrl }}</code>
+                  <button type="button" class="cfg-copy-btn" (click)="copyWompiWebhookUrl()">
+                    <app-icon [name]="wompiUrlCopied ? 'check' : 'copy'" [size]="11"></app-icon>
+                    {{ wompiUrlCopied ? 'Copiado' : 'Copiar' }}
+                  </button>
+                </div>
+                <span class="cfg-wh-hint">
+                  Pega en <a href="https://comercios.wompi.co" target="_blank">comercios.wompi.co</a> > Config. avanzadas > Seguimiento
+                </span>
+              </div>
+              <div class="cfg-test-btn">
+                <app-button variant="outline" size="sm" [loading]="wompiTestLoading" (clicked)="testWompiConnection()">
+                  <app-icon name="plug" [size]="13" slot="icon"></app-icon>
+                  Probar
+                </app-button>
+              </div>
             </div>
+            @if (wompiTestResult) {
+              <div class="cfg-test-msg" [class.ok]="wompiTestResult.success" [class.fail]="!wompiTestResult.success">
+                <app-icon [name]="wompiTestResult.success ? 'check-circle' : 'x-circle'" [size]="13"></app-icon>
+                {{ wompiTestResult.message }}
+              </div>
+            }
           </div>
         } @else {
           <!-- Generic: other payment methods use dynamic grid -->
@@ -457,12 +459,17 @@ import {
       }
 
       /* Webhook + Test section below divider */
+      .cfg-footer-section {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding-top: 10px;
+        border-top: 1px solid var(--color-border);
+      }
       .cfg-footer-row {
         display: flex;
         align-items: center;
         gap: 10px;
-        padding-top: 10px;
-        border-top: 1px solid var(--color-border);
       }
       @media (max-width: 480px) {
         .cfg-footer-row { flex-direction: column; align-items: stretch; }
@@ -534,19 +541,16 @@ import {
       .cfg-wh-hint a:hover { text-decoration: underline; }
 
       /* Test connection */
-      .cfg-test {
+      .cfg-test-btn {
         flex-shrink: 0;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 4px;
       }
       .cfg-test-msg {
         display: flex;
-        align-items: center;
-        gap: 3px;
+        align-items: flex-start;
+        gap: 4px;
         font-size: 11px;
-        white-space: nowrap;
+        line-height: 1.4;
+        word-break: break-word;
       }
       .cfg-test-msg.ok { color: var(--success); }
       .cfg-test-msg.fail { color: var(--danger); }
