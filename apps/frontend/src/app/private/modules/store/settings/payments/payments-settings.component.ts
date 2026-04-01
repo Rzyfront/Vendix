@@ -1,4 +1,5 @@
 import { Component, OnInit, OnDestroy, signal, computed, inject } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../../../environments/environment';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
@@ -341,11 +342,11 @@ import {
 
           <div class="wompi-test-section">
             <app-button
-              label="Probar Conexión"
               variant="outline"
               size="sm"
               [loading]="wompiTestLoading"
               (clicked)="testWompiConnection()">
+              Probar Conexión
             </app-button>
             @if (wompiTestResult) {
               <div class="wompi-test-result" [class.success]="wompiTestResult.success" [class.error]="!wompiTestResult.success">
@@ -995,13 +996,17 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     });
   }
 
+  private readonly http = inject(HttpClient);
+
   testWompiConnection(): void {
-    if (!this.config_method) return;
     this.wompiTestLoading = true;
     this.wompiTestResult = null;
 
-    this.payment_methods_service
-      .testPaymentMethodConfiguration(this.config_method.id, this.config_form.value)
+    this.http
+      .post<{ success: boolean; message?: string; environment?: string }>(
+        `${environment.apiUrl}/store/payments/wompi/test-connection`,
+        {},
+      )
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (res) => {
@@ -1013,9 +1018,10 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
         },
         error: (err) => {
           this.wompiTestLoading = false;
+          const msg = err?.error?.message || err?.statusText || 'Error al probar la conexión';
           this.wompiTestResult = {
             success: false,
-            message: err?.message || 'Error al probar la conexión',
+            message: typeof msg === 'string' ? msg : 'Error al probar la conexión',
           };
         },
       });
