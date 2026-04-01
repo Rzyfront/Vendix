@@ -92,9 +92,43 @@ export class CheckoutService {
       },
     });
 
-    if (!cart || cart.cart_items.length === 0) {
+    // Fallback: if backend cart is empty but frontend sent items, build from DTO
+    // This handles the case where localStorage cart was never synced to backend
+    let cart_items = cart?.cart_items || [];
+
+    if (cart_items.length === 0 && dto.items && dto.items.length > 0) {
+      cart_items = await Promise.all(
+        dto.items.map(async (item) => {
+          const product = await this.prisma.products.findUnique({
+            where: { id: item.product_id },
+          });
+          if (!product) {
+            throw new VendixHttpException(ErrorCodes.ECOM_PRODUCT_001);
+          }
+
+          let product_variant = null;
+          if (item.product_variant_id) {
+            product_variant = await this.prisma.product_variants.findUnique({
+              where: { id: item.product_variant_id },
+            });
+          }
+
+          return {
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id || null,
+            quantity: item.quantity,
+            product,
+            product_variant,
+          } as any;
+        }),
+      );
+    }
+
+    if (cart_items.length === 0) {
       throw new VendixHttpException(ErrorCodes.ECOM_CART_001);
     }
+
+    const cart_currency = cart?.currency || await this.settingsService.getStoreCurrency();
 
     // store_id se aplica automáticamente
     const payment_method = await this.prisma.store_payment_methods.findFirst({
@@ -109,7 +143,7 @@ export class CheckoutService {
       throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_002);
     }
 
-    for (const item of cart.cart_items) {
+    for (const item of cart_items) {
       // Validate: if product has variants, a variant must be selected
       const productVariantCount = await this.prisma.product_variants.count({
         where: { product_id: item.product_id },
@@ -229,7 +263,7 @@ export class CheckoutService {
     const order_number = await this.generateOrderNumber();
 
     const itemsWithTaxes = await Promise.all(
-      cart.cart_items.map(async (item) => {
+      cart_items.map(async (item) => {
         const productWithTaxes = await this.prisma.products.findUnique({
           where: { id: item.product_id },
           include: {
@@ -298,7 +332,7 @@ export class CheckoutService {
       data: {
         order_number,
         channel: 'ecommerce', // Ecommerce orders are assigned 'ecommerce' channel
-        currency: cart.currency,
+        currency: cart_currency,
         subtotal_amount: subtotal,
         tax_amount: total_tax,
         shipping_cost: shipping_cost,
@@ -356,13 +390,13 @@ export class CheckoutService {
       data: {
         order_id: order.id,
         amount: grand_total,
-        currency: cart.currency,
+        currency: cart_currency,
         state: 'pending',
         store_payment_method_id: dto.payment_method_id,
       },
     });
 
-    for (const item of cart.cart_items) {
+    for (const item of cart_items) {
       if (!item.product.track_inventory) continue;
       try {
         const location_id = await this.stockLevelManager.getDefaultLocationForProduct(

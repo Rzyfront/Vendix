@@ -594,6 +594,12 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       ...(this.cartHasBookableServices && this.bookingSelections.size > 0 ? {
         bookings: Array.from(this.bookingSelections.values()),
       } : {}),
+      // Always send cart items as fallback (in case backend cart is empty/not synced)
+      items: this.cart?.items?.map((item: CartItem) => ({
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id || undefined,
+        quantity: item.quantity,
+      })),
     };
 
     if (!this.cartHasOnlyServices && this.use_new_address) {
