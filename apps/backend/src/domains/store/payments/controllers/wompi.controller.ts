@@ -104,9 +104,23 @@ export class WompiController {
   @Post('test-connection')
   @ApiOperation({ summary: 'Test Wompi credentials by fetching merchant data' })
   @ApiResponse({ status: 200, description: 'Connection test result' })
-  async testConnection() {
+  async testConnection(
+    @Body() body?: { public_key?: string; private_key?: string; environment?: string },
+  ) {
     try {
-      const config = await this.resolveWompiConfig();
+      // Use credentials from request body (modal pre-save) or from stored config (post-save)
+      let config: Record<string, any>;
+
+      if (body?.public_key && body?.private_key) {
+        config = {
+          public_key: body.public_key,
+          private_key: body.private_key,
+          environment: body.environment || 'SANDBOX',
+        };
+      } else {
+        config = await this.resolveWompiConfig();
+      }
+
       this.configureClient(config);
       await this.wompiClient.getAcceptanceTokens();
 
