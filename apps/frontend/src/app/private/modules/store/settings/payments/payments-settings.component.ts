@@ -342,11 +342,11 @@ import {
 
           <div class="wompi-test-section">
             <app-button
-              label="Probar Conexión"
               variant="outline"
               size="sm"
               [loading]="wompiTestLoading"
               (clicked)="testWompiConnection()">
+              Probar Conexión
             </app-button>
             @if (wompiTestResult) {
               <div class="wompi-test-result" [class.success]="wompiTestResult.success" [class.error]="!wompiTestResult.success">
