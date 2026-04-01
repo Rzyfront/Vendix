@@ -510,7 +510,16 @@ export class PaymentsService {
 
         // 2. Process payment if required
         let payment: any = null;
-        if (createPosPaymentDto.requires_payment) {
+        const isDigitalPayment = createPosPaymentDto.requires_payment &&
+          ['wompi', 'wallet'].includes(
+            (await tx.store_payment_methods.findUnique({
+              where: { id: createPosPaymentDto.store_payment_method_id },
+              include: { system_payment_method: true },
+            }))?.system_payment_method?.type || '',
+          );
+
+        if (createPosPaymentDto.requires_payment && !isDigitalPayment) {
+          // Direct methods (cash, card, bank_transfer) — process inside transaction
           payment = await this.processPosPaymentTransaction(
             tx,
             order,
@@ -520,6 +529,14 @@ export class PaymentsService {
             tx,
             order.id,
             'succeeded',
+            order.delivery_type,
+          );
+        } else if (isDigitalPayment) {
+          // Digital methods (Wompi, wallet) — mark as pending, process AFTER commit
+          await this.updateOrderPaymentStatus(
+            tx,
+            order.id,
+            'pending_payment',
             order.delivery_type,
           );
         } else {
@@ -628,14 +645,16 @@ export class PaymentsService {
 
         return {
           success: true,
-          message: createPosPaymentDto.requires_payment
-            ? 'Payment processed successfully'
-            : 'Order created successfully (credit sale)',
+          message: isDigitalPayment
+            ? 'Order created, processing payment...'
+            : createPosPaymentDto.requires_payment
+              ? 'Payment processed successfully'
+              : 'Order created successfully (credit sale)',
           order: {
             id: order.id,
             order_number: order.order_number,
             status: order.state,
-            payment_status: payment ? payment.state : 'pending',
+            payment_status: payment ? payment.state : (isDigitalPayment ? 'pending' : 'pending'),
             total_amount: order.grand_total,
           },
           payment: payment
@@ -654,8 +673,40 @@ export class PaymentsService {
               }
             : undefined,
           nextAction: (payment as any)?.nextAction,
+          _digitalPaymentPending: isDigitalPayment || false,
         };
       });
+
+      // Process digital payments AFTER transaction commit (order is now visible)
+      if (result.success && result._digitalPaymentPending) {
+        try {
+          const payment = await this.processPosPaymentTransaction(
+            this.prisma as any,
+            { id: result.order.id, store_id: createPosPaymentDto.store_id } as any,
+            createPosPaymentDto,
+          );
+          if (payment) {
+            result.payment = {
+              id: payment.id,
+              amount: payment.amount,
+              payment_method:
+                payment.store_payment_method?.display_name ||
+                payment.store_payment_method?.system_payment_method?.display_name ||
+                'Wompi',
+              status: payment.state,
+              transaction_id: payment.transaction_id,
+              change: 0,
+              nextAction: (payment as any)?.nextAction,
+            };
+            result.nextAction = (payment as any)?.nextAction;
+            result.message = 'Payment initiated successfully';
+          }
+        } catch (err) {
+          this.logger.error(`Digital payment processing failed: ${err.message}`, err.stack);
+          result.payment = { success: false, message: err.message };
+        }
+        delete result._digitalPaymentPending;
+      }
 
       // Record cash register movement AFTER transaction commit (non-critical)
       if (result.success) {
