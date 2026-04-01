@@ -369,91 +369,160 @@ import {
         width: 100%;
       }
 
-      /* ── Config modal: dense layout ── */
-      .cfg-form { display: flex; flex-direction: column; gap: 0; }
+      /* ── Config modal: exact Pencil design replica ──
+         460px modal, 20px side padding, 10px grid gap
+         2 equal columns of ~205px each
+         Inputs: 34px height, 7px radius
+         Labels: 11px/500, #374151
+      */
+      .cfg-form {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
 
+      /* 2-column grid matching Pencil layout */
       .cfg-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 0.375rem 0.5rem;
+        gap: 10px;
       }
       .cfg-cell { min-width: 0; }
+
+      /* Env row: 2 equal columns — select left, badge right */
       .cfg-env-row {
         grid-column: 1 / -1;
-        display: flex; align-items: flex-end; gap: 0.5rem;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        align-items: end;
       }
-      .cfg-env-select { flex: 1; min-width: 0; }
+      .cfg-env-select { min-width: 0; }
       .cfg-sandbox-badge {
-        display: flex; align-items: center; gap: 0.3rem;
-        height: 2.125rem; /* match input height */
-        padding: 0 0.625rem;
-        border-radius: 0.4375rem;
-        background: #FEF3C7; border: 1px solid #FCD34D;
-        font-size: 0.6875rem; font-weight: 500; color: #92400E;
-        white-space: nowrap; flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        height: 34px;
+        padding: 0 10px;
+        border-radius: 7px;
+        background: var(--color-warning-subtle, #FEF3C7);
+        border: 1px solid var(--color-warning-border, #FCD34D);
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--color-warning-text, #92400E);
+        white-space: nowrap;
       }
+
       @media (max-width: 480px) {
         .cfg-grid { grid-template-columns: 1fr; }
-        .cfg-env-row { flex-direction: column; align-items: stretch; }
+        .cfg-env-row { grid-template-columns: 1fr; }
       }
 
+      /* Warning banner */
       .cfg-warn {
-        display: flex; align-items: center; gap: 0.375rem;
-        padding: 0.375rem 0.5rem; margin-top: 0.375rem;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
         background: color-mix(in srgb, var(--warning) 10%, transparent);
-        border: 1px solid var(--warning); border-radius: 0.375rem;
-        font-size: 0.6875rem; color: var(--warning);
+        border: 1px solid var(--warning);
+        border-radius: 6px;
+        font-size: 11px;
+        color: var(--warning);
       }
 
+      /* Webhook + Test section below divider */
       .cfg-footer-row {
-        display: flex; align-items: flex-end; gap: 0.75rem;
-        margin-top: 0.5rem; padding-top: 0.5rem;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding-top: 10px;
         border-top: 1px solid var(--color-border);
       }
-      @media (max-width: 480px) { .cfg-footer-row { flex-direction: column; align-items: stretch; } }
+      @media (max-width: 480px) {
+        .cfg-footer-row { flex-direction: column; align-items: stretch; }
+      }
 
       .cfg-webhook { flex: 1; min-width: 0; }
 
       .cfg-wh-label {
-        display: flex; align-items: center; gap: 0.25rem;
-        font-size: 0.6875rem; font-weight: 600;
-        color: var(--color-text-primary); margin-bottom: 0.25rem;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--color-text-secondary);
+        margin-bottom: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
       }
 
       .cfg-wh-box {
-        display: flex; align-items: center; gap: 0.25rem;
-        padding: 0.25rem 0.375rem;
-        background: var(--color-bg, #f5f5f5);
-        border: 1px solid var(--color-border); border-radius: 0.25rem;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        height: 30px;
+        background: var(--color-surface-secondary, #F3F4F6);
+        border: 1px solid var(--color-border);
+        border-radius: 6px;
       }
       .cfg-wh-box code {
-        flex: 1; font-size: 0.625rem; font-family: monospace;
-        word-break: break-all; color: var(--color-text-primary); line-height: 1.2;
+        flex: 1;
+        font-size: 10px;
+        font-family: 'IBM Plex Mono', 'Fira Code', monospace;
+        word-break: break-all;
+        color: var(--color-text-primary);
+        line-height: 1.2;
       }
       .cfg-copy-btn {
-        flex-shrink: 0; display: flex; align-items: center; gap: 0.2rem;
-        background: #fff; border: 1px solid var(--color-border);
-        border-radius: 0.25rem; padding: 0.125rem 0.375rem;
-        cursor: pointer; color: var(--color-text-muted);
-        font-size: 0.625rem; font-family: inherit;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        background: var(--color-surface, #fff);
+        border: 1px solid var(--color-border);
+        border-radius: 4px;
+        padding: 2px 8px;
+        height: 22px;
+        cursor: pointer;
+        color: var(--color-text-secondary);
+        font-size: 10px;
+        font-family: inherit;
         transition: all 0.15s;
       }
-      .cfg-copy-btn:hover { color: var(--color-text-primary); background: #f9fafb; }
+      .cfg-copy-btn:hover {
+        color: var(--color-text-primary);
+        background: var(--color-surface-hover, #f9fafb);
+      }
 
       .cfg-wh-hint {
-        display: block; font-size: 0.625rem;
-        color: var(--color-text-muted); margin-top: 0.125rem;
+        display: block;
+        font-size: 9.5px;
+        color: var(--color-text-muted);
+        margin-top: 3px;
       }
-      .cfg-wh-hint a { color: var(--accent); text-decoration: none; }
+      .cfg-wh-hint a {
+        color: var(--color-primary, var(--accent));
+        text-decoration: none;
+      }
       .cfg-wh-hint a:hover { text-decoration: underline; }
 
+      /* Test connection */
       .cfg-test {
-        flex-shrink: 0; display: flex; flex-direction: column;
-        align-items: flex-end; gap: 0.25rem;
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
       }
       .cfg-test-msg {
-        display: flex; align-items: center; gap: 0.2rem;
-        font-size: 0.6875rem; white-space: nowrap;
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 11px;
+        white-space: nowrap;
       }
       .cfg-test-msg.ok { color: var(--success); }
       .cfg-test-msg.fail { color: var(--danger); }
