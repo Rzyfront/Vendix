@@ -25,6 +25,8 @@ import {
   TableAction,
   ItemListCardConfig,
   CardComponent,
+  InputComponent,
+  SelectorComponent,
 } from '../../../../../../app/shared/components/index';
 
 @Component({
@@ -41,6 +43,8 @@ import {
     IconComponent,
     ResponsiveDataViewComponent,
     CardComponent,
+    InputComponent,
+    SelectorComponent,
   ],
   template: `
     <div class="w-full md:space-y-4">
@@ -272,87 +276,108 @@ import {
         </div>
       </div>
 
-      <form [formGroup]="config_form" (ngSubmit)="saveConfigAndEnable()">
-        <div class="space-y-4">
-          @for (field of config_fields; track field.key) {
-            <div>
-              <label class="block text-sm font-medium mb-1" style="color: var(--color-text-primary)">
-                {{ field.title }}
-                @if (field.required) { <span class="text-red-500">*</span> }
-              </label>
-              @if (field.description) {
-                <p class="text-xs mb-1" style="color: var(--color-text-muted)">{{ field.description }}</p>
+      <form [formGroup]="config_form" class="cfg-form">
+        @if (isWompiConfig()) {
+          <!-- Wompi: explicit layout matching Pencil design -->
+          <div class="cfg-grid">
+            <!-- Row 1: Public Key + Private Key -->
+            <div class="cfg-cell">
+              <app-input label="Public Key" type="text" placeholder="pub_test_ o pub_prod_"
+                [control]="config_form.get('public_key')!" [required]="true" size="sm">
+              </app-input>
+            </div>
+            <div class="cfg-cell">
+              <app-input label="Private Key" type="password" placeholder="prv_test_ o prv_prod_"
+                [control]="config_form.get('private_key')!" [required]="true" size="sm">
+              </app-input>
+            </div>
+            <!-- Row 2: Events Secret + Integrity Secret -->
+            <div class="cfg-cell">
+              <app-input label="Events Secret" type="password" placeholder="Secret de eventos"
+                [control]="config_form.get('events_secret')!" [required]="true" size="sm">
+              </app-input>
+            </div>
+            <div class="cfg-cell">
+              <app-input label="Integrity Secret" type="password" placeholder="Secret de integridad"
+                [control]="config_form.get('integrity_secret')!" [required]="true" size="sm">
+              </app-input>
+            </div>
+            <!-- Row 3: Ambiente + Badge -->
+            <div class="cfg-cell">
+              <app-selector label="Ambiente"
+                [options]="[{value: 'SANDBOX', label: 'SANDBOX'}, {value: 'PRODUCTION', label: 'PRODUCTION'}]"
+                formControlName="environment" size="sm">
+              </app-selector>
+            </div>
+            <div class="cfg-cell cfg-badge-cell">
+              @if (config_form.value.environment === 'SANDBOX') {
+                <div class="cfg-sandbox-badge">
+                  <app-icon name="flask-conical" [size]="13"></app-icon>
+                  Modo de pruebas activo
+                </div>
               }
-              @if (field.enum_values) {
-                <select [formControlName]="field.key"
-                        class="w-full px-3 py-2 rounded-lg border text-sm"
-                        style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary)">
-                  @for (opt of field.enum_values; track opt) {
-                    <option [value]="opt">{{ opt }}</option>
-                  }
-                </select>
-              } @else {
-                <input [formControlName]="field.key"
-                       [type]="field.type === 'password' ? 'password' : 'text'"
-                       [placeholder]="field.description || field.title"
-                       class="w-full px-3 py-2 rounded-lg border text-sm"
-                       style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary)"
-                />
-              }
-              @if (isWompiConfig() && wompiFieldHelp[field.key]) {
-                <span class="field-help">{{ wompiFieldHelp[field.key] }}</span>
-              }
+            </div>
+          </div>
+
+          @if (getWompiKeyWarning()) {
+            <div class="cfg-warn">
+              <app-icon name="alert-triangle" [size]="13"></app-icon>
+              {{ getWompiKeyWarning() }}
             </div>
           }
-        </div>
 
-        @if (getWompiKeyWarning()) {
-          <div class="wompi-warning">
-            <app-icon name="alert-triangle" [size]="16"></app-icon>
-            <span>{{ getWompiKeyWarning() }}</span>
-          </div>
-        }
-
-        @if (isWompiConfig()) {
-          <!-- Webhook URL Guide -->
-          <div class="wompi-webhook-guide">
-            <div class="wompi-webhook-header">
-              <app-icon name="webhook" [size]="18"></app-icon>
-              <span>URL de Eventos (Webhook)</span>
-            </div>
-            <p class="wompi-webhook-desc">
-              Copia esta URL y pégala en tu dashboard de Wompi para recibir notificaciones de pago.
-            </p>
-            <div class="wompi-webhook-url-box">
-              <code class="wompi-webhook-url">{{ wompiWebhookUrl }}</code>
-              <button type="button" class="wompi-copy-btn" (click)="copyWompiWebhookUrl()" [title]="wompiUrlCopied ? 'Copiado' : 'Copiar'">
-                <app-icon [name]="wompiUrlCopied ? 'check' : 'copy'" [size]="16"></app-icon>
-              </button>
-            </div>
-            <div class="wompi-webhook-steps">
-              <p><strong>Pasos:</strong></p>
-              <ol>
-                <li>Ingresa a <a href="https://comercios.wompi.co" target="_blank" rel="noopener">comercios.wompi.co</a></li>
-                <li>Ve a <strong>Configuraciones avanzadas</strong> > <strong>Seguimiento de transacciones</strong></li>
-                <li>Pega la URL de arriba en el campo <strong>"URL de Eventos"</strong></li>
-                <li>Haz clic en <strong>Guardar</strong></li>
-              </ol>
-            </div>
-          </div>
-
-          <div class="wompi-test-section">
-            <app-button
-              variant="outline"
-              size="sm"
-              [loading]="wompiTestLoading"
-              (clicked)="testWompiConnection()">
-              Probar Conexión
-            </app-button>
-            @if (wompiTestResult) {
-              <div class="wompi-test-result" [class.success]="wompiTestResult.success" [class.error]="!wompiTestResult.success">
-                <app-icon [name]="wompiTestResult.success ? 'check-circle' : 'x-circle'" [size]="16"></app-icon>
-                <span>{{ wompiTestResult.message }}</span>
+          <!-- Webhook URL + Test Connection -->
+          <div class="cfg-footer-section">
+            <div class="cfg-footer-row">
+              <div class="cfg-webhook">
+                <span class="cfg-wh-label">
+                  <app-icon name="webhook" [size]="13"></app-icon>
+                  URL de Eventos
+                </span>
+                <div class="cfg-wh-box">
+                  <code>{{ wompiWebhookUrl }}</code>
+                  <button type="button" class="cfg-copy-btn" (click)="copyWompiWebhookUrl()">
+                    <app-icon [name]="wompiUrlCopied ? 'check' : 'copy'" [size]="11"></app-icon>
+                    {{ wompiUrlCopied ? 'Copiado' : 'Copiar' }}
+                  </button>
+                </div>
+                <span class="cfg-wh-hint">
+                  Pega en <a href="https://comercios.wompi.co" target="_blank">comercios.wompi.co</a> > Config. avanzadas > Seguimiento
+                </span>
               </div>
+              <div class="cfg-test-btn">
+                <app-button variant="outline" size="sm" [loading]="wompiTestLoading" (clicked)="testWompiConnection()">
+                  <app-icon name="plug" [size]="13" slot="icon"></app-icon>
+                  Probar
+                </app-button>
+              </div>
+            </div>
+            @if (wompiTestResult) {
+              <div class="cfg-test-msg" [class.ok]="wompiTestResult.success" [class.fail]="!wompiTestResult.success">
+                <app-icon [name]="wompiTestResult.success ? 'check-circle' : 'x-circle'" [size]="13"></app-icon>
+                {{ wompiTestResult.message }}
+              </div>
+            }
+          </div>
+        } @else {
+          <!-- Generic: other payment methods use dynamic grid -->
+          <div class="cfg-grid">
+            @for (field of config_fields; track field.key) {
+              @if (field.enum_values) {
+                <div class="cfg-cell" style="grid-column: 1 / -1">
+                  <app-selector [label]="field.title" [options]="getEnumOptions(field.enum_values)"
+                    [formControlName]="field.key" [required]="field.required" size="sm">
+                  </app-selector>
+                </div>
+              } @else {
+                <div class="cfg-cell">
+                  <app-input [label]="field.title"
+                    [type]="field.key.includes('secret') || field.key.includes('private') ? 'password' : 'text'"
+                    [placeholder]="field.title" [control]="config_form.get(field.key)!"
+                    [required]="field.required" size="sm">
+                  </app-input>
+                </div>
+              }
             }
           </div>
         }
@@ -373,132 +398,162 @@ import {
         width: 100%;
       }
 
-      .field-help {
-        display: block;
-        font-size: 0.75rem;
-        color: var(--text-tertiary);
-        margin-top: 0.25rem;
-        line-height: 1.4;
+      /* ── Config modal: exact Pencil design replica ──
+         460px modal, 20px side padding, 10px grid gap
+         2 equal columns of ~205px each
+         Inputs: 34px height, 7px radius
+         Labels: 11px/500, #374151
+      */
+      .cfg-form {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
       }
 
-      .wompi-warning {
+      /* 2-column grid matching Pencil layout */
+      .cfg-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .cfg-cell { min-width: 0; }
+
+      /* Badge cell: align to bottom so badge sits next to the select input */
+      .cfg-badge-cell {
+        display: flex;
+        align-items: flex-end;
+      }
+      .cfg-sandbox-badge {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
-        padding: 0.75rem;
+        justify-content: center;
+        gap: 5px;
+        width: 100%;
+        height: 34px;
+        padding: 0 10px;
+        border-radius: 7px;
+        background: var(--color-warning-subtle, #FEF3C7);
+        border: 1px solid var(--color-warning-border, #FCD34D);
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--color-warning-text, #92400E);
+        white-space: nowrap;
+      }
+
+      @media (max-width: 480px) {
+        .cfg-grid { grid-template-columns: 1fr; }
+        .cfg-env-row { grid-template-columns: 1fr; }
+      }
+
+      /* Warning banner */
+      .cfg-warn {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
         background: color-mix(in srgb, var(--warning) 10%, transparent);
         border: 1px solid var(--warning);
-        border-radius: 0.5rem;
-        font-size: 0.8125rem;
+        border-radius: 6px;
+        font-size: 11px;
         color: var(--warning);
-        margin-top: 0.75rem;
       }
 
-      .wompi-test-section {
+      /* Webhook + Test section below divider */
+      .cfg-footer-section {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding-top: 10px;
+        border-top: 1px solid var(--color-border);
+      }
+      .cfg-footer-row {
         display: flex;
         align-items: center;
-        gap: 0.75rem;
-        margin-top: 1rem;
-        flex-wrap: wrap;
+        gap: 10px;
+      }
+      @media (max-width: 480px) {
+        .cfg-footer-row { flex-direction: column; align-items: stretch; }
       }
 
-      .wompi-test-result {
+      .cfg-webhook { flex: 1; min-width: 0; }
+
+      .cfg-wh-label {
         display: flex;
         align-items: center;
-        gap: 0.375rem;
-        font-size: 0.8125rem;
-      }
-
-      .wompi-test-result.success {
-        color: var(--success);
-      }
-
-      .wompi-test-result.error {
-        color: var(--danger);
-      }
-
-      .wompi-webhook-guide {
-        margin-top: 1rem;
-        padding: 1rem;
-        border: 1px solid var(--color-border);
-        border-radius: 0.75rem;
-        background: var(--color-surface);
-      }
-
-      .wompi-webhook-header {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
+        gap: 4px;
+        font-size: 10px;
         font-weight: 600;
-        font-size: 0.875rem;
-        margin-bottom: 0.5rem;
-        color: var(--color-text-primary);
+        color: var(--color-text-secondary);
+        margin-bottom: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
       }
 
-      .wompi-webhook-desc {
-        font-size: 0.8125rem;
-        color: var(--color-text-muted);
-        margin-bottom: 0.75rem;
-      }
-
-      .wompi-webhook-url-box {
+      .cfg-wh-box {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
-        padding: 0.625rem 0.75rem;
-        background: var(--color-bg, #f5f5f5);
+        gap: 6px;
+        padding: 4px 8px;
+        height: 30px;
+        background: var(--color-surface-secondary, #F3F4F6);
         border: 1px solid var(--color-border);
-        border-radius: 0.5rem;
-        margin-bottom: 0.75rem;
+        border-radius: 6px;
       }
-
-      .wompi-webhook-url {
+      .cfg-wh-box code {
         flex: 1;
-        font-size: 0.75rem;
-        font-family: monospace;
+        font-size: 10px;
+        font-family: 'IBM Plex Mono', 'Fira Code', monospace;
         word-break: break-all;
         color: var(--color-text-primary);
+        line-height: 1.2;
       }
-
-      .wompi-copy-btn {
+      .cfg-copy-btn {
         flex-shrink: 0;
-        background: none;
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        background: var(--color-surface, #fff);
         border: 1px solid var(--color-border);
-        border-radius: 0.375rem;
-        padding: 0.375rem;
+        border-radius: 4px;
+        padding: 2px 8px;
+        height: 22px;
         cursor: pointer;
-        color: var(--color-text-muted);
+        color: var(--color-text-secondary);
+        font-size: 10px;
+        font-family: inherit;
         transition: all 0.15s;
       }
-
-      .wompi-copy-btn:hover {
-        background: var(--color-surface);
+      .cfg-copy-btn:hover {
         color: var(--color-text-primary);
+        background: var(--color-surface-hover, #f9fafb);
       }
 
-      .wompi-webhook-steps {
-        font-size: 0.8125rem;
+      .cfg-wh-hint {
+        display: block;
+        font-size: 9.5px;
         color: var(--color-text-muted);
+        margin-top: 3px;
       }
+      .cfg-wh-hint a {
+        color: var(--color-primary, var(--accent));
+        text-decoration: none;
+      }
+      .cfg-wh-hint a:hover { text-decoration: underline; }
 
-      .wompi-webhook-steps p {
-        margin-bottom: 0.375rem;
+      /* Test connection */
+      .cfg-test-btn {
+        flex-shrink: 0;
       }
-
-      .wompi-webhook-steps ol {
-        margin: 0;
-        padding-left: 1.25rem;
+      .cfg-test-msg {
+        display: flex;
+        align-items: flex-start;
+        gap: 4px;
+        font-size: 11px;
+        line-height: 1.4;
+        word-break: break-word;
       }
-
-      .wompi-webhook-steps li {
-        margin-bottom: 0.25rem;
-        line-height: 1.5;
-      }
-
-      .wompi-webhook-steps a {
-        color: var(--accent);
-        text-decoration: underline;
-      }
+      .cfg-test-msg.ok { color: var(--success); }
+      .cfg-test-msg.fail { color: var(--danger); }
     `,
   ],
 })
@@ -987,6 +1042,10 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     }
 
     return null;
+  }
+
+  getEnumOptions(values: string[]): { value: string; label: string }[] {
+    return values.map((v) => ({ value: v, label: v }));
   }
 
   copyWompiWebhookUrl(): void {

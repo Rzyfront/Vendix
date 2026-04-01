@@ -208,6 +208,10 @@ import {
   Code,
   TextQuote,
   Strikethrough,
+  // Wompi payment config icons
+  FlaskConical,
+  Plug,
+  Webhook,
 } from 'lucide-angular';
 
 /**
@@ -484,6 +488,10 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'code': Code,
   'text-quote': TextQuote,
   'strikethrough': Strikethrough,
+  // Wompi payment config
+  'flask-conical': FlaskConical,
+  'plug': Plug,
+  'webhook': Webhook,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;
