@@ -1,4 +1,18 @@
-import { IsInt, IsOptional, IsString, IsObject } from 'class-validator';
+import { IsInt, IsOptional, IsString, IsObject, IsArray, ValidateNested, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+
+class CheckoutCartItemDto {
+  @IsInt()
+  product_id: number;
+
+  @IsOptional()
+  @IsInt()
+  product_variant_id?: number;
+
+  @IsInt()
+  @Min(1)
+  quantity: number;
+}
 
 export class CheckoutDto {
     @IsOptional()
@@ -31,4 +45,10 @@ export class CheckoutDto {
     @IsOptional()
     @IsString()
     notes?: string;
+
+    @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => CheckoutCartItemDto)
+    items?: CheckoutCartItemDto[];
 }

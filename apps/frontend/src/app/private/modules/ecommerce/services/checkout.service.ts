@@ -38,6 +38,7 @@ export interface CheckoutRequest {
     payment_method_id: number;
     notes?: string;
     bookings?: BookingSelection[];
+    items?: Array<{ product_id: number; product_variant_id?: number; quantity: number }>;
 }
 
 export interface CheckoutResponse {

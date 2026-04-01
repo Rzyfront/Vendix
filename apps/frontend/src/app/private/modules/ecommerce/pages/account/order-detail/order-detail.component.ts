@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, ActivatedRoute } from '@angular/router';
 import { Subject } from 'rxjs';
@@ -6,6 +6,7 @@ import { takeUntil } from 'rxjs/operators';
 import { AccountService, OrderDetail } from '../../../services/account.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 @Component({
   selector: 'app-order-detail',
@@ -24,6 +25,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
   wompiPaymentVerified = false;
   private wompiPollTimer: ReturnType<typeof setInterval> | null = null;
   private destroy$ = new Subject<void>();
+  private toast = inject(ToastService);
 
   constructor(
     private account_service: AccountService,
@@ -71,7 +73,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
 
             // Check if any payment is no longer pending
             const hasCompletedPayment = this.order.payments?.some(
-              (p: any) => p.state === 'completed' || p.state === 'paid'
+              (p: any) => p.state === 'completed' || p.state === 'paid' || p.state === 'succeeded'
             );
             const hasFailedPayment = this.order.payments?.some(
               (p: any) => p.state === 'failed' || p.state === 'declined'
@@ -83,6 +85,12 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
               if (hasCompletedPayment) {
                 this.is_new_order = true;
               }
+              if (!hasCompletedPayment && !hasFailedPayment && attempts >= maxAttempts) {
+                this.toast.warning(
+                  'La verificación del pago está tardando más de lo esperado. Tu pago puede estar siendo procesado. Recarga la página en unos minutos.',
+                  'Verificación en progreso',
+                );
+              }
               if (this.wompiPollTimer) {
                 clearInterval(this.wompiPollTimer);
                 this.wompiPollTimer = null;
@@ -93,6 +101,10 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
         error: () => {
           if (attempts >= maxAttempts) {
             this.verifyingWompiPayment = false;
+            this.toast.warning(
+              'No pudimos verificar el estado del pago. Recarga la página en unos minutos para ver la actualización.',
+              'Verificación interrumpida',
+            );
             if (this.wompiPollTimer) {
               clearInterval(this.wompiPollTimer);
               this.wompiPollTimer = null;

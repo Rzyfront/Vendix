@@ -79,15 +79,18 @@ export class WompiController {
     const tokens = await this.wompiClient.getAcceptanceTokens();
 
     return {
-      public_key: config.public_key,
-      currency,
-      amount_in_cents: amountInCents,
-      reference,
-      signature_integrity: integritySignature,
-      redirect_url: dto.redirect_url || '',
-      acceptance_token: tokens.acceptance_token,
-      accept_personal_auth: tokens.personal_auth_token,
-      customer_email: dto.customer_email || '',
+      success: true,
+      data: {
+        public_key: config.public_key,
+        currency,
+        amount_in_cents: amountInCents,
+        reference,
+        signature_integrity: integritySignature,
+        redirect_url: dto.redirect_url || '',
+        acceptance_token: tokens.acceptance_token,
+        accept_personal_auth: tokens.personal_auth_token,
+        customer_email: dto.customer_email || '',
+      },
     };
   }
 

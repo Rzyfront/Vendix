@@ -166,25 +166,35 @@ export class PaymentGatewayService {
   }
 
   private async validatePaymentData(paymentData: PaymentData): Promise<void> {
+    // Skip order validation for POS payments — the order was just created
+    // inside the same Prisma transaction and isn't visible to the regular client yet
+    const skipOrderValidation = paymentData.metadata?.is_pos_payment === true;
+
+    const validations: Promise<any>[] = [
+      skipOrderValidation
+        ? Promise.resolve({ valid: true })
+        : this.validatorService.validateOrder(
+            paymentData.orderId,
+            paymentData.storeId,
+          ),
+      this.validatorService.validatePaymentMethod(
+        paymentData.storePaymentMethodId,
+        paymentData.storeId,
+      ),
+      skipOrderValidation
+        ? Promise.resolve(true)
+        : this.validatorService.validatePaymentAmount(
+            paymentData.amount,
+            paymentData.orderId,
+          ),
+      this.validatorService.validateCurrency(
+        paymentData.currency,
+        paymentData.storeId,
+      ),
+    ];
+
     const [orderValid, methodValid, amountValid, currencyValid] =
-      await Promise.all([
-        this.validatorService.validateOrder(
-          paymentData.orderId,
-          paymentData.storeId,
-        ),
-        this.validatorService.validatePaymentMethod(
-          paymentData.storePaymentMethodId,
-          paymentData.storeId,
-        ),
-        this.validatorService.validatePaymentAmount(
-          paymentData.amount,
-          paymentData.orderId,
-        ),
-        this.validatorService.validateCurrency(
-          paymentData.currency,
-          paymentData.storeId,
-        ),
-      ]);
+      await Promise.all(validations);
 
     if (!orderValid.valid) {
       throw new PaymentError(

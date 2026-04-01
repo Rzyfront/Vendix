@@ -594,6 +594,12 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       ...(this.cartHasBookableServices && this.bookingSelections.size > 0 ? {
         bookings: Array.from(this.bookingSelections.values()),
       } : {}),
+      // Always send cart items as fallback (in case backend cart is empty/not synced)
+      items: this.cart?.items?.map((item: CartItem) => ({
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id || undefined,
+        quantity: item.quantity,
+      })),
     };
 
     if (!this.cartHasOnlyServices && this.use_new_address) {
@@ -714,9 +720,15 @@ export class CheckoutComponent implements OnInit, OnDestroy {
             // PENDING — redirect to order detail for status check
             this.router.navigate(['/account/orders', orderId], { queryParams: { wompi_callback: true } });
           }
+        } else {
+          // User closed widget without paying
+          this.toast.warning('El pago fue cancelado. Tu pedido está pendiente de pago.', 'Pago cancelado');
         }
       });
     } catch (error) {
+      this.wompiWidgetLoading = false;
+      this.is_submitting = false;
+      this.cdr.markForCheck();
       console.error('Failed to open Wompi widget:', error);
       this.toast.error('No se pudo abrir el widget de pago. Intenta de nuevo.', 'Error');
     }
