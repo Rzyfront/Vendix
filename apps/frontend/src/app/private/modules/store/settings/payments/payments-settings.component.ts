@@ -279,27 +279,27 @@ import {
       <form [formGroup]="config_form" class="cfg-form">
         @if (isWompiConfig()) {
           <!-- Wompi: explicit layout matching Pencil design -->
-          <div class="cfg-grid">
+          <div class="cfg-grid" [formGroup]="config_form">
             <!-- Row 1: Public Key + Private Key -->
             <div class="cfg-cell">
               <app-input label="Public Key" type="text" placeholder="pub_test_ o pub_prod_"
-                [control]="config_form.get('public_key')!" [required]="true" size="sm">
+                formControlName="public_key" [required]="true" size="sm">
               </app-input>
             </div>
             <div class="cfg-cell">
               <app-input label="Private Key" type="password" placeholder="prv_test_ o prv_prod_"
-                [control]="config_form.get('private_key')!" [required]="true" size="sm">
+                formControlName="private_key" [required]="true" size="sm">
               </app-input>
             </div>
             <!-- Row 2: Events Secret + Integrity Secret -->
             <div class="cfg-cell">
               <app-input label="Events Secret" type="password" placeholder="Secret de eventos"
-                [control]="config_form.get('events_secret')!" [required]="true" size="sm">
+                formControlName="events_secret" [required]="true" size="sm">
               </app-input>
             </div>
             <div class="cfg-cell">
               <app-input label="Integrity Secret" type="password" placeholder="Secret de integridad"
-                [control]="config_form.get('integrity_secret')!" [required]="true" size="sm">
+                formControlName="integrity_secret" [required]="true" size="sm">
               </app-input>
             </div>
             <!-- Row 3: Ambiente + Badge -->
@@ -361,7 +361,7 @@ import {
           </div>
         } @else {
           <!-- Generic: other payment methods use dynamic grid -->
-          <div class="cfg-grid">
+          <div class="cfg-grid" [formGroup]="config_form">
             @for (field of config_fields; track field.key) {
               @if (field.enum_values) {
                 <div class="cfg-cell" style="grid-column: 1 / -1">
@@ -373,7 +373,7 @@ import {
                 <div class="cfg-cell">
                   <app-input [label]="field.title"
                     [type]="field.key.includes('secret') || field.key.includes('private') ? 'password' : 'text'"
-                    [placeholder]="field.title" [control]="config_form.get(field.key)!"
+                    [placeholder]="field.title" [formControlName]="field.key"
                     [required]="field.required" size="sm">
                   </app-input>
                 </div>
@@ -1064,7 +1064,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     this.http
       .post<{ success: boolean; message?: string; environment?: string }>(
         `${environment.apiUrl}/store/payments/wompi/test-connection`,
-        {},
+        this.config_form.value,
       )
       .pipe(takeUntil(this.destroy$))
       .subscribe({
