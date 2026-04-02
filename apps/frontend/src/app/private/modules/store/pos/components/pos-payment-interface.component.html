@@ -434,18 +434,6 @@
             </div>
           </div>
 
-          <!-- Card — no extra form needed -->
-          <div *ngIf="selectedWompiSubMethod === 'CARD'" class="wompi-form">
-            <div class="wompi-form-header" style="border-color: #1A9C8B">
-              <app-icon name="credit-card" [size]="20"></app-icon>
-              <span>Pago con Tarjeta</span>
-              <button type="button" class="wompi-back-btn" (click)="selectedWompiSubMethod = null">
-                <app-icon name="arrow-left" [size]="16"></app-icon>
-              </button>
-            </div>
-            <p class="wompi-info-text">El pago con tarjeta será procesado de forma segura a través de Wompi.</p>
-          </div>
-
           <!-- Bancolombia Transfer -->
           <div *ngIf="selectedWompiSubMethod === 'BANCOLOMBIA_TRANSFER'" class="wompi-form">
             <div class="wompi-form-header" style="border-color: #FDDA24">

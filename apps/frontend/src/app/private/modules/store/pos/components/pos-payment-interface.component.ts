@@ -1420,7 +1420,9 @@ export class PosPaymentInterfaceComponent
   // Wompi state
   wompiService = inject(WompiService);
   selectedWompiSubMethod: WompiSubMethod | null = null;
-  wompiSubMethods: WompiSubMethodConfig[] = WompiService.SUB_METHODS;
+  wompiSubMethods: WompiSubMethodConfig[] = WompiService.SUB_METHODS.filter(
+    (m) => m.key !== WompiSubMethod.CARD,
+  );
   wompiAwaitingPayment = false;
   wompiAwaitingMessage = '';
   wompiPollingSubscription: Subscription | null = null;
@@ -2581,8 +2583,6 @@ export class PosPaymentInterfaceComponent
           financial_institution_code: this.pseForm.value.financialInstitutionCode,
           payment_description: this.pseForm.value.paymentDescription || 'Pago Vendix',
         };
-      case WompiSubMethod.CARD:
-        return { type: 'CARD' };
       case WompiSubMethod.BANCOLOMBIA_TRANSFER:
         return { type: 'BANCOLOMBIA_TRANSFER' };
       default:
@@ -2618,9 +2618,10 @@ export class PosPaymentInterfaceComponent
     if (!nextAction) return;
 
     this.wompiPaymentId =
+      response?.payment?.transaction_id ||
       response?.transactionId ||
-      response?.data?.transactionId ||
-      response?.data?.payment_id;
+      response?.data?.payment?.transaction_id ||
+      response?.data?.transactionId;
 
     switch (nextAction.type) {
       case 'redirect':

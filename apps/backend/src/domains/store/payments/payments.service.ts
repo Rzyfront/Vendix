@@ -705,14 +705,21 @@ export class PaymentsService {
           this.logger.error(`Digital payment processing failed: ${err.message}`, err.stack);
           result.payment = { success: false, message: err.message };
 
-          // Revert order status to 'created' so it can be retried or cancelled
+          // Release stock reservations and revert order status so it can be retried or cancelled
           try {
+            // Release stock reservations first
+            await this.stockLevelManager.releaseReservationsByReference(
+              'order',
+              result.order.id,
+              'cancelled',
+            );
+            // Then revert order state
             await this.prisma.orders.update({
               where: { id: result.order.id },
               data: { state: 'created', updated_at: new Date() },
             });
           } catch (revertErr) {
-            this.logger.error(`Failed to revert order state: ${revertErr.message}`);
+            this.logger.error(`Failed to revert order/stock: ${revertErr.message}`);
           }
         }
         delete result._digitalPaymentPending;
