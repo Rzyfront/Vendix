@@ -18,23 +18,40 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Action | Skill |
 |--------|-------|
 | -- | `git-workflow` |
+| -- | `vendix-ai-agent-tools` |
+| -- | `vendix-ai-chat` |
+| -- | `vendix-ai-embeddings-rag` |
 | -- | `vendix-ai-engine` |
+| -- | `vendix-ai-platform-core` |
+| -- | `vendix-ai-queue` |
+| -- | `vendix-ai-streaming` |
 | -- | `vendix-auto-entries` |
+| -- | `vendix-currency-formatting` |
+| -- | `vendix-mcp-server` |
 | -- | `vendix-monorepo-workspaces` |
 | -- | `vendix-panel-ui` |
 | -- | `vendix-prisma-scopes` |
+| Adding MCP resources or tools | `vendix-mcp-server` |
+| Adding a new AI provider | `vendix-ai-platform-core` |
+| Adding chat features | `vendix-ai-chat` |
 | Adding modules or submodules to the sidebar | `vendix-panel-ui` |
+| Adding money inputs to forms | `vendix-currency-formatting` |
 | Adding new AI applications | `vendix-ai-engine` |
 | Adding new automatic journal entries | `vendix-auto-entries` |
+| Adding new entity types to embeddings | `vendix-ai-embeddings-rag` |
 | Adding new mapping keys to accounting | `vendix-auto-entries` |
 | Adding new menu items to admin layouts | `vendix-panel-ui` |
 | Adding new models to domain scopes | `vendix-prisma-scopes` |
+| Adding tool-use to AI features | `vendix-ai-agent-tools` |
 | Adding/removing workspaces | `vendix-monorepo-workspaces` |
 | After creating/modifying a skill | `skill-sync` |
 | Configuring AI providers or applications | `vendix-ai-engine` |
+| Configuring AI rate limiting | `vendix-ai-platform-core` |
 | Configuring CI/CD | `vendix-monorepo-workspaces` |
+| Configuring MCP authentication | `vendix-mcp-server` |
 | Configuring middleware | `vendix-backend-middleware` |
 | Configuring panel_ui visibility | `vendix-panel-ui` |
+| Creating AI queue processors | `vendix-ai-queue` |
 | Creating AI-powered features | `vendix-ai-engine` |
 | Creating API endpoints | `vendix-backend-api` |
 | Creating API tests (Bruno) | `vendix-bruno-test` |
@@ -43,18 +60,29 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Creating Frontend Modules | `vendix-frontend-module` |
 | Creating Seeds | `vendix-prisma-seed` |
 | Creating migrations, editing migration SQL, deploying migrations to production, recovering from P3009, failed migration recovery, ALTER TYPE ADD VALUE | `vendix-prisma-migrations` |
+| Creating new AI tools | `vendix-ai-agent-tools` |
 | Creating or modifying modals in frontend | `vendix-frontend-modal` |
 | Creating or refactoring standard admin modules (stats + table) | `vendix-frontend-standard-module` |
+| Creating streaming UI components | `vendix-ai-streaming` |
+| Debugging AI job failures | `vendix-ai-queue` |
+| Debugging AI request failures | `vendix-ai-platform-core` |
 | Debugging Forbidden errors in Prisma queries | `vendix-prisma-scopes` |
+| Debugging agent loop issues | `vendix-ai-agent-tools` |
+| Debugging embedding generation | `vendix-ai-embeddings-rag` |
 | Debugging missing accounting entries | `vendix-auto-entries` |
 | Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns | `vendix-ui-ux` |
+| Displaying or formatting money/currency values | `vendix-currency-formatting` |
 | Editing Schema | `vendix-prisma-schema` |
+| Exposing Vendix data to AI clients | `vendix-mcp-server` |
 | Fixing Forbidden/403 errors in scoped services | `vendix-multi-tenant-context` |
+| Fixing currency display issues or hardcoded $ symbols | `vendix-currency-formatting` |
 | General Development | `vendix-development-rules` |
 | Handling Errors | `vendix-error-handling` |
 | Handling store context | `vendix-multi-tenant-context` |
+| Implementing AI streaming | `vendix-ai-streaming` |
 | Implementing authentication | `vendix-backend-auth` |
 | Implementing multi-tenant logic | `vendix-multi-tenant-context` |
+| Implementing semantic search | `vendix-ai-embeddings-rag` |
 | Implementing stats cards or dashboard metrics with mobile scroll | `vendix-frontend-stats-cards` |
 | Installing dependencies | `vendix-monorepo-workspaces` |
 | Integrating AI Engine into a domain | `vendix-ai-engine` |
@@ -62,20 +90,43 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Managing State | `vendix-frontend-state` |
 | Modifying auto-entry event handlers | `vendix-auto-entries` |
 | Modifying package.json | `vendix-monorepo-workspaces` |
+| Modifying the AI chat widget | `vendix-ai-chat` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
 | Styling AI interaction buttons or loading states | `vendix-ai-engine` |
 | Styling and Theming | `vendix-frontend-theme` |
 | Troubleshoot why a skill is missing from AGENTS.md auto-invoke | `skill-sync` |
+| Understanding AI cost tracking | `vendix-ai-platform-core` |
 | Understanding Public/Private Apps and Domains | `vendix-app-architecture` |
 | Uploading files, handling S3 URLs, or saving image URLs to database | `vendix-s3-storage` |
 | Verifying Build | `buildcheck-dev` |
 | Working on backend domains | `vendix-backend-domain` |
 | Working on frontend domains | `vendix-frontend-domain` |
+| Working with AI agent or tool-use | `vendix-ai-engine` |
+| Working with AI async processing | `vendix-ai-queue` |
+| Working with AI chat NgRx state | `vendix-ai-chat` |
+| Working with AI chat conversations | `vendix-ai-engine` |
+| Working with AI conversations | `vendix-ai-chat` |
+| Working with AI embeddings or RAG | `vendix-ai-engine` |
+| Working with AI logging and observability | `vendix-ai-platform-core` |
+| Working with AI streaming | `vendix-ai-engine` |
+| Working with AIAgentService | `vendix-ai-agent-tools` |
+| Working with AIChatService | `vendix-ai-chat` |
+| Working with AIEngineService core methods | `vendix-ai-platform-core` |
+| Working with AIStreamController | `vendix-ai-streaming` |
+| Working with AIToolRegistry | `vendix-ai-agent-tools` |
 | Working with AccountingEventsListener or AutoEntryService | `vendix-auto-entries` |
+| Working with BullMQ for AI | `vendix-ai-queue` |
+| Working with CurrencyPipe or CurrencyFormatService | `vendix-currency-formatting` |
+| Working with EventSource for AI | `vendix-ai-streaming` |
+| Working with MCP server | `vendix-ai-engine` |
+| Working with MCP server | `vendix-mcp-server` |
+| Working with McpController | `vendix-mcp-server` |
 | Working with MenuFilterService or menu filtering | `vendix-panel-ui` |
 | Working with Prisma scoped services | `vendix-prisma-scopes` |
+| Working with RAG pipeline | `vendix-ai-embeddings-rag` |
+| Working with SSE endpoints for AI | `vendix-ai-streaming` |
 | Working with ai_engine service or AIEngineService | `vendix-ai-engine` |
-| Working with notifications, SSE, or adding new event-driven alerts | `vendix-notifications-system` |
+| Working with embeddings or pgvector | `vendix-ai-embeddings-rag` |
 | Writing Code (Naming) | `vendix-naming-conventions` |
 | Writing Validation Logic | `vendix-validation` |
 | changes with database migrations | `git-workflow` |
