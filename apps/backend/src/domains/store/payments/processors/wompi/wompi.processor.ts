@@ -12,6 +12,7 @@ import {
   WompiConfig,
   WompiEnvironment,
   WompiTransactionStatus,
+  WompiTransactionData,
   WompiPaymentMethodData,
   WompiCreateTransactionRequest,
 } from './wompi.types';
@@ -33,12 +34,6 @@ export class WompiProcessor extends BasePaymentProcessor {
       // Configurar client con credenciales del metadata del store
       const wompiConfig = this.resolveConfig(paymentData);
       this.client.configure(wompiConfig);
-
-      const transactionId = this.generateTransactionId();
-
-      if (this.isTestMode() || wompiConfig.environment === WompiEnvironment.SANDBOX) {
-        return this.simulateTestPayment(paymentData, transactionId);
-      }
 
       // Obtener acceptance tokens
       const { acceptance_token: acceptanceToken, personal_auth_token } = await this.client.getAcceptanceTokens();
@@ -205,7 +200,7 @@ export class WompiProcessor extends BasePaymentProcessor {
 
   private resolveNextAction(
     paymentMethodType: string,
-    txn: { status: WompiTransactionStatus; redirect_url?: string },
+    txn: WompiTransactionData,
   ): PaymentResult['nextAction'] {
     // Si ya fue aprobada o falló, no hay acción siguiente
     if (txn.status === WompiTransactionStatus.APPROVED) {
@@ -221,11 +216,17 @@ export class WompiProcessor extends BasePaymentProcessor {
         return { type: 'await' };
 
       case 'PSE':
-      case 'BANCOLOMBIA_TRANSFER':
-        // Redirigir al banco / Bancolombia
+        // Redirigir al banco
         return {
           type: 'redirect',
           url: txn.redirect_url,
+        };
+
+      case 'BANCOLOMBIA_TRANSFER':
+        // Bancolombia devuelve la URL en payment_method.extra.async_payment_url
+        return {
+          type: 'redirect',
+          url: txn.payment_method?.extra?.async_payment_url || txn.redirect_url,
         };
 
       case 'CARD':
@@ -235,6 +236,14 @@ export class WompiProcessor extends BasePaymentProcessor {
           : { type: 'none' };
 
       case 'BANCOLOMBIA_QR':
+        // Bancolombia QR devuelve imagen base64 en payment_method.extra.qr_image
+        return {
+          type: 'await',
+          data: txn.payment_method?.extra?.qr_image
+            ? { qrImage: txn.payment_method.extra.qr_image }
+            : undefined,
+        };
+
       case 'DAVIPLATA':
         return { type: 'await' };
 
@@ -272,13 +281,15 @@ export class WompiProcessor extends BasePaymentProcessor {
     const paymentMethodType =
       (paymentData.metadata?.paymentMethod as any)?.type || 'CARD';
 
-    const simulatedTxn = {
+    const simulatedTxn: WompiTransactionData = {
       id: transactionId,
+      created_at: new Date().toISOString(),
       status: WompiTransactionStatus.APPROVED,
       amount_in_cents: this.formatAmount(paymentData.amount),
       currency: paymentData.currency || 'COP',
       reference: `vendix_test_${paymentData.orderId}_${Date.now()}`,
       payment_method_type: paymentMethodType,
+      payment_method: {},
       redirect_url: paymentData.returnUrl,
     };
 
