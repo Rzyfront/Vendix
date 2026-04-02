@@ -282,11 +282,9 @@ export class WompiProcessor extends BasePaymentProcessor {
       redirect_url: paymentData.returnUrl,
     };
 
-    // Para métodos asincrónicos, simular PENDING en lugar de APPROVED
-    const asyncMethods = ['NEQUI', 'PSE', 'BANCOLOMBIA_TRANSFER'];
-    if (asyncMethods.includes(paymentMethodType)) {
-      simulatedTxn.status = WompiTransactionStatus.PENDING;
-    }
+    // En sandbox, los métodos async se auto-aprueban inmediatamente
+    // porque no hay webhook real que confirme el pago.
+    // En producción, Wompi devuelve PENDING y notifica vía webhook.
 
     return {
       success: true,

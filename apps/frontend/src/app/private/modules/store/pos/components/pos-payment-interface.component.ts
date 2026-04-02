@@ -2618,9 +2618,10 @@ export class PosPaymentInterfaceComponent
     if (!nextAction) return;
 
     this.wompiPaymentId =
+      response?.payment?.transaction_id ||
       response?.transactionId ||
-      response?.data?.transactionId ||
-      response?.data?.payment_id;
+      response?.data?.payment?.transaction_id ||
+      response?.data?.transactionId;
 
     switch (nextAction.type) {
       case 'redirect':
