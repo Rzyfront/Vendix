@@ -119,7 +119,6 @@ export class WompiClient {
     const response = await this.request<WompiMerchantResponse>(
       'GET',
       `/merchants/${this.config.public_key}`,
-      { bearerToken: this.config.public_key },
     );
 
     const tokens = {
