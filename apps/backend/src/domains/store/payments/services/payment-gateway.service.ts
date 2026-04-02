@@ -41,7 +41,7 @@ export class PaymentGatewayService {
 
       const payment = await this.createPaymentRecord(
         paymentData,
-        paymentMethod.type,
+        paymentMethod.system_payment_method?.type || 'unknown',
       );
 
       const result = await processor.processPayment({
