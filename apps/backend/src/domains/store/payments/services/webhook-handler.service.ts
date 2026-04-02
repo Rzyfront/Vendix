@@ -211,6 +211,24 @@ export class WebhookHandlerService {
         if (mappedStatus) {
           await this.updatePaymentStatus(txn.id, mappedStatus, data);
 
+          // Auto-cancel order and release stock when payment is declined or errored
+          if (mappedStatus === 'failed' || mappedStatus === 'cancelled') {
+            try {
+              const client = this.prisma.withoutScope();
+              const payment = await client.payments.findFirst({
+                where: { transaction_id: txn.id },
+              });
+              if (payment) {
+                await this.orderFlowService.cancelOrder(payment.order_id, {
+                  reason: `Pago rechazado por Wompi: ${txn.status}`,
+                });
+                this.logger.log(`Order ${payment.order_id} auto-cancelled due to payment ${txn.status}`);
+              }
+            } catch (cancelErr) {
+              this.logger.warn(`Failed to auto-cancel order: ${cancelErr.message}`);
+            }
+          }
+
           // Check if this transaction is linked to a payment link
           const paymentLinkId = txn.payment_link_id;
           if (paymentLinkId && mappedStatus === 'succeeded') {
