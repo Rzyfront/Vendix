@@ -61,11 +61,10 @@ export class WompiProcessor extends BasePaymentProcessor {
         accept_personal_auth: personal_auth_token,
         amount_in_cents: this.formatAmount(paymentData.amount),
         currency: paymentData.currency || 'COP',
-        customer_email: paymentData.metadata?.customerEmail || '',
+        customer_email: paymentData.metadata?.customerEmail || `pos-${paymentData.storeId}@vendix.app`,
         reference,
         payment_method: paymentMethodData,
         redirect_url: paymentData.returnUrl,
-        signature: { integrity: integritySignature },
       };
 
       const response = await this.client.createTransaction(request);
