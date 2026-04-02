@@ -7,10 +7,12 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Public } from '@common/decorators/public.decorator';
 import { WebhookHandlerService } from './services/webhook-handler.service';
 import { WompiWebhookValidatorService } from './services/wompi-webhook-validator.service';
 import { WebhookEvent } from './interfaces';
 
+@Public()
 @ApiTags('Webhooks')
 @Controller('store/webhooks')
 export class WebhookController {
