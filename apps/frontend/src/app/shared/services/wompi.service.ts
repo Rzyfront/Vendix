@@ -121,7 +121,7 @@ export class WompiService {
       }),
       takeWhile(
         (update: WompiPaymentStatusUpdate) =>
-          update.status === 'pending' || update.status === 'authorized',
+          update.status === 'pending',
         true,
       ),
       retry({ count: 3, delay: 2000 }),
