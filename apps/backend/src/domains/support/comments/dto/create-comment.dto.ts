@@ -1,7 +1,12 @@
-import { IsNotEmpty, IsString, IsOptional, ValidateIf, MaxLength } from 'class-validator';
+import { IsNotEmpty, IsString, IsOptional, IsNumber, MaxLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateCommentDto {
+  @ApiProperty({ description: 'Ticket ID to comment on' })
+  @IsNumber()
+  @IsNotEmpty()
+  ticket_id: number;
+
   @ApiProperty({ description: 'Comment content' })
   @IsString()
   @IsNotEmpty()

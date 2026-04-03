@@ -27,6 +27,7 @@ async function bootstrap() {
       transform: true,
       whitelist: true,
       forbidNonWhitelisted: true,
+      validateCustomDecorators: true,
       transformOptions: {
         enableImplicitConversion: true,
       },
