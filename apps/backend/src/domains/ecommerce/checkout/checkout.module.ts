@@ -10,9 +10,10 @@ import { StockLevelManager } from '../../store/inventory/shared/services/stock-l
 import { InventoryTransactionsService } from '../../store/inventory/transactions/inventory-transactions.service';
 import { WompiModule } from '../../store/payments/processors/wompi/wompi.module';
 import { PaymentEncryptionService } from '../../store/payments/services/payment-encryption.service';
+import { ReservationsModule } from '../../store/reservations/reservations.module';
 
 @Module({
-    imports: [PrismaModule, CartModule, ShippingModule, TaxesModule, SettingsModule, WompiModule],
+    imports: [PrismaModule, CartModule, ShippingModule, TaxesModule, SettingsModule, WompiModule, ReservationsModule],
     controllers: [CheckoutController],
     providers: [CheckoutService, StockLevelManager, InventoryTransactionsService, PaymentEncryptionService],
     exports: [CheckoutService],

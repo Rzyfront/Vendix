@@ -49,6 +49,9 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   isWompiPayment = false;
   wompiWidgetLoading = false;
 
+  // Flag to prevent cart-empty redirect after successful checkout
+  private orderPlaced = false;
+
   step = 1; // Dynamic steps depending on cart content
 
   // ========== BOOKING ==========
@@ -139,6 +142,37 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     this.loadRecommendations();
   }
 
+  /**
+   * Restores a pending booking selection from sessionStorage (set by BookingComponent).
+   * Automatically pre-fills the booking slot for the bookable service in the cart.
+   */
+  private restorePendingBooking(): void {
+    try {
+      const stored = sessionStorage.getItem('pending_booking');
+      if (!stored) return;
+
+      const booking = JSON.parse(stored);
+      if (booking.product_id && booking.date && booking.start_time && booking.end_time) {
+        // Verify the product is actually in the current cart
+        const isInCart = this.cart?.items?.some(item => item.product_id === booking.product_id);
+        if (!isInCart) {
+          sessionStorage.removeItem('pending_booking');
+          return;
+        }
+        this.bookingSelections.set(booking.product_id, {
+          product_id: booking.product_id,
+          date: booking.date,
+          start_time: booking.start_time,
+          end_time: booking.end_time,
+        });
+        // Clean up after reading
+        sessionStorage.removeItem('pending_booking');
+      }
+    } catch {
+      sessionStorage.removeItem('pending_booking');
+    }
+  }
+
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
@@ -215,7 +249,9 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     // Load cart
     this.cart_service.cart$.pipe(takeUntil(this.destroy$)).subscribe((cart) => {
       this.cart = cart;
-      if (!cart || cart.items.length === 0) {
+      // Restore pending booking only after cart is loaded
+      this.restorePendingBooking();
+      if (!this.orderPlaced && (!cart || cart.items.length === 0)) {
         this.router.navigate(['/cart']);
       }
     });
@@ -640,6 +676,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       this.checkout_service.checkout(request).subscribe({
         next: (response) => {
           if (response.success) {
+            this.orderPlaced = true;
             const orderId = response.data.order_id;
             const totalAmount = (this.cart?.subtotal || 0) + this.shipping_cost;
 
@@ -679,6 +716,8 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     this.checkout_service.checkout(request).subscribe({
       next: (response) => {
         if (response.success) {
+          this.orderPlaced = true;
+          this.is_submitting = false;
           this.router.navigate(['/account/orders', response.data.order_id], {
             queryParams: { success: true },
           });

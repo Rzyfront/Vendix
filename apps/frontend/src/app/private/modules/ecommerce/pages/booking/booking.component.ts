@@ -14,6 +14,7 @@ import { Subject, takeUntil } from 'rxjs';
 
 import { EcommerceBookingService, AvailabilitySlot } from '../../services/ecommerce-booking.service';
 import { CatalogService, ProductDetail } from '../../services/catalog.service';
+import { CartService } from '../../services/cart.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { StepsLineComponent } from '../../../../../shared/components/steps-line/steps-line.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
@@ -42,6 +43,7 @@ export class BookingComponent implements OnInit, OnDestroy {
     private router = inject(Router);
     private bookingService = inject(EcommerceBookingService);
     private catalogService = inject(CatalogService);
+    private cartService = inject(CartService);
     private authFacade = inject(AuthFacade);
     private toast = inject(ToastService);
 
@@ -239,7 +241,12 @@ export class BookingComponent implements OnInit, OnDestroy {
 
         this.bookingService.getAvailability(this.productId(), dateFrom, dateTo).subscribe({
             next: (response) => {
-                const slots = response.data || response || [];
+                const rawSlots = response.data || response || [];
+                // Map total_available → available for compatibility
+                const slots = (rawSlots as any[]).map(s => ({
+                    ...s,
+                    available: s.available ?? s.total_available ?? 0,
+                }));
                 this.availableSlots.set(slots as AvailabilitySlot[]);
                 this.loadingSlots.set(false);
             },
@@ -291,7 +298,7 @@ export class BookingComponent implements OnInit, OnDestroy {
 
     confirmBooking(): void {
         if (!this.isLoggedIn()) {
-            this.errorMessage.set('Debes iniciar sesión para reservar');
+            this.errorMessage.set('Debes iniciar sesion para reservar');
             return;
         }
 
@@ -299,33 +306,29 @@ export class BookingComponent implements OnInit, OnDestroy {
         const date = this.selectedDate();
         if (!slot || !date) return;
 
-        this.submitting.set(true);
-        this.errorMessage.set('');
+        // Store booking selection in sessionStorage so checkout can pick it up
+        const bookingSelection = {
+            product_id: this.productId(),
+            date,
+            start_time: slot.start_time,
+            end_time: slot.end_time,
+        };
+        sessionStorage.setItem('pending_booking', JSON.stringify(bookingSelection));
 
-        this.bookingService
-            .createBooking({
-                product_id: this.productId(),
-                date,
-                start_time: slot.start_time,
-                end_time: slot.end_time,
-                notes: this.bookingNotes() || undefined,
-            })
-            .subscribe({
-                next: (response) => {
-                    this.submitting.set(false);
-                    if (response.success) {
-                        this.bookingResult.set(response.data);
-                        this.currentStep.set(3); // Confirmation screen
-                        this.toast.success('Reserva creada exitosamente', 'Reserva confirmada');
-                    }
-                },
-                error: (err) => {
-                    this.submitting.set(false);
-                    const msg = err?.error?.message || 'Error al crear la reserva';
-                    this.errorMessage.set(msg);
-                    this.toast.error(msg, 'Error');
-                },
-            });
+        // Add the service to cart and navigate to checkout
+        const product = this.product();
+        if (product) {
+            const result = this.cartService.addToCart(product.id, 1);
+            if (result) {
+                result.subscribe(() => {
+                    this.router.navigate(['/checkout']);
+                });
+            } else {
+                this.router.navigate(['/checkout']);
+            }
+        } else {
+            this.router.navigate(['/checkout']);
+        }
     }
 
     goToStep(step: number): void {
