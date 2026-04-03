@@ -122,7 +122,7 @@ export interface WompiCreateTransactionRequest {
   reference: string;
   payment_method: WompiPaymentMethodData;
   redirect_url?: string;
-  signature?: { integrity: string };
+  signature?: string;
   customer_data?: {
     phone_number?: string;
     full_name?: string;

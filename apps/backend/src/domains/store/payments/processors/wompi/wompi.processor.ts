@@ -65,7 +65,7 @@ export class WompiProcessor extends BasePaymentProcessor {
         reference,
         payment_method: paymentMethodData,
         redirect_url: paymentData.returnUrl,
-        signature: { integrity: integritySignature },
+        signature: integritySignature,
       };
 
       const response = await this.client.createTransaction(request);
