@@ -109,27 +109,16 @@ export class WompiClient {
   async getAcceptanceTokens(): Promise<{ acceptance_token: string; personal_auth_token: string }> {
     this.ensureConfigured();
 
-    // Check cache first
-    const cacheKey = this.config.public_key;
-    const cached = this.tokenCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
-      return cached.tokens;
-    }
-
+    // No cache — acceptance tokens are single-use per Wompi docs
     const response = await this.request<WompiMerchantResponse>(
       'GET',
       `/merchants/${this.config.public_key}`,
     );
 
-    const tokens = {
+    return {
       acceptance_token: response.data.presigned_acceptance.acceptance_token,
       personal_auth_token: response.data.presigned_personal_data_auth.acceptance_token,
     };
-
-    // Cache the tokens
-    this.tokenCache.set(cacheKey, { tokens, expiresAt: Date.now() + this.TOKEN_CACHE_TTL });
-
-    return tokens;
   }
 
   // ── Integrity signature ──────────────────────
