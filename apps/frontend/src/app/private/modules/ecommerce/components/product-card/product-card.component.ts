@@ -121,9 +121,9 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
           size="sm"
           customClasses="add-to-cart-btn"
           [disabled]="product.product_type !== 'service' && product.track_inventory !== false && product.stock_quantity === 0"
-          title="Agregar al carrito"
+          [title]="product.requires_booking && product.product_type === 'service' ? 'Agendar' : 'Agregar al carrito'"
           (clicked)="onAddToCart($event)">
-          <app-icon slot="icon" name="shopping-cart" [size]="16"></app-icon>
+          <app-icon slot="icon" [name]="product.requires_booking && product.product_type === 'service' ? 'calendar-check' : 'shopping-cart'" [size]="16"></app-icon>
         </app-button>
       </div>
     </article>
@@ -494,6 +494,10 @@ export class ProductCardComponent implements OnInit {
   onBuyNow(event: Event): void {
     event.stopPropagation();
     event.preventDefault();
+    if (this.product.requires_booking && this.product.product_type === 'service') {
+      this.router.navigate(['/book', this.product.id]);
+      return;
+    }
     if (this.hasVariants) {
       this.router.navigate(['/catalog', this.product.slug]);
       return;
@@ -505,6 +509,10 @@ export class ProductCardComponent implements OnInit {
   onAddToCart(event: Event): void {
     event.stopPropagation();
     event.preventDefault();
+    if (this.product.requires_booking && this.product.product_type === 'service') {
+      this.router.navigate(['/book', this.product.id]);
+      return;
+    }
     if (this.hasVariants) {
       this.router.navigate(['/catalog', this.product.slug]);
       return;

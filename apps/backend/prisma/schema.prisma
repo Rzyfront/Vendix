@@ -759,7 +759,7 @@ model orders {
   coupon_uses                                     coupon_uses[]
   cash_register_movements                         cash_register_movements[]
   // Bookings
-  booking                                         bookings?
+  bookings                                        bookings[]
 
   // Payment Links
   payment_links                                   payment_links[]
@@ -4645,7 +4645,7 @@ model bookings {
   channel            order_channel_enum  @default(pos)
   notes              String?             @db.Text
   internal_notes     String?             @db.Text
-  order_id           Int?                @unique
+  order_id           Int?
   created_by_user_id Int?
   provider_id        Int?
   created_at         DateTime?           @default(now()) @db.Timestamp(6)
@@ -4664,6 +4664,7 @@ model bookings {
   @@index([store_id, product_id, date])
   @@index([customer_id])
   @@index([provider_id])
+  @@index([order_id])
 }
 
 model service_providers {

@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, IsObject, IsArray, ValidateNested, Min } from 'class-validator';
+import { IsInt, IsOptional, IsString, IsObject, IsArray, ValidateNested, Min, IsDateString, Matches } from 'class-validator';
 import { Type } from 'class-transformer';
 
 class CheckoutCartItemDto {
@@ -15,6 +15,13 @@ class CheckoutCartItemDto {
 }
 
 export class CheckoutDto {
+    // Booking selections for bookable services
+    @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => CheckoutBookingDto)
+    bookings?: CheckoutBookingDto[];
+
     @IsOptional()
     @IsInt()
     shipping_method_id?: number;
@@ -51,4 +58,20 @@ export class CheckoutDto {
     @ValidateNested({ each: true })
     @Type(() => CheckoutCartItemDto)
     items?: CheckoutCartItemDto[];
+}
+
+class CheckoutBookingDto {
+    @IsInt()
+    product_id: number;
+
+    @IsDateString()
+    date: string;
+
+    @IsString()
+    @Matches(/^([01]\d|2[0-3]):([0-5]\d)$/, { message: 'start_time debe tener formato HH:mm' })
+    start_time: string;
+
+    @IsString()
+    @Matches(/^([01]\d|2[0-3]):([0-5]\d)$/, { message: 'end_time debe tener formato HH:mm' })
+    end_time: string;
 }

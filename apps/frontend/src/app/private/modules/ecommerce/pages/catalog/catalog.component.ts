@@ -257,6 +257,11 @@ export class CatalogComponent implements OnInit, OnDestroy {
   }
 
   onAddToCart(product: EcommerceProduct): void {
+    // Guard: bookable services go to booking page
+    if (product.requires_booking && product.product_type === 'service') {
+      this.router.navigate(['/book', product.id]);
+      return;
+    }
     // Guard: variant products must go through detail page for variant selection
     if (product.variant_count && product.variant_count > 0) {
       this.router.navigate(['/catalog', product.slug]);

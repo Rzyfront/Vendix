@@ -16,6 +16,8 @@ import { WompiClient } from '../../store/payments/processors/wompi/wompi.client'
 import { WompiEnvironment } from '../../store/payments/processors/wompi/wompi.types';
 import { PaymentEncryptionService } from '../../store/payments/services/payment-encryption.service';
 import * as crypto from 'crypto';
+import { ReservationsService } from '../../store/reservations/reservations.service';
+import { order_channel_enum } from '@prisma/client';
 
 @Injectable()
 export class CheckoutService {
@@ -31,6 +33,7 @@ export class CheckoutService {
     private readonly stockLevelManager: StockLevelManager,
     private readonly wompiClient: WompiClient,
     private readonly paymentEncryption: PaymentEncryptionService,
+    private readonly reservationsService: ReservationsService,
   ) {}
 
   async getPaymentMethods(shippingMethodType?: string) {
@@ -421,6 +424,30 @@ export class CheckoutService {
         );
       } catch (error) {
         this.logger.warn(`Stock reservation failed for product ${item.product_id}: ${error.message}`);
+      }
+    }
+
+    // Create bookings for bookable services
+    if (dto.bookings && dto.bookings.length > 0) {
+      const user_id = RequestContextService.getUserId();
+      for (const booking of dto.bookings) {
+        try {
+          await this.reservationsService.create({
+            customer_id: user_id!,
+            product_id: booking.product_id,
+            date: booking.date,
+            start_time: booking.start_time,
+            end_time: booking.end_time,
+            channel: order_channel_enum.ecommerce,
+            order_id: order.id,
+            skip_availability_check: false,
+          });
+          this.logger.log(`Booking created for product ${booking.product_id} linked to order ${order.id}`);
+        } catch (error) {
+          this.logger.warn(`Failed to create booking for product ${booking.product_id}: ${error.message}`);
+          // Don't fail the entire checkout if a booking fails
+          // The order is already created; booking can be retried manually
+        }
       }
     }
 
