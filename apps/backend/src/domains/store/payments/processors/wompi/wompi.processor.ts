@@ -56,8 +56,6 @@ export class WompiProcessor extends BasePaymentProcessor {
         paymentData.currency || 'COP',
       );
 
-      console.log(`[WompiProcessor] amount debug: raw=${paymentData.amount} type=${typeof paymentData.amount} formatted=${this.formatAmount(paymentData.amount)}`);
-
       const request: WompiCreateTransactionRequest = {
         acceptance_token: acceptanceToken,
         accept_personal_auth: personal_auth_token,
