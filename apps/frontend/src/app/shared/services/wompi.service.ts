@@ -110,14 +110,18 @@ export class WompiService {
           `${this.apiUrl}/store/payments/${paymentId}/status`,
         );
       }),
-      map((response) => ({
-        status: response?.data?.state || response?.state || 'pending',
-        transactionId:
-          response?.data?.transaction_id || response?.transaction_id,
-        message: response?.data?.message || response?.message,
-      })),
+      map((response) => {
+        // Response shape: { success, data: { success, data: { status, transactionId, ... } } }
+        const inner = response?.data?.data || response?.data || response;
+        return {
+          status: inner?.status || inner?.state || 'pending',
+          transactionId: inner?.transactionId || inner?.transaction_id,
+          message: inner?.message,
+        };
+      }),
       takeWhile(
-        (update: WompiPaymentStatusUpdate) => update.status === 'pending',
+        (update: WompiPaymentStatusUpdate) =>
+          update.status === 'pending' || update.status === 'authorized',
         true,
       ),
       retry({ count: 3, delay: 2000 }),
