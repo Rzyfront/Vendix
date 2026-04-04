@@ -4,6 +4,7 @@ import {
 } from '@nestjs/common';
 import * as XLSX from 'xlsx';
 import * as bcrypt from 'bcryptjs';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { EmployeesService } from './employees.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -330,27 +331,22 @@ export class EmployeesBulkService {
           );
         }
 
-        // Check document doesn't already exist in DB
-        const existingEmployee = await this.prisma.employees.findFirst({
+        // Check if employee already exists in DB (org-level unique constraint)
+        const unscoped = this.prisma.withoutScope() as any;
+        const existingEmployee = await unscoped.employees.findFirst({
           where: {
+            organization_id: organizationId,
             document_type: docType,
             document_number: docNumber,
           },
         });
-
-        if (existingEmployee) {
-          throw new VendixHttpException(
-            ErrorCodes.PAYROLL_DUP_002,
-            `Ya existe un empleado con documento ${docType} ${docNumber}`,
-          );
-        }
 
         // Handle user linking/creation
         let userId: number | undefined;
         let userCreated = false;
         let userLinked = false;
 
-        if (empData.is_user) {
+        if (empData.is_user && !existingEmployee) {
           if (!empData.email) {
             throw new VendixHttpException(
               ErrorCodes.PAYROLL_BULK_004,
@@ -428,30 +424,61 @@ export class EmployeesBulkService {
           }
         }
 
-        // Create employee using EmployeesService
-        const createDto: CreateEmployeeDto = {
-          first_name: empData.first_name.trim(),
-          last_name: empData.last_name.trim(),
-          document_type: docType,
-          document_number: docNumber,
-          hire_date: empData.hire_date,
-          contract_type: normalizedContract as CreateEmployeeDto['contract_type'],
-          base_salary: Number(empData.base_salary),
-          position: empData.position?.trim() || undefined,
-          department: empData.department?.trim() || undefined,
-          payment_frequency: normalizedFrequency as CreateEmployeeDto['payment_frequency'],
-          bank_name: empData.bank_name?.trim() || undefined,
-          bank_account_number: empData.bank_account_number?.trim() || undefined,
-          bank_account_type: empData.bank_account_type?.trim() || undefined,
-          health_provider: empData.health_provider?.trim() || undefined,
-          pension_fund: empData.pension_fund?.trim() || undefined,
-          arl_risk_level: empData.arl_risk_level || 1,
-          severance_fund: empData.severance_fund?.trim() || undefined,
-          compensation_fund: empData.compensation_fund?.trim() || undefined,
-          user_id: userId,
-        };
+        let employee: any;
+        let wasUpdated = false;
 
-        const employee = await this.employeesService.create(createDto);
+        if (existingEmployee) {
+          // Update existing employee
+          const updateData: any = {
+            first_name: empData.first_name.trim(),
+            last_name: empData.last_name.trim(),
+            hire_date: new Date(empData.hire_date),
+            contract_type: normalizedContract,
+            base_salary: new Prisma.Decimal(Number(empData.base_salary)),
+            payment_frequency: normalizedFrequency,
+            position: empData.position?.trim() || null,
+            department: empData.department?.trim() || null,
+            bank_name: empData.bank_name?.trim() || null,
+            bank_account_number: empData.bank_account_number?.trim() || null,
+            bank_account_type: empData.bank_account_type?.trim() || null,
+            health_provider: empData.health_provider?.trim() || null,
+            pension_fund: empData.pension_fund?.trim() || null,
+            arl_risk_level: empData.arl_risk_level || 1,
+            severance_fund: empData.severance_fund?.trim() || null,
+            compensation_fund: empData.compensation_fund?.trim() || null,
+          };
+
+          employee = await this.prisma.employees.update({
+            where: { id: existingEmployee.id },
+            data: updateData,
+          });
+          wasUpdated = true;
+        } else {
+          // Create new employee
+          const createDto: CreateEmployeeDto = {
+            first_name: empData.first_name.trim(),
+            last_name: empData.last_name.trim(),
+            document_type: docType,
+            document_number: docNumber,
+            hire_date: empData.hire_date,
+            contract_type: normalizedContract as CreateEmployeeDto['contract_type'],
+            base_salary: Number(empData.base_salary),
+            position: empData.position?.trim() || undefined,
+            department: empData.department?.trim() || undefined,
+            payment_frequency: normalizedFrequency as CreateEmployeeDto['payment_frequency'],
+            bank_name: empData.bank_name?.trim() || undefined,
+            bank_account_number: empData.bank_account_number?.trim() || undefined,
+            bank_account_type: empData.bank_account_type?.trim() || undefined,
+            health_provider: empData.health_provider?.trim() || undefined,
+            pension_fund: empData.pension_fund?.trim() || undefined,
+            arl_risk_level: empData.arl_risk_level || 1,
+            severance_fund: empData.severance_fund?.trim() || undefined,
+            compensation_fund: empData.compensation_fund?.trim() || undefined,
+            user_id: userId,
+          };
+
+          employee = await this.employeesService.create(createDto);
+        }
 
         if (userCreated) users_created++;
         if (userLinked) users_linked++;
@@ -460,11 +487,13 @@ export class EmployeesBulkService {
         results.push({
           employee,
           status: 'success',
-          message: userCreated
-            ? 'Empleado creado y usuario del sistema generado'
-            : userLinked
-              ? 'Empleado creado y vinculado a usuario existente'
-              : 'Empleado creado exitosamente',
+          message: wasUpdated
+            ? `Empleado ${docType} ${docNumber} actualizado`
+            : userCreated
+              ? 'Empleado creado y usuario del sistema generado'
+              : userLinked
+                ? 'Empleado creado y vinculado a usuario existente'
+                : 'Empleado creado exitosamente',
           user_created: userCreated,
           user_linked: userLinked,
         });

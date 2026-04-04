@@ -237,12 +237,12 @@ export class SelectorComponent
       'block',
       'w-full',
       'border',
+      'truncate',
       'transition-colors',
       'duration-200',
       'focus:outline-none',
       'bg-[var(--color-surface)]',
       'text-[var(--color-text-primary)]',
-      'pr-10', // Space for chevron
     ];
 
     let stateClasses: string[];
@@ -267,9 +267,9 @@ export class SelectorComponent
     // md: 40px mobile → 44px desktop
     // lg: 48px mobile → 52px desktop
     const sizeClasses = {
-      sm: ['h-8', 'sm:h-9', 'px-3', 'text-sm'],
-      md: ['h-10', 'sm:h-11', 'px-3', 'sm:px-4', 'text-sm', 'sm:text-base'],
-      lg: ['h-12', 'sm:h-[52px]', 'px-4', 'text-base', 'sm:text-lg'],
+      sm: ['h-8', 'sm:h-9', 'pl-3', 'pr-10', 'text-sm'],
+      md: ['h-10', 'sm:h-11', 'pl-3', 'sm:pl-4', 'pr-10', 'text-sm', 'sm:text-base'],
+      lg: ['h-12', 'sm:h-[52px]', 'pl-4', 'pr-10', 'text-base', 'sm:text-lg'],
     };
 
     if (this.styleVariant === 'modern') {

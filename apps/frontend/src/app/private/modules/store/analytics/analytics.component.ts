@@ -168,16 +168,10 @@ export class AnalyticsComponent {
       color: 'bg-blue-500',
       items: [
         {
-          id: 'stock-levels',
-          label: 'Niveles de Stock',
-          description: '',
-          route: './inventory/stock-levels',
-        },
-        {
           id: 'low-stock',
-          label: 'Alertas de Stock Bajo',
+          label: 'Info de Stock',
           description: '',
-          route: './inventory/low-stock',
+          route: './inventory/stock-info',
         },
         {
           id: 'movements',
@@ -352,9 +346,9 @@ export class AnalyticsComponent {
       route: './sales/summary',
     },
     {
-      label: 'Stock Bajo',
+      label: 'Stock Info',
       icon: 'alert-triangle',
-      route: './inventory/low-stock',
+      route: './inventory/stock-info',
     },
     { label: 'Top Productos', icon: 'award', route: './products/top-sellers' },
     { label: 'P&L', icon: 'landmark', route: './financial/profit-loss' },

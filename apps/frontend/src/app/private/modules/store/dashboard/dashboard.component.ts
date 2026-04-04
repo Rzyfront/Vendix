@@ -44,8 +44,7 @@ const QUICK_LINKS: QuickLink[] = [
   { icon: 'trending-up', label: 'Resumen de Ventas', route: '/admin/analytics/sales/summary' },
   { icon: 'package', label: 'Ventas por Producto', route: '/admin/analytics/sales/by-product' },
   { icon: 'shopping-cart', label: 'Órdenes', route: '/admin/orders/sales' },
-  { icon: 'layers', label: 'Stock', route: '/admin/analytics/inventory/stock-levels' },
-  { icon: 'alert-triangle', label: 'Bajo Stock', route: '/admin/analytics/inventory/low-stock' },
+  { icon: 'alert-triangle', label: 'Stock Info', route: '/admin/analytics/inventory/stock-info' },
   { icon: 'credit-card', label: 'Gastos', route: '/admin/expenses' },
   { icon: 'users', label: 'Clientes', route: '/admin/analytics/customers/summary' },
   { icon: 'shopping-bag', label: 'Compras', route: '/admin/inventory/pop' },
@@ -176,7 +175,7 @@ const QUICK_LINKS: QuickLink[] = [
               @if (lowStockCount() > 0) {
                 <div
                   class="flex items-center gap-3 p-3 bg-warning-light rounded-lg cursor-pointer hover:bg-warning/15 transition-colors"
-                  (click)="navigateTo('/admin/analytics/inventory/low-stock')"
+                  (click)="navigateTo('/admin/analytics/inventory/stock-info')"
                 >
                   <div class="flex-shrink-0 w-7 h-7 bg-warning/20 rounded-full flex items-center justify-center">
                     <app-icon name="alert-triangle" [size]="14" class="text-warning"></app-icon>
@@ -191,7 +190,7 @@ const QUICK_LINKS: QuickLink[] = [
               @if (outOfStockCount() > 0) {
                 <div
                   class="flex items-center gap-3 p-3 bg-error-light rounded-lg cursor-pointer hover:bg-error/15 transition-colors"
-                  (click)="navigateTo('/admin/analytics/inventory/stock-levels')"
+                  (click)="navigateTo('/admin/analytics/inventory/stock-info')"
                 >
                   <div class="flex-shrink-0 w-7 h-7 bg-error/20 rounded-full flex items-center justify-center">
                     <app-icon name="x-circle" [size]="14" class="text-error"></app-icon>
