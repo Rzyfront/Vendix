@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { Observable, throwError } from 'rxjs';
+import { map, catchError } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import {
   Employee,
@@ -30,6 +30,10 @@ import {
   EmployeeAdvanceSummary,
   BankExportResult,
 } from '../interfaces/payroll.interface';
+import {
+  BulkEmployeeAnalysisResult,
+  BulkEmployeeUploadResult,
+} from '../interfaces/bulk-employee-analysis.interface';
 
 @Injectable({
   providedIn: 'root',
@@ -77,14 +81,46 @@ export class PayrollService {
     return this.http.get<ApiResponse<AvailableUser[]>>(this.getApiUrl('employees/available-users'));
   }
 
-  // ─── Bulk Upload ───────────────────────────────────────
-
-  uploadBulkEmployeesJson(employees: any[]): Observable<ApiResponse<any>> {
-    return this.http.post<ApiResponse<any>>(this.getApiUrl('employees/bulk/upload'), { employees });
-  }
+  // ─── Bulk Upload (Session-based) ──────────────────────
 
   getBulkEmployeeTemplate(): Observable<Blob> {
     return this.http.get(this.getApiUrl('employees/bulk/template/download'), { responseType: 'blob' });
+  }
+
+  analyzeBulkEmployees(file: File): Observable<BulkEmployeeAnalysisResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.http
+      .post<ApiResponse<BulkEmployeeAnalysisResult>>(
+        this.getApiUrl('employees/bulk/analyze'),
+        formData,
+      )
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
+  uploadBulkEmployeesFromSession(
+    sessionId: string,
+  ): Observable<BulkEmployeeUploadResult> {
+    return this.http
+      .post<ApiResponse<BulkEmployeeUploadResult>>(
+        this.getApiUrl('employees/bulk/upload-session'),
+        { session_id: sessionId },
+      )
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
+  cancelBulkEmployeeSession(sessionId: string): Observable<void> {
+    return this.http
+      .delete<void>(
+        this.getApiUrl(`employees/bulk/session/${sessionId}`),
+      )
+      .pipe(catchError(this.handleError));
   }
 
   // ─── Payroll Runs ───────────────────────────────────────
@@ -279,5 +315,24 @@ export class PayrollService {
       ...rest,
       items: payroll_items || rest.items,
     };
+  }
+
+  private handleError(error: any): Observable<never> {
+    console.error('PayrollService Error:', error);
+    let errorMessage = 'Ocurrió un error';
+    if (error.error?.message) {
+      errorMessage = error.error.message;
+    } else if (error.status === 400) {
+      errorMessage = 'Datos inválidos proporcionados';
+    } else if (error.status === 401) {
+      errorMessage = 'Acceso no autorizado';
+    } else if (error.status === 403) {
+      errorMessage = 'Acceso prohibido';
+    } else if (error.status === 404) {
+      errorMessage = 'Recurso no encontrado';
+    } else if (error.status === 0) {
+      errorMessage = 'Error de conexión con el servidor';
+    }
+    return throwError(() => errorMessage);
   }
 }

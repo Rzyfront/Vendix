@@ -3,12 +3,15 @@ import {
   Post,
   Body,
   Get,
+  Delete,
+  Param,
   UseGuards,
   Req,
   UseInterceptors,
   UploadedFile,
   ParseFilePipe,
   MaxFileSizeValidator,
+  BadRequestException,
   Res,
 } from '@nestjs/common';
 import { Response } from 'express';
@@ -18,44 +21,12 @@ import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
+import { RequestContextService } from '@common/context/request-context.service';
 import { BulkEmployeeUploadDto } from './dto/bulk-employee.dto';
 
 @Controller('store/payroll/employees/bulk')
 @UseGuards(PermissionsGuard)
 export class EmployeesBulkController {
-  private readonly HEADER_TRANSLATIONS: Record<string, string> = {
-    nombre: 'first_name',
-    apellido: 'last_name',
-    'tipo documento': 'document_type',
-    'número documento': 'document_number',
-    'numero documento': 'document_number',
-    'fecha contratación': 'hire_date',
-    'fecha contratacion': 'hire_date',
-    'tipo contrato': 'contract_type',
-    'salario base': 'base_salary',
-    cargo: 'position',
-    departamento: 'department',
-    'frecuencia pago': 'payment_frequency',
-    banco: 'bank_name',
-    'número cuenta': 'bank_account_number',
-    'numero cuenta': 'bank_account_number',
-    'tipo cuenta': 'bank_account_type',
-    eps: 'health_provider',
-    'fondo pensión': 'pension_fund',
-    'fondo pension': 'pension_fund',
-    'nivel riesgo arl': 'arl_risk_level',
-    'fondo cesantías': 'severance_fund',
-    'fondo cesantias': 'severance_fund',
-    'caja compensación': 'compensation_fund',
-    'caja compensacion': 'compensation_fund',
-    '¿es usuario?': 'is_user',
-    'es usuario': 'is_user',
-    email: 'email',
-    correo: 'email',
-    teléfono: 'phone',
-    telefono: 'phone',
-  };
-
   constructor(
     private readonly employeesBulkService: EmployeesBulkService,
     private readonly responseService: ResponseService,
@@ -159,5 +130,91 @@ export class EmployeesBulkController {
     } catch (error) {
       throw error;
     }
+  }
+
+  /**
+   * Analiza archivo Excel/CSV sin procesar (dry-run)
+   */
+  @Post('analyze')
+  @Permissions('store:payroll:employees:bulk:upload')
+  @UseInterceptors(FileInterceptor('file'))
+  async analyzeEmployees(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB
+        ],
+      }),
+    )
+    file: any,
+  ) {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+    const organizationId = context?.organization_id;
+    if (!storeId || !organizationId) {
+      throw new BadRequestException('No se pudo determinar la tienda actual');
+    }
+
+    const result = await this.employeesBulkService.analyzeEmployees(
+      file.buffer,
+      storeId,
+      organizationId,
+    );
+
+    return this.responseService.success(result, 'Analisis completado');
+  }
+
+  /**
+   * Procesa carga masiva desde sesion de analisis
+   */
+  @Post('upload-session')
+  @Permissions('store:payroll:employees:bulk:upload')
+  async uploadFromSession(
+    @Body() body: { session_id: string },
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+    if (!storeId) {
+      throw new BadRequestException('No se pudo determinar la tienda actual');
+    }
+    if (!body.session_id) {
+      throw new BadRequestException('session_id es requerido');
+    }
+
+    const result = await this.employeesBulkService.uploadFromSession(
+      body.session_id,
+      storeId,
+      req.user,
+    );
+
+    if (result.failed > 0) {
+      return this.responseService.created(
+        result,
+        'Carga masiva completada con algunos errores',
+      );
+    }
+
+    return this.responseService.created(
+      result,
+      'Carga masiva completada exitosamente',
+    );
+  }
+
+  /**
+   * Cancela sesion de analisis
+   */
+  @Delete('session/:id')
+  @Permissions('store:payroll:employees:bulk:upload')
+  async cancelSession(@Param('id') sessionId: string) {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+    if (!storeId) {
+      throw new BadRequestException('No se pudo determinar la tienda actual');
+    }
+
+    await this.employeesBulkService.cancelSession(sessionId, storeId);
+
+    return this.responseService.success(null, 'Sesion cancelada');
   }
 }
