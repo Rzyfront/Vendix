@@ -11,7 +11,13 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../../store/settings/settings.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../../store/inventory/shared/services/stock-level-manager.service';
-import { Logger } from '@nestjs/common';
+import { Logger, BadRequestException } from '@nestjs/common';
+import { WompiClient } from '../../store/payments/processors/wompi/wompi.client';
+import { WompiEnvironment } from '../../store/payments/processors/wompi/wompi.types';
+import { PaymentEncryptionService } from '../../store/payments/services/payment-encryption.service';
+import * as crypto from 'crypto';
+import { ReservationsService } from '../../store/reservations/reservations.service';
+import { order_channel_enum } from '@prisma/client';
 
 @Injectable()
 export class CheckoutService {
@@ -25,6 +31,9 @@ export class CheckoutService {
     private readonly eventEmitter: EventEmitter2,
     private readonly settingsService: SettingsService,
     private readonly stockLevelManager: StockLevelManager,
+    private readonly wompiClient: WompiClient,
+    private readonly paymentEncryption: PaymentEncryptionService,
+    private readonly reservationsService: ReservationsService,
   ) {}
 
   async getPaymentMethods(shippingMethodType?: string) {
@@ -92,9 +101,43 @@ export class CheckoutService {
       },
     });
 
-    if (!cart || cart.cart_items.length === 0) {
+    // Fallback: if backend cart is empty but frontend sent items, build from DTO
+    // This handles the case where localStorage cart was never synced to backend
+    let cart_items = cart?.cart_items || [];
+
+    if (cart_items.length === 0 && dto.items && dto.items.length > 0) {
+      cart_items = await Promise.all(
+        dto.items.map(async (item) => {
+          const product = await this.prisma.products.findUnique({
+            where: { id: item.product_id },
+          });
+          if (!product) {
+            throw new VendixHttpException(ErrorCodes.ECOM_PRODUCT_001);
+          }
+
+          let product_variant = null;
+          if (item.product_variant_id) {
+            product_variant = await this.prisma.product_variants.findUnique({
+              where: { id: item.product_variant_id },
+            });
+          }
+
+          return {
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id || null,
+            quantity: item.quantity,
+            product,
+            product_variant,
+          } as any;
+        }),
+      );
+    }
+
+    if (cart_items.length === 0) {
       throw new VendixHttpException(ErrorCodes.ECOM_CART_001);
     }
+
+    const cart_currency = cart?.currency || await this.settingsService.getStoreCurrency();
 
     // store_id se aplica automáticamente
     const payment_method = await this.prisma.store_payment_methods.findFirst({
@@ -109,7 +152,7 @@ export class CheckoutService {
       throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_002);
     }
 
-    for (const item of cart.cart_items) {
+    for (const item of cart_items) {
       // Validate: if product has variants, a variant must be selected
       const productVariantCount = await this.prisma.product_variants.count({
         where: { product_id: item.product_id },
@@ -229,7 +272,7 @@ export class CheckoutService {
     const order_number = await this.generateOrderNumber();
 
     const itemsWithTaxes = await Promise.all(
-      cart.cart_items.map(async (item) => {
+      cart_items.map(async (item) => {
         const productWithTaxes = await this.prisma.products.findUnique({
           where: { id: item.product_id },
           include: {
@@ -298,7 +341,7 @@ export class CheckoutService {
       data: {
         order_number,
         channel: 'ecommerce', // Ecommerce orders are assigned 'ecommerce' channel
-        currency: cart.currency,
+        currency: cart_currency,
         subtotal_amount: subtotal,
         tax_amount: total_tax,
         shipping_cost: shipping_cost,
@@ -356,13 +399,13 @@ export class CheckoutService {
       data: {
         order_id: order.id,
         amount: grand_total,
-        currency: cart.currency,
+        currency: cart_currency,
         state: 'pending',
         store_payment_method_id: dto.payment_method_id,
       },
     });
 
-    for (const item of cart.cart_items) {
+    for (const item of cart_items) {
       if (!item.product.track_inventory) continue;
       try {
         const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
@@ -381,6 +424,30 @@ export class CheckoutService {
         );
       } catch (error) {
         this.logger.warn(`Stock reservation failed for product ${item.product_id}: ${error.message}`);
+      }
+    }
+
+    // Create bookings for bookable services
+    if (dto.bookings && dto.bookings.length > 0) {
+      const user_id = RequestContextService.getUserId();
+      for (const booking of dto.bookings) {
+        try {
+          await this.reservationsService.create({
+            customer_id: user_id!,
+            product_id: booking.product_id,
+            date: booking.date,
+            start_time: booking.start_time,
+            end_time: booking.end_time,
+            channel: order_channel_enum.ecommerce,
+            order_id: order.id,
+            skip_availability_check: false,
+          });
+          this.logger.log(`Booking created for product ${booking.product_id} linked to order ${order.id}`);
+        } catch (error) {
+          this.logger.warn(`Failed to create booking for product ${booking.product_id}: ${error.message}`);
+          // Don't fail the entire checkout if a booking fails
+          // The order is already created; booking can be retried manually
+        }
       }
     }
 
@@ -746,5 +813,68 @@ export class CheckoutService {
 
     const sequence = String(count + 1).padStart(4, '0');
     return `${store_code}-${date_str}-${sequence}`;
+  }
+
+  /**
+   * Prepare Wompi payment data for the frontend Widget.
+   * This endpoint is accessible from eCommerce context (customer JWT + x-store-id header).
+   */
+  async prepareWompiPayment(dto: {
+    order_id: number;
+    amount: number;
+    currency?: string;
+    customer_email?: string;
+    redirect_url?: string;
+  }) {
+    // Find Wompi payment method for this store
+    const wompiMethod = await this.store_prisma.store_payment_methods.findFirst({
+      where: {
+        state: 'enabled',
+        system_payment_method: { type: 'wompi' },
+      },
+      include: { system_payment_method: true },
+    });
+
+    if (!wompiMethod?.custom_config) {
+      throw new BadRequestException('Wompi no está configurado para esta tienda');
+    }
+
+    const config = this.paymentEncryption.decryptConfig(
+      wompiMethod.custom_config as Record<string, any>,
+      'wompi',
+    );
+
+    this.wompiClient.configure({
+      public_key: config.public_key,
+      private_key: config.private_key,
+      events_secret: config.events_secret || '',
+      integrity_secret: config.integrity_secret || '',
+      environment: (config.environment as WompiEnvironment) || WompiEnvironment.SANDBOX,
+    });
+
+    const storeId = RequestContextService.getStoreId();
+    const reference = `vendix_${storeId}_${dto.order_id}_${Date.now()}`;
+    const amountInCents = Math.round(dto.amount * 100);
+    const currency = dto.currency || 'COP';
+
+    const integritySignature = this.wompiClient.generateIntegritySignature(
+      reference,
+      amountInCents,
+      currency,
+    );
+
+    const tokens = await this.wompiClient.getAcceptanceTokens();
+
+    return {
+      public_key: config.public_key,
+      currency,
+      amount_in_cents: amountInCents,
+      reference,
+      signature_integrity: integritySignature,
+      redirect_url: dto.redirect_url || '',
+      acceptance_token: tokens.acceptance_token,
+      accept_personal_auth: tokens.personal_auth_token,
+      customer_email: dto.customer_email || '',
+    };
   }
 }

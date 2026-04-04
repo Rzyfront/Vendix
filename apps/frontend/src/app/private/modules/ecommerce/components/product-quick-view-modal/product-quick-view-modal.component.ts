@@ -203,8 +203,8 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
               [disabled]="(!isOnDemand && displayStock === 0) || (hasVariants && !selectedVariant)"
               (clicked)="onBuyNow()"
             >
-              <app-icon slot="icon" name="shopping-bag" [size]="18" />
-              Comprar ahora
+              <app-icon slot="icon" [name]="product.requires_booking && product.product_type === 'service' ? 'calendar-check' : 'shopping-bag'" [size]="18" />
+              {{ product.requires_booking && product.product_type === 'service' ? 'Agendar ahora' : 'Comprar ahora' }}
             </app-button>
 
             <!-- View Full Details Link -->
@@ -694,6 +694,13 @@ export class ProductQuickViewModalComponent implements OnChanges {
 
   onAddToCart(): void {
     if (!this.product) return;
+    // Guard: bookable services go to booking page
+    if (this.product.requires_booking && this.product.product_type === 'service') {
+      const productId = this.product.id;
+      this.onClose();
+      this.router.navigate(['/book', productId]);
+      return;
+    }
     const variantId = this.selectedVariant?.id;
     const variantInfo = this.selectedVariant
       ? { name: this.selectedVariant.name, sku: this.selectedVariant.sku, price: this.selectedVariant.final_price }
@@ -708,6 +715,13 @@ export class ProductQuickViewModalComponent implements OnChanges {
 
   onBuyNow(): void {
     if (!this.product) return;
+    // Guard: bookable services go to booking page
+    if (this.product.requires_booking && this.product.product_type === 'service') {
+      const productId = this.product.id;
+      this.onClose();
+      this.router.navigate(['/book', productId]);
+      return;
+    }
     const variantId = this.selectedVariant?.id;
     const variantInfo = this.selectedVariant
       ? { name: this.selectedVariant.name, sku: this.selectedVariant.sku, price: this.selectedVariant.final_price }

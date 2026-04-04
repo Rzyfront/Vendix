@@ -293,7 +293,7 @@ export class CatalogService {
   async getProductBySlug(slug: string) {
     const product = await this.prisma.products.findFirst({
       where: {
-        slug,
+        ...(isNaN(Number(slug)) ? { slug } : { id: Number(slug) }),
         state: 'active',
         available_for_ecommerce: true,
         // store_id se aplica automáticamente por EcommercePrismaService
@@ -474,6 +474,10 @@ export class CatalogService {
       categories:
         product.product_categories?.map((pc: any) => pc.categories) || [],
       variant_count: product._count?.product_variants || 0,
+      product_type: product.product_type,
+      requires_booking: product.requires_booking,
+      service_duration_minutes: product.service_duration_minutes,
+      service_modality: product.service_modality,
     };
   }
 
@@ -521,6 +525,10 @@ export class CatalogService {
       })),
       avg_rating: Math.round(avg_rating * 10) / 10,
       review_count: reviews.length,
+      product_type: product.product_type,
+      requires_booking: product.requires_booking,
+      service_duration_minutes: product.service_duration_minutes,
+      service_modality: product.service_modality,
     };
   }
 

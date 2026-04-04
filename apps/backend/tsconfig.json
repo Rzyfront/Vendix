@@ -21,5 +21,11 @@
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
     "useDefineForClassFields": false
+  },
+  "watchOptions": {
+    "watchFile": "dynamicPriorityPolling",
+    "watchDirectory": "dynamicPriorityPolling",
+    "fallbackPolling": "dynamicPriorityPolling",
+    "synchronousWatchDirectory": false
   }
 }

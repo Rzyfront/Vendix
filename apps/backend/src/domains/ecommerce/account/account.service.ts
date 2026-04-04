@@ -13,10 +13,14 @@ import {
 } from './dto/account.dto';
 import * as bcrypt from 'bcrypt';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { S3Service } from '@common/services/s3.service';
 
 @Injectable()
 export class AccountService {
-  constructor(private readonly prisma: EcommercePrismaService) {}
+  constructor(
+    private readonly prisma: EcommercePrismaService,
+    private readonly s3Service: S3Service,
+  ) {}
 
   async getProfile() {
     // user_id se obtiene del contexto del JWT
@@ -201,6 +205,10 @@ export class AccountService {
           },
         },
         addresses_orders_shipping_address_idToaddresses: true,
+        bookings: {
+          include: { product: { select: { name: true } } },
+          orderBy: { date: 'asc' },
+        },
       },
     });
 
@@ -224,16 +232,20 @@ export class AccountService {
       shipping_address:
         order.shipping_address_snapshot ||
         order.addresses_orders_shipping_address_idToaddresses,
-      items: order.order_items.map((item) => ({
-        id: item.id,
-        product_name: item.product_name,
-        variant_sku: item.variant_sku,
-        variant_attributes: item.variant_attributes,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        total_price: item.total_price,
-        image_url: item.products?.product_images?.[0]?.image_url || null,
-      })),
+      items: await Promise.all(
+        order.order_items.map(async (item) => ({
+          id: item.id,
+          product_name: item.product_name,
+          variant_sku: item.variant_sku,
+          variant_attributes: item.variant_attributes,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          total_price: item.total_price,
+          image_url: item.products?.product_images?.[0]?.image_url
+            ? await this.s3Service.signUrl(item.products.product_images[0].image_url)
+            : null,
+        })),
+      ),
       payments: order.payments.map((p) => ({
         id: p.id,
         amount: p.amount,
@@ -241,6 +253,16 @@ export class AccountService {
         method: p.store_payment_method?.system_payment_method?.display_name,
         paid_at: p.paid_at,
       })),
+      bookings: (order as any).bookings?.map((b: any) => ({
+        id: b.id,
+        booking_number: b.booking_number,
+        date: b.date,
+        start_time: b.start_time,
+        end_time: b.end_time,
+        status: b.status,
+        product_id: b.product_id,
+        product_name: b.product?.name,
+      })) || [],
     };
   }
 

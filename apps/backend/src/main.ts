@@ -129,15 +129,17 @@ async function bootstrap() {
     exposedHeaders: ['Authorization'],
   });
 
-  // Swagger configuration
-  const config = new DocumentBuilder()
-    .setTitle('Vendix API')
-    .setDescription('Documentación de la API de Vendix')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api-docs', app, document);
+  // Swagger configuration (disabled in development to save memory and avoid SWC metadata issues)
+  if (process.env.NODE_ENV !== 'development') {
+    const config = new DocumentBuilder()
+      .setTitle('Vendix API')
+      .setDescription('Documentación de la API de Vendix')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api-docs', app, document);
+  }
 
   // SEO routes (must be registered before global prefix)
   const seoService = app.get(PublicSeoService);

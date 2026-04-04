@@ -49,6 +49,7 @@ export class StorePrismaService extends BasePrismaService {
     'wallets',
     'commission_rules',
     'commission_calculations',
+    'payment_links',
   ];
 
   constructor() {
@@ -922,6 +923,11 @@ export class StorePrismaService extends BasePrismaService {
 
   get ap_payment_schedules() {
     return this.scoped_client.ap_payment_schedules;
+  }
+
+  // Payment Links
+  get payment_links() {
+    return this.scoped_client.payment_links;
   }
 
   // Commission models

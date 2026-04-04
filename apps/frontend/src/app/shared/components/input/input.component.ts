@@ -395,14 +395,14 @@ export class InputComponent implements ControlValueAccessor {
       ];
     }
 
-    // Padding ajustado para íconos
-    const iconPadding = [];
-    if (this.prefixIcon) {
-      iconPadding.push('pl-10');
-    }
-    if (this.suffixIcon || this.type === 'password') {
-      iconPadding.push('pr-10');
-    }
+    // Padding horizontal condicional — evita conflicto px-* vs pl-*/pr-* en Tailwind v4
+    const basePadding: Record<string, { pl: string[]; pr: string[] }> = {
+      sm: { pl: ['pl-3'], pr: ['pr-3'] },
+      md: { pl: ['pl-3', 'sm:pl-4'], pr: ['pr-3', 'sm:pr-4'] },
+      lg: { pl: ['pl-4'], pr: ['pr-4'] },
+    };
+    const leftPadding = this.prefixIcon ? ['pl-10'] : basePadding[this.size].pl;
+    const rightPadding = (this.suffixIcon || this.type === 'password') ? ['pr-10'] : basePadding[this.size].pr;
 
     let variantClasses: string[];
 
@@ -411,9 +411,9 @@ export class InputComponent implements ControlValueAccessor {
     // md: 40px mobile → 44px desktop
     // lg: 48px mobile → 52px desktop
     const sizeClasses = {
-      sm: ['h-8', 'sm:h-9', 'px-3', 'text-sm'],
-      md: ['h-10', 'sm:h-11', 'px-3', 'sm:px-4', 'text-sm', 'sm:text-base'],
-      lg: ['h-12', 'sm:h-[52px]', 'px-4', 'text-base', 'sm:text-lg'],
+      sm: ['h-8', 'sm:h-9', 'text-sm'],
+      md: ['h-10', 'sm:h-11', 'text-sm', 'sm:text-base'],
+      lg: ['h-12', 'sm:h-[52px]', 'text-base', 'sm:text-lg'],
     };
 
     if (this.styleVariant === 'modern') {
@@ -449,7 +449,8 @@ export class InputComponent implements ControlValueAccessor {
       ...baseClasses,
       ...variantClasses,
       ...stateClasses,
-      ...iconPadding,
+      ...leftPadding,
+      ...rightPadding,
     ];
 
     // Agregar clases personalizadas

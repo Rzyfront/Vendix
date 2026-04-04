@@ -1032,6 +1032,12 @@ export class ProductDetailComponent implements OnInit {
   toggleDescription(): void { this.isDescriptionExpanded.update(v => !v); }
 
   onAddToCart(product: EcommerceProduct | ProductDetail): void {
+    // For services that require booking, redirect to booking page
+    if ('requires_booking' in product && product.requires_booking &&
+        'product_type' in product && product.product_type === 'service') {
+      this.router.navigate(['/book', product.id]);
+      return;
+    }
     const variantId = this.selectedVariantId() ?? undefined;
     const variant = this.selectedVariant();
     const variantInfo = variant
@@ -1045,6 +1051,12 @@ export class ProductDetailComponent implements OnInit {
   onShareClick(): void { this.shareModalOpen = true; }
 
   onBuyNow(product: ProductDetail): void {
+    // For services that require booking, go to booking page
+    if (this.isService() && product.requires_booking) {
+      this.router.navigate(['/book', product.id]);
+      return;
+    }
+    // For regular products or services without booking, add to cart and go to cart
     const variantId = this.selectedVariantId() ?? undefined;
     const variant = this.selectedVariant();
     const variantInfo = variant

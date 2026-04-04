@@ -1,7 +1,8 @@
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, Optional } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { WebhookEvent } from '../interfaces';
 import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
+import { PaymentLinksService } from '../../payment-links/payment-links.service';
 
 @Injectable()
 export class WebhookHandlerService {
@@ -11,6 +12,8 @@ export class WebhookHandlerService {
     private prisma: StorePrismaService,
     @Inject(forwardRef(() => OrderFlowService))
     private orderFlowService: OrderFlowService,
+    @Optional() @Inject(forwardRef(() => PaymentLinksService))
+    private readonly paymentLinksService?: PaymentLinksService,
   ) {}
 
   async handleWebhook(event: WebhookEvent): Promise<void> {
@@ -111,7 +114,9 @@ export class WebhookHandlerService {
     gatewayResponse: any,
   ): Promise<void> {
     try {
-      const payment = await this.prisma.payments.findFirst({
+      // Use unscoped client because webhooks execute outside tenant context
+      const client = this.prisma.withoutScope();
+      const payment = await client.payments.findFirst({
         where: { transaction_id: transactionId },
       });
 
@@ -130,7 +135,7 @@ export class WebhookHandlerService {
         updateData.paid_at = new Date();
       }
 
-      await this.prisma.payments.update({
+      await client.payments.update({
         where: { id: payment.id },
         data: updateData,
       });
@@ -151,7 +156,9 @@ export class WebhookHandlerService {
 
   private async updateOrderStatus(orderId: number): Promise<void> {
     try {
-      const order = await this.prisma.orders.findUnique({
+      // Use unscoped client because this may be called from webhook context
+      const client = this.prisma.withoutScope();
+      const order = await client.orders.findUnique({
         where: { id: orderId },
         include: {
           payments: true,
@@ -203,6 +210,34 @@ export class WebhookHandlerService {
         const mappedStatus = statusMap[txn.status];
         if (mappedStatus) {
           await this.updatePaymentStatus(txn.id, mappedStatus, data);
+
+          // Auto-cancel order and release stock when payment is declined or errored
+          if (mappedStatus === 'failed' || mappedStatus === 'cancelled') {
+            try {
+              const client = this.prisma.withoutScope();
+              const payment = await client.payments.findFirst({
+                where: { transaction_id: txn.id },
+              });
+              if (payment) {
+                await this.orderFlowService.cancelOrder(payment.order_id, {
+                  reason: `Pago rechazado por Wompi: ${txn.status}`,
+                });
+                this.logger.log(`Order ${payment.order_id} auto-cancelled due to payment ${txn.status}`);
+              }
+            } catch (cancelErr) {
+              this.logger.warn(`Failed to auto-cancel order: ${cancelErr.message}`);
+            }
+          }
+
+          // Check if this transaction is linked to a payment link
+          const paymentLinkId = txn.payment_link_id;
+          if (paymentLinkId && mappedStatus === 'succeeded') {
+            try {
+              await this.paymentLinksService?.handlePaymentCompleted(paymentLinkId, txn);
+            } catch (error) {
+              this.logger.warn(`Failed to update payment link: ${error.message}`);
+            }
+          }
         } else {
           this.logger.log(`Wompi transaction ${txn.id} still PENDING`);
         }
@@ -218,7 +253,9 @@ export class WebhookHandlerService {
     disputeData: any,
   ): Promise<void> {
     try {
-      const payment = await this.prisma.payments.findFirst({
+      // Use unscoped client because this is called from webhook context
+      const client = this.prisma.withoutScope();
+      const payment = await client.payments.findFirst({
         where: {
           gateway_response: {
             path: ['charge'],

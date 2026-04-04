@@ -1,7 +1,7 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { Subject, takeUntil } from 'rxjs';
+import { Subject, takeUntil, forkJoin } from 'rxjs';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
@@ -10,11 +10,21 @@ import {
   ItemListCardConfig,
 } from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
+import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
+import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import {
+  FilterConfig,
+  FilterValues,
+  DropdownAction,
+} from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 
 import { AnalyticsService } from '../../services/analytics.service';
-import { StockLevelReport } from '../../interfaces/inventory-analytics.interface';
+import {
+  StockLevelReport,
+  InventorySummary,
+} from '../../interfaces/inventory-analytics.interface';
 
 @Component({
   selector: 'vendix-low-stock',
@@ -24,98 +34,124 @@ import { StockLevelReport } from '../../interfaces/inventory-analytics.interface
     RouterModule,
     CardComponent,
     ResponsiveDataViewComponent,
-    IconComponent,
-    ExportButtonComponent,
+    StatsComponent,
+    InputsearchComponent,
+    OptionsDropdownComponent,
   ],
   template: `
-    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
-      <!-- Header -->
+    <div class="w-full">
+      <!-- Stats: Sticky on mobile, static on desktop -->
       <div
-        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
       >
-        <div>
-          <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/reports" class="hover:text-primary"
-              >Reportes</a
-            >
-            <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/reports/inventory" class="hover:text-primary"
-              >Inventario</a
-            >
-            <app-icon name="chevron-right" [size]="14"></app-icon>
-            <span>Stock Bajo</span>
-          </div>
-          <h1 class="text-2xl font-bold text-text-primary">
-            Alertas de Stock Bajo
-          </h1>
-          <p class="text-text-secondary mt-1">
-            Productos que necesitan reabastecimiento
-          </p>
-        </div>
-        <vendix-export-button
-          [loading]="exporting()"
-          (export)="exportReport()"
-        ></vendix-export-button>
+        <app-stats
+          title="Total Alertas"
+          [value]="totalAlerts()"
+          smallText="Stock bajo + agotados"
+          iconName="alert-triangle"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-600"
+        ></app-stats>
+
+        <app-stats
+          title="Agotados"
+          [value]="summary()?.out_of_stock_count ?? 0"
+          smallText="Sin unidades"
+          iconName="x-circle"
+          iconBgColor="bg-red-100"
+          iconColor="text-red-600"
+        ></app-stats>
+
+        <app-stats
+          title="Stock Bajo"
+          [value]="summary()?.low_stock_count ?? 0"
+          smallText="Bajo punto reorden"
+          iconName="alert-circle"
+          iconBgColor="bg-yellow-100"
+          iconColor="text-yellow-600"
+        ></app-stats>
+
+        <app-stats
+          title="Unidades Totales"
+          [value]="summary()?.total_quantity_on_hand ?? 0"
+          smallText="En inventario"
+          iconName="package"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+        ></app-stats>
       </div>
 
-      <!-- Alert Banner -->
-      @if (!loading() && data().length > 0) {
-        <div
-          class="bg-yellow-50 border border-yellow-200 rounded-xl p-4 flex items-start gap-3"
+      <!-- Card with search + data -->
+      <div class="md:space-y-4">
+        <app-card
+          [responsive]="true"
+          [padding]="false"
+          customClasses="md:min-h-[600px]"
         >
-          <app-icon
-            name="alert-triangle"
-            [size]="20"
-            class="text-yellow-600 flex-shrink-0 mt-0.5"
-          ></app-icon>
-          <div>
-            <h4 class="font-semibold text-yellow-800">Atención Requerida</h4>
-            <p class="text-sm text-yellow-700">
-              Hay {{ data().length }} productos con stock bajo o agotado.
-              Considera crear órdenes de compra para reabastecerlos.
-            </p>
-          </div>
-        </div>
-      }
-
-      <!-- Main Content -->
-      <app-card
-        shadow="none"
-        [padding]="false"
-        overflow="hidden"
-        [showHeader]="true"
-      >
-        <div slot="header" class="flex items-center justify-between">
-          <div class="flex flex-col">
-            <span class="text-sm font-bold text-[var(--color-text-primary)]">
-              Productos con Stock Bajo
-              <span
-                class="text-xs text-[var(--color-text-secondary)] font-normal ml-2"
-              >
-                ({{ data().length }} alertas)
-              </span>
-            </span>
-          </div>
-          <a
-            routerLink="/admin/inventory/pop"
-            class="text-sm text-primary hover:underline flex items-center gap-1"
+          <!-- Search Section: sticky below stats on mobile, normal on desktop -->
+          <div
+            class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
           >
-            <app-icon name="plus" [size]="14"></app-icon>
-            Crear Orden de Compra
-          </a>
-        </div>
+            <div
+              class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+            >
+              <h2
+                class="text-[13px] font-semibold text-text-secondary tracking-wide md:text-lg md:font-semibold md:text-text-primary md:tracking-normal"
+              >
+                Productos
+                <span
+                  class="font-normal text-text-secondary/50 md:font-semibold md:text-text-primary"
+                >
+                  ({{ filteredData().length }})
+                </span>
+              </h2>
+              <div class="flex items-center gap-2 w-full md:w-auto">
+                <app-inputsearch
+                  class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                  size="sm"
+                  placeholder="Buscar producto o SKU..."
+                  [debounceTime]="300"
+                  (searchChange)="onSearch($event)"
+                ></app-inputsearch>
+                <app-options-dropdown
+                  class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                  [filters]="filterConfigs"
+                  [filterValues]="filterValues"
+                  [actions]="dropdownActions"
+                  [isLoading]="loading()"
+                  (filterChange)="onFilterChange($event)"
+                  (clearAllFilters)="clearFilters()"
+                  (actionClick)="onActionClick($event)"
+                ></app-options-dropdown>
+              </div>
+            </div>
+          </div>
 
-        <div class="p-4">
-          <app-responsive-data-view
-            [data]="data()"
-            [columns]="columns"
-            [cardConfig]="cardConfig"
-            [loading]="loading()"
-            emptyMessage="No hay productos con stock bajo"
-            emptyIcon="check-circle"
-          ></app-responsive-data-view>
-        </div>
-      </app-card>
+          <!-- Loading -->
+          @if (loading()) {
+            <div class="p-4 md:p-6 text-center">
+              <div
+                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+              ></div>
+              <p class="mt-2 text-text-secondary">Cargando alertas...</p>
+            </div>
+          }
+
+          <!-- Data View -->
+          @if (!loading()) {
+            <div class="px-2 pb-2 pt-3 md:p-4">
+              <app-responsive-data-view
+                [data]="filteredData()"
+                [columns]="columns"
+                [cardConfig]="cardConfig"
+                [loading]="loading()"
+                emptyMessage="No hay productos con stock bajo"
+                emptyIcon="check-circle"
+              ></app-responsive-data-view>
+            </div>
+          }
+        </app-card>
+      </div>
     </div>
   `,
 })
@@ -124,10 +160,73 @@ export class LowStockComponent implements OnInit, OnDestroy {
   private toastService = inject(ToastService);
   private destroy$ = new Subject<void>();
 
+  // Signals
   loading = signal(true);
   exporting = signal(false);
   data = signal<StockLevelReport[]>([]);
+  summary = signal<InventorySummary | null>(null);
+  searchTerm = signal('');
+  statusFilter = signal<string>('');
 
+  // Computed: filtered data based on search + status filter
+  filteredData = computed(() => {
+    let items = this.data();
+    const term = this.searchTerm().toLowerCase().trim();
+    const status = this.statusFilter();
+
+    if (term) {
+      items = items.filter(
+        (item) =>
+          item.product_name.toLowerCase().includes(term) ||
+          item.sku.toLowerCase().includes(term),
+      );
+    }
+
+    if (status) {
+      items = items.filter((item) => item.status === status);
+    }
+
+    return items;
+  });
+
+  // Computed: total alerts
+  totalAlerts = computed(() => {
+    const s = this.summary();
+    if (!s) return this.data().length;
+    return s.low_stock_count + s.out_of_stock_count;
+  });
+
+  // Filter configs for OptionsDropdown
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'status',
+      label: 'Estado',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos' },
+        { value: 'out_of_stock', label: 'Agotado' },
+        { value: 'low_stock', label: 'Stock Bajo' },
+      ],
+    },
+  ];
+
+  filterValues: FilterValues = {};
+
+  dropdownActions: DropdownAction[] = [
+    {
+      label: 'Crear Orden de Compra',
+      icon: 'shopping-cart',
+      action: 'create-pop',
+      variant: 'primary',
+    },
+    {
+      label: 'Exportar',
+      icon: 'download',
+      action: 'export',
+    },
+  ];
+
+  // Columns with SPANISH badges
   columns: TableColumn[] = [
     {
       key: 'image_url',
@@ -157,27 +256,35 @@ export class LowStockComponent implements OnInit, OnDestroy {
     },
     {
       key: 'days_of_stock',
-      label: 'Días de Stock',
+      label: 'Dias de Stock',
       sortable: true,
       align: 'right',
       priority: 2,
       width: '120px',
-      transform: (val) =>
-        val !== null && val !== undefined ? `${val} días` : '-',
+      defaultValue: '-',
+      transform: (val: any) => `${val} dias`,
     },
     {
       key: 'status',
       label: 'Estado',
+      badge: true,
       align: 'center',
       priority: 1,
       width: '100px',
       badgeConfig: {
-        type: 'status',
+        type: 'custom',
+        size: 'sm',
         colorMap: {
-          low_stock: 'warn',
-          out_of_stock: 'danger',
+          low_stock: '#f59e0b',
+          out_of_stock: '#ef4444',
         },
       },
+      transform: (val: string) =>
+        val === 'out_of_stock'
+          ? 'Agotado'
+          : val === 'low_stock'
+            ? 'Stock Bajo'
+            : val,
     },
   ];
 
@@ -187,12 +294,19 @@ export class LowStockComponent implements OnInit, OnDestroy {
     avatarKey: 'image_url',
     badgeKey: 'status',
     badgeConfig: {
-      type: 'status',
+      type: 'custom',
+      size: 'sm',
       colorMap: {
-        low_stock: 'warn',
-        out_of_stock: 'danger',
+        low_stock: '#f59e0b',
+        out_of_stock: '#ef4444',
       },
     },
+    badgeTransform: (val: string) =>
+      val === 'out_of_stock'
+        ? 'Agotado'
+        : val === 'low_stock'
+          ? 'Stock Bajo'
+          : val,
     detailKeys: [
       {
         key: 'quantity_available',
@@ -219,12 +333,15 @@ export class LowStockComponent implements OnInit, OnDestroy {
   loadData(): void {
     this.loading.set(true);
 
-    this.analyticsService
-      .getLowStockAlerts({ limit: 100 })
+    forkJoin({
+      alerts: this.analyticsService.getLowStockAlerts({ limit: 100 }),
+      summary: this.analyticsService.getInventorySummary(),
+    })
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: (response) => {
-          this.data.set(response.data);
+        next: ({ alerts, summary }) => {
+          this.data.set(alerts.data);
+          this.summary.set(summary.data);
           this.loading.set(false);
         },
         error: () => {
@@ -232,6 +349,30 @@ export class LowStockComponent implements OnInit, OnDestroy {
           this.loading.set(false);
         },
       });
+  }
+
+  onSearch(term: string): void {
+    this.searchTerm.set(term);
+  }
+
+  onFilterChange(values: FilterValues): void {
+    const status = values['status'] as string;
+    this.statusFilter.set(status || '');
+    this.filterValues = values;
+  }
+
+  clearFilters(): void {
+    this.searchTerm.set('');
+    this.statusFilter.set('');
+    this.filterValues = {};
+  }
+
+  onActionClick(action: string): void {
+    if (action === 'export') {
+      this.exportReport();
+    } else if (action === 'create-pop') {
+      window.location.href = '/admin/inventory/pop';
+    }
   }
 
   exportReport(): void {

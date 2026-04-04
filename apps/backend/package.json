@@ -9,7 +9,7 @@
     "// ----- BUILD & START -----": "",
     "build": "nest build",
     "start": "nest start",
-    "start:dev": "nest start --watch --entryFile src/main",
+    "start:dev": "nest start --watch --builder swc",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/src/main",
     "// ----- LINT & FORMAT -----": "",

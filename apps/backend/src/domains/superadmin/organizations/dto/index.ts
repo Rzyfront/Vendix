@@ -10,6 +10,7 @@ import {
   IsBoolean,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { ApiProperty } from '@nestjs/swagger';
 import { organization_mode_enum } from '@prisma/client';
 
 export enum OrganizationState {
@@ -165,11 +166,22 @@ export class AdminOrganizationQueryDto {
 }
 
 export class OrganizationsDashboardStatsDto {
+  @ApiProperty({ type: Number })
   total_organizations: number;
+
+  @ApiProperty({ type: Number })
   active: number;
+
+  @ApiProperty({ type: Number })
   inactive: number;
+
+  @ApiProperty({ type: Number })
   suspended: number;
+
+  @ApiProperty({ type: Number })
   demo: number;
+
+  @ApiProperty({ type: Number })
   test: number;
 }
 

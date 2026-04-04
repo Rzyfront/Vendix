@@ -13,6 +13,7 @@ import { BookingRemindersJob } from './booking-reminders.job';
 import { EmbeddingSyncJob } from './embedding-sync.job';
 import { ArAgingUpdateJob } from './ar-aging-update.job';
 import { ApAgingUpdateJob } from './ap-aging-update.job';
+import { PaymentTimeoutCleanupJob } from './payment-timeout-cleanup.job';
 import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
@@ -34,6 +35,7 @@ import { PrismaModule } from '../prisma/prisma.module';
     EmbeddingSyncJob,
     ArAgingUpdateJob,
     ApAgingUpdateJob,
+    PaymentTimeoutCleanupJob,
   ],
 })
 export class JobsModule {}

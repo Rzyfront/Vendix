@@ -9,6 +9,11 @@ export enum WompiPaymentMethod {
   PSE = 'PSE',
   BANCOLOMBIA_TRANSFER = 'BANCOLOMBIA_TRANSFER',
   BANCOLOMBIA_COLLECT = 'BANCOLOMBIA_COLLECT',
+  BANCOLOMBIA_QR = 'BANCOLOMBIA_QR',
+  DAVIPLATA = 'DAVIPLATA',
+  BANCOLOMBIA_BNPL = 'BANCOLOMBIA_BNPL',
+  SU_PLUS = 'SU_PLUS',
+  PCOL = 'PCOL',
 }
 
 /** Estados de transacción en Wompi */
@@ -59,23 +64,69 @@ export interface WompiBancolombiaCollectPaymentMethod {
   sandbox_status?: WompiTransactionStatus;
 }
 
+export interface WompiBancolombiaQrPaymentMethod {
+  type: 'BANCOLOMBIA_QR';
+  payment_description?: string;
+  sandbox_status?: WompiTransactionStatus;
+}
+
+export interface WompiDaviplataPaymentMethod {
+  type: 'DAVIPLATA';
+  user_legal_id: string;
+  user_legal_id_type: string;
+  payment_description?: string;
+}
+
+export interface WompiBancolombiaBnplPaymentMethod {
+  type: 'BANCOLOMBIA_BNPL';
+  name: string;
+  last_name: string;
+  user_legal_id_type: string;
+  user_legal_id: string;
+  phone_number: string;
+  phone_code: string;
+  redirect_url: string;
+  payment_description?: string;
+}
+
+export interface WompiSuPlusPaymentMethod {
+  type: 'SU_PLUS';
+  user_legal_id_type: string;
+  user_legal_id: string;
+}
+
+export interface WompiPcolPaymentMethod {
+  type: 'PCOL';
+}
+
 export type WompiPaymentMethodData =
   | WompiCardPaymentMethod
   | WompiNequiPaymentMethod
   | WompiPsePaymentMethod
   | WompiBancolombiaTransferPaymentMethod
-  | WompiBancolombiaCollectPaymentMethod;
+  | WompiBancolombiaCollectPaymentMethod
+  | WompiBancolombiaQrPaymentMethod
+  | WompiDaviplataPaymentMethod
+  | WompiBancolombiaBnplPaymentMethod
+  | WompiSuPlusPaymentMethod
+  | WompiPcolPaymentMethod;
 
 // ── Request / Response ──────────────────────
 
 export interface WompiCreateTransactionRequest {
   acceptance_token: string;
+  accept_personal_auth: string;
   amount_in_cents: number;
   currency: string;
   customer_email: string;
   reference: string;
   payment_method: WompiPaymentMethodData;
   redirect_url?: string;
+  signature?: string;
+  customer_data?: {
+    phone_number?: string;
+    full_name?: string;
+  };
 }
 
 export interface WompiTransactionData {
@@ -101,6 +152,11 @@ export interface WompiMerchantResponse {
     id: number;
     name: string;
     presigned_acceptance: {
+      acceptance_token: string;
+      permalink: string;
+      type: string;
+    };
+    presigned_personal_data_auth: {
       acceptance_token: string;
       permalink: string;
       type: string;
@@ -136,6 +192,45 @@ export interface WompiWebhookEvent {
   timestamp: number;
   signature: WompiWebhookSignature;
   environment: string;
+}
+
+// ── Payment Links ─────────────────────────────
+
+export interface WompiCreatePaymentLinkRequest {
+  name: string;
+  description: string;
+  single_use: boolean;
+  collect_shipping: boolean;
+  amount_in_cents?: number | null;
+  currency?: string;
+  expires_at?: string;
+  redirect_url?: string;
+  image_url?: string;
+  sku?: string;
+  customer_data?: {
+    customer_references?: Array<{ label: string; is_required: boolean }>;
+  };
+}
+
+export interface WompiPaymentLinkData {
+  id: string;
+  name: string;
+  description: string;
+  single_use: boolean;
+  collect_shipping: boolean;
+  active: boolean;
+  amount_in_cents: number | null;
+  currency: string;
+  expires_at: string | null;
+  redirect_url: string | null;
+  image_url: string | null;
+  sku: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WompiPaymentLinkResponse {
+  data: WompiPaymentLinkData;
 }
 
 // ── Config ──────────────────────────────────

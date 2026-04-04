@@ -1,7 +1,12 @@
 FROM node:20-alpine
 WORKDIR /app
 COPY package*.json ./
-RUN npm install
+RUN npm install && \
+    if [ "$(uname -m)" = "aarch64" ]; then \
+        npm install @swc/core-linux-arm64-musl --force; \
+    else \
+        npm install @swc/core-linux-x64-musl --force; \
+    fi
 COPY . .
 RUN npx prisma generate
 EXPOSE 3000

@@ -946,6 +946,24 @@ export class PosPaymentService {
   }
 
   /**
+   * Get PSE financial institutions from Wompi
+   */
+  getPseFinancialInstitutions(): Observable<any[]> {
+    return this.http
+      .get<any>(`${environment.apiUrl}/store/payments/wompi/financial-institutions`)
+      .pipe(map((res: any) => res.data || []));
+  }
+
+  /**
+   * Get payment status (for polling async Wompi payments)
+   */
+  getPaymentStatus(paymentId: string): Observable<any> {
+    return this.http.get<any>(
+      `${environment.apiUrl}/store/payments/${paymentId}/status`,
+    );
+  }
+
+  /**
    * Get current store ID
    */
   private getStoreId(): number {

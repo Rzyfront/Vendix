@@ -41,7 +41,7 @@ export class PaymentGatewayService {
 
       const payment = await this.createPaymentRecord(
         paymentData,
-        paymentMethod.type,
+        paymentMethod.system_payment_method?.type || 'unknown',
       );
 
       const result = await processor.processPayment({
@@ -103,7 +103,7 @@ export class PaymentGatewayService {
     try {
       const payment = await this.prisma.payments.findFirst({
         where: { transaction_id: paymentId },
-        include: { payment_methods: { include: { system_payment_method: true } } },
+        include: { store_payment_method: { include: { system_payment_method: true } } },
       });
 
       if (!payment) {
@@ -121,7 +121,7 @@ export class PaymentGatewayService {
       }
 
       const processor = this.getProcessor(
-        payment.payment_methods?.system_payment_method?.type || payment.payment_methods?.type || 'card',
+        payment.store_payment_method?.system_payment_method?.type || 'card',
       );
       const result = await processor.refundPayment(paymentId, amount);
 
@@ -143,7 +143,7 @@ export class PaymentGatewayService {
     try {
       const payment = await this.prisma.payments.findFirst({
         where: { transaction_id: transactionId },
-        include: { payment_methods: { include: { system_payment_method: true } } },
+        include: { store_payment_method: { include: { system_payment_method: true } } },
       });
 
       if (!payment) {
@@ -154,7 +154,7 @@ export class PaymentGatewayService {
       }
 
       const processor = this.getProcessor(
-        payment.payment_methods?.system_payment_method?.type || payment.payment_methods?.type || 'card',
+        payment.store_payment_method?.system_payment_method?.type || 'card',
       );
       return await processor.getPaymentStatus(transactionId);
     } catch (error) {
@@ -166,25 +166,35 @@ export class PaymentGatewayService {
   }
 
   private async validatePaymentData(paymentData: PaymentData): Promise<void> {
+    // Skip order validation for POS payments — the order was just created
+    // inside the same Prisma transaction and isn't visible to the regular client yet
+    const skipOrderValidation = paymentData.metadata?.is_pos_payment === true;
+
+    const validations: Promise<any>[] = [
+      skipOrderValidation
+        ? Promise.resolve({ valid: true })
+        : this.validatorService.validateOrder(
+            paymentData.orderId,
+            paymentData.storeId,
+          ),
+      this.validatorService.validatePaymentMethod(
+        paymentData.storePaymentMethodId,
+        paymentData.storeId,
+      ),
+      skipOrderValidation
+        ? Promise.resolve(true)
+        : this.validatorService.validatePaymentAmount(
+            paymentData.amount,
+            paymentData.orderId,
+          ),
+      this.validatorService.validateCurrency(
+        paymentData.currency,
+        paymentData.storeId,
+      ),
+    ];
+
     const [orderValid, methodValid, amountValid, currencyValid] =
-      await Promise.all([
-        this.validatorService.validateOrder(
-          paymentData.orderId,
-          paymentData.storeId,
-        ),
-        this.validatorService.validatePaymentMethod(
-          paymentData.storePaymentMethodId,
-          paymentData.storeId,
-        ),
-        this.validatorService.validatePaymentAmount(
-          paymentData.amount,
-          paymentData.orderId,
-        ),
-        this.validatorService.validateCurrency(
-          paymentData.currency,
-          paymentData.storeId,
-        ),
-      ]);
+      await Promise.all(validations);
 
     if (!orderValid.valid) {
       throw new PaymentError(

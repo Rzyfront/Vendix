@@ -48,6 +48,7 @@ export interface WebhookEvent {
   data: any;
   signature?: string;
   rawBody?: string;
+  storeId?: number;
 }
 
 export interface PaymentProcessorConfig {
