@@ -94,7 +94,7 @@ export class EmployeesService {
 
     // Auto-generate employee_code if not provided
     if (!dto.employee_code) {
-      dto.employee_code = await this.generateNextEmployeeCode(context.organization_id);
+      dto.employee_code = await this.generateNextEmployeeCode(context.organization_id!);
     }
 
     // Check for duplicate employee_code (org-level unique constraint)
