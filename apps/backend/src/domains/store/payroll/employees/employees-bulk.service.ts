@@ -2,20 +2,23 @@ import {
   Injectable,
   BadRequestException,
 } from '@nestjs/common';
+import { v4 as uuidv4 } from 'uuid';
 import * as XLSX from 'xlsx';
 import * as bcrypt from 'bcryptjs';
-import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { EmployeesService } from './employees.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '@common/responses/response.service';
 import { DefaultPanelUIService } from '../../../../common/services/default-panel-ui.service';
+import { S3Service } from '@common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import {
   BulkEmployeeUploadDto,
   BulkEmployeeItemDto,
   BulkEmployeeUploadResultDto,
   BulkEmployeeItemResultDto,
+  BulkEmployeeAnalysisResultDto,
+  BulkEmployeeAnalysisItemDto,
 } from './dto/bulk-employee.dto';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 
@@ -103,6 +106,7 @@ export class EmployeesBulkService {
     private readonly employeesService: EmployeesService,
     private readonly responseService: ResponseService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
+    private readonly s3Service: S3Service,
   ) {}
 
   generateExcelTemplate(): Buffer {
@@ -154,6 +158,241 @@ export class EmployeesBulkService {
     XLSX.utils.book_append_sheet(wb, ws, 'Plantilla Empleados');
 
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  }
+
+  /**
+   * Analiza un archivo Excel/CSV sin procesar los empleados.
+   * Retorna un analisis detallado por empleado con status ready/warning/error.
+   * Almacena el archivo en S3 temporal para posterior procesamiento.
+   */
+  async analyzeEmployees(
+    fileBuffer: Buffer,
+    storeId: number,
+    organizationId: number,
+  ): Promise<BulkEmployeeAnalysisResultDto> {
+    // 1. Parse file
+    let employees: any[];
+    try {
+      employees = this.parseFile(fileBuffer);
+    } catch (error) {
+      throw new VendixHttpException(ErrorCodes.BULK_PROD_FILE_INVALID);
+    }
+
+    if (!employees || employees.length === 0) {
+      throw new VendixHttpException(ErrorCodes.BULK_PROD_EMPTY_FILE);
+    }
+
+    if (employees.length > this.MAX_BATCH_SIZE) {
+      throw new VendixHttpException(ErrorCodes.BULK_PROD_LIMIT_EXCEEDED);
+    }
+
+    // 2. Pre-fetch existing employees by document number (org-scoped)
+    const unscoped = this.prisma.withoutScope() as any;
+    const existingEmployees = await unscoped.employees.findMany({
+      where: { organization_id: organizationId },
+      select: {
+        id: true,
+        document_type: true,
+        document_number: true,
+        first_name: true,
+        last_name: true,
+        employee_stores: {
+          select: { store_id: true, status: true },
+        },
+      },
+    });
+    const employeeDocMap = new Map<string, { id: number; first_name: string; last_name: string; store_ids: number[] }>();
+    for (const e of existingEmployees) {
+      const key = `${e.document_type}-${e.document_number}`;
+      const store_ids = e.employee_stores
+        .filter((es: any) => es.status === 'active')
+        .map((es: any) => es.store_id);
+      employeeDocMap.set(key, { id: e.id, first_name: e.first_name, last_name: e.last_name, store_ids });
+    }
+
+    // 3. Pre-fetch existing users by document number for user linking warnings
+    const existingUsers = await this.prisma.users.findMany({
+      where: { organization_id: organizationId },
+      select: { id: true, document_type: true, document_number: true, email: true },
+    });
+    const userDocMap = new Map<string, { id: number; email: string }>();
+    for (const u of existingUsers) {
+      if (u.document_type && u.document_number) {
+        const key = `${u.document_type}-${u.document_number}`;
+        userDocMap.set(key, { id: u.id, email: u.email });
+      }
+    }
+
+    // 4. Track duplicate documents in batch
+    const seenDocs = new Map<string, number>(); // docKey -> first row number
+
+    // 5. Analyze each employee
+    const analysisItems: BulkEmployeeAnalysisItemDto[] = [];
+    let ready = 0;
+    let withWarnings = 0;
+    let withErrors = 0;
+
+    for (let i = 0; i < employees.length; i++) {
+      const emp = employees[i];
+      const docType = (emp.document_type || 'CC').toString().trim().toUpperCase();
+      const docNumber = (emp.document_number || '').toString().trim();
+      const docKey = `${docType}-${docNumber}`;
+
+      const item: BulkEmployeeAnalysisItemDto = {
+        row_number: i + 2, // +2 because row 1 is header, data starts at row 2
+        name: emp.first_name || '',
+        last_name: emp.last_name || '',
+        document_type: docType,
+        document_number: docNumber,
+        base_salary: parseFloat(emp.base_salary) || 0,
+        position: emp.position || undefined,
+        department: emp.department || undefined,
+        contract_type: emp.contract_type || '',
+        is_user: !!emp.is_user,
+        email: emp.email || undefined,
+        action: 'create',
+        status: 'ready',
+        warnings: [],
+        errors: [],
+      };
+
+      // Validate required fields
+      if (!item.name) {
+        item.errors.push('Nombre es requerido');
+      }
+      if (!item.last_name) {
+        item.errors.push('Apellido es requerido');
+      }
+      if (!item.document_number) {
+        item.errors.push('Numero de documento es requerido');
+      }
+      if (!emp.hire_date) {
+        item.errors.push('Fecha de contratacion es requerida');
+      }
+      if (!item.contract_type) {
+        item.warnings.push('Tipo de contrato no especificado, se usara "indefinido" por defecto');
+      }
+      if (item.base_salary <= 0) {
+        item.warnings.push('Salario base es 0 o no especificado');
+      }
+
+      // Check is_user requires email
+      if (item.is_user && !item.email) {
+        item.errors.push('Email es requerido cuando el empleado sera usuario del sistema');
+      }
+
+      // Check duplicate document in batch
+      if (docNumber) {
+        if (seenDocs.has(docKey)) {
+          item.warnings.push(
+            `Documento duplicado en el archivo (primera aparicion en fila ${seenDocs.get(docKey)})`,
+          );
+        } else {
+          seenDocs.set(docKey, item.row_number);
+        }
+
+        // Check if document exists in organization employees
+        const existingEmp = employeeDocMap.get(docKey);
+        if (existingEmp) {
+          if (existingEmp.store_ids.includes(storeId)) {
+            item.action = 'update';
+            item.warnings.push(
+              `Ya existe en esta tienda: ${existingEmp.first_name} ${existingEmp.last_name}. Se actualizarán sus datos.`,
+            );
+          } else {
+            item.action = 'associate';
+            item.warnings.push(
+              `Existe en otra tienda: ${existingEmp.first_name} ${existingEmp.last_name}. Se vinculará a esta tienda sin modificar sus datos.`,
+            );
+          }
+        }
+
+        // Check if user exists for this document (for is_user warning)
+        if (item.is_user && userDocMap.has(docKey)) {
+          const existingUser = userDocMap.get(docKey)!;
+          item.warnings.push(
+            `Se vinculara al usuario existente (${existingUser.email})`,
+          );
+        }
+      }
+
+      // Determine final status
+      if (item.errors.length > 0) {
+        item.status = 'error';
+        withErrors++;
+      } else if (item.warnings.length > 0) {
+        item.status = 'warning';
+        withWarnings++;
+      } else {
+        item.status = 'ready';
+        ready++;
+      }
+
+      analysisItems.push(item);
+    }
+
+    // 6. Store file in S3 temp
+    const sessionId = uuidv4();
+    const s3Key = `tmp/bulk-employees/${storeId}/${sessionId}.xlsx`;
+    await this.s3Service.uploadFile(
+      fileBuffer,
+      s3Key,
+      'application/octet-stream',
+    );
+
+    // 7. Return analysis result
+    return {
+      session_id: sessionId,
+      total_employees: employees.length,
+      ready,
+      with_warnings: withWarnings,
+      with_errors: withErrors,
+      employees: analysisItems,
+    };
+  }
+
+  /**
+   * Procesa la carga masiva desde una sesion de analisis previa.
+   * Descarga el archivo temporal de S3, lo procesa y limpia.
+   */
+  async uploadFromSession(
+    sessionId: string,
+    storeId: number,
+    user: any,
+  ): Promise<BulkEmployeeUploadResultDto> {
+    const s3Key = `tmp/bulk-employees/${storeId}/${sessionId}.xlsx`;
+
+    let fileBuffer: Buffer;
+    try {
+      fileBuffer = await this.s3Service.downloadImage(s3Key);
+    } catch (error) {
+      throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
+    }
+
+    try {
+      const employees = this.parseFile(fileBuffer);
+      const result = await this.uploadEmployees({ employees }, user);
+      return result;
+    } finally {
+      // Clean up temp file
+      try {
+        await this.s3Service.deleteFile(s3Key);
+      } catch (e) {
+        // Silent cleanup failure
+      }
+    }
+  }
+
+  /**
+   * Cancela una sesion de analisis y limpia el archivo temporal.
+   */
+  async cancelSession(sessionId: string, storeId: number): Promise<void> {
+    const s3Key = `tmp/bulk-employees/${storeId}/${sessionId}.xlsx`;
+    try {
+      await this.s3Service.deleteFile(s3Key);
+    } catch (e) {
+      // File may not exist, silently ignore
+    }
   }
 
   parseFile(buffer: Buffer): BulkEmployeeItemDto[] {
@@ -268,6 +507,8 @@ export class EmployeesBulkService {
     const results: BulkEmployeeItemResultDto[] = [];
     let successful = 0;
     let failed = 0;
+    let updated = 0;
+    let associated = 0;
     let users_created = 0;
     let users_linked = 0;
 
@@ -331,22 +572,23 @@ export class EmployeesBulkService {
           );
         }
 
-        // Check if employee already exists in DB (org-level unique constraint)
-        const unscoped = this.prisma.withoutScope() as any;
-        const existingEmployee = await unscoped.employees.findFirst({
+        // Check if employee already exists (org-scoped) to determine if user handling should run
+        const unscopedUpload = this.prisma.withoutScope() as any;
+        const existingEmployee = await unscopedUpload.employees.findFirst({
           where: {
             organization_id: organizationId,
             document_type: docType,
             document_number: docNumber,
           },
         });
+        const isNewEmployee = !existingEmployee;
 
-        // Handle user linking/creation
+        // Handle user linking/creation (only for new employees)
         let userId: number | undefined;
         let userCreated = false;
         let userLinked = false;
 
-        if (empData.is_user && !existingEmployee) {
+        if (isNewEmployee && empData.is_user) {
           if (!empData.email) {
             throw new VendixHttpException(
               ErrorCodes.PAYROLL_BULK_004,
@@ -365,8 +607,9 @@ export class EmployeesBulkService {
 
           if (existingUser) {
             // Check user isn't already linked to another employee
-            const linkedEmployee = await this.prisma.employees.findFirst({
+            const linkedEmployee = await unscopedUpload.employees.findFirst({
               where: {
+                organization_id: organizationId,
                 user_id: existingUser.id,
               },
             });
@@ -424,76 +667,50 @@ export class EmployeesBulkService {
           }
         }
 
-        let employee: any;
-        let wasUpdated = false;
+        // Create/update/associate employee using EmployeesService
+        const createDto: CreateEmployeeDto = {
+          first_name: empData.first_name.trim(),
+          last_name: empData.last_name.trim(),
+          document_type: docType,
+          document_number: docNumber,
+          hire_date: empData.hire_date,
+          contract_type: normalizedContract as CreateEmployeeDto['contract_type'],
+          base_salary: Number(empData.base_salary),
+          position: empData.position?.trim() || undefined,
+          department: empData.department?.trim() || undefined,
+          payment_frequency: normalizedFrequency as CreateEmployeeDto['payment_frequency'],
+          bank_name: empData.bank_name?.trim() || undefined,
+          bank_account_number: empData.bank_account_number?.trim() || undefined,
+          bank_account_type: empData.bank_account_type?.trim() || undefined,
+          health_provider: empData.health_provider?.trim() || undefined,
+          pension_fund: empData.pension_fund?.trim() || undefined,
+          arl_risk_level: empData.arl_risk_level || 1,
+          severance_fund: empData.severance_fund?.trim() || undefined,
+          compensation_fund: empData.compensation_fund?.trim() || undefined,
+          user_id: userId,
+        };
 
-        if (existingEmployee) {
-          // Update existing employee
-          const updateData: any = {
-            first_name: empData.first_name.trim(),
-            last_name: empData.last_name.trim(),
-            hire_date: new Date(empData.hire_date),
-            contract_type: normalizedContract,
-            base_salary: new Prisma.Decimal(Number(empData.base_salary)),
-            payment_frequency: normalizedFrequency,
-            position: empData.position?.trim() || null,
-            department: empData.department?.trim() || null,
-            bank_name: empData.bank_name?.trim() || null,
-            bank_account_number: empData.bank_account_number?.trim() || null,
-            bank_account_type: empData.bank_account_type?.trim() || null,
-            health_provider: empData.health_provider?.trim() || null,
-            pension_fund: empData.pension_fund?.trim() || null,
-            arl_risk_level: empData.arl_risk_level || 1,
-            severance_fund: empData.severance_fund?.trim() || null,
-            compensation_fund: empData.compensation_fund?.trim() || null,
-          };
-
-          employee = await this.prisma.employees.update({
-            where: { id: existingEmployee.id },
-            data: updateData,
-          });
-          wasUpdated = true;
-        } else {
-          // Create new employee
-          const createDto: CreateEmployeeDto = {
-            first_name: empData.first_name.trim(),
-            last_name: empData.last_name.trim(),
-            document_type: docType,
-            document_number: docNumber,
-            hire_date: empData.hire_date,
-            contract_type: normalizedContract as CreateEmployeeDto['contract_type'],
-            base_salary: Number(empData.base_salary),
-            position: empData.position?.trim() || undefined,
-            department: empData.department?.trim() || undefined,
-            payment_frequency: normalizedFrequency as CreateEmployeeDto['payment_frequency'],
-            bank_name: empData.bank_name?.trim() || undefined,
-            bank_account_number: empData.bank_account_number?.trim() || undefined,
-            bank_account_type: empData.bank_account_type?.trim() || undefined,
-            health_provider: empData.health_provider?.trim() || undefined,
-            pension_fund: empData.pension_fund?.trim() || undefined,
-            arl_risk_level: empData.arl_risk_level || 1,
-            severance_fund: empData.severance_fund?.trim() || undefined,
-            compensation_fund: empData.compensation_fund?.trim() || undefined,
-            user_id: userId,
-          };
-
-          employee = await this.employeesService.create(createDto);
-        }
+        const result = await this.employeesService.createOrAssociate(createDto);
+        const employee = result.employee;
+        const action = result.action;
 
         if (userCreated) users_created++;
         if (userLinked) users_linked++;
-        successful++;
+        if (action === 'created') successful++;
+        if (action === 'updated') { successful++; updated++; }
+        if (action === 'associated') { successful++; associated++; }
 
         results.push({
           employee,
           status: 'success',
-          message: wasUpdated
-            ? `Empleado ${docType} ${docNumber} actualizado`
-            : userCreated
-              ? 'Empleado creado y usuario del sistema generado'
-              : userLinked
-                ? 'Empleado creado y vinculado a usuario existente'
-                : 'Empleado creado exitosamente',
+          action: action,
+          message: action === 'created'
+            ? (userCreated ? 'Empleado creado y usuario del sistema generado'
+               : userLinked ? 'Empleado creado y vinculado a usuario existente'
+               : 'Empleado creado exitosamente')
+            : action === 'updated'
+              ? 'Datos del empleado actualizados'
+              : 'Empleado vinculado a esta tienda',
           user_created: userCreated,
           user_linked: userLinked,
         });
@@ -513,6 +730,8 @@ export class EmployeesBulkService {
       total_processed: employees.length,
       successful,
       failed,
+      updated,
+      associated,
       users_created,
       users_linked,
       results,
