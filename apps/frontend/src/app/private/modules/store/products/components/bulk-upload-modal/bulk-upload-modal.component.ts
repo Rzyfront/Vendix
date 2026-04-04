@@ -84,14 +84,15 @@ import {
                   <tr class="border-b border-gray-200">
                     <th class="px-2 py-0.5 text-left text-gray-600">Nombre</th>
                     <th class="px-2 py-0.5 text-left text-gray-600">SKU</th>
-                    <th class="px-2 py-0.5 text-right text-gray-600">Precio</th>
-                    <th class="px-2 py-0.5 text-right text-gray-600">Costo</th>
-                    <th class="px-2 py-0.5 text-right text-gray-600">Stock</th>
+                    <th class="px-2 py-0.5 text-left text-gray-600">Tipo</th>
+                    <th class="px-2 py-0.5 text-right text-gray-600">Precio Venta</th>
+                    <th class="px-2 py-0.5 text-right text-gray-600">Precio Compra</th>
+                    <th class="px-2 py-0.5 text-right text-gray-600">Cantidad Inicial</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr><td class="px-2 py-0.5">Camiseta Básica</td><td class="px-2 py-0.5">CAM-BAS-001</td><td class="px-2 py-0.5 text-right">15000</td><td class="px-2 py-0.5 text-right">8000</td><td class="px-2 py-0.5 text-right">50</td></tr>
-                  <tr><td class="px-2 py-0.5">Pantalón Jean</td><td class="px-2 py-0.5">PAN-JEA-032</td><td class="px-2 py-0.5 text-right">45000</td><td class="px-2 py-0.5 text-right">22000</td><td class="px-2 py-0.5 text-right">30</td></tr>
+                  <tr><td class="px-2 py-0.5">Camiseta Básica Blanca</td><td class="px-2 py-0.5">CAM-BAS-BLA-001</td><td class="px-2 py-0.5">Producto</td><td class="px-2 py-0.5 text-right">15000</td><td class="px-2 py-0.5 text-right">8000</td><td class="px-2 py-0.5 text-right">50</td></tr>
+                  <tr><td class="px-2 py-0.5">Pantalón Jean Clásico</td><td class="px-2 py-0.5">PAN-JEA-CLA-032</td><td class="px-2 py-0.5">Producto</td><td class="px-2 py-0.5 text-right">45000</td><td class="px-2 py-0.5 text-right">22000</td><td class="px-2 py-0.5 text-right">30</td></tr>
                 </tbody>
               </table>
             </div>
@@ -157,7 +158,7 @@ import {
                   </div>
                   <div class="min-w-0">
                     <p class="font-semibold text-indigo-900 text-xs">Plantilla Rápida</p>
-                    <p class="text-[10px] text-indigo-600 truncate">Solo campos indispensables: Nombre, SKU, Precio, Costo y Stock</p>
+                    <p class="text-[10px] text-indigo-600 truncate">Solo campos indispensables: Nombre, SKU, Tipo, Precio Venta, Precio Compra y Cantidad Inicial</p>
                     <div class="flex items-center text-[10px] font-bold text-indigo-600 group-hover:text-indigo-800 mt-1">
                       <app-icon name="download" [size]="12" class="mr-1"></app-icon>
                       DESCARGAR EXCEL

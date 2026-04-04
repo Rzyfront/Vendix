@@ -94,31 +94,17 @@ export class EmployeesService {
 
     // Auto-generate employee_code if not provided
     if (!dto.employee_code) {
-      const last_employee = await this.prisma.employees.findMany({
-        where: {
-          employee_code: { startsWith: 'EMP-' },
-        },
-        select: { employee_code: true },
-        orderBy: { employee_code: 'desc' },
-        take: 1,
-      });
-
-      let next_number = 1;
-      if (last_employee.length > 0) {
-        const last_code = last_employee[0].employee_code;
-        const parsed = parseInt(last_code.replace('EMP-', ''), 10);
-        if (!isNaN(parsed)) {
-          next_number = parsed + 1;
-        }
-      }
-
-      dto.employee_code = `EMP-${String(next_number).padStart(4, '0')}`;
+      dto.employee_code = await this.generateNextEmployeeCode(context.organization_id);
     }
 
-    // Check for duplicate employee_code
+    // Check for duplicate employee_code (org-level unique constraint)
+    const unscoped = this.prisma.withoutScope() as any;
     if (dto.employee_code) {
-      const existing_code = await this.prisma.employees.findFirst({
-        where: { employee_code: dto.employee_code },
+      const existing_code = await unscoped.employees.findFirst({
+        where: {
+          organization_id: context.organization_id,
+          employee_code: dto.employee_code,
+        },
       });
 
       if (existing_code) {
@@ -126,9 +112,10 @@ export class EmployeesService {
       }
     }
 
-    // Check for duplicate document
-    const existing_doc = await this.prisma.employees.findFirst({
+    // Check for duplicate document (org-level unique constraint)
+    const existing_doc = await unscoped.employees.findFirst({
       where: {
+        organization_id: context.organization_id,
         document_type: dto.document_type,
         document_number: dto.document_number,
       },
@@ -327,6 +314,31 @@ export class EmployeesService {
       avg_salary: Number(salary_aggregate._avg.base_salary || 0),
       by_department,
     };
+  }
+
+  async generateNextEmployeeCode(organization_id: number): Promise<string> {
+    // withoutScope: la unique constraint es a nivel organization, no store
+    const unscoped = this.prisma.withoutScope() as any;
+    const last_employee = await unscoped.employees.findMany({
+      where: {
+        organization_id,
+        employee_code: { startsWith: 'EMP-' },
+      },
+      select: { employee_code: true },
+      orderBy: { employee_code: 'desc' },
+      take: 1,
+    });
+
+    let next_number = 1;
+    if (last_employee.length > 0) {
+      const last_code = last_employee[0].employee_code;
+      const parsed = parseInt(last_code.replace('EMP-', ''), 10);
+      if (!isNaN(parsed)) {
+        next_number = parsed + 1;
+      }
+    }
+
+    return `EMP-${String(next_number).padStart(4, '0')}`;
   }
 }
 

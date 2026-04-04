@@ -112,14 +112,7 @@ export const analyticsRoutes: Routes = [
               ),
           },
           {
-            path: 'stock-levels',
-            loadComponent: () =>
-              import('./pages/inventory/stock-levels.component').then(
-                (c) => c.StockLevelsComponent,
-              ),
-          },
-          {
-            path: 'low-stock',
+            path: 'stock-info',
             loadComponent: () =>
               import('./pages/inventory/low-stock.component').then(
                 (c) => c.LowStockComponent,

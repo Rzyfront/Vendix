@@ -39,7 +39,7 @@ import { takeUntil, map, distinctUntilChanged, skip, pairwise } from 'rxjs/opera
         [title]="(storeName$ | async) || 'Cargando...'"
         [logoUrl]="storeLogo$ | async"
         subtitle="Administrador de Tienda"
-        [vlink]="(organizationSlug$ | async) || 'slug'"
+        [vlink]="(storeSlug$ | async) || 'slug'"
         [domainHostname]="storeDomainHostname"
         [isVendixDomain]="isVendixDomain"
         [collapsed]="sidebarCollapsed"
