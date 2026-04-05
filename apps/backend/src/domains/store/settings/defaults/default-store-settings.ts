@@ -235,6 +235,37 @@ export function getDefaultStoreSettings(): StoreSettings {
       installments: true,
     },
 
+    // Module flows — master toggles for entire modules (disabled by default for new stores)
+    module_flows: {
+      accounting: {
+        enabled: false,
+        invoicing: true,
+        payments: true,
+        expenses: true,
+        payroll: true,
+        credit_sales: true,
+        inventory: true,
+        returns: true,
+        purchases: true,
+        layaway: true,
+        fixed_assets: true,
+        withholding: true,
+        settlements: true,
+        wallet: true,
+        cash_register: true,
+        stock_transfers: true,
+        commissions: true,
+        ar_ap: true,
+        installments: true,
+      },
+      payroll: {
+        enabled: false,
+      },
+      invoicing: {
+        enabled: false,
+      },
+    },
+
     // Legacy: Mantener por compatibilidad (redundante con branding)
     app: {
       name: 'Vendix',

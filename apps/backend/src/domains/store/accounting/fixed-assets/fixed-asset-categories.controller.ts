@@ -14,11 +14,13 @@ import { FixedAssetCategoriesService } from './fixed-asset-categories.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { ModuleFlowGuard, RequireModuleFlow } from '../../../../common/guards/module-flow.guard';
 import { CreateFixedAssetCategoryDto } from './dto/create-category.dto';
 import { UpdateFixedAssetCategoryDto } from './dto/update-category.dto';
 
 @Controller('store/accounting/fixed-asset-categories')
-@UseGuards(PermissionsGuard)
+@UseGuards(ModuleFlowGuard, PermissionsGuard)
+@RequireModuleFlow('accounting')
 export class FixedAssetCategoriesController {
   constructor(
     private readonly categories_service: FixedAssetCategoriesService,

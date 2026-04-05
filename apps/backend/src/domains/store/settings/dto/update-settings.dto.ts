@@ -14,6 +14,7 @@ import {
   PublicationSettingsDto,
   PanelUISettingsDto,
   AccountingFlowsSettingsDto,
+  ModuleFlowsSettingsDto,
 } from './settings-schemas.dto';
 import { EcommerceSettingsDto } from '../../ecommerce/dto/ecommerce-settings.dto';
 
@@ -96,4 +97,10 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => AccountingFlowsSettingsDto)
   accounting_flows?: AccountingFlowsSettingsDto;
+
+  @ApiProperty({ type: ModuleFlowsSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ModuleFlowsSettingsDto)
+  module_flows?: ModuleFlowsSettingsDto;
 }

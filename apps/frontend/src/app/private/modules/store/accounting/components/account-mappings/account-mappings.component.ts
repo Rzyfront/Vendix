@@ -338,7 +338,7 @@ export class AccountMappingsComponent implements OnInit {
     this.http.get<any>(`${environment.apiUrl}/store/settings`).subscribe({
       next: (res) => {
         const settings = res?.data?.settings || res?.data || res;
-        this.flow_toggles = settings?.accounting_flows || {};
+        this.flow_toggles = settings?.module_flows?.accounting || settings?.accounting_flows || {};
         this.flows_loaded = true;
       },
       error: () => { this.flows_loaded = true; },
@@ -408,7 +408,7 @@ export class AccountMappingsComponent implements OnInit {
     const new_value = !this.isFlowEnabled(group_key);
     this.flow_toggles[flow_key] = new_value;
     this.http.patch(`${environment.apiUrl}/store/settings`, {
-      accounting_flows: { [flow_key]: new_value },
+      module_flows: { accounting: { [flow_key]: new_value } },
     }).subscribe({
       next: () => {
         const group = GROUP_DEFINITIONS.find(g => g.key === group_key);

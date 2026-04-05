@@ -213,6 +213,35 @@ export class SettingsService {
       }
     }
 
+    // Bidirectional sync: module_flows.accounting <-> accounting_flows
+    if (dto.module_flows?.accounting) {
+      // module_flows.accounting was written → sync to legacy accounting_flows
+      const { enabled, ...flow_toggles } = dto.module_flows.accounting;
+      if (Object.keys(flow_toggles).length > 0) {
+        updatedSettings.accounting_flows = {
+          ...(updatedSettings.accounting_flows || {}),
+          ...flow_toggles,
+        } as any;
+      }
+    } else if (dto.accounting_flows) {
+      // Legacy accounting_flows was written → sync to module_flows.accounting
+      if (!updatedSettings.module_flows) {
+        updatedSettings.module_flows = {
+          accounting: { enabled: true, ...dto.accounting_flows } as any,
+          payroll: { enabled: true },
+          invoicing: { enabled: true },
+        };
+      } else {
+        updatedSettings.module_flows = {
+          ...updatedSettings.module_flows,
+          accounting: {
+            ...updatedSettings.module_flows.accounting,
+            ...dto.accounting_flows,
+          } as any,
+        };
+      }
+    }
+
     // NUEVO: Actualizar campos de la tabla stores si vienen en general
     if (dto.general) {
       let { name, logo_url, store_type, timezone } = dto.general;

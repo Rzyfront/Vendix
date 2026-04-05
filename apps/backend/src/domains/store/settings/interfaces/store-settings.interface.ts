@@ -179,6 +179,45 @@ export interface AccountingFlowsSettings {
   installments: boolean;
 }
 
+// ============================================================================
+// MODULE FLOWS - Master toggles + per-module flow settings
+// ============================================================================
+export interface AccountingModuleFlows {
+  enabled: boolean;
+  invoicing: boolean;
+  payments: boolean;
+  expenses: boolean;
+  payroll: boolean;
+  credit_sales: boolean;
+  inventory: boolean;
+  returns: boolean;
+  purchases: boolean;
+  layaway: boolean;
+  fixed_assets: boolean;
+  withholding: boolean;
+  settlements: boolean;
+  wallet: boolean;
+  cash_register: boolean;
+  stock_transfers: boolean;
+  commissions: boolean;
+  ar_ap: boolean;
+  installments: boolean;
+}
+
+export interface PayrollModuleFlows {
+  enabled: boolean;
+}
+
+export interface InvoicingModuleFlows {
+  enabled: boolean;
+}
+
+export interface ModuleFlowsSettings {
+  accounting: AccountingModuleFlows;
+  payroll: PayrollModuleFlows;
+  invoicing: InvoicingModuleFlows;
+}
+
 export interface StoreSettings {
   // NUEVAS SECCIONES - Única fuente de verdad
   branding: BrandingSettings;
@@ -189,8 +228,11 @@ export interface StoreSettings {
   // Panel UI - Control de módulos disponibles a nivel de tienda
   panel_ui?: PanelUISettings;
 
-  // Accounting flows - Controls which flows generate auto-entries
+  /** @deprecated Use module_flows.accounting instead */
   accounting_flows?: AccountingFlowsSettings;
+
+  // Module flows - Master toggles + per-module flow settings
+  module_flows?: ModuleFlowsSettings;
 
   // Secciones existentes
   general: GeneralSettings;

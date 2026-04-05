@@ -1,5 +1,6 @@
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { ModuleFlowGuard, RequireModuleFlow } from '../../../../common/guards/module-flow.guard';
 import { UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
 import {
   Controller,
@@ -18,7 +19,8 @@ import { ResponseService } from '../../../../common/responses/response.service';
 import { QueryBankTransactionDto } from './dto/query-bank-transaction.dto';
 
 @Controller('store/accounting/bank-reconciliation/transactions')
-@UseGuards(PermissionsGuard)
+@UseGuards(ModuleFlowGuard, PermissionsGuard)
+@RequireModuleFlow('accounting')
 export class BankTransactionsController {
   constructor(
     private readonly bank_transactions_service: BankTransactionsService,

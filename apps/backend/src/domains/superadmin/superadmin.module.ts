@@ -16,6 +16,8 @@ import { LegalDocumentsModule } from './legal-documents/legal-documents.module';
 import { SuperadminSupportModule } from './support/support.module';
 import { AIEngineConfigModule } from './ai-engine/ai-engine.module';
 import { HelpCenterAdminModule } from './help-center/help-center-admin.module';
+import { MonitoringModule } from './monitoring/monitoring.module';
+import { BackupModule } from './backups/backups.module';
 
 @Module({
   imports: [
@@ -35,6 +37,8 @@ import { HelpCenterAdminModule } from './help-center/help-center-admin.module';
     SuperadminSupportModule,
     AIEngineConfigModule,
     HelpCenterAdminModule,
+    MonitoringModule,
+    BackupModule,
   ],
   providers: [GlobalPrismaService],
   exports: [GlobalPrismaService],

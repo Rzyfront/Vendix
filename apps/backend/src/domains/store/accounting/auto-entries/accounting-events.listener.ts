@@ -7,7 +7,7 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 export class AccountingEventsListener {
   private readonly logger = new Logger(AccountingEventsListener.name);
 
-  private flow_cache = new Map<string, { value: Record<string, boolean>; expires: number }>();
+  private flow_cache = new Map<string, { value: any; expires: number }>();
 
   constructor(
     private readonly auto_entry_service: AutoEntryService,
@@ -15,26 +15,34 @@ export class AccountingEventsListener {
   ) {}
 
   private async isFlowEnabled(store_id: number | undefined, flow_key: string): Promise<boolean> {
-    if (!store_id) return true; // If no store context, default to enabled
+    if (!store_id) return true;
 
     const cache_key = `flows_${store_id}`;
     const cached = this.flow_cache.get(cache_key);
+
+    let accounting_flows: any;
     if (cached && cached.expires > Date.now()) {
-      return cached.value[flow_key] !== false;
+      accounting_flows = cached.value;
+    } else {
+      try {
+        const settings = await this.prisma.withoutScope().store_settings.findUnique({
+          where: { store_id },
+          select: { settings: true },
+        });
+        const s = (settings?.settings as any) || {};
+        // Prefer module_flows.accounting, fallback to legacy accounting_flows
+        accounting_flows = s.module_flows?.accounting
+          || (s.accounting_flows ? { enabled: true, ...s.accounting_flows } : { enabled: true });
+        this.flow_cache.set(cache_key, { value: accounting_flows, expires: Date.now() + 5 * 60 * 1000 });
+      } catch {
+        return true;
+      }
     }
 
-    try {
-      const settings = await this.prisma.withoutScope().store_settings.findUnique({
-        where: { store_id },
-        select: { settings: true },
-      });
-
-      const flows = (settings?.settings as any)?.accounting_flows || {};
-      this.flow_cache.set(cache_key, { value: flows, expires: Date.now() + 5 * 60 * 1000 }); // 5 min cache
-      return flows[flow_key] !== false; // Default true if not configured
-    } catch {
-      return true; // On error, default to enabled
-    }
+    // Master toggle check
+    if (accounting_flows.enabled === false) return false;
+    // Individual flow check
+    return accounting_flows[flow_key] !== false;
   }
 
   @OnEvent('invoice.validated')

@@ -124,6 +124,11 @@ export class SuperAdminLayoutComponent implements OnInit, OnDestroy {
       route: '/super-admin/dashboard',
     },
     {
+      label: 'Monitoreo',
+      icon: 'activity',
+      route: '/super-admin/monitoring',
+    },
+    {
       label: 'Organizaciones',
       icon: 'building',
       route: '/super-admin/organizations',

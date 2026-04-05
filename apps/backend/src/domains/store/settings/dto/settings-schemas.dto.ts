@@ -567,3 +567,110 @@ export class AccountingFlowsSettingsDto {
   @IsBoolean()
   installments?: boolean;
 }
+
+export class AccountingModuleFlowsDto {
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  invoicing?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  payments?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  expenses?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  payroll?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  credit_sales?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  inventory?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  returns?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  purchases?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  layaway?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  fixed_assets?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  withholding?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  settlements?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  wallet?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  cash_register?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  stock_transfers?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  commissions?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  ar_ap?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  installments?: boolean;
+}
+
+export class PayrollModuleFlowsDto {
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+}
+
+export class InvoicingModuleFlowsDto {
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+}
+
+export class ModuleFlowsSettingsDto {
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AccountingModuleFlowsDto)
+  accounting?: AccountingModuleFlowsDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PayrollModuleFlowsDto)
+  payroll?: PayrollModuleFlowsDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => InvoicingModuleFlowsDto)
+  invoicing?: InvoicingModuleFlowsDto;
+}
