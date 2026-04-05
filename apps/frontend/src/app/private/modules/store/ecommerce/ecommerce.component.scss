@@ -736,6 +736,90 @@
 }
 
 // ============================================
+// COLOR GRID (matches Settings branding style)
+// ============================================
+
+.color-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.color-card {
+  padding: 14px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  transition: background 200ms ease;
+
+  &:hover {
+    background: #f3f4f6;
+  }
+}
+
+.color-card-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 10px;
+}
+
+.color-card-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.color-picker {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 2px solid #e5e7eb;
+  padding: 2px;
+  background: transparent;
+  flex-shrink: 0;
+
+  &::-webkit-color-swatch-wrapper {
+    padding: 0;
+  }
+
+  &::-webkit-color-swatch {
+    border: none;
+    border-radius: 7px;
+  }
+
+  &::-moz-color-swatch {
+    border: none;
+    border-radius: 7px;
+  }
+}
+
+.color-hex-input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  min-height: 44px;
+  font-size: 16px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-transform: uppercase;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  color: #111827;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+
+  &:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+  }
+}
+
+// ============================================
 // RESPONSIVE DESIGN
 // ============================================
 @media (max-width: 768px) {
