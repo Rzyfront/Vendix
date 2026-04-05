@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsDateString,
   ValidateNested,
+  Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
@@ -25,6 +26,7 @@ export class SalesOrderItemDto {
   @ApiProperty({ description: 'Quantity ordered' })
   @IsNumber()
   @IsNotEmpty()
+  @Min(1)
   quantity: number;
 
   @ApiProperty({ description: 'Unit price' })
