@@ -34,18 +34,21 @@ export class SalesOrderItemDto {
   @IsNotEmpty()
   unit_price: number;
 
-  @ApiProperty({ description: 'Discount percentage (optional)' })
+  @ApiProperty({ description: 'Discount percentage (optional)', example: 15 })
   @IsNumber()
   @IsOptional()
   @Min(0)
   @Max(100)
   discount_percentage?: number;
 
-  @ApiProperty({ description: 'Tax rate (optional)' })
+  @ApiProperty({
+    description: 'Tax rate as decimal (0.19 = 19%)',
+    example: 0.19,
+  })
   @IsNumber()
   @IsOptional()
   @Min(0)
-  @Max(100)
+  @Max(1)
   tax_rate?: number;
 
   @ApiProperty({ description: 'Location ID to fulfill from' })
