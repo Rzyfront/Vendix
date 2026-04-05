@@ -137,34 +137,38 @@
                     </div>
                   </div>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div class="p-4 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Color Primario</label>
-                    <div class="flex items-center gap-2">
-                      <input type="color" [formControl]="primaryColorControl"
-                        class="w-10 h-10 rounded-lg cursor-pointer border-0 p-0" />
-                      <app-input [formControl]="primaryColorControl" placeholder="#3B82F6"
-                        customWrapperClass="!mt-0 flex-1" customInputClass="!font-mono !uppercase"></app-input>
+                <div class="color-grid">
+                  <div class="color-card">
+                    <label class="color-card-label">Primario</label>
+                    <div class="color-card-row">
+                      <input type="color" [value]="primaryColorControl.value"
+                        (change)="onColorPickerChange('primary_color', $event)"
+                        class="color-picker" />
+                      <input type="text" [formControl]="primaryColorControl"
+                        class="color-hex-input"
+                        placeholder="#000000" />
                     </div>
                   </div>
-
-                  <div class="p-4 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Color Secundario</label>
-                    <div class="flex items-center gap-2">
-                      <input type="color" [formControl]="secondaryColorControl"
-                        class="w-10 h-10 rounded-lg cursor-pointer border-0 p-0" />
-                      <app-input [formControl]="secondaryColorControl" placeholder="#10B981"
-                        customWrapperClass="!mt-0 flex-1" customInputClass="!font-mono !uppercase"></app-input>
+                  <div class="color-card">
+                    <label class="color-card-label">Secundario</label>
+                    <div class="color-card-row">
+                      <input type="color" [value]="secondaryColorControl.value"
+                        (change)="onColorPickerChange('secondary_color', $event)"
+                        class="color-picker" />
+                      <input type="text" [formControl]="secondaryColorControl"
+                        class="color-hex-input"
+                        placeholder="#000000" />
                     </div>
                   </div>
-
-                  <div class="p-4 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Color de Acento</label>
-                    <div class="flex items-center gap-2">
-                      <input type="color" [formControl]="accentColorControl"
-                        class="w-10 h-10 rounded-lg cursor-pointer border-0 p-0" />
-                      <app-input [formControl]="accentColorControl" placeholder="#F59E0B"
-                        customWrapperClass="!mt-0 flex-1" customInputClass="!font-mono !uppercase"></app-input>
+                  <div class="color-card">
+                    <label class="color-card-label">Acento</label>
+                    <div class="color-card-row">
+                      <input type="color" [value]="accentColorControl.value"
+                        (change)="onColorPickerChange('accent_color', $event)"
+                        class="color-picker" />
+                      <input type="text" [formControl]="accentColorControl"
+                        class="color-hex-input"
+                        placeholder="#000000" />
                     </div>
                   </div>
                 </div>

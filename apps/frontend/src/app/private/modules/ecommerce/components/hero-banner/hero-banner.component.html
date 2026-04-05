@@ -26,14 +26,6 @@
   </div>
 
   @if (slides.length > 1) {
-    <div class="slider-controls">
-      <button class="control-btn prev" (click)="prevSlide()">
-        <i class="pi pi-chevron-left"></i>
-      </button>
-      <button class="control-btn next" (click)="nextSlide()">
-        <i class="pi pi-chevron-right"></i>
-      </button>
-    </div>
     <div class="slider-indicators">
       @for (slide of slides; track $index) {
         <button

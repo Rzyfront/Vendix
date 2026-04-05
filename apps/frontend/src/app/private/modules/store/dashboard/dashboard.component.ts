@@ -8,6 +8,7 @@ import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
+import { EmptyStateComponent } from '../../../../shared/components/empty-state/empty-state.component';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import { OptionsDropdownComponent } from '../../../../shared/components/options-dropdown/options-dropdown.component';
@@ -59,6 +60,7 @@ const QUICK_LINKS: QuickLink[] = [
     ChartComponent,
     IconComponent,
     OptionsDropdownComponent,
+    EmptyStateComponent,
   ],
   template: `
     <div class="w-full space-y-4 pb-6">
@@ -105,7 +107,7 @@ const QUICK_LINKS: QuickLink[] = [
       <!-- Charts: Trend (2/3) + Channels (1/3) -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <!-- Sales Trend Chart -->
-        <div class="lg:col-span-2 bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden">
+        <div class="lg:col-span-2 bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden flex flex-col">
           <div class="p-4 border-b border-border flex items-center justify-between gap-2">
             <div>
               <h3 class="font-semibold text-text-primary text-sm">Tendencia de Ventas</h3>
@@ -120,16 +122,19 @@ const QUICK_LINKS: QuickLink[] = [
               (filterChange)="onDateFilterChange($event)"
             />
           </div>
-          <div class="p-4">
+          <div class="p-4 flex-1">
             @if (loadingTrends()) {
               <div class="h-56 flex items-center justify-center">
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else if (trends().length === 0) {
-              <div class="h-56 flex flex-col items-center justify-center text-text-secondary">
-                <app-icon name="bar-chart-2" [size]="40" class="mb-2 opacity-30"></app-icon>
-                <p class="text-sm">No hay datos de ventas</p>
-              </div>
+              <app-empty-state
+                icon="bar-chart-2"
+                title="No hay datos de ventas"
+                description="Realiza ventas para ver las tendencias"
+                [showActionButton]="false"
+                size="sm"
+              />
             } @else {
               <app-chart [options]="trendChartOptions()" size="large"></app-chart>
             }
@@ -137,21 +142,24 @@ const QUICK_LINKS: QuickLink[] = [
         </div>
 
         <!-- Sales by Channel Chart -->
-        <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden">
+        <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden flex flex-col">
           <div class="p-4 border-b border-border">
             <h3 class="font-semibold text-text-primary text-sm">Ventas por Canal</h3>
             <p class="text-xs text-text-secondary">Distribución del período</p>
           </div>
-          <div class="p-4">
+          <div class="p-4 flex-1">
             @if (loadingChannels()) {
               <div class="h-56 flex items-center justify-center">
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else if (channels().length === 0) {
-              <div class="h-56 flex flex-col items-center justify-center text-text-secondary">
-                <app-icon name="pie-chart" [size]="40" class="mb-2 opacity-30"></app-icon>
-                <p class="text-sm">No hay datos de canales</p>
-              </div>
+              <app-empty-state
+                icon="pie-chart"
+                title="No hay datos de canales"
+                description="Realiza ventas para ver la distribución por canal"
+                [showActionButton]="false"
+                size="sm"
+              />
             } @else {
               <app-chart [options]="channelChartOptions()" size="large"></app-chart>
             }
@@ -233,13 +241,14 @@ const QUICK_LINKS: QuickLink[] = [
               }
 
               @if (lowStockCount() === 0 && outOfStockCount() === 0 && dispatchPendingCount() === 0 && refundPendingCount() === 0) {
-                <div class="py-4 text-center">
-                  <div class="w-10 h-10 bg-success-light rounded-full flex items-center justify-center mx-auto mb-2">
-                    <app-icon name="check-circle" [size]="20" class="text-success"></app-icon>
-                  </div>
-                  <p class="text-sm font-medium text-text-primary">Todo en orden</p>
-                  <p class="text-xs text-text-secondary">Sin alertas pendientes</p>
-                </div>
+                <app-empty-state
+                  icon="check-circle"
+                  iconColor="success"
+                  title="Todo en orden"
+                  description="Sin alertas pendientes"
+                  [showActionButton]="false"
+                  size="sm"
+                />
               }
             }
           </div>

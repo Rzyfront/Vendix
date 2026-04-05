@@ -4,7 +4,7 @@
     [actions]="productHeaderActions()" (actionClicked)="onHeaderAction($event)" variant="default">
 </app-sticky-header>
 
-<div class="p-3 md:p-4 space-y-4 md:space-y-6 max-w-[1600px] mx-auto">
+<div class="space-y-4 md:space-y-6 max-w-[1600px] mx-auto">
 
     <form [formGroup]="productForm" class="space-y-4 md:space-y-6">
 
@@ -113,10 +113,11 @@
                         <app-selector label="Tipo de Venta" [options]="pricingTypeOptions"
                             formControlName="pricing_type"
                             placeholder="Seleccionar tipo"
+                            [disabled]="isService"
                             tooltipText="Define si el producto se vende por unidad o por peso (kg). Afecta cómo se interpretan los precios.">
                         </app-selector>
 
-                        <div class="flex gap-2 items-end h-full">
+                        <div class="flex gap-2 items-end h-full md:col-span-2">
                             <app-multi-selector class="flex-1" label="Impuestos Aplicables"
                                 [options]="taxCategoryOptions" formControlName="tax_category_ids"
                                 placeholder="Seleccionar impuestos..."
@@ -128,15 +129,63 @@
                             </app-button>
                         </div>
 
-                        <div class="flex flex-col justify-end h-full">
-                            <div class="space-y-1.5">
-                                <label class="block text-sm font-bold text-text-primary">Precio Final (PVP + Imp)</label>
-                                <div class="h-[42px] px-4 flex items-center bg-surface border-2 border-primary-500/20 rounded-lg text-xl font-black text-primary-600 shadow-sm">
-                                    {{ priceWithTax | currency }}
-                                </div>
-                                <p class="text-[10px] text-text-secondary font-medium italic">Calculado automáticamente</p>
-                            </div>
+                    </div>
+
+                    <!-- Row 3: Desglose de precio + Oferta -->
+                    <div class="rounded-xl border border-gray-200/60">
+                        <!-- Fórmula de cálculo -->
+                        <div class="bg-gray-50/80 px-4 py-2.5 border-b border-gray-200/40 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                            <span class="font-semibold text-gray-700">{{ productForm.get('cost_price')?.value | currency }}</span>
+                            <span class="text-gray-400 text-xs">(Costo)</span>
+                            <span class="text-gray-300 font-medium">×</span>
+                            <span class="font-medium text-gray-600">(1 + {{ productForm.get('profit_margin')?.value | number:'1.0-1' }}%)</span>
+                            <span class="text-gray-300 font-medium">=</span>
+                            <span class="font-semibold text-gray-700">{{ productForm.get('base_price')?.value | currency }}</span>
+                            <span class="text-gray-400 text-xs">(PVP)</span>
+                            @for (tax of taxBreakdown; track tax.name) {
+                                <span class="text-gray-300 font-medium">+</span>
+                                <span class="font-medium text-gray-600">{{ tax.rate * 100 | number:'1.0-1' }}% {{ tax.name }}</span>
+                                <span class="text-gray-500">({{ tax.amount | currency }})</span>
+                            }
+                            <span class="text-gray-300 font-medium">=</span>
+                            <span class="font-bold text-primary-600">{{ priceWithTax | currency }}</span>
                         </div>
+
+                        <!-- Precio Final + Toggle Oferta -->
+                        <div class="bg-white px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
+                            <!-- Precio Final -->
+                            <div class="flex flex-col">
+                                <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Precio Final</span>
+                                <span class="text-2xl font-black leading-tight"
+                                    [class]="productForm.get('is_on_sale')?.value ? 'text-gray-300 line-through' : 'text-primary-600'">
+                                    {{ priceWithTax | currency }}
+                                </span>
+                            </div>
+
+                            <!-- Divider -->
+                            <div class="hidden sm:block w-px h-10 bg-gray-200"></div>
+
+                            <!-- Toggle Oferta -->
+                            <app-setting-toggle class="flex-1" formControlName="is_on_sale" label="Activar precio de oferta"
+                                description="Se mostrará como precio promocional">
+                            </app-setting-toggle>
+                        </div>
+
+                        <!-- Precio de Oferta (row aparte para que no se corte) -->
+                        @if (productForm.get('is_on_sale')?.value) {
+                            <div class="animate-fadeIn border-t border-rose-200 bg-gradient-to-r from-rose-50/80 to-orange-50/50 px-4 py-3 flex items-center gap-3">
+                                <app-icon name="flame" size="18" class="text-rose-500 shrink-0"></app-icon>
+                                <div class="flex flex-col sm:flex-row sm:items-center gap-2 flex-1">
+                                    <span class="text-xs font-bold text-rose-600 uppercase tracking-wide whitespace-nowrap">Precio de Oferta</span>
+                                    <app-input [currency]="true"
+                                        formControlName="sale_price" [error]="getErrorMessage('sale_price')"
+                                        prefix="$" placeholder="0.00"
+                                        customWrapperClass="!mt-0 flex-1"
+                                        customInputClass="!border-rose-300 !bg-white focus:!border-rose-500 !text-lg !font-bold !text-rose-600">
+                                    </app-input>
+                                </div>
+                            </div>
+                        }
                     </div>
                 </section>
 
@@ -168,10 +217,9 @@
 
                                 <!-- Badge & Delete -->
                                 <div class="absolute top-2 left-2">
-                                    <div *ngIf="activeImageIndex === 0"
-                                        class="px-1.5 py-0.5 bg-primary-600/90 text-white text-[9px] font-bold uppercase rounded tracking-wider">
+                                    <app-badge *ngIf="activeImageIndex === 0" variant="primary" size="xs">
                                         Principal
-                                    </div>
+                                    </app-badge>
                                 </div>
                                 <button type="button" (click)="removeImage(activeImageIndex)"
                                     class="absolute top-2 right-2 p-1.5 bg-red-500/90 text-white rounded-full shadow-sm hover:bg-red-600">
@@ -234,65 +282,25 @@
                     <div class="grid grid-cols-1 md:grid-cols-2 md:auto-rows-fr gap-4">
                         <!-- Row 1, Col 1: Estado -->
                         <app-input-buttons
-                            label="Estado"
                             [options]="productStateButtonOptions"
                             formControlName="state"
                             (valueChange)="onStateChange($event)"
-                            customWrapperClass="!mt-0">
+                            customWrapperClass="!mt-3"
+                            customContainerClass="!bg-gray-50 !border-gray-100 !h-[46px]">
                         </app-input-buttons>
 
-                        <!-- Row 1, Col 2: Stock (condicional) -->
-                        <div class="animate-fadeIn h-full flex flex-col">
-                            @if (productForm.get('track_inventory')?.value) {
-                                @if (hasVariants) {
-                                    <!-- Stock basado en variantes -->
-                                    <div class="flex items-center gap-2 px-3 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800 min-h-[42px] flex-1">
-                                        <app-icon name="layers" size="16" class="text-blue-600 shrink-0"></app-icon>
-                                        <span class="font-medium text-xs">Stock basado en variantes</span>
-                                        @if (isEditMode()) {
-                                            <span class="ml-auto font-bold text-blue-900 text-sm">{{ totalVariantStock }} uds</span>
-                                        }
-                                    </div>
-                                } @else {
-                                    @if (!isEditMode()) {
-                                        <app-input label="Stock Inicial" type="number"
-                                            formControlName="stock_quantity"
-                                            [error]="getErrorMessage('stock_quantity')" placeholder="0"
-                                            tooltipText="Cantidad inicial de unidades disponibles para venta."
-                                            customWrapperClass="!mt-0"></app-input>
-                                    } @else {
-                                        <div (click)="openStockAdjustment()" class="cursor-pointer group">
-                                            <app-input label="Stock Actual" type="number"
-                                                formControlName="stock_quantity" [disabled]="true"
-                                                placeholder="Click para ajustar"
-                                                class="opacity-75 cursor-pointer" [suffixIcon]="true"
-                                                customWrapperClass="!mt-0"
-                                                tooltipText="El stock no se edita directamente. Haz clic para crear un ajuste.">
-                                                <ng-container slot="suffix-icon">
-                                                    <app-icon name="plus" size="16"
-                                                        class="text-text-muted group-hover:text-primary-600"></app-icon>
-                                                </ng-container>
-                                            </app-input>
-                                        </div>
-                                    }
-                                }
-                            } @else {
-                                <!-- Producto bajo pedido -->
-                                <div class="flex items-center gap-2 px-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 min-h-[42px] flex-1">
-                                    <app-icon name="info" size="16" class="text-amber-600 shrink-0"></app-icon>
-                                    <span class="font-medium text-xs">Producto bajo pedido — siempre disponible</span>
-                                </div>
-                            }
-                        </div>
+                        <!-- Row 1, Col 2: Disponibilidad E-commerce -->
+                        <app-setting-toggle formControlName="available_for_ecommerce"
+                            label="Disponible en E-commerce" description="Visible en tu tienda online">
+                        </app-setting-toggle>
 
-                        <!-- Row 2, Col 1: Variantes -->
+                        <!-- Row 2: Variantes + Inventario (solo productos físicos) -->
+                        @if (!isService) {
                         <app-setting-toggle [ngModel]="hasVariants" (ngModelChange)="toggleVariants($event)"
                             [ngModelOptions]="{standalone: true}" label="Este producto tiene variantes"
                             description="Agrega opciones como tamaño, color o material">
                         </app-setting-toggle>
 
-                        <!-- Row 2, Col 2: Control de inventario (hidden for services) -->
-                        @if (!isService) {
                         <app-setting-toggle formControlName="track_inventory"
                             label="Controlar inventario"
                             [description]="productForm.get('track_inventory')?.value
@@ -300,43 +308,13 @@
                                 : 'Producto bajo pedido — siempre disponible para venta'">
                         </app-setting-toggle>
                         } @else {
-                        <div class="flex items-center gap-2 px-3 bg-purple-50 rounded-xl border border-purple-200 h-full min-h-[42px]">
+                        <div class="flex items-center gap-2 px-3 py-2.5 mt-3 bg-purple-50 rounded-xl border border-purple-200 md:col-span-2">
                             <app-icon name="briefcase" size="16" class="text-purple-600"></app-icon>
                             <span class="text-sm text-purple-700 font-medium">Servicio — siempre disponible</span>
                         </div>
                         }
                     </div>
 
-                    <!-- E-commerce y Ofertas -->
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-gray-100">
-                        <app-setting-toggle formControlName="available_for_ecommerce"
-                            label="Disponible en E-commerce" description="Visible en tu tienda online">
-                        </app-setting-toggle>
-
-                        <div class="space-y-3">
-                            <app-setting-toggle formControlName="is_on_sale" label="Producto en Oferta"
-                                description="Activa un precio promocional">
-                            </app-setting-toggle>
-
-                            <div *ngIf="productForm.get('is_on_sale')?.value"
-                                class="animate-fadeIn mt-2 relative overflow-hidden rounded-xl p-[1px] bg-gradient-to-r from-rose-500 via-orange-400 to-amber-400 shadow-lg shadow-rose-500/20">
-                                <div class="bg-white rounded-[11px] p-3 space-y-2">
-                                    <div class="flex items-center gap-1.5">
-                                        <app-icon name="flame" size="14" class="text-rose-500"></app-icon>
-                                        <span class="text-[11px] font-bold uppercase tracking-wide bg-gradient-to-r from-rose-600 to-orange-500 bg-clip-text text-transparent">
-                                            Precio de Oferta
-                                        </span>
-                                    </div>
-                                    <app-input [currency]="true"
-                                        formControlName="sale_price" [error]="getErrorMessage('sale_price')"
-                                        prefix="$" placeholder="0.00"
-                                        customWrapperClass="!mt-0"
-                                        customInputClass="!border-rose-200 !bg-rose-50/50 focus:!border-rose-400 !text-lg !font-bold !text-rose-600"></app-input>
-                                    <p class="text-[10px] text-rose-400 font-medium italic">Se mostrará como precio promocional</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
                 </section>
 
                 <!-- Clasificación y Etiquetas Section -->
@@ -429,55 +407,6 @@
                     </app-textarea>
                 </section>
 
-                <!-- Proveedores del Servicio (only when requires_booking and edit mode) -->
-                @if (productForm.get('requires_booking')?.value && isEditMode() && productId) {
-                <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4">
-                    <div class="flex items-center gap-2">
-                        <app-icon name="users" size="20" class="text-indigo-500"></app-icon>
-                        <h2 class="text-base font-bold text-gray-900">Proveedores del Servicio</h2>
-                    </div>
-
-                    <!-- Assigned providers as chips -->
-                    <div class="flex flex-wrap items-center gap-2">
-                        @for (provider of assignedProviders(); track provider.id) {
-                            <div class="inline-flex items-center gap-2 pl-1 pr-2 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-sm">
-                                <span class="w-6 h-6 rounded-full bg-indigo-500 text-white text-xs font-bold flex items-center justify-center">
-                                    {{ getProviderInitials(provider) }}
-                                </span>
-                                <span class="text-gray-700 font-medium">{{ provider.display_name || provider.employee?.first_name }}</span>
-                                <button class="w-5 h-5 rounded-full flex items-center justify-center text-indigo-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                                    (click)="removeProviderFromService(provider.id)">
-                                    <app-icon name="x" [size]="12"></app-icon>
-                                </button>
-                            </div>
-                        }
-
-                        <!-- Add dropdown -->
-                        @if (availableProvidersForProduct().length > 0) {
-                            <select class="text-sm border border-dashed border-gray-300 rounded-full px-3 py-1.5 bg-white text-gray-500 hover:border-indigo-400 hover:text-indigo-500 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                                (change)="addProviderToService($any($event.target).value); $any($event.target).value = ''">
-                                <option value="">+ Agregar proveedor</option>
-                                @for (provider of availableProvidersForProduct(); track provider.id) {
-                                    <option [value]="provider.id">{{ provider.display_name || (provider.employee?.first_name + ' ' + provider.employee?.last_name) }}</option>
-                                }
-                            </select>
-                        }
-                    </div>
-
-                    @if (assignedProviders().length === 0 && !loadingProviders()) {
-                        <p class="text-sm text-gray-400 italic">No hay proveedores asignados a este servicio.</p>
-                    }
-
-                    <!-- Link to schedule config -->
-                    <button type="button"
-                        class="inline-flex items-center gap-1.5 text-sm text-indigo-500 hover:text-indigo-700 transition-colors font-medium"
-                        (click)="goToScheduleConfig()">
-                        <app-icon name="settings" [size]="14"></app-icon>
-                        Configurar horarios y disponibilidad
-                        <app-icon name="arrow-right" [size]="14"></app-icon>
-                    </button>
-                </section>
-                }
                 }
 
                 <!-- Dimensiones y Peso Section (only for physical products) -->
@@ -542,10 +471,9 @@
 
                                 <!-- Status Badges -->
                                 <div class="absolute top-3 left-3 flex flex-col gap-2">
-                                    <div *ngIf="activeImageIndex === mainImageIndex"
-                                        class="px-2 py-1 bg-primary-600/90 text-white text-[10px] font-bold uppercase rounded-md tracking-wider shadow-sm backdrop-blur-sm">
+                                    <app-badge *ngIf="activeImageIndex === mainImageIndex" variant="primary" size="xs">
                                         Principal
-                                    </div>
+                                    </app-badge>
                                 </div>
 
                                 <!-- Hover Actions -->
@@ -703,75 +631,119 @@
                     }
 
                     <div class="flex-1 space-y-4">
-                        <!-- Action Section -->
-                        <div class="p-3 bg-bg rounded-xl border border-border space-y-2">
-                            <p class="text-[10px] text-text-muted uppercase font-bold tracking-wider">Acciones Rápidas</p>
-                            <div class="flex flex-wrap gap-2">
-                                <button type="button" (click)="goToPurchase()"
-                                    class="flex-1 min-w-[120px] text-xs font-bold text-primary-700 bg-primary-50 hover:bg-primary-100 border border-primary/20 px-3 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm">
-                                    <app-icon name="cart" size="14"></app-icon>
-                                    Iniciar Inventario
-                                </button>
-                                <button *ngIf="isEditMode()" type="button" (click)="openAdjustmentModal()"
-                                    class="flex-1 min-w-[120px] text-xs font-bold text-white bg-primary-600 hover:bg-primary-700 px-3 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm">
-                                    <app-icon name="sliders" size="14"></app-icon>
-                                    Ajustar Inventario
-                                </button>
-                            </div>
-                            <button *ngIf="isEditMode()" type="button" (click)="isStockDetailsOpen = true"
-                                class="w-full text-xs font-medium text-primary-600 hover:text-primary-700 hover:bg-primary-50 px-3 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors">
-                                <app-icon name="list" size="14"></app-icon>
-                                Ver detalle completo
-                            </button>
-                        </div>
-
-                        <!-- Information Section -->
+                        <!-- Resumen de Existencias (principal) -->
                         <div class="space-y-2">
-                            <p class="text-[10px] text-text-muted uppercase font-bold tracking-wider px-1">Resumen de Existencias</p>
+                            <p class="text-[10px] text-text-muted uppercase font-bold tracking-wider px-1">Inventario</p>
                             <div class="grid grid-cols-2 gap-2">
                                 <div class="p-3 bg-surface rounded-lg border border-border">
-                                    <span class="block text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Total Físico</span>
+                                    <span class="block text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">En inventario</span>
                                     <span class="text-xl font-bold text-text-primary">{{ totalStockOnHand }}</span>
+                                    <span class="block text-[9px] text-text-muted mt-0.5">Disponible + reservado</span>
                                 </div>
                                 <div class="p-3 bg-surface rounded-lg border border-border">
                                     <span class="block text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Disponible</span>
                                     <span class="text-xl font-bold text-primary-600">{{ totalStockAvailable }}</span>
+                                    <span class="block text-[9px] text-text-muted mt-0.5">Listo para vender</span>
                                 </div>
                                 <div class="p-3 bg-surface rounded-lg border border-border">
-                                    <span class="block text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Stock Bajo</span>
-                                    <span class="text-xl font-bold" [class.text-destructive]="lowStockCount > 0"
-                                        [class.text-text-muted]="lowStockCount === 0">
-                                        {{ lowStockCount }}
-                                    </span>
+                                    <span class="block text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Reservado</span>
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-xl font-bold" [class.text-amber-600]="totalStockReserved > 0"
+                                            [class.text-text-muted]="totalStockReserved === 0">
+                                            {{ totalStockReserved }}
+                                        </span>
+                                        <button *ngIf="totalStockReserved > 0" type="button" (click)="releaseReservations()"
+                                            [disabled]="isReleasingReservations"
+                                            class="text-[10px] font-bold text-white bg-destructive hover:bg-destructive/90 px-2.5 py-1 rounded-lg shadow-sm transition-colors disabled:opacity-50 cursor-pointer">
+                                            @if (isReleasingReservations) {
+                                                <app-icon name="loader-2" size="10" class="animate-spin"></app-icon>
+                                            } @else {
+                                                Liberar
+                                            }
+                                        </button>
+                                    </div>
+                                    <span class="block text-[9px] text-text-muted mt-0.5">En órdenes pendientes</span>
                                 </div>
                                 <div class="p-3 bg-surface rounded-lg border border-border">
-                                    <span class="block text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Bodegas</span>
-                                    <span class="text-xl font-bold text-text-primary">{{ warehouseCount }}</span>
+                                    <span class="block text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Ubicaciones</span>
+                                    <span class="text-xl font-bold text-text-primary">{{ activeLocationCount }}<span class="text-sm text-text-muted font-medium">/{{ warehouseCount }}</span></span>
+                                    <span class="block text-[9px] text-text-muted mt-0.5">Con stock activo</span>
                                 </div>
                             </div>
-                            <div class="p-3 bg-surface rounded-lg border border-border flex items-center justify-between">
-                                <div class="flex items-center gap-2">
-                                    <app-icon name="package" size="16" class="text-primary-600"></app-icon>
-                                    <span class="text-xs text-text-secondary font-medium">Reservado para órdenes</span>
-                                </div>
-                                <div class="flex items-center gap-2">
-                                    <span class="text-sm font-bold text-text-primary">{{ totalStockReserved }}</span>
-                                    <button *ngIf="totalStockReserved > 0" type="button" (click)="releaseReservations()"
-                                        [disabled]="isReleasingReservations"
-                                        class="text-[10px] font-bold text-destructive hover:text-destructive/80 bg-destructive/10 hover:bg-destructive/20 px-1.5 py-0.5 rounded transition-colors disabled:opacity-50">
-                                        @if (isReleasingReservations) {
-                                            <app-icon name="loader-2" size="10" class="animate-spin"></app-icon>
-                                        } @else {
-                                            Limpiar
-                                        }
-                                    </button>
-                                </div>
+                        </div>
+
+                        <!-- Acciones Rápidas -->
+                        <div class="p-3 bg-bg rounded-xl border border-border space-y-2">
+                            <p class="text-[10px] text-text-muted uppercase font-bold tracking-wider">Acciones Rápidas</p>
+                            <div class="flex flex-col gap-2">
+                                <button *ngIf="isEditMode()" type="button" (click)="openAdjustmentModal()"
+                                    class="w-full text-xs font-bold text-white bg-primary-600 hover:bg-primary-700 px-3 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm">
+                                    <app-icon name="sliders" size="14"></app-icon>
+                                    Ajustar Inventario
+                                </button>
+                                <button type="button" (click)="goToPurchase()"
+                                    class="w-full text-xs font-bold text-primary-700 bg-primary-50 hover:bg-primary-100 border border-primary/20 px-3 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm">
+                                    <app-icon name="cart" size="14"></app-icon>
+                                    Iniciar Inventario
+                                </button>
+                                <button *ngIf="isEditMode()" type="button" (click)="isStockDetailsOpen = true"
+                                    class="w-full text-xs font-medium text-primary-600 hover:text-primary-700 hover:bg-primary-50 px-3 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors">
+                                    <app-icon name="list" size="14"></app-icon>
+                                    Ver detalle completo
+                                </button>
                             </div>
                         </div>
                     </div>
 
                     } <!-- end @else track_inventory -->
                 </section>
+
+                <!-- Proveedores del Servicio (Desktop sidebar) -->
+                @if (productForm.get('requires_booking')?.value && isEditMode() && productId) {
+                <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4">
+                    <div class="flex items-center gap-2">
+                        <app-icon name="users" size="20" class="text-indigo-500"></app-icon>
+                        <h2 class="text-base font-bold text-gray-900">Proveedores del Servicio</h2>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-2">
+                        @for (provider of assignedProviders(); track provider.id) {
+                            <div class="inline-flex items-center gap-2 pl-1 pr-2 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-sm">
+                                <span class="w-6 h-6 rounded-full bg-indigo-500 text-white text-xs font-bold flex items-center justify-center">
+                                    {{ getProviderInitials(provider) }}
+                                </span>
+                                <span class="text-gray-700 font-medium">{{ provider.display_name || provider.employee?.first_name }}</span>
+                                <button class="w-5 h-5 rounded-full flex items-center justify-center text-indigo-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                                    (click)="removeProviderFromService(provider.id)">
+                                    <app-icon name="x" [size]="12"></app-icon>
+                                </button>
+                            </div>
+                        }
+
+                        @if (availableProvidersForProduct().length > 0) {
+                            <select class="text-sm border border-dashed border-gray-300 rounded-full px-3 py-1.5 bg-white text-gray-500 hover:border-indigo-400 hover:text-indigo-500 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                                (change)="addProviderToService($any($event.target).value); $any($event.target).value = ''">
+                                <option value="">+ Agregar proveedor</option>
+                                @for (provider of availableProvidersForProduct(); track provider.id) {
+                                    <option [value]="provider.id">{{ provider.display_name || (provider.employee?.first_name + ' ' + provider.employee?.last_name) }}</option>
+                                }
+                            </select>
+                        }
+                    </div>
+
+                    @if (assignedProviders().length === 0 && !loadingProviders()) {
+                        <p class="text-sm text-gray-400 italic">No hay proveedores asignados.</p>
+                    }
+
+                    <button type="button"
+                        class="inline-flex items-center gap-1.5 text-sm text-indigo-500 hover:text-indigo-700 transition-colors font-medium"
+                        (click)="goToScheduleConfig()">
+                        <app-icon name="settings" [size]="14"></app-icon>
+                        Configurar horarios y disponibilidad
+                        <app-icon name="arrow-right" [size]="14"></app-icon>
+                    </button>
+                </section>
+                }
 
                 <!-- Promotions Section (Desktop sidebar, edit mode only) -->
                 @if (isEditMode()) {

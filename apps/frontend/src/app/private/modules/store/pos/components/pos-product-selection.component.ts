@@ -21,6 +21,7 @@ import {
   OptionsDropdownComponent,
   FilterConfig,
   FilterValues,
+  BadgeComponent,
 } from '../../../../../shared/components';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { Router } from '@angular/router';
@@ -53,6 +54,7 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
     OptionsDropdownComponent,
     CurrencyPipe,
     PosVariantSelectorComponent,
+    BadgeComponent,
   ],
   schemas: [NO_ERRORS_SCHEMA],
   template: `
@@ -205,19 +207,19 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
 
               <!-- Stock Badge -->
               @if (product.track_inventory !== false) {
-                <div
-                  *ngIf="product.stock <= 5"
-                  class="absolute top-2 right-2 px-2 py-1 rounded-md text-xs font-semibold backdrop-blur-md text-white"
-                  style="background: rgba(var(--color-secondary-rgb), 0.85)"
-                >
-                  {{
-                    product.stock === 0 ? 'AGOTADO' : 'Últimas ' + product.stock
-                  }}
-                </div>
+                @if (product.stock <= 5) {
+                  <app-badge
+                    [variant]="product.stock === 0 ? 'error' : 'warning'"
+                    size="xs"
+                    badgeStyle="outline"
+                    class="absolute top-2 right-2 z-[1]">
+                    {{ product.stock === 0 ? 'AGOTADO' : 'Últimas ' + product.stock }}
+                  </app-badge>
+                }
               } @else {
-                <div class="absolute top-2 right-2 px-2 py-0.5 rounded text-[10px] font-bold shadow-sm backdrop-blur-sm bg-blue-100/90 text-blue-700">
+                <app-badge variant="info" size="xs" badgeStyle="outline" class="absolute top-2 right-2 z-[1]">
                   Disponible
-                </div>
+                </app-badge>
               }
 
               <!-- Variant Indicator -->
@@ -398,11 +400,6 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
         font-weight: var(--fw-bold);
       }
 
-      /* Stock badges */
-      .stock-badge {
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-      }
     `,
   ],
 })

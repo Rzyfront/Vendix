@@ -1,7 +1,13 @@
 export interface Employee {
   id: number;
   organization_id: number;
-  store_id?: number;
+  employee_stores?: {
+    id: number;
+    store_id: number;
+    is_primary: boolean;
+    status: string;
+    store: { id: number; name: string };
+  }[];
   employee_code: string;
   first_name: string;
   last_name: string;

@@ -1,378 +1,397 @@
-import { Component, EventEmitter, Input, Output, OnChanges, OnDestroy, SimpleChanges, inject } from '@angular/core';
+import { Component, input, output, signal, computed, inject, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { HttpClient, HttpParams } from '@angular/common/http';
+import { FormsModule } from '@angular/forms';
 import {
   ModalComponent,
   ButtonComponent,
-  InputComponent,
-  SelectorComponent,
-  TextareaComponent,
   IconComponent,
   SpinnerComponent,
+  StepsLineComponent,
+  StepsLineItem,
+  ToggleComponent,
+  InputComponent,
+  SelectorComponent,
 } from '../../../../../../shared/components';
+import { ToastService } from '../../../../../../shared/components';
 import { ReservationsService } from '../../services/reservations.service';
-import { CreateBookingDto, AvailabilitySlot, ServiceProvider } from '../../interfaces/reservation.interface';
-import { Subject, takeUntil, finalize, debounceTime, switchMap, of } from 'rxjs';
+import { AvailabilitySlot, CreateBookingDto } from '../../interfaces/reservation.interface';
 import { environment } from '../../../../../../../environments/environment';
+import { debounceTime, Subject, switchMap, of } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
   selector: 'app-reservation-form-modal',
   standalone: true,
   imports: [
     CommonModule,
-    ReactiveFormsModule,
+    FormsModule,
     ModalComponent,
     ButtonComponent,
-    InputComponent,
-    SelectorComponent,
-    TextareaComponent,
     IconComponent,
     SpinnerComponent,
+    StepsLineComponent,
+    ToggleComponent,
+    InputComponent,
+    SelectorComponent,
   ],
   templateUrl: './reservation-form-modal.component.html',
   styleUrls: ['./reservation-form-modal.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class ReservationFormModalComponent implements OnChanges, OnDestroy {
-  private fb = inject(FormBuilder);
+export class ReservationFormModalComponent {
   private http = inject(HttpClient);
   private reservationsService = inject(ReservationsService);
+  private toastService = inject(ToastService);
 
-  @Input() isOpen = false;
-  @Input() serviceProducts: { value: any; label: string; booking_mode?: string }[] = [];
+  // Inputs / Outputs
+  readonly isOpen = input<boolean>(false);
+  readonly closed = output<void>();
+  readonly created = output<void>();
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() closed = new EventEmitter<void>();
-  @Output() created = new EventEmitter<void>();
+  // Wizard
+  currentStep = signal(0);
 
-  form: FormGroup;
-  loading = false;
-  loadingSlots = false;
-  currentStep = 1;
-  availableSlots: AvailabilitySlot[] = [];
-  selectedSlot: AvailabilitySlot | null = null;
+  // Services
+  services = signal<any[]>([]);
+  serviceSearch = signal('');
+  selectedService = signal<any>(null);
+  loadingServices = signal(false);
 
-  // Provider selection state
-  providers: ServiceProvider[] = [];
-  selectedProvider: ServiceProvider | null = null;
-  loadingProviders = false;
-  isFreeBooking = false;
-  skipAvailabilityCheck = false;
+  // Date & Channel
+  selectedDate = signal('');
+  selectedChannel = signal('pos');
 
-  // Customer search state
-  customerSearch = '';
-  customers: any[] = [];
-  selectedCustomer: any = null;
-  searchingCustomers = false;
-  private searchSubject = new Subject<string>();
+  // Providers
+  providers = signal<any[]>([]);
+  selectedProvider = signal<any>(null);
+  loadingProviders = signal(false);
+  isFreeBooking = signal(false);
 
-  private destroy$ = new Subject<void>();
+  // Slots
+  availableSlots = signal<AvailabilitySlot[]>([]);
+  selectedSlot = signal<AvailabilitySlot | null>(null);
+  loadingSlots = signal(false);
 
-  channelOptions = [
+  // Time (manual or from slot)
+  startTime = signal('');
+  endTime = signal('');
+  skipAvailabilityCheck = signal(false);
+
+  // Customer
+  customerSearch = signal('');
+  customers = signal<any[]>([]);
+  selectedCustomer = signal<any>(null);
+  searchingCustomers = signal(false);
+
+  // Notes & Submit
+  notes = signal('');
+  submitting = signal(false);
+
+  // Channel options
+  readonly channelOptions = [
     { value: 'pos', label: 'POS' },
     { value: 'ecommerce', label: 'E-commerce' },
     { value: 'whatsapp', label: 'WhatsApp' },
   ];
 
-  constructor() {
-    this.form = this.fb.group({
-      product_id: [null, [Validators.required]],
-      date: ['', [Validators.required]],
-      start_time: ['', [Validators.required]],
-      end_time: ['', [Validators.required]],
-      customer_id: [null, [Validators.required]],
-      channel: ['pos'],
-      notes: [''],
-    });
+  // Computed signals
+  readonly wizardSteps = computed<StepsLineItem[]>(() => {
+    if (this.isFreeBooking()) {
+      return [
+        { label: 'Servicio' },
+        { label: 'Horario' },
+        { label: 'Cliente' },
+        { label: 'Confirmación' },
+      ];
+    }
+    return [
+      { label: 'Servicio' },
+      { label: 'Proveedor' },
+      { label: 'Horario' },
+      { label: 'Cliente' },
+      { label: 'Confirmación' },
+    ];
+  });
 
+  readonly totalSteps = computed(() => this.wizardSteps().length);
+
+  readonly filteredServices = computed(() => {
+    const all = this.services();
+    const query = this.serviceSearch().toLowerCase().trim();
+    if (!query) return all.slice(0, 5);
+    return all.filter(s => s.name?.toLowerCase().includes(query));
+  });
+
+  readonly hasMoreServices = computed(() => {
+    return !this.serviceSearch() && this.services().length > 5;
+  });
+
+  // Dynamic step numbers
+  readonly providerStep = computed(() => this.isFreeBooking() ? -1 : 1);
+  readonly slotStep = computed(() => this.isFreeBooking() ? 1 : 2);
+  readonly customerStep = computed(() => this.isFreeBooking() ? 2 : 3);
+  readonly confirmStep = computed(() => this.isFreeBooking() ? 3 : 4);
+
+  readonly canGoNext = computed(() => {
+    const step = this.currentStep();
+    // Step 0: Service + Date required
+    if (step === 0) return !!this.selectedService() && !!this.selectedDate();
+    // Provider step (only in provider mode)
+    if (step === this.providerStep()) return true; // "any" is valid
+    // Slot step
+    if (step === this.slotStep()) return !!this.startTime() && !!this.endTime();
+    // Customer step
+    if (step === this.customerStep()) return !!this.selectedCustomer();
+    return false;
+  });
+
+  private searchSubject = new Subject<string>();
+
+  constructor() {
     // Debounced customer search
     this.searchSubject.pipe(
       debounceTime(300),
       switchMap(query => {
         if (query.length < 2) return of([]);
-        this.searchingCustomers = true;
+        this.searchingCustomers.set(true);
         const params = new HttpParams().set('search', query).set('limit', '5');
         return this.http.get<any>(`${environment.apiUrl}/store/customers`, { params });
       }),
-      takeUntil(this.destroy$),
+      takeUntilDestroyed(),
     ).subscribe({
       next: (response) => {
         const data = response?.data || response || [];
-        this.customers = Array.isArray(data) ? data : [];
-        this.searchingCustomers = false;
+        this.customers.set(Array.isArray(data) ? data : []);
+        this.searchingCustomers.set(false);
       },
-      error: () => {
-        this.searchingCustomers = false;
-      },
+      error: () => this.searchingCustomers.set(false),
     });
   }
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['isOpen'] && this.isOpen) {
-      this.resetForm();
-      this.loadServiceProducts();
-    }
+  onOpen(): void {
+    this.currentStep.set(0);
+    this.services.set([]);
+    this.serviceSearch.set('');
+    this.selectedService.set(null);
+    this.selectedDate.set('');
+    this.selectedChannel.set('pos');
+    this.providers.set([]);
+    this.selectedProvider.set(null);
+    this.isFreeBooking.set(false);
+    this.availableSlots.set([]);
+    this.selectedSlot.set(null);
+    this.startTime.set('');
+    this.endTime.set('');
+    this.skipAvailabilityCheck.set(false);
+    this.customerSearch.set('');
+    this.customers.set([]);
+    this.selectedCustomer.set(null);
+    this.notes.set('');
+    this.submitting.set(false);
+    this.loadServices();
   }
 
-  private loadServiceProducts(): void {
-    if (this.serviceProducts.length > 0) return; // Already provided by parent
-    this.reservationsService.getBookableServices()
-      .pipe(takeUntil(this.destroy$))
+  onClose(): void {
+    this.closed.emit();
+  }
+
+  loadServices(): void {
+    this.loadingServices.set(true);
+    const params = new HttpParams()
+      .set('product_type', 'service')
+      .set('requires_booking', 'true')
+      .set('limit', '50');
+
+    this.http.get<any>(`${environment.apiUrl}/store/products`, { params })
       .subscribe({
-        next: (services) => {
-          this.serviceProducts = services.map(s => ({
-            value: s.id,
-            label: s.name + (s.service_duration_minutes ? ` (${s.service_duration_minutes} min)` : ''),
-            booking_mode: s.booking_mode,
-          }));
+        next: (res) => {
+          this.services.set(res?.data || []);
+          this.loadingServices.set(false);
         },
-        error: () => {},
+        error: () => this.loadingServices.set(false),
       });
   }
 
-  get totalSteps(): number {
-    // free_booking: 3 steps (service+date, time, customer)
-    // provider_required: 4 steps (service+date, provider, time, customer)
-    return this.isFreeBooking ? 3 : 4;
-  }
-
-  /** Maps logical step labels depending on mode */
-  get stepLabels(): string[] {
-    if (this.isFreeBooking) {
-      return ['Servicio', 'Horario', 'Cliente'];
-    }
-    return ['Servicio', 'Proveedor', 'Horario', 'Cliente'];
-  }
-
-  get canGoNext(): boolean {
-    if (this.isFreeBooking) {
-      switch (this.currentStep) {
-        case 1:
-          return this.form.get('product_id')?.valid === true && this.form.get('date')?.valid === true;
-        case 2:
-          return this.form.get('start_time')?.valid === true && this.form.get('end_time')?.valid === true;
-        case 3:
-          return this.form.get('customer_id')?.valid === true;
-        default:
-          return false;
-      }
-    }
-    // provider_required mode (4 steps)
-    switch (this.currentStep) {
-      case 1:
-        return this.form.get('product_id')?.valid === true && this.form.get('date')?.valid === true;
-      case 2:
-        // Provider step: allow "any available" (null) or a selected provider
-        return true;
-      case 3:
-        return this.form.get('start_time')?.valid === true && this.form.get('end_time')?.valid === true;
-      case 4:
-        return this.form.get('customer_id')?.valid === true;
-      default:
-        return false;
-    }
+  selectService(service: any): void {
+    this.selectedService.set(service);
+    this.isFreeBooking.set(service.booking_mode === 'free_booking');
   }
 
   nextStep(): void {
-    if (!this.canGoNext) return;
+    if (!this.canGoNext()) return;
 
-    if (this.currentStep === 1) {
-      this.detectBookingMode();
-      if (this.isFreeBooking) {
-        // Skip provider, go directly to time step
-        this.currentStep = 2;
-      } else {
-        // Load providers for step 2
+    const step = this.currentStep();
+
+    if (step === 0) {
+      if (!this.isFreeBooking()) {
         this.loadProviders();
-        this.currentStep = 2;
       }
+      this.currentStep.set(step + 1);
       return;
     }
 
-    if (!this.isFreeBooking && this.currentStep === 2) {
-      // Moving from provider step to time/slot step
+    if (step === this.providerStep()) {
       this.loadAvailableSlots();
-      this.currentStep = 3;
+      this.currentStep.set(step + 1);
       return;
     }
 
-    if (this.currentStep < this.totalSteps) {
-      this.currentStep++;
+    if (step === this.slotStep() && this.isFreeBooking()) {
+      // For free booking, try loading slots if not already loaded
+      if (this.availableSlots().length === 0 && !this.loadingSlots()) {
+        this.loadAvailableSlots();
+      }
+      this.currentStep.set(step + 1);
+      return;
     }
+
+    this.currentStep.set(step + 1);
   }
 
   prevStep(): void {
-    if (this.currentStep > 1) {
-      this.currentStep--;
+    if (this.currentStep() > 0) {
+      this.currentStep.set(this.currentStep() - 1);
     }
   }
 
-  private detectBookingMode(): void {
-    const productId = this.form.get('product_id')?.value;
-    const selected = this.serviceProducts.find(sp => sp.value === productId);
-    this.isFreeBooking = selected?.booking_mode === 'free_booking';
-  }
-
   loadProviders(): void {
-    const productId = this.form.get('product_id')?.value;
+    const productId = this.selectedService()?.id;
     if (!productId) return;
 
-    this.loadingProviders = true;
-    this.reservationsService
-      .getProvidersForService(productId)
-      .pipe(
-        takeUntil(this.destroy$),
-        finalize(() => (this.loadingProviders = false)),
-      )
+    this.loadingProviders.set(true);
+    this.reservationsService.getProvidersForService(productId)
       .subscribe({
         next: (providers) => {
-          this.providers = providers;
+          this.providers.set(providers);
+          this.loadingProviders.set(false);
         },
         error: () => {
-          this.providers = [];
+          this.providers.set([]);
+          this.loadingProviders.set(false);
         },
       });
   }
 
-  selectProvider(provider: ServiceProvider | null): void {
-    this.selectedProvider = provider;
-  }
-
-  getProviderDisplayName(provider: ServiceProvider): string {
-    return provider.display_name || `${provider.employee?.first_name || ''} ${provider.employee?.last_name || ''}`.trim() || 'Proveedor';
-  }
-
-  getProviderInitials(provider: ServiceProvider): string {
-    const name = provider.display_name || `${provider.employee?.first_name || ''} ${provider.employee?.last_name || ''}`.trim();
-    if (!name) return '?';
-    const parts = name.split(' ');
-    return parts.map(p => p[0]).slice(0, 2).join('').toUpperCase();
+  selectProvider(provider: any | null): void {
+    this.selectedProvider.set(provider);
   }
 
   loadAvailableSlots(): void {
-    const productId = this.form.get('product_id')?.value;
-    const date = this.form.get('date')?.value;
-
+    const productId = this.selectedService()?.id;
+    const date = this.selectedDate();
     if (!productId || !date) return;
 
-    this.loadingSlots = true;
-    this.reservationsService
-      .getAvailability(productId, date, date, this.selectedProvider?.id)
-      .pipe(
-        takeUntil(this.destroy$),
-        finalize(() => (this.loadingSlots = false)),
-      )
+    this.loadingSlots.set(true);
+    this.reservationsService.getAvailability(productId, date, date, this.selectedProvider()?.id)
       .subscribe({
         next: (slots) => {
-          this.availableSlots = slots.filter((s) => s.total_available > 0);
+          this.availableSlots.set(slots.filter(s => s.total_available > 0));
+          this.loadingSlots.set(false);
         },
         error: () => {
-          this.availableSlots = [];
+          this.availableSlots.set([]);
+          this.loadingSlots.set(false);
         },
       });
   }
 
   selectSlot(slot: AvailabilitySlot): void {
-    this.selectedSlot = slot;
-    this.form.patchValue({
-      start_time: slot.start_time,
-      end_time: slot.end_time,
-    });
-  }
-
-  /** Returns the step number for the time/slot step */
-  get slotStep(): number {
-    return this.isFreeBooking ? 2 : 3;
-  }
-
-  /** Returns the step number for the customer step */
-  get customerStep(): number {
-    return this.isFreeBooking ? 3 : 4;
-  }
-
-  onSubmit(): void {
-    if (this.form.invalid) {
-      this.form.markAllAsTouched();
-      return;
-    }
-
-    this.loading = true;
-    const dto: CreateBookingDto = {
-      ...this.form.value,
-      provider_id: this.selectedProvider?.id,
-      skip_availability_check: this.skipAvailabilityCheck || undefined,
-    };
-
-    this.reservationsService
-      .createReservation(dto)
-      .pipe(
-        takeUntil(this.destroy$),
-        finalize(() => (this.loading = false)),
-      )
-      .subscribe({
-        next: () => {
-          this.created.emit();
-        },
-        error: () => {
-          // Error handled by interceptor or parent
-        },
-      });
-  }
-
-  onCancel(): void {
-    this.closed.emit();
-    this.isOpenChange.emit(false);
+    this.selectedSlot.set(slot);
+    this.startTime.set(slot.start_time);
+    this.endTime.set(slot.end_time);
   }
 
   onCustomerSearch(query: string): void {
-    this.customerSearch = query;
+    this.customerSearch.set(query);
     this.searchSubject.next(query);
   }
 
   selectCustomer(customer: any): void {
-    this.selectedCustomer = customer;
-    this.customers = [];
-    this.customerSearch = '';
-    this.form.patchValue({ customer_id: customer.id });
+    this.selectedCustomer.set(customer);
+    this.customers.set([]);
+    this.customerSearch.set('');
   }
 
   clearCustomer(): void {
-    this.selectedCustomer = null;
-    this.form.patchValue({ customer_id: null });
+    this.selectedCustomer.set(null);
   }
 
-  resetForm(): void {
-    this.form.reset({ channel: 'pos' });
-    this.currentStep = 1;
-    this.availableSlots = [];
-    this.selectedSlot = null;
-    this.loading = false;
-    this.loadingSlots = false;
-    this.customerSearch = '';
-    this.customers = [];
-    this.selectedCustomer = null;
-    this.searchingCustomers = false;
-    this.providers = [];
-    this.selectedProvider = null;
-    this.loadingProviders = false;
-    this.isFreeBooking = false;
-    this.skipAvailabilityCheck = false;
+  submit(): void {
+    const service = this.selectedService();
+    const customer = this.selectedCustomer();
+    if (!service || !customer) return;
+
+    this.submitting.set(true);
+
+    const dto: CreateBookingDto = {
+      customer_id: customer.id,
+      product_id: service.id,
+      date: this.selectedDate(),
+      start_time: this.startTime(),
+      end_time: this.endTime() || this.getEndTime(),
+      channel: this.selectedChannel(),
+      notes: this.notes() || undefined,
+      provider_id: this.selectedProvider()?.id || undefined,
+      skip_availability_check: this.skipAvailabilityCheck() || undefined,
+    };
+
+    this.reservationsService.createReservation(dto).subscribe({
+      next: () => {
+        this.toastService.success('Reserva creada exitosamente');
+        this.submitting.set(false);
+        this.created.emit();
+      },
+      error: (err) => {
+        const msg = err?.error?.message?.message || err?.error?.message || 'Error al crear la reserva';
+        this.toastService.error(msg);
+        this.submitting.set(false);
+      },
+    });
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+  // Helpers
+  formatTime(time: string): string {
+    if (!time || !time.includes(':')) return '--:--';
+    const [hours, minutes] = time.split(':').map(Number);
+    if (isNaN(hours) || isNaN(minutes)) return '--:--';
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const h = hours % 12 || 12;
+    return `${h}:${minutes.toString().padStart(2, '0')} ${ampm}`;
   }
 
-  getFieldError(field: string): string {
-    const control = this.form.get(field);
-    if (control?.touched && control?.errors) {
-      if (control.errors['required']) return 'Este campo es obligatorio';
-    }
-    return '';
+  formatDate(date: string): string {
+    if (!date) return '--';
+    const d = new Date(date + 'T12:00:00');
+    const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+    const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+    return `${days[d.getDay()]} ${d.getDate()} ${months[d.getMonth()]}`;
   }
 
-  onFieldBlur(field: string): void {
-    this.form.get(field)?.markAsTouched();
+  getEndTime(): string {
+    const time = this.startTime();
+    if (!time || !time.includes(':')) return '';
+    const duration = this.selectedService()?.service_duration_minutes || 60;
+    const [h, m] = time.split(':').map(Number);
+    if (isNaN(h) || isNaN(m)) return '';
+    const totalMin = h * 60 + m + duration;
+    const endH = Math.floor(totalMin / 60) % 24;
+    const endM = totalMin % 60;
+    return `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
+  }
+
+  getProviderDisplayName(provider: any): string {
+    return provider.display_name || `${provider.employee?.first_name || ''} ${provider.employee?.last_name || ''}`.trim() || 'Proveedor';
+  }
+
+  getProviderInitials(provider: any): string {
+    const name = provider.display_name || `${provider.employee?.first_name || ''} ${provider.employee?.last_name || ''}`.trim();
+    if (!name) return '?';
+    const parts = name.split(' ');
+    return parts.map((p: string) => p[0]).slice(0, 2).join('').toUpperCase();
+  }
+
+  getChannelLabel(): string {
+    return this.channelOptions.find(c => c.value === this.selectedChannel())?.label || this.selectedChannel();
   }
 }

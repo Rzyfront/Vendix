@@ -1,323 +1,464 @@
-<app-modal
-  [isOpen]="isOpen"
-  (isOpenChange)="isOpenChange.emit($event)"
-  (cancel)="onCancel()"
-  [size]="'md'"
-  title="Nueva Reserva"
-  subtitle="Crea una nueva reserva para un servicio"
->
-  <!-- Step indicator -->
-  <div class="flex items-center justify-center gap-2 mb-6">
-    @for (step of stepLabels; track $index; let i = $index) {
-      <div class="flex items-center gap-2">
-        <div
-          class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors"
-          [class.bg-primary]="currentStep >= i + 1"
-          [class.text-white]="currentStep >= i + 1"
-          [class.bg-gray-200]="currentStep < i + 1"
-          [class.text-gray-500]="currentStep < i + 1"
-        >
-          {{ i + 1 }}
-        </div>
-        @if (i < stepLabels.length - 1) {
-          <div
-            class="w-8 h-0.5 transition-colors"
-            [class.bg-primary]="currentStep > i + 1"
-            [class.bg-gray-200]="currentStep <= i + 1"
-          ></div>
+<app-modal [isOpen]="isOpen()" (isOpenChange)="$event ? null : onClose()"
+  (opened)="onOpen()" (cancel)="onClose()" title="Nueva Reserva" size="md">
+
+  <!-- Hero Header -->
+  <div class="booking-hero">
+    <div class="hero-icon-wrapper">
+      <app-icon name="sparkles" [size]="20"></app-icon>
+    </div>
+    @if (selectedDate() || startTime()) {
+      <div class="hero-datetime">
+        @if (selectedDate()) {
+          <span class="datetime-chip">
+            <app-icon name="calendar" [size]="14"></app-icon>
+            {{ formatDate(selectedDate()) }}
+          </span>
+        }
+        @if (startTime()) {
+          <span class="datetime-chip">
+            <app-icon name="clock" [size]="14"></app-icon>
+            {{ formatTime(startTime()) }}
+            @if (selectedService()?.service_duration_minutes) {
+              <span class="time-arrow">&rarr;</span>
+              {{ formatTime(endTime() || getEndTime()) }}
+            }
+          </span>
         }
       </div>
     }
   </div>
 
-  <form [formGroup]="form">
-    <!-- Step 1: Servicio y Fecha -->
-    @if (currentStep === 1) {
-      <div class="space-y-4">
-        <h3 class="text-sm font-semibold text-text-primary mb-3">Selecciona servicio y fecha</h3>
+  <!-- Step Indicator -->
+  <app-steps-line
+    [steps]="wizardSteps()"
+    [currentStep]="currentStep()"
+    size="sm"
+    orientation="horizontal">
+  </app-steps-line>
 
-        <app-selector
-          formControlName="product_id"
-          label="Servicio"
-          placeholder="Selecciona un servicio"
-          [options]="serviceProducts"
-          [required]="true"
-        ></app-selector>
-
-        <app-input
-          formControlName="date"
-          label="Fecha"
-          type="date"
-          [required]="true"
-          [error]="getFieldError('date')"
-          (blur)="onFieldBlur('date')"
-          customWrapperClass="mt-0"
-        ></app-input>
-
-        <app-selector
-          formControlName="channel"
-          label="Canal"
-          placeholder="Selecciona un canal"
-          [options]="channelOptions"
-        ></app-selector>
-      </div>
-    }
-
-    <!-- Step 2 (provider mode): Seleccionar Proveedor -->
-    @if (!isFreeBooking && currentStep === 2) {
-      <div class="space-y-4">
-        <h3 class="text-sm font-semibold text-text-primary mb-3">Selecciona un proveedor</h3>
-
-        @if (loadingProviders) {
-          <div class="p-6 text-center">
-            <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-            <p class="mt-2 text-sm text-text-secondary">Cargando proveedores...</p>
+  <!-- Step 0: Service + Date + Channel -->
+  @if (currentStep() === 0) {
+    <div class="step-content fade-in">
+      @if (loadingServices()) {
+        <div class="loading-state">
+          <app-spinner size="md" color="primary"></app-spinner>
+          <span class="loading-text">Cargando servicios...</span>
+        </div>
+      } @else if (services().length === 0) {
+        <div class="empty-state">
+          <div class="empty-icon-wrapper">
+            <app-icon name="briefcase" [size]="32"></app-icon>
           </div>
-        }
-
-        @if (!loadingProviders) {
-          <div class="grid grid-cols-2 gap-3">
-            <!-- "Any available" option -->
-            <button
-              type="button"
-              class="flex flex-col items-center gap-2 p-4 rounded-lg border text-center text-sm transition-colors cursor-pointer"
-              [class.border-primary]="selectedProvider === null"
-              [class.bg-primary/5]="selectedProvider === null"
-              [class.ring-2]="selectedProvider === null"
-              [class.ring-primary/30]="selectedProvider === null"
-              [class.border-border]="selectedProvider !== null"
-              [class.hover:border-primary/50]="selectedProvider !== null"
-              (click)="selectProvider(null)"
-            >
-              <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
-                <app-icon name="users" [size]="20" class="text-gray-500"></app-icon>
-              </div>
-              <span class="font-medium text-text-primary">Cualquier disponible</span>
-              <span class="text-xs text-text-secondary">El sistema asigna automáticamente</span>
+          <h4 class="empty-title">Sin servicios disponibles</h4>
+          <p class="empty-description">No hay servicios configurados para reserva. Agrega servicios desde el catálogo de productos.</p>
+        </div>
+      } @else {
+        <!-- Service Search -->
+        <div class="service-search-wrapper">
+          <app-icon name="search" [size]="16" class="search-prefix-icon"></app-icon>
+          <input
+            type="text"
+            class="search-input"
+            placeholder="Buscar servicio..."
+            [value]="serviceSearch()"
+            (input)="serviceSearch.set($any($event.target).value)"
+          />
+          @if (serviceSearch()) {
+            <button class="search-clear-btn" (click)="serviceSearch.set('')">
+              <app-icon name="x" [size]="14"></app-icon>
             </button>
+          }
+        </div>
 
-            @for (provider of providers; track provider.id) {
-              <button
-                type="button"
-                class="flex flex-col items-center gap-2 p-4 rounded-lg border text-center text-sm transition-colors cursor-pointer"
-                [class.border-primary]="selectedProvider?.id === provider.id"
-                [class.bg-primary/5]="selectedProvider?.id === provider.id"
-                [class.ring-2]="selectedProvider?.id === provider.id"
-                [class.ring-primary/30]="selectedProvider?.id === provider.id"
-                [class.border-border]="selectedProvider?.id !== provider.id"
-                [class.hover:border-primary/50]="selectedProvider?.id !== provider.id"
-                (click)="selectProvider(provider)"
-              >
-                @if (provider.avatar_url) {
-                  <img [src]="provider.avatar_url" [alt]="getProviderDisplayName(provider)" class="w-10 h-10 rounded-full object-cover">
-                } @else {
-                  <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-sm">
-                    {{ getProviderInitials(provider) }}
+        <div class="services-grid">
+          @for (service of filteredServices(); track service.id) {
+            <button
+              class="service-card"
+              [class.selected]="selectedService()?.id === service.id"
+              (click)="selectService(service)">
+              <div class="card-header">
+                <span class="service-name">{{ service.name }}</span>
+                @if (selectedService()?.id === service.id) {
+                  <div class="selected-badge">
+                    <app-icon name="circle-check" [size]="16"></app-icon>
                   </div>
                 }
-                <span class="font-medium text-text-primary">{{ getProviderDisplayName(provider) }}</span>
-                @if (provider.employee?.position) {
-                  <span class="text-xs text-text-secondary">{{ provider.employee?.position }}</span>
+              </div>
+              <div class="card-details">
+                @if (service.service_duration_minutes) {
+                  <span class="detail-badge duration-badge">
+                    <app-icon name="clock" [size]="12"></app-icon>
+                    {{ service.service_duration_minutes }} min
+                  </span>
                 }
+                @if (service.base_price) {
+                  <span class="detail-badge price-badge">
+                    ${{ service.base_price | number:'1.0-0' }}
+                  </span>
+                }
+              </div>
+            </button>
+          }
+        </div>
+
+        @if (hasMoreServices()) {
+          <p class="services-hint">
+            Mostrando 5 de {{ services().length }} servicios. Usa el buscador para encontrar más.
+          </p>
+        }
+        @if (serviceSearch() && filteredServices().length === 0) {
+          <p class="services-hint">No se encontraron servicios para "{{ serviceSearch() }}"</p>
+        }
+
+        <!-- Date + Channel below services -->
+        @if (selectedService()) {
+          <div class="date-channel-row">
+            <div class="form-section">
+              <div class="section-header">
+                <div class="section-icon-badge schedule-badge">
+                  <app-icon name="calendar" [size]="14"></app-icon>
+                </div>
+                <span class="section-title"><span class="title-text">Fecha</span><span class="title-required">*</span></span>
+              </div>
+              <app-input type="date" [ngModel]="selectedDate()" (ngModelChange)="selectedDate.set($event)" placeholder="Selecciona fecha" [required]="true"></app-input>
+            </div>
+            <div class="form-section">
+              <div class="section-header">
+                <div class="section-icon-badge channel-badge-icon">
+                  <app-icon name="radio" [size]="14"></app-icon>
+                </div>
+                <span class="section-title"><span class="title-text">Canal</span></span>
+              </div>
+              <app-selector [ngModel]="selectedChannel()" (ngModelChange)="selectedChannel.set($event)" [options]="channelOptions" placeholder="Canal"></app-selector>
+            </div>
+          </div>
+        }
+      }
+    </div>
+  }
+
+  <!-- Provider Step (only if !isFreeBooking) -->
+  @if (currentStep() === providerStep()) {
+    <div class="step-content fade-in">
+      <div class="form-section">
+        <div class="section-header">
+          <div class="section-icon-badge" style="background: rgba(99, 102, 241, 0.1); color: #6366f1;">
+            <app-icon name="users" [size]="14"></app-icon>
+          </div>
+          <span class="section-title">
+            <span class="title-text">Proveedor</span>
+            <span class="title-optional">(opcional)</span>
+          </span>
+        </div>
+
+        @if (loadingProviders()) {
+          <div class="loading-state">
+            <app-spinner size="sm" color="primary"></app-spinner>
+            <span class="loading-text">Cargando proveedores...</span>
+          </div>
+        } @else {
+          <div class="flex flex-wrap gap-2">
+            <!-- "Cualquiera" chip -->
+            <button type="button" class="provider-chip" [class.selected]="!selectedProvider()" (click)="selectProvider(null)">
+              <app-icon name="users" [size]="14"></app-icon> Cualquiera
+            </button>
+            @for (p of providers(); track p.id) {
+              <button type="button" class="provider-chip" [class.selected]="selectedProvider()?.id === p.id" (click)="selectProvider(p)">
+                <app-icon name="user" [size]="14"></app-icon> {{ getProviderDisplayName(p) }}
               </button>
             }
           </div>
 
-          @if (!loadingProviders && providers.length === 0) {
-            <div class="p-4 text-center text-gray-500">
-              <app-icon name="user-x" [size]="28" class="mx-auto mb-2 text-gray-300"></app-icon>
-              <p class="text-sm">No hay proveedores asignados a este servicio.</p>
-              <p class="text-xs mt-1">Se utilizara asignacion automatica.</p>
+          @if (providers().length === 0) {
+            <div class="empty-state" style="padding: 24px 16px;">
+              <div class="empty-icon-wrapper" style="width: 40px; height: 40px; border-radius: 10px;">
+                <app-icon name="user-x" [size]="20"></app-icon>
+              </div>
+              <p class="empty-description">No hay proveedores asignados a este servicio. Se utilizará asignación automática.</p>
             </div>
           }
         }
       </div>
-    }
+    </div>
+  }
 
-    <!-- Slot step (step 2 for free_booking, step 3 for provider mode) -->
-    @if (currentStep === slotStep) {
-      <div class="space-y-4">
-        <h3 class="text-sm font-semibold text-text-primary mb-3">Selecciona un horario</h3>
+  <!-- Slot/Time Step -->
+  @if (currentStep() === slotStep()) {
+    <div class="step-content fade-in">
+      <!-- Available slots (for non-free booking) -->
+      @if (!isFreeBooking()) {
+        <div class="form-section">
+          <div class="section-header">
+            <div class="section-icon-badge schedule-badge">
+              <app-icon name="clock" [size]="14"></app-icon>
+            </div>
+            <span class="section-title"><span class="title-text">Horarios disponibles</span></span>
+          </div>
 
-        @if (!isFreeBooking) {
-          @if (loadingSlots) {
-            <div class="p-6 text-center">
-              <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-              <p class="mt-2 text-sm text-text-secondary">Cargando horarios disponibles...</p>
+          @if (loadingSlots()) {
+            <div class="loading-state">
+              <app-spinner size="sm" color="primary"></app-spinner>
+              <span class="loading-text">Cargando horarios disponibles...</span>
+            </div>
+          } @else if (availableSlots().length === 0) {
+            <div class="empty-state" style="padding: 24px 16px;">
+              <div class="empty-icon-wrapper" style="width: 40px; height: 40px; border-radius: 10px;">
+                <app-icon name="calendar" [size]="20"></app-icon>
+              </div>
+              <p class="empty-description">No hay horarios disponibles para esta fecha. Intenta con otra fecha o ingresa manualmente.</p>
+            </div>
+          } @else {
+            <div class="slot-grid">
+              @for (slot of availableSlots(); track slot.start_time) {
+                <button type="button" class="slot-card"
+                  [class.selected]="selectedSlot() === slot"
+                  (click)="selectSlot(slot)">
+                  <div class="slot-time">{{ slot.start_time.substring(0, 5) }}</div>
+                  <div class="slot-availability">{{ slot.total_available }} disponible{{ slot.total_available > 1 ? 's' : '' }}</div>
+                </button>
+              }
             </div>
           }
+        </div>
+      }
 
-          @if (!loadingSlots && availableSlots.length === 0) {
-            <div class="p-6 text-center text-gray-500">
-              <app-icon name="calendar" [size]="32" class="mx-auto mb-2 text-gray-300"></app-icon>
-              <p class="text-sm">No hay horarios disponibles para esta fecha.</p>
-              <p class="text-xs mt-1">Intenta con otra fecha o servicio.</p>
+      <!-- Divider for manual time input -->
+      @if (!isFreeBooking() && availableSlots().length > 0) {
+        <div class="time-divider">
+          <span class="divider-text">o ingresa manualmente</span>
+        </div>
+      }
+
+      <!-- Manual time inputs -->
+      <div class="time-inputs-row">
+        <app-input type="time" label="Hora inicio" [ngModel]="startTime()" (ngModelChange)="startTime.set($event)" placeholder="HH:mm" [required]="true"></app-input>
+        <app-input type="time" label="Hora fin" [ngModel]="endTime()" (ngModelChange)="endTime.set($event)" placeholder="HH:mm" [required]="true"></app-input>
+      </div>
+
+      <!-- Skip availability toggle -->
+      <div class="toggle-section">
+        <app-toggle [ngModel]="skipAvailabilityCheck()" (ngModelChange)="skipAvailabilityCheck.set($event)"></app-toggle>
+        <span class="toggle-label">Agendar sin verificar disponibilidad</span>
+      </div>
+    </div>
+  }
+
+  <!-- Customer + Notes Step -->
+  @if (currentStep() === customerStep()) {
+    <div class="step-content fade-in">
+
+      <!-- Customer Search Section -->
+      <div class="form-section">
+        <div class="section-header">
+          <div class="section-icon-badge customer-badge">
+            <app-icon name="user" [size]="14"></app-icon>
+          </div>
+          <div class="section-title">
+            <span class="title-text">Cliente</span>
+            <span class="title-required">*</span>
+          </div>
+        </div>
+
+        @if (selectedCustomer()) {
+          <div class="selected-customer-chip">
+            <div class="customer-avatar">
+              {{ selectedCustomer().first_name?.charAt(0) }}{{ selectedCustomer().last_name?.charAt(0) }}
             </div>
-          }
+            <div class="customer-chip-info">
+              <span class="chip-name">{{ selectedCustomer().first_name }} {{ selectedCustomer().last_name }}</span>
+              @if (selectedCustomer().email || selectedCustomer().phone) {
+                <span class="chip-detail">{{ selectedCustomer().email || selectedCustomer().phone }}</span>
+              }
+            </div>
+            <button class="chip-clear" (click)="clearCustomer()">
+              <app-icon name="x" [size]="14"></app-icon>
+            </button>
+          </div>
+        } @else {
+          <div class="search-wrapper">
+            <app-icon name="search" [size]="16" class="search-prefix-icon"></app-icon>
+            <input
+              type="text"
+              class="search-input"
+              placeholder="Buscar por nombre, email o teléfono..."
+              [value]="customerSearch()"
+              (input)="onCustomerSearch($any($event.target).value)"
+            />
+            @if (searchingCustomers()) {
+              <div class="search-suffix">
+                <app-spinner size="sm" color="primary"></app-spinner>
+              </div>
+            }
+          </div>
 
-          @if (!loadingSlots && availableSlots.length > 0) {
-            <div class="grid grid-cols-3 gap-2 max-h-[240px] overflow-y-auto">
-              @for (slot of availableSlots; track slot.start_time) {
-                <button
-                  type="button"
-                  class="p-3 rounded-lg border text-center text-sm transition-colors cursor-pointer"
-                  [class.border-primary]="selectedSlot === slot"
-                  [class.bg-primary/5]="selectedSlot === slot"
-                  [class.text-primary]="selectedSlot === slot"
-                  [class.font-semibold]="selectedSlot === slot"
-                  [class.border-border]="selectedSlot !== slot"
-                  [class.hover:border-primary/50]="selectedSlot !== slot"
-                  (click)="selectSlot(slot)"
-                >
-                  <div class="font-medium">{{ slot.start_time.substring(0, 5) }}</div>
-                  <div class="text-xs text-text-secondary mt-0.5">
-                    {{ slot.total_available }} disponible{{ slot.total_available > 1 ? 's' : '' }}
+          @if (customers().length > 0) {
+            <div class="customer-dropdown">
+              @for (customer of customers(); track customer.id) {
+                <button class="customer-option" (click)="selectCustomer(customer)">
+                  <div class="option-avatar">
+                    {{ customer.first_name?.charAt(0) }}{{ customer.last_name?.charAt(0) }}
+                  </div>
+                  <div class="option-info">
+                    <span class="option-name">{{ customer.first_name }} {{ customer.last_name }}</span>
+                    <div class="option-details">
+                      @if (customer.email) {
+                        <span class="option-detail">
+                          <app-icon name="mail" [size]="10"></app-icon>
+                          {{ customer.email }}
+                        </span>
+                      }
+                      @if (customer.phone) {
+                        <span class="option-detail">
+                          <app-icon name="phone" [size]="10"></app-icon>
+                          {{ customer.phone }}
+                        </span>
+                      }
+                    </div>
                   </div>
                 </button>
               }
             </div>
           }
         }
-
-        <!-- Manual time input (always shown for free_booking, fallback for provider mode) -->
-        <div class="grid grid-cols-2 gap-4"
-          [class.mt-4]="!isFreeBooking"
-          [class.pt-4]="!isFreeBooking"
-          [class.border-t]="!isFreeBooking"
-          [class.border-border]="!isFreeBooking"
-        >
-          <app-input
-            formControlName="start_time"
-            label="Hora inicio"
-            type="text"
-            placeholder="HH:mm"
-            [required]="true"
-            [error]="getFieldError('start_time')"
-            (blur)="onFieldBlur('start_time')"
-            customWrapperClass="mt-0"
-          ></app-input>
-
-          <app-input
-            formControlName="end_time"
-            label="Hora fin"
-            type="text"
-            placeholder="HH:mm"
-            [required]="true"
-            [error]="getFieldError('end_time')"
-            (blur)="onFieldBlur('end_time')"
-            customWrapperClass="mt-0"
-          ></app-input>
-        </div>
-
-        <!-- Admin override toggle -->
-        <div class="flex items-center gap-2 mt-3 pt-3 border-t border-border">
-          <input
-            type="checkbox"
-            id="skipAvailability"
-            [checked]="skipAvailabilityCheck"
-            (change)="skipAvailabilityCheck = !skipAvailabilityCheck"
-            class="w-4 h-4 rounded border-border text-primary focus:ring-primary/30"
-          />
-          <label for="skipAvailability" class="text-xs text-text-secondary cursor-pointer">
-            Agendar sin verificar disponibilidad
-          </label>
-        </div>
       </div>
-    }
 
-    <!-- Customer step (step 3 for free_booking, step 4 for provider mode) -->
-    @if (currentStep === customerStep) {
-      <div class="space-y-4">
-        <h3 class="text-sm font-semibold text-text-primary mb-3">Datos del cliente</h3>
+      <!-- Notes Section -->
+      <div class="form-section">
+        <div class="section-header">
+          <div class="section-icon-badge notes-badge">
+            <app-icon name="file-text" [size]="14"></app-icon>
+          </div>
+          <span class="section-title">
+            <span class="title-text">Notas</span>
+            <span class="title-optional">(opcional)</span>
+          </span>
+        </div>
+        <textarea
+          class="notes-textarea"
+          rows="3"
+          placeholder="Agregar instrucciones especiales, preferencias del cliente..."
+          [value]="notes()"
+          (input)="notes.set($any($event.target).value)"
+        ></textarea>
+      </div>
+    </div>
+  }
 
-        <div>
-          <label class="block text-sm font-medium mb-1.5">Cliente *</label>
-          @if (selectedCustomer) {
-            <div class="flex items-center gap-2 px-3 py-2 rounded-lg border border-primary bg-primary/5 text-sm">
-              <app-icon name="user" [size]="16"></app-icon>
-              <span class="font-medium">{{ selectedCustomer.first_name }} {{ selectedCustomer.last_name }}</span>
-              @if (selectedCustomer.email) {
-                <span class="text-text-secondary text-xs">{{ selectedCustomer.email }}</span>
-              }
-              <button type="button" class="ml-auto text-text-secondary hover:text-text-primary" (click)="clearCustomer()">
-                <app-icon name="x" [size]="14"></app-icon>
-              </button>
+  <!-- Confirmation Step -->
+  @if (currentStep() === confirmStep()) {
+    <div class="step-content fade-in">
+      <div class="confirmation-summary">
+        <!-- Service -->
+        <div class="confirm-section">
+          <div class="confirm-label">
+            <app-icon name="briefcase" [size]="14"></app-icon>
+            Servicio
+          </div>
+          <div class="confirm-value">{{ selectedService()?.name }}</div>
+          <div class="confirm-meta">
+            @if (selectedService()?.service_duration_minutes) {
+              <span class="summary-chip">
+                <app-icon name="clock" [size]="12"></app-icon>
+                {{ selectedService()?.service_duration_minutes }} min
+              </span>
+            }
+            @if (selectedService()?.base_price) {
+              <span class="summary-chip">
+                ${{ selectedService()?.base_price | number:'1.0-0' }}
+              </span>
+            }
+          </div>
+        </div>
+
+        <!-- Date & Time -->
+        <div class="confirm-section">
+          <div class="confirm-label">
+            <app-icon name="calendar" [size]="14"></app-icon>
+            Fecha y Hora
+          </div>
+          <div class="confirm-value">
+            {{ formatDate(selectedDate()) }} &middot; {{ formatTime(startTime()) }} &rarr; {{ formatTime(endTime() || getEndTime()) }}
+          </div>
+        </div>
+
+        <!-- Channel -->
+        <div class="confirm-section">
+          <div class="confirm-label">
+            <app-icon name="radio" [size]="14"></app-icon>
+            Canal
+          </div>
+          <div class="confirm-value">
+            <span class="channel-badge">{{ getChannelLabel() }}</span>
+          </div>
+        </div>
+
+        <!-- Provider -->
+        @if (selectedProvider()) {
+          <div class="confirm-section">
+            <div class="confirm-label">
+              <app-icon name="user" [size]="14"></app-icon>
+              Proveedor
             </div>
-          } @else {
-            <input
-              type="text"
-              class="w-full px-3 py-2 border border-border rounded-lg text-sm bg-surface outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-              placeholder="Buscar por nombre, email o telefono..."
-              [value]="customerSearch"
-              (input)="onCustomerSearch($any($event.target).value)"
-            />
-            @if (searchingCustomers) {
-              <div class="flex justify-center py-2">
-                <app-spinner size="sm" color="primary"></app-spinner>
-              </div>
-            }
-            @if (customers.length > 0) {
-              <div class="border border-border rounded-lg mt-1 max-h-[200px] overflow-y-auto">
-                @for (customer of customers; track customer.id) {
-                  <button
-                    type="button"
-                    class="flex items-center gap-2.5 w-full px-3 py-2.5 text-left hover:bg-surface-hover border-b border-border last:border-b-0"
-                    (click)="selectCustomer(customer)"
-                  >
-                    <app-icon name="user" [size]="16"></app-icon>
-                    <div class="flex flex-col">
-                      <span class="font-medium text-sm">{{ customer.first_name }} {{ customer.last_name }}</span>
-                      <span class="text-xs text-text-secondary">{{ customer.email || customer.phone }}</span>
-                    </div>
-                  </button>
-                }
-              </div>
-            }
-          }
+            <div class="confirm-value">{{ getProviderDisplayName(selectedProvider()) }}</div>
+          </div>
+        }
+
+        <!-- Customer -->
+        <div class="confirm-section">
+          <div class="confirm-label">
+            <app-icon name="user" [size]="14"></app-icon>
+            Cliente
+          </div>
+          <div class="confirm-customer">
+            <div class="customer-avatar">
+              {{ selectedCustomer()?.first_name?.charAt(0) }}{{ selectedCustomer()?.last_name?.charAt(0) }}
+            </div>
+            <div class="confirm-customer-info">
+              <span class="confirm-customer-name">{{ selectedCustomer()?.first_name }} {{ selectedCustomer()?.last_name }}</span>
+              @if (selectedCustomer()?.email) {
+                <span class="confirm-customer-detail">{{ selectedCustomer()?.email }}</span>
+              }
+              @if (selectedCustomer()?.phone) {
+                <span class="confirm-customer-detail">{{ selectedCustomer()?.phone }}</span>
+              }
+            </div>
+          </div>
         </div>
 
-        <app-textarea
-          formControlName="notes"
-          label="Notas (opcional)"
-          placeholder="Notas adicionales para la reserva..."
-        ></app-textarea>
+        <!-- Notes -->
+        @if (notes()) {
+          <div class="confirm-section">
+            <div class="confirm-label">
+              <app-icon name="file-text" [size]="14"></app-icon>
+              Notas
+            </div>
+            <div class="confirm-notes">{{ notes() }}</div>
+          </div>
+        }
       </div>
-    }
-  </form>
+    </div>
+  }
 
   <!-- Footer -->
-  <div slot="footer" class="flex justify-between gap-3">
-    <div>
-      @if (currentStep > 1) {
-        <app-button variant="ghost" (clicked)="prevStep()">
-          Anterior
-        </app-button>
-      }
-    </div>
-
-    <div class="flex gap-3">
-      <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
-
-      @if (currentStep < totalSteps) {
-        <app-button
-          variant="primary"
-          [disabled]="!canGoNext"
-          (clicked)="nextStep()"
-        >
-          Siguiente
-        </app-button>
-      }
-
-      @if (currentStep === totalSteps) {
-        <app-button
-          variant="primary"
-          [disabled]="form.invalid || loading"
-          [loading]="loading"
-          (clicked)="onSubmit()"
-        >
-          Crear Reserva
-        </app-button>
-      }
-    </div>
+  <div slot="footer" class="modal-footer">
+    @if (currentStep() > 0) {
+      <app-button variant="ghost" size="sm" (clicked)="prevStep()">
+        <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
+        Atrás
+      </app-button>
+    }
+    <div class="footer-spacer"></div>
+    @if (currentStep() < confirmStep()) {
+      <app-button variant="primary" size="sm" [disabled]="!canGoNext()" (clicked)="nextStep()">
+        Continuar
+        <app-icon slot="icon" name="arrow-right" [size]="16"></app-icon>
+      </app-button>
+    }
+    @if (currentStep() === confirmStep()) {
+      <app-button variant="primary" size="sm" [disabled]="submitting()" [loading]="submitting()" (clicked)="submit()">
+        <app-icon slot="icon" name="check" [size]="16"></app-icon>
+        Crear Reserva
+      </app-button>
+    }
   </div>
 </app-modal>

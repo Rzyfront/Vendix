@@ -65,11 +65,6 @@ export class HeroBannerComponent implements OnInit, OnDestroy {
       (this.current_slide_index + 1) % this.slides.length;
   }
 
-  prevSlide(): void {
-    this.current_slide_index =
-      (this.current_slide_index - 1 + this.slides.length) % this.slides.length;
-  }
-
   setSlide(index: number): void {
     this.current_slide_index = index;
     this.stopAutoPlay();

@@ -5,11 +5,12 @@ import { EcommerceProduct } from '../../services/catalog.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
+import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
 
 @Component({
   selector: 'app-product-card',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent, CurrencyPipe, ButtonComponent],
+  imports: [CommonModule, RouterModule, IconComponent, CurrencyPipe, ButtonComponent, BadgeComponent],
   template: `
     <article class="product-card" (click)="onQuickView($event)">
       <div class="product-image">
@@ -23,25 +24,25 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
 
         <!-- Service Badge -->
         @if (product.product_type === 'service') {
-          <div class="stock-badge stock-badge--service">
+          <app-badge class="stock-badge-pos" variant="service" size="sm" badgeStyle="outline">
             Servicio
-          </div>
+          </app-badge>
         } @else if (product.track_inventory !== false) {
           <!-- Stock Badge (POS style con backdrop-blur) — Solo para productos con inventario -->
           @if (product.stock_quantity !== null && product.stock_quantity <= 5 && product.stock_quantity > 0) {
-            <div class="stock-badge stock-badge--warning">
+            <app-badge class="stock-badge-pos" variant="warning" size="sm" badgeStyle="outline">
               ¡Últimas {{ product.stock_quantity }}!
-            </div>
+            </app-badge>
           }
           @if (product.stock_quantity === 0) {
-            <div class="stock-badge stock-badge--error">
+            <app-badge class="stock-badge-pos" variant="error" size="sm" badgeStyle="outline">
               Agotado
-            </div>
+            </app-badge>
           }
         } @else {
-          <div class="stock-badge stock-badge--on-demand">
+          <app-badge class="stock-badge-pos" variant="success" size="sm" badgeStyle="outline">
             Disponible
-          </div>
+          </app-badge>
         }
 
         <!-- Variant Badge -->
@@ -189,43 +190,12 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
       }
     }
 
-    /* Stock Badge con backdrop-blur (POS style) */
-    .stock-badge {
+    /* Stock Badge positioning */
+    .stock-badge-pos {
       position: absolute;
       top: 0.5rem;
       left: 0.5rem;
-      padding: 0.25rem 0.5rem;
-      border-radius: var(--radius-md);
-      font-size: var(--fs-xs);
-      font-weight: var(--fw-semibold);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      border: 1px solid;
       z-index: 1;
-
-      &--warning {
-        background: rgba(251, 146, 60, 0.8);
-        color: white;
-        border-color: rgba(251, 146, 60, 0.6);
-      }
-
-      &--error {
-        background: rgba(239, 68, 68, 0.8);
-        color: white;
-        border-color: rgba(239, 68, 68, 0.6);
-      }
-
-      &--on-demand {
-        background: rgba(14, 165, 233, 0.8);
-        color: white;
-        border-color: rgba(14, 165, 233, 0.6);
-      }
-
-      &--service {
-        background: rgba(139, 92, 246, 0.8);
-        color: white;
-        border-color: rgba(139, 92, 246, 0.6);
-      }
     }
 
     /* Variant Badge */
@@ -404,7 +374,6 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
         border-radius: 0.75rem;
       }
 
-      .stock-badge,
       .variant-badge {
         padding: 0.15rem 0.35rem;
         font-size: 10px;

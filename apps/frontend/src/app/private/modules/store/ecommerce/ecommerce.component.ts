@@ -911,6 +911,16 @@ export class EcommerceComponent implements OnInit, OnDestroy {
     }
   }
   /**
+   * Sync color picker native input with FormControl
+   */
+  onColorPickerChange(controlName: string, event: Event): void {
+    const value = (event.target as HTMLInputElement).value;
+    const coloresGroup = this.settingsForm.get('inicio.colores') as FormGroup;
+    coloresGroup.get(controlName)?.setValue(value);
+    this.settingsForm.markAsDirty();
+  }
+
+  /**
    * Sincronizar colores desde el branding de la tienda (source of truth)
    */
   syncColorsFromBranding(): void {
