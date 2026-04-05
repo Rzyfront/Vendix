@@ -135,7 +135,11 @@ export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
       }
 
       .btn-shadow-success {
-        box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);
+        box-shadow: 0 4px 12px rgba(var(--color-success-rgb), 0.3);
+      }
+
+      .btn-shadow-warning {
+        box-shadow: 0 4px 12px rgba(var(--color-warning-rgb), 0.3);
       }
 
       /* Outline hover backgrounds */
@@ -153,6 +157,14 @@ export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
 
       .btn-outline-danger-border:hover:not(:disabled) {
         background: rgba(var(--color-destructive-rgb), 0.06);
+      }
+
+      .btn-outline-warning-border {
+        border: 1px solid rgba(var(--color-warning-rgb), 0.5);
+      }
+
+      .btn-outline-warning-border:hover:not(:disabled) {
+        background: rgba(var(--color-warning-rgb), 0.06);
       }
     `,
   ],
@@ -232,11 +244,8 @@ export class ButtonComponent {
         'focus:ring-[var(--color-destructive)]/50',
       ],
       'outline-warning': [
-        'border',
-        'border-orange-300',
-        'bg-white',
-        'text-orange-600',
-        'hover:bg-orange-50',
+        'btn-outline-warning-border',
+        'text-[var(--color-warning)]',
         'focus:ring-orange-500/50',
       ],
       ghost: [
@@ -252,10 +261,10 @@ export class ButtonComponent {
         'btn-shadow-danger',
       ],
       success: [
-        'bg-green-600',
+        'bg-[var(--color-success)]',
         'hover:brightness-110',
-        'text-white',
-        'focus:ring-green-500/50',
+        'text-[var(--color-text-on-primary)]',
+        'focus:ring-[var(--color-success)]/50',
         'btn-shadow-success',
       ],
     };
