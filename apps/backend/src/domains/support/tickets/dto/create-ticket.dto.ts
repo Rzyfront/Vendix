@@ -47,6 +47,7 @@ export class CreateTicketDto {
   @ApiProperty({ description: 'Detailed description' })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(5000)
   description: string;
 
   @ApiProperty({

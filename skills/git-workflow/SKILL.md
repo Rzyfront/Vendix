@@ -64,22 +64,29 @@ CORRECT:
   # create PR targeting main
 ```
 
-### RULE 2: No AI Co-authors (MANDATORY)
+### RULE 2: Zero AI Signatures (ABSOLUTE — NON-NEGOTIABLE)
 
-**NEVER** add `Co-Authored-By` lines from AI or automated tools in commit messages. This rule is **absolute and non-negotiable**.
+**NEVER** include any signature, footer, attribution, or mention of AI tools in **any** output. This covers commits, PRs, reviews, comments, issue comments, and absolutely anything else.
 
 ```
-FORBIDDEN (never include):
+FORBIDDEN (never include, anywhere):
   Co-Authored-By: Claude <noreply@anthropic.com>
   Co-Authored-By: GitHub Copilot <noreply@github.com>
   Co-Authored-By: [any AI or bot]
+  "Hecho con Claude Code"
+  "Hecho con [any AI agent]"
+  "Generated with [any AI tool]"
+  "Powered by [any AI tool]"
+  Any footer/signature mentioning AI involvement
+  Any emoji + AI attribution (e.g. 🤖 Generated with...)
 
 CORRECT:
   git commit -m "feat: add form validation"
-  (no automated co-authorship lines)
+  PR body: only technical content, no signatures
+  Review comments: only technical content, no signatures
 ```
 
-Only co-authors who are **real people** on the team are allowed.
+Only co-authors who are **real people** on the team are allowed. This rule has **ZERO exceptions** and applies to **every single piece of text** produced.
 
 ### RULE 3: DB Migrations Require Alerts in Commit and PR
 
@@ -145,8 +152,8 @@ Are there conflicts with main?
   → Yes, they are ambiguous → Ask the user which resolution option they prefer.
   → No                      → Continue normally.
 
-Does the commit have an AI co-author?
-  → ALWAYS remove. No exceptions.
+Does any output have an AI signature/footer?
+  → ALWAYS remove. No exceptions. Applies to commits, PRs, reviews, comments — everything.
 ```
 
 ---

@@ -120,6 +120,52 @@ export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
       .h-13 {
         height: 3.25rem; /* 52px */
       }
+
+      /* Colored glow shadows - POS style */
+      .btn-shadow-primary {
+        box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
+      }
+
+      .btn-shadow-secondary {
+        box-shadow: 0 4px 12px rgba(var(--color-secondary-rgb), 0.3);
+      }
+
+      .btn-shadow-danger {
+        box-shadow: 0 4px 12px rgba(var(--color-destructive-rgb), 0.3);
+      }
+
+      .btn-shadow-success {
+        box-shadow: 0 4px 12px rgba(var(--color-success-rgb), 0.3);
+      }
+
+      .btn-shadow-warning {
+        box-shadow: 0 4px 12px rgba(var(--color-warning-rgb), 0.3);
+      }
+
+      /* Outline hover backgrounds */
+      .btn-outline-border {
+        border: 1px solid rgba(var(--color-primary-rgb), 0.5);
+      }
+
+      .btn-outline-border:hover:not(:disabled) {
+        background: rgba(var(--color-primary-rgb), 0.06);
+      }
+
+      .btn-outline-danger-border {
+        border: 1px solid rgba(var(--color-destructive-rgb), 0.5);
+      }
+
+      .btn-outline-danger-border:hover:not(:disabled) {
+        background: rgba(var(--color-destructive-rgb), 0.06);
+      }
+
+      .btn-outline-warning-border {
+        border: 1px solid rgba(var(--color-warning-rgb), 0.5);
+      }
+
+      .btn-outline-warning-border:hover:not(:disabled) {
+        background: rgba(var(--color-warning-rgb), 0.06);
+      }
     `,
   ],
 })
@@ -143,15 +189,16 @@ export class ButtonComponent {
 
   get buttonClasses(): string {
     const baseClasses = [
-      'font-medium',
+      'font-semibold',
       'rounded-xl',
       'transition-all',
       'duration-200',
       'focus:outline-none',
       'focus:ring-2',
       'focus:ring-offset-2',
-      'disabled:opacity-50',
+      'disabled:opacity-40',
       'disabled:cursor-not-allowed',
+      'active:scale-[0.97]',
       'relative',
       'inline-flex',
       'items-center',
@@ -170,42 +217,35 @@ export class ButtonComponent {
       lg: ['h-12', 'px-4', 'text-base', 'sm:h-13', 'sm:px-6', 'sm:text-lg'], // 48px móvil → 52px desktop
     };
 
-    // Variant classes
+    // Variant classes — POS-inspired style
     const variantClasses = {
       primary: [
         'bg-[var(--color-primary)]',
-        'hover:bg-[var(--color-primary)]/90',
+        'hover:brightness-110',
         'text-[var(--color-text-on-primary)]',
         'focus:ring-[var(--color-primary)]/50',
+        'btn-shadow-primary',
       ],
       secondary: [
         'bg-[var(--color-secondary)]',
-        'hover:bg-[var(--color-secondary)]/90',
+        'hover:brightness-110',
         'text-[var(--color-text-on-primary)]',
         'focus:ring-[var(--color-secondary)]/50',
+        'btn-shadow-secondary',
       ],
       outline: [
-        'border',
-        'border-[var(--color-primary)]',
+        'btn-outline-border',
         'text-[var(--color-primary)]',
-        'hover:bg-[var(--color-primary)]',
-        'hover:text-[var(--color-text-on-primary)]',
         'focus:ring-[var(--color-primary)]/50',
       ],
       'outline-danger': [
-        'border',
-        'border-[var(--color-destructive)]',
+        'btn-outline-danger-border',
         'text-[var(--color-destructive)]',
-        'hover:bg-[var(--color-destructive)]',
-        'hover:text-[var(--color-text-on-primary)]',
         'focus:ring-[var(--color-destructive)]/50',
       ],
       'outline-warning': [
-        'border',
-        'border-orange-300',
-        'bg-white',
-        'text-orange-600',
-        'hover:bg-orange-50',
+        'btn-outline-warning-border',
+        'text-[var(--color-warning)]',
         'focus:ring-orange-500/50',
       ],
       ghost: [
@@ -215,15 +255,17 @@ export class ButtonComponent {
       ],
       danger: [
         'bg-[var(--color-destructive)]',
-        'hover:bg-[var(--color-destructive)]',
+        'hover:brightness-110',
         'text-[var(--color-text-on-primary)]',
         'focus:ring-[var(--color-destructive)]/50',
+        'btn-shadow-danger',
       ],
       success: [
-        'bg-green-600',
-        'hover:bg-green-700',
-        'text-white',
-        'focus:ring-green-500/50',
+        'bg-[var(--color-success)]',
+        'hover:brightness-110',
+        'text-[var(--color-text-on-primary)]',
+        'focus:ring-[var(--color-success)]/50',
+        'btn-shadow-success',
       ],
     };
 

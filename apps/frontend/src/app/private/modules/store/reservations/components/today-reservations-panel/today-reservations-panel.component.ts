@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
 import { CommonModule } from '@angular/common';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
-import { BadgeComponent, IconComponent } from '../../../../../../shared/components';
+import { BadgeComponent, EmptyStateComponent, IconComponent } from '../../../../../../shared/components';
 import { BadgeVariant } from '../../../../../../shared/components/badge/badge.component';
 import { Booking, BookingStatus } from '../../interfaces/reservation.interface';
 
@@ -14,7 +14,7 @@ const SPANISH_MONTHS = [
 @Component({
   selector: 'app-today-reservations-panel',
   standalone: true,
-  imports: [CommonModule, CardComponent, BadgeComponent, IconComponent],
+  imports: [CommonModule, CardComponent, BadgeComponent, EmptyStateComponent, IconComponent],
   templateUrl: './today-reservations-panel.component.html',
   styleUrls: ['./today-reservations-panel.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

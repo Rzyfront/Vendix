@@ -27,6 +27,7 @@ export class SalesOrderItemDto {
   @ApiProperty({ description: 'Quantity ordered' })
   @IsNumber()
   @IsNotEmpty()
+  @Min(1)
   quantity: number;
 
   @ApiProperty({ description: 'Unit price' })

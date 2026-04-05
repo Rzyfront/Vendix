@@ -33,6 +33,7 @@ import {
   SettingToggleComponent,
   StickyHeaderComponent,
   StickyHeaderActionButton,
+  BadgeComponent,
 } from '../../../../../../shared/components';
 import {
   CurrencyPipe,
@@ -106,6 +107,7 @@ interface GeneratedVariant {
     AdjustmentCreateModalComponent,
     StickyHeaderComponent,
     CurrencyPipe,
+    BadgeComponent,
   ],
   templateUrl: './product-create-page.component.html',
   styles: [
@@ -400,6 +402,7 @@ export class ProductCreatePageComponent implements OnInit {
     if (value === 'service') {
       this.productForm.patchValue({
         track_inventory: false,
+        pricing_type: 'unit',
         weight: 0,
         dimensions: { length: 0, width: 0, height: 0 },
         stock_quantity: 0,
@@ -643,6 +646,26 @@ export class ProductCreatePageComponent implements OnInit {
     });
 
     return basePrice * (1 + totalTaxRate);
+  }
+
+  get taxBreakdown(): { name: string; rate: number; amount: number }[] {
+    const basePrice = Number(this.productForm.get('base_price')?.value || 0);
+    const selectedTaxIds =
+      this.productForm.get('tax_category_ids')?.value || [];
+
+    return selectedTaxIds
+      .map((id: number) => {
+        const taxCat = this.allTaxCategories.find((tc) => tc.id === id);
+        if (!taxCat) return null;
+        const rawRate = taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0;
+        const rate = parseFloat(String(rawRate));
+        if (isNaN(rate) || rate === 0) return null;
+        return { name: taxCat.name, rate, amount: basePrice * rate };
+      })
+      .filter(
+        (entry: { name: string; rate: number; amount: number } | null): entry is { name: string; rate: number; amount: number } =>
+          entry !== null,
+      );
   }
 
   private allTaxCategories: TaxCategory[] = [];
@@ -1222,13 +1245,15 @@ export class ProductCreatePageComponent implements OnInit {
     // Keep modal open for creating another
   }
 
+  /** Stock total en inventario (disponible + reservado) */
   get totalStockOnHand(): number {
     return (this.product?.stock_levels || []).reduce(
-      (sum, sl: any) => sum + (sl.quantity_on_hand || 0),
+      (sum, sl: any) => sum + (sl.quantity_available || 0) + (sl.quantity_reserved || 0),
       0,
     );
   }
 
+  /** Stock disponible para venta */
   get totalStockAvailable(): number {
     return (this.product?.stock_levels || []).reduce(
       (sum, sl: any) => sum + (sl.quantity_available || 0),
@@ -1236,6 +1261,7 @@ export class ProductCreatePageComponent implements OnInit {
     );
   }
 
+  /** Stock reservado en órdenes pendientes */
   get totalStockReserved(): number {
     return (this.product?.stock_levels || []).reduce(
       (sum, sl: any) => sum + (sl.quantity_reserved || 0),
@@ -1243,16 +1269,16 @@ export class ProductCreatePageComponent implements OnInit {
     );
   }
 
-  get lowStockCount(): number {
+  /** Ubicaciones con stock activo (al menos 1 unidad) */
+  get activeLocationCount(): number {
     return (this.product?.stock_levels || []).filter(
-      (sl: any) => (sl.quantity_available || 0) <= (sl.reorder_point || 0),
+      (sl: any) => (sl.quantity_available || 0) + (sl.quantity_reserved || 0) > 0,
     ).length;
   }
 
+  /** Total de ubicaciones asignadas */
   get warehouseCount(): number {
-    return new Set(
-      (this.product?.stock_levels || []).map((sl: any) => sl.location_id),
-    ).size;
+    return (this.product?.stock_levels || []).length;
   }
 
   isExpired(date: Date | string): boolean {

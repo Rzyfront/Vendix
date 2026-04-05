@@ -43,7 +43,7 @@ export class StorePrismaService extends BasePrismaService {
     'ai_conversations',
     'ai_embeddings',
     'dispatch_notes',
-    'employees',
+    'employee_stores',
     'accounts_receivable',
     'payment_agreements',
     'wallets',
@@ -133,7 +133,8 @@ export class StorePrismaService extends BasePrismaService {
       'chart_of_accounts', // Org scoped
       'fiscal_periods', // Org scoped
       'accounting_entries', // Org scoped
-      'employees', // Store scoped
+      'employees', // Org scoped (multi-store via employee_stores junction)
+      'employee_stores', // Store scoped (junction table)
       'payroll_runs', // Org scoped
       'layaway_items', // Relational
       'layaway_installments', // Relational
@@ -312,6 +313,7 @@ export class StorePrismaService extends BasePrismaService {
       'chart_of_accounts',
       'fiscal_periods',
       'accounting_entries',
+      'employees',
       'payroll_runs',
       'payroll_settlements',
       'employee_advances',
@@ -734,6 +736,10 @@ export class StorePrismaService extends BasePrismaService {
   // Payroll models
   get employees() {
     return this.scoped_client.employees;
+  }
+
+  get employee_stores() {
+    return this.scoped_client.employee_stores;
   }
 
   get payroll_runs() {

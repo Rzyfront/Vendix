@@ -484,7 +484,7 @@ model stores {
   invoices                    invoices[]
   invoice_resolutions         invoice_resolutions[]
   accounting_entries          accounting_entries[]
-  employees                   employees[]
+  employee_stores             employee_stores[]
   payroll_runs                payroll_runs[]
   dian_configurations         dian_configurations[]
   accounting_account_mappings accounting_account_mappings[]
@@ -2595,6 +2595,11 @@ enum employee_status_enum {
   terminated
 }
 
+enum employee_store_status_enum {
+  active
+  inactive
+}
+
 enum contract_type_enum {
   indefinite
   fixed_term
@@ -3391,7 +3396,6 @@ model accounting_entry_lines {
 model employees {
   id                  Int                      @id @default(autoincrement())
   organization_id     Int
-  store_id            Int
   user_id             Int?
   employee_code       String                   @db.VarChar(50)
   first_name          String                   @db.VarChar(100)
@@ -3420,8 +3424,8 @@ model employees {
   updated_at          DateTime?                @default(now()) @db.Timestamp(6)
 
   organization        organizations         @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store               stores                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   user                users?                @relation("employees_user", fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  employee_stores     employee_stores[]
   payroll_items       payroll_items[]
   payroll_settlements payroll_settlements[]
   employee_advances   employee_advances[]
@@ -3430,7 +3434,23 @@ model employees {
   @@unique([organization_id, employee_code])
   @@unique([organization_id, document_type, document_number])
   @@index([organization_id, status])
+}
+
+model employee_stores {
+  id          Int                        @id @default(autoincrement())
+  employee_id Int
+  store_id    Int
+  is_primary  Boolean                    @default(false)
+  status      employee_store_status_enum @default(active)
+  assigned_at DateTime                   @default(now()) @db.Timestamp(6)
+  created_at  DateTime?                  @default(now()) @db.Timestamp(6)
+
+  employee    employees @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+  store       stores    @relation(fields: [store_id], references: [id], onDelete: Restrict)
+
+  @@unique([employee_id, store_id])
   @@index([store_id])
+  @@index([employee_id, status])
 }
 
 model payroll_runs {

@@ -51,7 +51,7 @@ export interface InputButtonOption {
       </label>
 
       <!-- Buttons container -->
-      <div [class]="containerClasses">
+      <div [class]="containerClasses + ' ' + customContainerClass">
         <button
           *ngFor="let option of options"
           type="button"
@@ -139,6 +139,7 @@ export class InputButtonsComponent implements ControlValueAccessor {
   @Input() tooltipText?: string;
   @Input() styleVariant: FormStyleVariant = 'modern';
   @Input() customWrapperClass = '';
+  @Input() customContainerClass = '';
 
   @Output() valueChange = new EventEmitter<string>();
 

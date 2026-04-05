@@ -17,10 +17,13 @@
     </div>
   } @else if (bookings().length === 0) {
     <!-- Empty -->
-    <div class="p-8 text-center">
-      <app-icon name="calendar-x" [size]="32" class="text-[var(--color-text-tertiary)] mx-auto mb-2"></app-icon>
-      <p class="text-sm text-[var(--color-text-secondary)]">No hay reservas para hoy</p>
-    </div>
+    <app-empty-state
+      size="sm"
+      icon="calendar-x"
+      title="No hay reservas para hoy"
+      description="Las reservas del día aparecerán aquí."
+      [showActionButton]="false"
+    ></app-empty-state>
   } @else {
     <!-- Reservations list -->
     <div class="divide-y divide-[var(--color-border)]">
