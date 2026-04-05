@@ -28,7 +28,7 @@ export interface BulkEmployeeAnalysisResult {
 export interface BulkEmployeeUploadItemResult {
   employee_name?: string;
   document_number?: string;
-  action?: 'create' | 'update';
+  action?: 'created' | 'updated' | 'associated';
   employee: any;
   status: 'success' | 'error';
   message: string;
