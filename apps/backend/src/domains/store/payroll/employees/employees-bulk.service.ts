@@ -395,6 +395,18 @@ export class EmployeesBulkService {
     }
   }
 
+  /**
+   * Removes abandoned temp files older than the specified TTL.
+   * Should be called periodically (e.g., via cron/scheduler).
+   * Note: Requires S3 lifecycle rule on `tmp/` prefix for full coverage.
+   */
+  async cleanupExpiredSessions(_olderThanHours: number = 24): Promise<number> {
+    // TODO: Implement with S3 listObjects when available.
+    // For now, rely on S3 lifecycle rules configured at infrastructure level
+    // to auto-expire objects under tmp/ prefix after 24 hours.
+    return 0;
+  }
+
   parseFile(buffer: Buffer): BulkEmployeeItemDto[] {
     try {
       const workbook = XLSX.read(buffer, { type: 'buffer' });

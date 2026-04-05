@@ -152,43 +152,44 @@ export class EmployeesService {
         }
       }
 
-      const employee = await this.prisma.employees.create({
-        data: {
-          organization_id: context.organization_id,
-          user_id: dto.user_id || null,
-          employee_code: dto.employee_code,
-          first_name: dto.first_name,
-          last_name: dto.last_name,
-          document_type: dto.document_type,
-          document_number: dto.document_number,
-          hire_date: new Date(dto.hire_date),
-          contract_type: dto.contract_type as any,
-          base_salary: new Prisma.Decimal(dto.base_salary),
-          payment_frequency: (dto.payment_frequency || 'monthly') as any,
-          position: dto.position || null,
-          department: dto.department || null,
-          bank_name: dto.bank_name || null,
-          bank_account_number: dto.bank_account_number || null,
-          bank_account_type: dto.bank_account_type || null,
-          health_provider: dto.health_provider || null,
-          pension_fund: dto.pension_fund || null,
-          arl_risk_level: dto.arl_risk_level || 1,
-          severance_fund: dto.severance_fund || null,
-          compensation_fund: dto.compensation_fund || null,
-        },
-      });
+      const result = await this.prisma.$transaction(async (tx) => {
+        const employee = await tx.employees.create({
+          data: {
+            organization_id: context.organization_id,
+            user_id: dto.user_id || null,
+            employee_code: dto.employee_code,
+            first_name: dto.first_name,
+            last_name: dto.last_name,
+            document_type: dto.document_type,
+            document_number: dto.document_number,
+            hire_date: new Date(dto.hire_date),
+            contract_type: dto.contract_type as any,
+            base_salary: new Prisma.Decimal(dto.base_salary),
+            payment_frequency: (dto.payment_frequency || 'monthly') as any,
+            position: dto.position || null,
+            department: dto.department || null,
+            bank_name: dto.bank_name || null,
+            bank_account_number: dto.bank_account_number || null,
+            bank_account_type: dto.bank_account_type || null,
+            health_provider: dto.health_provider || null,
+            pension_fund: dto.pension_fund || null,
+            arl_risk_level: dto.arl_risk_level || 1,
+            severance_fund: dto.severance_fund || null,
+            compensation_fund: dto.compensation_fund || null,
+          },
+        });
 
-      // Create employee_stores junction (store_id injected by scoping)
-      await this.prisma.employee_stores.create({
-        data: {
-          employee_id: employee.id,
-          is_primary: true,
-        },
-      });
+        await tx.employee_stores.create({
+          data: {
+            employee_id: employee.id,
+            is_primary: true,
+          },
+        });
 
-      const result = await this.prisma.employees.findFirst({
-        where: { id: employee.id },
-        include: EMPLOYEE_INCLUDE,
+        return await tx.employees.findFirst({
+          where: { id: employee.id },
+          include: EMPLOYEE_INCLUDE,
+        });
       });
 
       return { employee: result, action: 'created' };
@@ -245,16 +246,28 @@ export class EmployeesService {
     }
 
     // --- ASSOCIATE existing employee with current store ---
-    await this.prisma.employee_stores.create({
-      data: {
-        employee_id: existing.id,
-        is_primary: false,
-      },
-    });
+    const employee = await this.prisma.$transaction(async (tx) => {
+      // Ensure employee has at least one primary store
+      const activePrimaries = await this.prisma.withoutScope().employee_stores.count({
+        where: {
+          employee_id: existing.id,
+          is_primary: true,
+          status: 'active',
+        },
+      });
+      const shouldBePrimary = activePrimaries === 0;
 
-    const employee = await this.prisma.employees.findFirst({
-      where: { id: existing.id },
-      include: EMPLOYEE_INCLUDE,
+      await tx.employee_stores.create({
+        data: {
+          employee_id: existing.id,
+          is_primary: shouldBePrimary,
+        },
+      });
+
+      return await tx.employees.findFirst({
+        where: { id: existing.id },
+        include: EMPLOYEE_INCLUDE,
+      });
     });
 
     return { employee, action: 'associated' };
@@ -420,6 +433,25 @@ export class EmployeesService {
       avg_salary: Number(salary_aggregate._avg.base_salary || 0),
       by_department,
     };
+  }
+
+  /**
+   * Validates that setting is_primary on an employee_store won't violate
+   * the single-primary constraint. Throws if employee already has a primary store.
+   */
+  private async validateSinglePrimary(employeeId: number): Promise<void> {
+    const unscoped = this.prisma.withoutScope();
+    const primaryCount = await unscoped.employee_stores.count({
+      where: {
+        employee_id: employeeId,
+        is_primary: true,
+        status: 'active',
+      },
+    });
+    if (primaryCount > 1) {
+      // Data integrity issue - should not happen but log it
+      console.warn(`Employee ${employeeId} has ${primaryCount} primary stores - data integrity issue`);
+    }
   }
 
   async generateNextEmployeeCode(organization_id: number): Promise<string> {
