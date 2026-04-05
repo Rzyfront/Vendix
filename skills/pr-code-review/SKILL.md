@@ -180,6 +180,7 @@ There are [N] things to review before merging:
 
 Message rules:
 
+- **NEVER include AI signatures or attributions** — No "Hecho con Claude Code", "Generated with", "Co-Authored-By" AI lines, or any AI-related footer/signature anywhere. Zero exceptions. Applies to review comments, PR descriptions, commit messages, and all text output.
 - Natural language, not robotic
 - Start with something positive about the PR
 - Issues ordered by severity (critical first)
@@ -198,6 +199,35 @@ CREATE INDEX idx_orders_status ON orders(status);
 \`\`\`
 ```
 
+### Pattern 6: Merge Conflicts (MANDATORY CHECK)
+
+**ALWAYS check `mergeable` status before starting the code review.** Use `gh pr view N --repo OWNER/REPO --json mergeable --jq '.mergeable'`.
+
+**Rules (non-negotiable):**
+
+| Condition | Action |
+|-----------|--------|
+| `mergeable: false` (has conflicts) | **Score: 0/100** — Automatic REQUEST CHANGES |
+| `mergeable: true` | Proceed with normal review |
+| `mergeable: null` (GitHub still calculating) | Wait and re-check before proceeding |
+
+**If the PR has conflicts:**
+1. **Do NOT proceed with deep code analysis.** A PR that can't be merged shouldn't be reviewed in detail.
+2. **Rating is automatically 0/100** — no exceptions.
+3. **Post REQUEST CHANGES** with a brief, decontextualized recommendation.
+4. The review comment should follow this template:
+
+```markdown
+Hi [author], this PR has merge conflicts that need to be resolved before we can proceed with the review.
+
+**Merge Conflicts (BLOCKING)**
+This PR cannot be merged as-is. Please resolve the conflicts, favoring the most stable changes or the ones you consider most relevant for this feature.
+
+Once conflicts are resolved, we'll proceed with the full code review.
+```
+
+**Important:** The conflict resolution recommendation is intentionally decontextualized — it does not analyze which specific lines conflicted or suggest which side is "correct." It simply guides the author to prioritize stability and relevance at their own discretion.
+
 ---
 
 ## Decision Tree
@@ -210,6 +240,9 @@ Did the user ask to review PRs?
 │
 ├─ Did they specify a PR number? → Go directly to that PR
 │  └─ NO → List open PRs and review one by one
+│
+├─ Does the PR have merge conflicts? (check mergeable status FIRST)
+│  └─ YES → Score 0/100, REQUEST CHANGES with decontextualized recommendation → Next PR
 │
 ├─ Is the diff very large (>3000 lines)?
 │  └─ YES → Use subagent (Agent tool) to analyze the full diff
@@ -380,6 +413,12 @@ gh api repos/OWNER/REPO/pulls/N/comments \
 
 **Problem**: A store action (NgRx effect) already dispatches a fetch, and the component also calls fetch after
 **Fix**: Trust the store effect or move the fetch logic only to the component — not both
+
+### Issue 8: Merge conflicts blocking review
+
+**Problem**: The PR has merge conflicts (`mergeable: false`), making it impossible to merge regardless of code quality.
+**Fix**: Resolve conflicts favoring the most stable changes or those the author considers most relevant. Then request re-review.
+**Review action**: Automatic 0/100, REQUEST CHANGES with brief decontextualized recommendation. No deep code analysis until conflicts are resolved.
 
 ---
 

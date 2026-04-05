@@ -145,7 +145,7 @@ export class SettlementFlowService {
     const settlement = await this.prisma.payroll_settlements.create({
       data: {
         organization_id: context.organization_id,
-        store_id: employee.store_id || context.store_id || null,
+        store_id: context.store_id || null,
         employee_id: dto.employee_id,
         settlement_number,
         status: 'calculated',

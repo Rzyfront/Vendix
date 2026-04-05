@@ -70,7 +70,11 @@ export class PayrollCalculationService {
     const where: Prisma.employeesWhereInput = {
       status: 'active',
       hire_date: { lte: period_end },
-      ...(store_id && { store_id }),
+      ...(store_id && {
+        employee_stores: {
+          some: { store_id, status: 'active' },
+        },
+      }),
     };
 
     const employees = await this.prisma.employees.findMany({ where });

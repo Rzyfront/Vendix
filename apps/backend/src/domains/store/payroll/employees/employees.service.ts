@@ -8,13 +8,25 @@ import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { QueryEmployeeDto } from './dto/query-employee.dto';
 
 const EMPLOYEE_INCLUDE = {
-  store: {
-    select: { id: true, name: true },
+  employee_stores: {
+    select: {
+      id: true,
+      store_id: true,
+      is_primary: true,
+      status: true,
+      store: { select: { id: true, name: true } },
+    },
+    where: { status: 'active' as const },
   },
   user: {
     select: { id: true, first_name: true, last_name: true, email: true },
   },
 };
+
+interface CreateOrAssociateResult {
+  employee: any;
+  action: 'created' | 'updated' | 'associated';
+}
 
 @Injectable()
 export class EmployeesService {
@@ -29,6 +41,7 @@ export class EmployeesService {
   }
 
   async findAll(query: QueryEmployeeDto) {
+    const context = this.getContext();
     const {
       page = 1,
       limit = 10,
@@ -42,6 +55,12 @@ export class EmployeesService {
     const skip = (page - 1) * limit;
 
     const where: Prisma.employeesWhereInput = {
+      employee_stores: {
+        some: {
+          store_id: context.store_id,
+          status: 'active' as any,
+        },
+      },
       ...(search && {
         OR: [
           { first_name: { contains: search, mode: 'insensitive' as const } },
@@ -89,31 +108,12 @@ export class EmployeesService {
     return employee;
   }
 
-  async create(dto: CreateEmployeeDto) {
+  async createOrAssociate(dto: CreateEmployeeDto): Promise<CreateOrAssociateResult> {
     const context = this.getContext();
-
-    // Auto-generate employee_code if not provided
-    if (!dto.employee_code) {
-      dto.employee_code = await this.generateNextEmployeeCode(context.organization_id!);
-    }
-
-    // Check for duplicate employee_code (org-level unique constraint)
     const unscoped = this.prisma.withoutScope() as any;
-    if (dto.employee_code) {
-      const existing_code = await unscoped.employees.findFirst({
-        where: {
-          organization_id: context.organization_id,
-          employee_code: dto.employee_code,
-        },
-      });
 
-      if (existing_code) {
-        throw new VendixHttpException(ErrorCodes.PAYROLL_DUP_001);
-      }
-    }
-
-    // Check for duplicate document (org-level unique constraint)
-    const existing_doc = await unscoped.employees.findFirst({
+    // Search for existing employee by document at org level
+    const existing = await unscoped.employees.findFirst({
       where: {
         organization_id: context.organization_id,
         document_type: dto.document_type,
@@ -121,49 +121,161 @@ export class EmployeesService {
       },
     });
 
-    if (existing_doc) {
-      throw new VendixHttpException(ErrorCodes.PAYROLL_DUP_002);
-    }
+    if (!existing) {
+      // --- CREATE new employee ---
+      if (!dto.employee_code) {
+        dto.employee_code = await this.generateNextEmployeeCode(context.organization_id!);
+      }
 
-    // Check for duplicate user_id
-    if (dto.user_id) {
-      const existing_user = await this.prisma.employees.findFirst({
-        where: { user_id: dto.user_id },
+      // Validate employee_code uniqueness at org level
+      if (dto.employee_code) {
+        const existing_code = await unscoped.employees.findFirst({
+          where: {
+            organization_id: context.organization_id,
+            employee_code: dto.employee_code,
+          },
+        });
+
+        if (existing_code) {
+          throw new VendixHttpException(ErrorCodes.PAYROLL_DUP_001);
+        }
+      }
+
+      // Check for duplicate user_id
+      if (dto.user_id) {
+        const existing_user = await this.prisma.employees.findFirst({
+          where: { user_id: dto.user_id },
+        });
+
+        if (existing_user) {
+          throw new VendixHttpException(ErrorCodes.PAYROLL_DUP_003);
+        }
+      }
+
+      const result = await this.prisma.$transaction(async (tx) => {
+        const employee = await tx.employees.create({
+          data: {
+            organization_id: context.organization_id,
+            user_id: dto.user_id || null,
+            employee_code: dto.employee_code,
+            first_name: dto.first_name,
+            last_name: dto.last_name,
+            document_type: dto.document_type,
+            document_number: dto.document_number,
+            hire_date: new Date(dto.hire_date),
+            contract_type: dto.contract_type as any,
+            base_salary: new Prisma.Decimal(dto.base_salary),
+            payment_frequency: (dto.payment_frequency || 'monthly') as any,
+            position: dto.position || null,
+            department: dto.department || null,
+            bank_name: dto.bank_name || null,
+            bank_account_number: dto.bank_account_number || null,
+            bank_account_type: dto.bank_account_type || null,
+            health_provider: dto.health_provider || null,
+            pension_fund: dto.pension_fund || null,
+            arl_risk_level: dto.arl_risk_level || 1,
+            severance_fund: dto.severance_fund || null,
+            compensation_fund: dto.compensation_fund || null,
+          },
+        });
+
+        await tx.employee_stores.create({
+          data: {
+            employee_id: employee.id,
+            is_primary: true,
+          },
+        });
+
+        return await tx.employees.findFirst({
+          where: { id: employee.id },
+          include: EMPLOYEE_INCLUDE,
+        });
       });
 
-      if (existing_user) {
-        throw new VendixHttpException(ErrorCodes.PAYROLL_DUP_003);
-      }
+      return { employee: result, action: 'created' };
     }
 
-    const employee = await this.prisma.employees.create({
-      data: {
-        organization_id: context.organization_id,
-        user_id: dto.user_id || null,
-        employee_code: dto.employee_code,
-        first_name: dto.first_name,
-        last_name: dto.last_name,
-        document_type: dto.document_type,
-        document_number: dto.document_number,
-        hire_date: new Date(dto.hire_date),
-        contract_type: dto.contract_type as any,
-        base_salary: new Prisma.Decimal(dto.base_salary),
-        payment_frequency: (dto.payment_frequency || 'monthly') as any,
-        position: dto.position || null,
-        department: dto.department || null,
-        bank_name: dto.bank_name || null,
-        bank_account_number: dto.bank_account_number || null,
-        bank_account_type: dto.bank_account_type || null,
-        health_provider: dto.health_provider || null,
-        pension_fund: dto.pension_fund || null,
-        arl_risk_level: dto.arl_risk_level || 1,
-        severance_fund: dto.severance_fund || null,
-        compensation_fund: dto.compensation_fund || null,
+    // Check if already associated with current store
+    const existingRelation = await unscoped.employee_stores.findFirst({
+      where: {
+        employee_id: existing.id,
+        store_id: context.store_id,
       },
-      include: EMPLOYEE_INCLUDE,
     });
 
-    return employee;
+    if (existingRelation) {
+      // --- UPDATE existing employee ---
+      const update_data: any = {};
+
+      if (dto.first_name) update_data.first_name = dto.first_name;
+      if (dto.last_name) update_data.last_name = dto.last_name;
+      if (dto.position !== undefined) update_data.position = dto.position || null;
+      if (dto.department !== undefined) update_data.department = dto.department || null;
+      if (dto.contract_type) update_data.contract_type = dto.contract_type;
+      if (dto.base_salary !== undefined) update_data.base_salary = new Prisma.Decimal(dto.base_salary);
+      if (dto.payment_frequency) update_data.payment_frequency = dto.payment_frequency;
+      if (dto.hire_date) update_data.hire_date = new Date(dto.hire_date);
+      if (dto.bank_name !== undefined) update_data.bank_name = dto.bank_name || null;
+      if (dto.bank_account_number !== undefined) update_data.bank_account_number = dto.bank_account_number || null;
+      if (dto.bank_account_type !== undefined) update_data.bank_account_type = dto.bank_account_type || null;
+      if (dto.health_provider !== undefined) update_data.health_provider = dto.health_provider || null;
+      if (dto.pension_fund !== undefined) update_data.pension_fund = dto.pension_fund || null;
+      if (dto.arl_risk_level !== undefined) update_data.arl_risk_level = dto.arl_risk_level;
+      if (dto.severance_fund !== undefined) update_data.severance_fund = dto.severance_fund || null;
+      if (dto.compensation_fund !== undefined) update_data.compensation_fund = dto.compensation_fund || null;
+
+      if (dto.user_id !== undefined) {
+        if (dto.user_id !== null) {
+          const existing_user = await this.prisma.employees.findFirst({
+            where: { user_id: dto.user_id, id: { not: existing.id } },
+          });
+          if (existing_user) {
+            throw new VendixHttpException(ErrorCodes.PAYROLL_DUP_003);
+          }
+        }
+        update_data.user_id = dto.user_id;
+      }
+
+      const employee = await this.prisma.employees.update({
+        where: { id: existing.id },
+        data: update_data,
+        include: EMPLOYEE_INCLUDE,
+      });
+
+      return { employee, action: 'updated' };
+    }
+
+    // --- ASSOCIATE existing employee with current store ---
+    const employee = await this.prisma.$transaction(async (tx) => {
+      // Ensure employee has at least one primary store
+      const activePrimaries = await this.prisma.withoutScope().employee_stores.count({
+        where: {
+          employee_id: existing.id,
+          is_primary: true,
+          status: 'active',
+        },
+      });
+      const shouldBePrimary = activePrimaries === 0;
+
+      await tx.employee_stores.create({
+        data: {
+          employee_id: existing.id,
+          is_primary: shouldBePrimary,
+        },
+      });
+
+      return await tx.employees.findFirst({
+        where: { id: existing.id },
+        include: EMPLOYEE_INCLUDE,
+      });
+    });
+
+    return { employee, action: 'associated' };
+  }
+
+  async create(dto: CreateEmployeeDto) {
+    const result = await this.createOrAssociate(dto);
+    return result.employee;
   }
 
   async getAvailableUsers() {
@@ -265,6 +377,12 @@ export class EmployeesService {
   }
 
   async getStats() {
+    const context = this.getContext();
+
+    const storeFilter = {
+      employee_stores: { some: { store_id: context.store_id, status: 'active' as any } },
+    };
+
     const [
       total_count,
       total_active,
@@ -272,21 +390,22 @@ export class EmployeesService {
       salary_aggregate,
       by_status_raw,
     ] = await Promise.all([
-      this.prisma.employees.count(),
+      this.prisma.employees.count({ where: storeFilter }),
       this.prisma.employees.count({
-        where: { status: 'active' },
+        where: { ...storeFilter, status: 'active' },
       }),
       this.prisma.employees.groupBy({
         by: ['department'],
-        where: { status: 'active' },
+        where: { ...storeFilter, status: 'active' },
         _count: { id: true },
       }),
       this.prisma.employees.aggregate({
-        where: { status: 'active' },
+        where: { ...storeFilter, status: 'active' },
         _avg: { base_salary: true },
       }),
       this.prisma.employees.groupBy({
         by: ['status'],
+        where: storeFilter,
         _count: { id: true },
       }),
     ]);
@@ -316,8 +435,26 @@ export class EmployeesService {
     };
   }
 
+  /**
+   * Validates that setting is_primary on an employee_store won't violate
+   * the single-primary constraint. Throws if employee already has a primary store.
+   */
+  private async validateSinglePrimary(employeeId: number): Promise<void> {
+    const unscoped = this.prisma.withoutScope();
+    const primaryCount = await unscoped.employee_stores.count({
+      where: {
+        employee_id: employeeId,
+        is_primary: true,
+        status: 'active',
+      },
+    });
+    if (primaryCount > 1) {
+      // Data integrity issue - should not happen but log it
+      console.warn(`Employee ${employeeId} has ${primaryCount} primary stores - data integrity issue`);
+    }
+  }
+
   async generateNextEmployeeCode(organization_id: number): Promise<string> {
-    // withoutScope: la unique constraint es a nivel organization, no store
     const unscoped = this.prisma.withoutScope() as any;
     const last_employee = await unscoped.employees.findMany({
       where: {
@@ -341,4 +478,3 @@ export class EmployeesService {
     return `EMP-${String(next_number).padStart(4, '0')}`;
   }
 }
-

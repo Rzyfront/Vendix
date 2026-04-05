@@ -1,6 +1,5 @@
-import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
+import { Component, EventEmitter, Input, Output, inject, OnChanges, SimpleChanges, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import * as XLSX from 'xlsx';
 import { PayrollService } from '../../../services/payroll.service';
 import {
   ModalComponent,
@@ -8,397 +7,683 @@ import {
   IconComponent,
   ToastService,
 } from '../../../../../../../shared/components';
+import { SpinnerComponent } from '../../../../../../../shared/components/spinner/spinner.component';
 import {
   StepsLineComponent,
   StepsLineItem,
 } from '../../../../../../../shared/components/steps-line/steps-line.component';
+import {
+  BulkEmployeeAnalysisResult,
+  BulkEmployeeUploadResult,
+} from '../../../interfaces/bulk-employee-analysis.interface';
 
 @Component({
   selector: 'app-employee-bulk-upload-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent, StepsLineComponent],
+  imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent, StepsLineComponent, SpinnerComponent],
   template: `
     <app-modal
       [isOpen]="isOpen"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
-      [size]="'md'"
+      [size]="'lg'"
       title="Carga Masiva de Empleados"
       (closed)="onCancel()"
-      subtitle="Importa múltiples empleados desde un archivo Excel"
+      subtitle="Importa múltiples empleados desde un archivo Excel o CSV"
     >
-      <!-- Steps Indicator -->
-      <app-steps-line
-        [steps]="steps"
-        [currentStep]="currentStep"
-        size="sm"
-      ></app-steps-line>
-
-      <!-- ═══ STEP 0: Cargar Datos ═══ -->
-      <div *ngIf="currentStep === 0" class="space-y-5 mt-2">
-        <!-- Template Download -->
-        <div
-          class="border-2 border-indigo-100 hover:border-indigo-500 bg-indigo-50 rounded-lg p-4 cursor-pointer transition-all shadow-sm hover:shadow-md group"
-          (click)="downloadTemplate()"
-        >
-          <div class="flex items-center mb-2">
-            <div class="p-2 bg-indigo-100 rounded-full text-indigo-600 mr-3 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-              <app-icon name="users" [size]="20"></app-icon>
+      <!-- INTRO SCREEN -->
+      @if (showingIntro) {
+        <div class="space-y-3">
+          <!-- Header -->
+          <div class="text-center">
+            <div class="inline-flex items-center justify-center w-12 h-12 bg-primary/10 rounded-full mb-2">
+              <app-icon name="users" [size]="24" class="text-primary"></app-icon>
             </div>
-            <h4 class="font-bold text-indigo-900">Plantilla de Empleados</h4>
+            <h3 class="text-base font-semibold text-gray-900">Carga masiva de empleados</h3>
+            <p class="text-xs text-gray-500 mt-0.5">Importa empleados de una sola vez</p>
           </div>
-          <p class="text-xs text-indigo-700 mb-3 leading-relaxed">
-            Incluye: Nombre, Apellido, Documento, Salario, Contrato, Banco, EPS, Pensión y más. Con 10 ejemplos para guiarte.
-          </p>
-          <div class="flex items-center text-xs font-bold text-indigo-600 group-hover:text-indigo-800">
-            <app-icon name="download" [size]="14" class="mr-1"></app-icon>
-            DESCARGAR EXCEL
-          </div>
-        </div>
 
-        <!-- File Upload Zone -->
-        <div
-          class="border-2 border-dashed rounded-lg p-8 text-center transition-all cursor-pointer"
-          [class.border-blue-500]="isDragging"
-          [class.bg-blue-50]="isDragging"
-          [class.border-gray-300]="!isDragging"
-          [class.hover:border-blue-500]="!isDragging"
-          [class.hover:bg-blue-50]="!isDragging"
-          (dragover)="onDragOver($event)"
-          (dragleave)="onDragLeave($event)"
-          (drop)="onDrop($event)"
-          (click)="fileInput.click()"
-        >
-          <input
-            #fileInput
-            type="file"
-            accept=".xlsx,.xls,.csv"
-            class="hidden"
-            (change)="onFileSelected($event)"
-          />
-          <div *ngIf="!isProcessingFile">
-            <app-icon
-              name="upload-cloud"
-              [size]="48"
-              class="mx-auto text-gray-400 mb-4"
-              [class.text-blue-500]="isDragging"
-            ></app-icon>
-            <p class="text-gray-900 font-medium">Arrastra tu archivo Excel (.xlsx) aquí</p>
-            <p class="text-gray-500 text-sm mt-1">o haz clic para seleccionar</p>
-            <p class="text-xs text-indigo-500 mt-2 font-medium">Máximo 1000 empleados por archivo</p>
-          </div>
-          <div *ngIf="isProcessingFile" class="animate-pulse flex flex-col items-center">
-            <app-icon name="loader" [size]="48" class="text-primary mb-4 animate-spin"></app-icon>
-            <p class="text-sm text-gray-500">Procesando archivo...</p>
-          </div>
-        </div>
-
-        <!-- Error Messages -->
-        <div *ngIf="uploadError" class="bg-red-50 p-4 rounded-lg border border-red-100 text-red-700 text-sm">
-          <div class="font-medium flex items-center mb-1">
-            <app-icon name="alert-circle" [size]="16" class="mr-2"></app-icon>
-            Error en la carga
-          </div>
-          <div *ngIf="isErrorMessageArray(); else singleError" class="mt-2">
-            <ul class="list-disc list-inside space-y-1 max-h-40 overflow-y-auto">
-              <li *ngFor="let msg of uploadError">{{ msg }}</li>
-            </ul>
-          </div>
-          <ng-template #singleError>
-            <p class="mt-1">{{ uploadError }}</p>
-          </ng-template>
-        </div>
-      </div>
-
-      <!-- ═══ STEP 1: Verificar ═══ -->
-      <div *ngIf="currentStep === 1 && parsedData" class="space-y-4 mt-2">
-        <div class="bg-green-50 p-4 rounded-lg border border-green-100 flex items-center justify-between">
-          <div class="flex items-center">
-            <app-icon name="check-circle" [size]="24" class="text-green-500 mr-3"></app-icon>
-            <div>
-              <h4 class="text-sm font-medium text-green-900">
-                {{ parsedData.length }} empleados encontrados
-              </h4>
-              <p *ngIf="userCount > 0" class="text-xs text-blue-600 mt-0.5">
-                {{ userCount }} marcados para crear/vincular como usuarios
-              </p>
+          <!-- Step-by-step guide -->
+          <div class="space-y-2">
+            <div class="flex items-start gap-2.5 px-3 py-2 bg-blue-50 rounded-lg border border-blue-100">
+              <div class="flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-[10px] font-bold shrink-0">1</div>
+              <div>
+                <p class="text-xs font-medium text-blue-900">Descarga la plantilla</p>
+                <p class="text-[11px] text-blue-700">Excel con columnas pre-configuradas para tus empleados.</p>
+              </div>
             </div>
-          </div>
-          <button (click)="goToStep(0)" class="text-xs text-red-500 hover:text-red-700 font-medium">
-            Cambiar archivo
-          </button>
-        </div>
-
-        <!-- Preview Table -->
-        <div class="border rounded-md overflow-hidden">
-          <table class="min-w-full divide-y divide-gray-200 text-sm">
-            <thead class="bg-gray-50">
-              <tr>
-                <th class="px-3 py-2 text-left font-medium text-gray-500">Nombre</th>
-                <th class="px-3 py-2 text-left font-medium text-gray-500">Apellido</th>
-                <th class="px-3 py-2 text-left font-medium text-gray-500">Documento</th>
-                <th class="px-3 py-2 text-right font-medium text-gray-500">Salario</th>
-                <th class="px-3 py-2 text-center font-medium text-gray-500">Usuario</th>
-              </tr>
-            </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
-              <tr *ngFor="let item of parsedData.slice(0, 5)">
-                <td class="px-3 py-2 text-gray-900">{{ item.first_name || '-' }}</td>
-                <td class="px-3 py-2 text-gray-700">{{ item.last_name || '-' }}</td>
-                <td class="px-3 py-2 text-gray-500 font-mono text-xs">
-                  {{ item.document_type || 'CC' }} {{ item.document_number || '-' }}
-                </td>
-                <td class="px-3 py-2 text-gray-900 text-right font-mono text-xs">
-                  {{ formatSalary(item.base_salary) }}
-                </td>
-                <td class="px-3 py-2 text-center">
-                  <span *ngIf="item.is_user" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                    Sí
-                  </span>
-                  <span *ngIf="!item.is_user" class="text-gray-400 text-xs">No</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <div *ngIf="parsedData.length > 5" class="bg-gray-50 px-3 py-2 text-xs text-gray-500 text-center">
-            ... y {{ parsedData.length - 5 }} más
-          </div>
-        </div>
-
-        <!-- Warnings -->
-        <div *ngIf="warnings.length > 0" class="bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-yellow-800 text-xs">
-          <div class="font-medium flex items-center mb-1">
-            <app-icon name="alert-triangle" [size]="14" class="mr-1"></app-icon>
-            Advertencias
-          </div>
-          <ul class="list-disc list-inside space-y-0.5">
-            <li *ngFor="let w of warnings">{{ w }}</li>
-          </ul>
-        </div>
-      </div>
-
-      <!-- ═══ STEP 2: Resultados ═══ -->
-      <div *ngIf="currentStep === 2" class="space-y-5 mt-2">
-        <!-- Uploading state -->
-        <div *ngIf="isUploading" class="py-12 flex flex-col items-center">
-          <app-icon name="loader" [size]="48" class="text-primary mb-4 animate-spin"></app-icon>
-          <p class="text-sm font-medium text-gray-700">Procesando {{ parsedData?.length }} empleados...</p>
-          <p class="text-xs text-gray-500 mt-1">Esto puede tomar unos segundos</p>
-        </div>
-
-        <!-- Results -->
-        <div *ngIf="!isUploading && uploadResults" class="space-y-5">
-          <div class="bg-white border rounded-lg overflow-hidden">
-            <div class="bg-gray-50 p-4 border-b flex justify-between items-center">
-              <h4 class="font-medium text-gray-900">Resumen de Carga</h4>
-              <span class="text-sm text-gray-500">
-                Procesados: {{ uploadResults.total_processed || 0 }}
-              </span>
+            <div class="flex items-start gap-2.5 px-3 py-2 bg-indigo-50 rounded-lg border border-indigo-100">
+              <div class="flex items-center justify-center w-6 h-6 rounded-full bg-indigo-600 text-white text-[10px] font-bold shrink-0">2</div>
+              <div>
+                <p class="text-xs font-medium text-indigo-900">Completa los datos</p>
+                <p class="text-[11px] text-indigo-700">Nombre, Documento, Salario, Cargo, Tipo de Contrato y más.</p>
+              </div>
             </div>
-            <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div class="bg-green-50 p-3 rounded border border-green-100">
-                <div class="text-xs text-green-600 font-medium">Exitosos</div>
-                <div class="text-2xl font-bold text-green-700">{{ uploadResults.successful || 0 }}</div>
+            <div class="flex items-start gap-2.5 px-3 py-2 bg-violet-50 rounded-lg border border-violet-100">
+              <div class="flex items-center justify-center w-6 h-6 rounded-full bg-violet-600 text-white text-[10px] font-bold shrink-0">3</div>
+              <div>
+                <p class="text-xs font-medium text-violet-900">Sube el archivo</p>
+                <p class="text-[11px] text-violet-700">Excel (.xlsx, .xls) o CSV. Máx. 1000 empleados por archivo.</p>
               </div>
-              <div class="bg-red-50 p-3 rounded border border-red-100">
-                <div class="text-xs text-red-600 font-medium">Fallidos</div>
-                <div class="text-2xl font-bold text-red-700">{{ uploadResults.failed || 0 }}</div>
-              </div>
-              <div class="bg-blue-50 p-3 rounded border border-blue-100">
-                <div class="text-xs text-blue-600 font-medium">Usuarios Creados</div>
-                <div class="text-2xl font-bold text-blue-700">{{ uploadResults.users_created || 0 }}</div>
-              </div>
-              <div class="bg-purple-50 p-3 rounded border border-purple-100">
-                <div class="text-xs text-purple-600 font-medium">Usuarios Vinculados</div>
-                <div class="text-2xl font-bold text-purple-700">{{ uploadResults.users_linked || 0 }}</div>
+            </div>
+            <div class="flex items-start gap-2.5 px-3 py-2 bg-green-50 rounded-lg border border-green-100">
+              <div class="flex items-center justify-center w-6 h-6 rounded-full bg-green-600 text-white text-[10px] font-bold shrink-0">4</div>
+              <div>
+                <p class="text-xs font-medium text-green-900">Revisa y confirma</p>
+                <p class="text-[11px] text-green-700">Análisis empleado por empleado antes de confirmar la carga.</p>
               </div>
             </div>
           </div>
 
-          <!-- Error Detail -->
-          <div *ngIf="uploadResults.failed > 0" class="border rounded-lg overflow-hidden">
-            <div class="bg-red-50 p-3 border-b border-red-100 text-red-800 font-medium text-sm flex items-center">
-              <app-icon name="alert-triangle" [size]="16" class="mr-2"></app-icon>
-              Detalle de Errores
-            </div>
-            <div class="max-h-60 overflow-y-auto bg-white">
-              <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                  <tr>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Empleado</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Error</th>
+          <!-- Excel structure visual -->
+          <div class="bg-gray-50 border rounded-lg px-3 py-2">
+            <p class="text-[11px] font-medium text-gray-700 mb-1">Ejemplo de Excel:</p>
+            <div class="overflow-x-auto">
+              <table class="text-[10px] text-gray-500 font-mono">
+                <thead>
+                  <tr class="border-b border-gray-200">
+                    <th class="px-2 py-0.5 text-left text-gray-600">Nombre</th>
+                    <th class="px-2 py-0.5 text-left text-gray-600">Documento</th>
+                    <th class="px-2 py-0.5 text-right text-gray-600">Salario</th>
+                    <th class="px-2 py-0.5 text-left text-gray-600">Cargo</th>
+                    <th class="px-2 py-0.5 text-left text-gray-600">Tipo Contrato</th>
                   </tr>
                 </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
-                  <ng-container *ngFor="let result of uploadResults.results; let i = index">
-                    <tr *ngIf="result.status === 'error'">
-                      <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
-                        {{ parsedData?.[i]?.first_name || '' }} {{ parsedData?.[i]?.last_name || 'Fila ' + (i + 1) }}
-                      </td>
-                      <td class="px-4 py-2 text-sm text-red-600">{{ result.message }}</td>
-                    </tr>
-                  </ng-container>
+                <tbody>
+                  <tr><td class="px-2 py-0.5">Juan Pérez</td><td class="px-2 py-0.5">CC 12345678</td><td class="px-2 py-0.5 text-right">2500000</td><td class="px-2 py-0.5">Vendedor</td><td class="px-2 py-0.5">Término Indefinido</td></tr>
+                  <tr><td class="px-2 py-0.5">María Gómez</td><td class="px-2 py-0.5">CC 87654321</td><td class="px-2 py-0.5 text-right">3200000</td><td class="px-2 py-0.5">Gerente</td><td class="px-2 py-0.5">Término Indefinido</td></tr>
                 </tbody>
               </table>
             </div>
           </div>
+
+          <!-- Auto-advance + don't show again -->
+          <div class="flex items-center justify-between pt-1.5 border-t border-gray-100">
+            <label class="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                [checked]="dontShowIntroAgain"
+                (change)="toggleDontShowAgain()"
+                class="w-3.5 h-3.5 rounded border-gray-300 text-primary focus:ring-primary"
+              />
+              <span class="text-[11px] text-gray-500">No volver a mostrar</span>
+            </label>
+            <div class="flex items-center gap-1.5">
+              <div class="w-16 h-1 bg-gray-200 rounded-full overflow-hidden">
+                <div
+                  class="h-full bg-primary rounded-full transition-all duration-100"
+                  [style.width.%]="introProgress"
+                ></div>
+              </div>
+              <span class="text-[10px] text-gray-400">{{ introCountdown }}s</span>
+            </div>
+          </div>
         </div>
-      </div>
+      }
+
+      <!-- WIZARD -->
+      @if (!showingIntro) {
+        <!-- Steps Line -->
+        <div class="mb-4">
+          <app-steps-line
+            [steps]="steps"
+            [currentStep]="currentStep"
+            size="sm"
+          ></app-steps-line>
+        </div>
+
+        <!-- STEP 0: Preparar -->
+        @if (currentStep === 0) {
+          <div class="space-y-3">
+            <!-- Compact hint -->
+            <div class="bg-blue-50 px-3 py-2 rounded-lg border border-blue-100 flex items-start gap-2">
+              <app-icon name="info" [size]="14" class="text-blue-600 shrink-0 mt-0.5"></app-icon>
+              <p class="text-[11px] text-blue-800 leading-relaxed">
+                <span class="font-medium">Descarga la plantilla</span>, completa los datos de tus empleados y sube el archivo.
+                Formatos: .xlsx, .xls, .csv · Máx. 1000 empleados.
+              </p>
+            </div>
+
+            <!-- Template Download (single card) -->
+            <div>
+              <p class="text-xs font-medium text-gray-700 mb-2">1. Descarga la plantilla</p>
+              <div
+                class="border border-indigo-200 hover:border-indigo-500 bg-indigo-50 rounded-lg px-3 py-2.5 cursor-pointer transition-all group flex items-center gap-3"
+                (click)="downloadTemplate()"
+              >
+                <div class="p-1.5 bg-indigo-100 rounded-full text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors shrink-0">
+                  <app-icon name="users" [size]="16"></app-icon>
+                </div>
+                <div class="min-w-0">
+                  <p class="font-semibold text-indigo-900 text-xs">Plantilla de Empleados</p>
+                  <p class="text-[10px] text-indigo-600 truncate">Nombre, Documento, Salario, Cargo, Tipo de Contrato, Banco, EPS y más</p>
+                  <div class="flex items-center text-[10px] font-bold text-indigo-600 group-hover:text-indigo-800 mt-1">
+                    <app-icon name="download" [size]="12" class="mr-1"></app-icon>
+                    DESCARGAR EXCEL
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- File Upload -->
+            <div>
+              <p class="text-xs font-medium text-gray-700 mb-2">2. Sube tu archivo</p>
+              <div
+                class="border-2 border-dashed border-gray-300 rounded-lg p-5 text-center hover:border-blue-500 hover:bg-blue-50 transition-all cursor-pointer"
+                (dragover)="onDragOver($event)"
+                (dragleave)="onDragLeave($event)"
+                (drop)="onDrop($event)"
+                (click)="fileInput.click()"
+                [class.border-blue-500]="isDragging"
+                [class.bg-blue-50]="isDragging"
+              >
+                <input
+                  #fileInput
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  class="hidden"
+                  (change)="onFileSelected($event)"
+                />
+
+                @if (!selectedFile) {
+                  <app-icon
+                    name="upload-cloud"
+                    [size]="36"
+                    class="mx-auto text-gray-400 mb-2"
+                    [class.text-blue-500]="isDragging"
+                  ></app-icon>
+                  <p class="text-sm text-gray-900 font-medium">Arrastra tu archivo Excel aquí</p>
+                  <p class="text-xs text-gray-500 mt-0.5">o haz clic para seleccionar · .xlsx, .xls, .csv · Máximo 5 MB</p>
+                }
+
+                @if (selectedFile) {
+                  <app-icon name="file-spreadsheet" [size]="36" class="mx-auto text-green-500 mb-2"></app-icon>
+                  <p class="text-sm text-gray-900 font-medium">{{ selectedFile.name }}</p>
+                  <p class="text-xs text-gray-500 mt-0.5">{{ formatFileSize(selectedFile.size) }}</p>
+                }
+              </div>
+
+              @if (selectedFile) {
+                <div class="flex justify-end mt-2">
+                  <button
+                    class="text-xs text-red-500 hover:text-red-700 font-medium flex items-center gap-1"
+                    (click)="removeFile()"
+                  >
+                    <app-icon name="x" [size]="12"></app-icon>
+                    Quitar archivo
+                  </button>
+                </div>
+              }
+            </div>
+
+            <!-- Upload Error -->
+            @if (uploadError) {
+              <div class="bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-red-700 text-xs flex items-start gap-2">
+                <app-icon name="alert-circle" [size]="14" class="shrink-0 mt-0.5"></app-icon>
+                <p>{{ uploadError }}</p>
+              </div>
+            }
+          </div>
+        }
+
+        <!-- STEP 1: Revisar -->
+        @if (currentStep === 1) {
+          <div class="space-y-3">
+            <!-- Loading state -->
+            @if (isAnalyzing) {
+              <div class="py-8 flex flex-col items-center justify-center">
+                <app-spinner size="lg" [center]="true" class="mb-3"></app-spinner>
+                <p class="text-sm text-gray-900 font-medium">Analizando archivo...</p>
+                <p class="text-xs text-gray-500 mt-1">Verificando empleados, documentos y datos</p>
+              </div>
+            }
+
+            <!-- Analysis results -->
+            @if (analysisResult && !isAnalyzing) {
+              <!-- Summary stats cards -->
+              <div class="flex overflow-x-auto gap-2 pb-1 md:grid md:grid-cols-4 md:gap-3 md:overflow-visible">
+                <div class="min-w-[100px] bg-blue-50 px-3 py-2 rounded-lg border border-blue-100 shrink-0">
+                  <div class="text-[10px] text-blue-600 font-medium">Total Empleados</div>
+                  <div class="text-xl font-bold text-blue-700">{{ analysisResult!.total_employees }}</div>
+                </div>
+                <div class="min-w-[100px] bg-green-50 px-3 py-2 rounded-lg border border-green-100 shrink-0">
+                  <div class="text-[10px] text-green-600 font-medium">Listos</div>
+                  <div class="text-xl font-bold text-green-700">{{ analysisResult!.ready }}</div>
+                </div>
+                <div class="min-w-[100px] bg-amber-50 px-3 py-2 rounded-lg border border-amber-100 shrink-0">
+                  <div class="text-[10px] text-amber-600 font-medium">Advertencias</div>
+                  <div class="text-xl font-bold text-amber-700">{{ analysisResult!.with_warnings }}</div>
+                </div>
+                <div class="min-w-[100px] bg-red-50 px-3 py-2 rounded-lg border border-red-100 shrink-0">
+                  <div class="text-[10px] text-red-600 font-medium">Errores</div>
+                  <div class="text-xl font-bold text-red-700">{{ analysisResult!.with_errors }}</div>
+                </div>
+              </div>
+
+              <!-- Detail table (desktop) -->
+              <div class="hidden md:block border rounded-lg overflow-hidden mt-3">
+                <div class="max-h-52 overflow-y-auto">
+                  <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50 sticky top-0">
+                      <tr>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Nombre</th>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Documento</th>
+                        <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Salario</th>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Tipo Contrato</th>
+                        <th class="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Acción</th>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                      @for (item of analysisResult!.employees; track item.row_number) {
+                        <tr>
+                          <td class="px-3 py-2 text-sm text-gray-900 max-w-[180px] truncate">{{ item.name }} {{ item.last_name }}</td>
+                          <td class="px-3 py-2 text-sm font-mono text-xs text-gray-600">{{ item.document_type }} {{ item.document_number }}</td>
+                          <td class="px-3 py-2 text-sm text-right text-gray-700">{{ item.base_salary | currency:'COP':'symbol-narrow':'1.0-0' }}</td>
+                          <td class="px-3 py-2 text-sm text-gray-600">{{ item.contract_type || '—' }}</td>
+                          <td class="px-3 py-2 text-sm text-center">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                              [ngClass]="{
+                                'bg-emerald-100 text-emerald-800': item.action === 'create',
+                                'bg-sky-100 text-sky-800': item.action === 'update',
+                                'bg-blue-100 text-blue-800': item.action === 'associate'
+                              }">
+                              {{ item.action === 'create' ? 'Crear' : item.action === 'update' ? 'Actualizar' : 'Vincular' }}
+                            </span>
+                          </td>
+                          <td class="px-3 py-2 text-sm">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                              [ngClass]="{
+                                'bg-green-100 text-green-800': item.status === 'ready',
+                                'bg-amber-100 text-amber-800': item.status === 'warning',
+                                'bg-red-100 text-red-800': item.status === 'error'
+                              }">
+                              {{ item.status === 'ready' ? 'Listo' : item.status === 'warning' ? 'Advertencia' : 'Error' }}
+                            </span>
+                          </td>
+                        </tr>
+                        <!-- Warnings/Errors expandable row -->
+                        @if (item.warnings.length > 0 || item.errors.length > 0) {
+                          <tr class="bg-gray-50">
+                            <td colspan="6" class="px-3 py-2">
+                              @for (warning of item.warnings; track warning) {
+                                <p class="text-xs text-amber-700 flex items-start gap-1">
+                                  <app-icon name="alert-triangle" [size]="12" class="shrink-0 mt-0.5"></app-icon>
+                                  {{ warning }}
+                                </p>
+                              }
+                              @for (error of item.errors; track error) {
+                                <p class="text-xs text-red-700 flex items-start gap-1">
+                                  <app-icon name="x-circle" [size]="12" class="shrink-0 mt-0.5"></app-icon>
+                                  {{ error }}
+                                </p>
+                              }
+                            </td>
+                          </tr>
+                        }
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- Mobile cards -->
+              <div class="block md:hidden space-y-2 mt-3 max-h-52 overflow-y-auto">
+                @for (item of analysisResult!.employees; track item.row_number) {
+                  <div class="border rounded-lg p-3 bg-white">
+                    <div class="flex items-center justify-between mb-2">
+                      <span class="text-sm font-medium text-gray-900 truncate mr-2">{{ item.name }} {{ item.last_name }}</span>
+                      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium shrink-0"
+                        [ngClass]="{
+                          'bg-green-100 text-green-800': item.status === 'ready',
+                          'bg-amber-100 text-amber-800': item.status === 'warning',
+                          'bg-red-100 text-red-800': item.status === 'error'
+                        }">
+                        {{ item.status === 'ready' ? 'Listo' : item.status === 'warning' ? 'Advertencia' : 'Error' }}
+                      </span>
+                    </div>
+                    <p class="text-xs text-gray-500 font-mono mb-2">{{ item.document_type }} {{ item.document_number }}</p>
+                    <div class="flex gap-3 text-xs text-gray-600 mb-1">
+                      <span>{{ item.base_salary | currency:'COP':'symbol-narrow':'1.0-0' }}</span>
+                      <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium"
+                        [ngClass]="{
+                          'bg-emerald-100 text-emerald-700': item.action === 'create',
+                          'bg-sky-100 text-sky-700': item.action === 'update',
+                          'bg-blue-100 text-blue-700': item.action === 'associate'
+                        }">
+                        {{ item.action === 'create' ? 'Crear' : item.action === 'update' ? 'Actualizar' : 'Vincular' }}
+                      </span>
+                    </div>
+                    @if (item.warnings.length > 0 || item.errors.length > 0) {
+                      <div class="mt-2 pt-2 border-t border-gray-100 space-y-1">
+                        @for (warning of item.warnings; track warning) {
+                          <p class="text-[11px] text-amber-700 flex items-start gap-1">
+                            <span class="shrink-0">&#9888;</span> {{ warning }}
+                          </p>
+                        }
+                        @for (error of item.errors; track error) {
+                          <p class="text-[11px] text-red-700 flex items-start gap-1">
+                            <span class="shrink-0">&#10007;</span> {{ error }}
+                          </p>
+                        }
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        }
+
+        <!-- STEP 2: Resultados -->
+        @if (currentStep === 2) {
+          <div class="space-y-3">
+            <!-- Loading state -->
+            @if (isUploading) {
+              <div class="py-8 flex flex-col items-center justify-center">
+                <app-spinner size="lg" [center]="true" class="mb-3"></app-spinner>
+                <p class="text-sm text-gray-900 font-medium">Cargando empleados...</p>
+                <p class="text-xs text-gray-500 mt-1">Esto puede tomar unos momentos</p>
+              </div>
+            }
+
+            <!-- Upload Error -->
+            @if (uploadError && !isUploading) {
+              <div class="bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-red-700 text-xs flex items-start gap-2">
+                <app-icon name="alert-circle" [size]="14" class="shrink-0 mt-0.5"></app-icon>
+                <p>{{ uploadError }}</p>
+              </div>
+            }
+
+            <!-- Results -->
+            @if (uploadResults && !isUploading) {
+              <!-- Summary -->
+              <div class="bg-white border rounded-lg overflow-hidden">
+                <div class="bg-gray-50 px-3 py-2 border-b flex justify-between items-center">
+                  <h4 class="text-sm font-medium text-gray-900">Resumen de Carga</h4>
+                  <span class="text-xs text-gray-500">{{ uploadResults.total_processed || 0 }} empleados</span>
+                </div>
+                <div class="p-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <div class="bg-green-50 px-3 py-2 rounded border border-green-100">
+                    <div class="text-[10px] text-green-600 font-medium">Exitosos</div>
+                    <div class="text-xl font-bold text-green-700">{{ uploadResults.successful || 0 }}</div>
+                  </div>
+                  <div class="bg-red-50 px-3 py-2 rounded border border-red-100">
+                    <div class="text-[10px] text-red-600 font-medium">Fallidos</div>
+                    <div class="text-xl font-bold text-red-700">{{ uploadResults.failed || 0 }}</div>
+                  </div>
+                  <div class="bg-blue-50 px-3 py-2 rounded border border-blue-100">
+                    <div class="text-[10px] text-blue-600 font-medium">Usuarios Creados</div>
+                    <div class="text-xl font-bold text-blue-700">{{ uploadResults.users_created || 0 }}</div>
+                  </div>
+                  <div class="bg-purple-50 px-3 py-2 rounded border border-purple-100">
+                    <div class="text-[10px] text-purple-600 font-medium">Usuarios Vinculados</div>
+                    <div class="text-xl font-bold text-purple-700">{{ uploadResults.users_linked || 0 }}</div>
+                  </div>
+                  @if (uploadResults.updated) {
+                    <div class="bg-sky-50 px-3 py-2 rounded border border-sky-100">
+                      <div class="text-[10px] text-sky-600 font-medium">Actualizados</div>
+                      <div class="text-xl font-bold text-sky-700">{{ uploadResults.updated }}</div>
+                    </div>
+                  }
+                  @if (uploadResults.associated) {
+                    <div class="bg-indigo-50 px-3 py-2 rounded border border-indigo-100">
+                      <div class="text-[10px] text-indigo-600 font-medium">Vinculados</div>
+                      <div class="text-xl font-bold text-indigo-700">{{ uploadResults.associated }}</div>
+                    </div>
+                  }
+                </div>
+              </div>
+
+              <!-- Detail Table -->
+              <div class="border rounded-lg overflow-hidden">
+                <div class="bg-gray-50 px-3 py-2 border-b text-gray-800 font-medium text-xs flex items-center">
+                  <app-icon name="list" [size]="14" class="mr-1.5"></app-icon>
+                  Detalle por Empleado
+                </div>
+                <div class="max-h-48 overflow-y-auto bg-white">
+                  <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                      <tr>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Empleado</th>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Documento</th>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
+                        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Detalle</th>
+                      </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                      @for (result of uploadResults.results; track $index) {
+                        <tr>
+                          <td class="px-3 py-2 text-sm text-gray-900 max-w-[150px] truncate">
+                            {{ result.employee_name || result.employee?.name || '—' }}
+                          </td>
+                          <td class="px-3 py-2 whitespace-nowrap text-sm font-mono text-xs text-gray-600">
+                            {{ result.document_number || '—' }}
+                          </td>
+                          <td class="px-3 py-2 whitespace-nowrap text-sm">
+                            <span
+                              class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                              [ngClass]="{
+                                'bg-green-100 text-green-800': result.status === 'success',
+                                'bg-red-100 text-red-800': result.status === 'error'
+                              }"
+                            >
+                              {{ result.status === 'success' ? 'Exitoso' : 'Error' }}
+                            </span>
+                          </td>
+                          <td class="px-3 py-2 text-sm text-gray-600">
+                            {{ result.message }}
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            }
+          </div>
+        }
+      } <!-- end @if (!showingIntro) -->
 
       <!-- Footer -->
-      <div slot="footer" class="flex justify-between gap-3 pt-6 border-t border-gray-200 mt-6">
-        <div>
-          <app-button
-            *ngIf="currentStep === 1"
-            variant="ghost"
-            size="sm"
-            (clicked)="goToStep(0)"
-            [disabled]="isUploading"
-          >
-            <app-icon name="arrow-left" [size]="14" slot="icon"></app-icon>
-            Atrás
+      <div slot="footer" class="flex justify-end gap-2 pt-4 border-t border-gray-200 mt-4">
+        @if (showingIntro) {
+          <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
+          <app-button variant="primary" (clicked)="skipIntro()">
+            Continuar
+            <app-icon name="arrow-right" [size]="16" slot="icon"></app-icon>
           </app-button>
-        </div>
-        <div class="flex gap-3">
-          <app-button
-            variant="outline"
-            (clicked)="onCancel()"
-            [disabled]="isUploading"
-          >
-            {{ currentStep === 2 && uploadResults ? 'Cerrar' : 'Cancelar' }}
-          </app-button>
-          <app-button
-            *ngIf="currentStep === 1 && parsedData"
-            variant="primary"
-            (clicked)="confirmUpload()"
-            [disabled]="isUploading"
-            [loading]="isUploading"
-          >
-            <app-icon name="upload" [size]="16" slot="icon"></app-icon>
-            Cargar {{ parsedData.length }} Empleados
-          </app-button>
-        </div>
+        }
+        <!-- Step 0 -->
+        @if (!showingIntro && currentStep === 0) {
+          <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
+          @if (selectedFile) {
+            <app-button variant="primary" (clicked)="analyzeFile()" [disabled]="isAnalyzing">
+              <app-icon name="search" [size]="16" slot="icon"></app-icon>
+              Analizar Archivo
+            </app-button>
+          }
+        }
+        <!-- Step 1 -->
+        @if (!showingIntro && currentStep === 1 && !isAnalyzing) {
+          <app-button variant="outline" (clicked)="prevStep()">Atrás</app-button>
+          <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
+          @if (analysisResult && canProceed) {
+            <app-button variant="primary" (clicked)="proceedWithUpload()">
+              <app-icon name="upload" [size]="16" slot="icon"></app-icon>
+              Cargar {{ loadableCount }} Empleados
+            </app-button>
+          }
+        }
+        <!-- Step 2 -->
+        @if (!showingIntro && currentStep === 2 && !isUploading) {
+          <app-button variant="outline" (clicked)="onCancel()">Cerrar</app-button>
+        }
       </div>
     </app-modal>
   `,
-  styles: [`
-    :host { display: block; }
-  `],
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+    `,
+  ],
 })
-export class EmployeeBulkUploadModalComponent {
+export class EmployeeBulkUploadModalComponent implements OnChanges, OnDestroy {
   @Input() isOpen = false;
   @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() uploadComplete = new EventEmitter<void>();
 
-  // Steps
+  private static readonly INTRO_CACHE_KEY = 'vendix_bulk_employee_intro_dismissed';
+  private static readonly INTRO_DURATION = 20000;
+  private static readonly INTRO_TICK = 100;
+
+  // Intro state
+  showingIntro = false;
+  dontShowIntroAgain = false;
+  introProgress = 0;
+  introCountdown = 20;
+  private introTimerId: ReturnType<typeof setInterval> | null = null;
+  private introElapsed = 0;
+
+  // Wizard state
   steps: StepsLineItem[] = [
-    { label: 'Cargar Datos' },
-    { label: 'Verificar' },
+    { label: 'Preparar' },
+    { label: 'Revisar' },
     { label: 'Resultados' },
   ];
   currentStep = 0;
 
-  // State
-  isProcessingFile = false;
+  // File state
+  selectedFile: File | null = null;
   isDragging = false;
+
+  // Analysis state
+  isAnalyzing = false;
+  analysisResult: BulkEmployeeAnalysisResult | null = null;
+  sessionId: string | null = null;
+
+  // Upload state
   isUploading = false;
-  uploadError: any = null;
-  parsedData: any[] | null = null;
-  uploadResults: any = null;
-  warnings: string[] = [];
-  userCount = 0;
+  uploadResults: BulkEmployeeUploadResult | null = null;
+
+  // Error state
+  uploadError: string | null = null;
 
   private payrollService = inject(PayrollService);
   private toastService = inject(ToastService);
 
-  private readonly HEADER_MAP: Record<string, string> = {
-    nombre: 'first_name',
-    'first name': 'first_name',
-    apellido: 'last_name',
-    'last name': 'last_name',
-    'tipo documento': 'document_type',
-    'document type': 'document_type',
-    'número documento': 'document_number',
-    'numero documento': 'document_number',
-    'document number': 'document_number',
-    'fecha contratación': 'hire_date',
-    'fecha contratacion': 'hire_date',
-    'hire date': 'hire_date',
-    'tipo contrato': 'contract_type',
-    'contract type': 'contract_type',
-    'salario base': 'base_salary',
-    'base salary': 'base_salary',
-    cargo: 'position',
-    position: 'position',
-    departamento: 'department',
-    department: 'department',
-    'frecuencia pago': 'payment_frequency',
-    'payment frequency': 'payment_frequency',
-    banco: 'bank_name',
-    bank: 'bank_name',
-    'número cuenta': 'bank_account_number',
-    'numero cuenta': 'bank_account_number',
-    'account number': 'bank_account_number',
-    'tipo cuenta': 'bank_account_type',
-    'account type': 'bank_account_type',
-    eps: 'health_provider',
-    'health provider': 'health_provider',
-    'fondo pensión': 'pension_fund',
-    'fondo pension': 'pension_fund',
-    'pension fund': 'pension_fund',
-    'nivel riesgo arl': 'arl_risk_level',
-    'arl risk level': 'arl_risk_level',
-    'fondo cesantías': 'severance_fund',
-    'fondo cesantias': 'severance_fund',
-    'severance fund': 'severance_fund',
-    'caja compensación': 'compensation_fund',
-    'caja compensacion': 'compensation_fund',
-    'compensation fund': 'compensation_fund',
-    '¿es usuario?': 'is_user',
-    'es usuario': 'is_user',
-    'is user': 'is_user',
-    email: 'email',
-    correo: 'email',
-    teléfono: 'phone',
-    telefono: 'phone',
-    phone: 'phone',
-  };
-
-  isErrorMessageArray(): boolean {
-    return Array.isArray(this.uploadError);
+  // Computed properties
+  get canProceed(): boolean {
+    if (!this.analysisResult) return false;
+    return this.analysisResult.ready > 0 || this.analysisResult.with_warnings > 0;
   }
 
+  get loadableCount(): number {
+    if (!this.analysisResult) return 0;
+    return this.analysisResult.employees.filter(e => e.status !== 'error').length;
+  }
+
+  // Lifecycle
+  ngOnChanges(changes: SimpleChanges) {
+    if (changes['isOpen'] && this.isOpen) {
+      this.onModalOpen();
+    }
+    if (changes['isOpen'] && !this.isOpen) {
+      this.clearIntroTimer();
+    }
+  }
+
+  ngOnDestroy() {
+    this.clearIntroTimer();
+  }
+
+  // Intro logic
+  private onModalOpen() {
+    const dismissed = localStorage.getItem(EmployeeBulkUploadModalComponent.INTRO_CACHE_KEY);
+    if (dismissed === 'true') {
+      this.showingIntro = false;
+      return;
+    }
+    this.showingIntro = true;
+    this.introElapsed = 0;
+    this.introProgress = 0;
+    this.introCountdown = Math.ceil(EmployeeBulkUploadModalComponent.INTRO_DURATION / 1000);
+    this.startIntroTimer();
+  }
+
+  private startIntroTimer() {
+    this.clearIntroTimer();
+    this.introTimerId = setInterval(() => {
+      this.introElapsed += EmployeeBulkUploadModalComponent.INTRO_TICK;
+      this.introProgress = Math.min(100, (this.introElapsed / EmployeeBulkUploadModalComponent.INTRO_DURATION) * 100);
+      this.introCountdown = Math.max(0, Math.ceil((EmployeeBulkUploadModalComponent.INTRO_DURATION - this.introElapsed) / 1000));
+
+      if (this.introElapsed >= EmployeeBulkUploadModalComponent.INTRO_DURATION) {
+        this.skipIntro();
+      }
+    }, EmployeeBulkUploadModalComponent.INTRO_TICK);
+  }
+
+  private clearIntroTimer() {
+    if (this.introTimerId) {
+      clearInterval(this.introTimerId);
+      this.introTimerId = null;
+    }
+  }
+
+  skipIntro() {
+    this.clearIntroTimer();
+    if (this.dontShowIntroAgain) {
+      localStorage.setItem(EmployeeBulkUploadModalComponent.INTRO_CACHE_KEY, 'true');
+    }
+    this.showingIntro = false;
+  }
+
+  toggleDontShowAgain() {
+    this.dontShowIntroAgain = !this.dontShowIntroAgain;
+  }
+
+  // Navigation
+  prevStep() {
+    if (this.currentStep > 0) {
+      this.currentStep--;
+    }
+  }
+
+  // Cancel/Close
   onCancel() {
+    if (this.sessionId && !this.uploadResults) {
+      this.payrollService.cancelBulkEmployeeSession(this.sessionId).subscribe();
+    }
+    if ((this.uploadResults?.successful ?? 0) > 0) {
+      this.uploadComplete.emit();
+    }
     this.isOpenChange.emit(false);
     this.resetState();
   }
 
   resetState() {
+    this.clearIntroTimer();
+    this.showingIntro = false;
+    this.introProgress = 0;
+    this.introElapsed = 0;
     this.currentStep = 0;
-    this.isProcessingFile = false;
+    this.selectedFile = null;
     this.isDragging = false;
+    this.isAnalyzing = false;
+    this.analysisResult = null;
+    this.sessionId = null;
     this.isUploading = false;
-    this.uploadError = null;
     this.uploadResults = null;
-    this.parsedData = null;
-    this.warnings = [];
-    this.userCount = 0;
+    this.uploadError = null;
   }
 
-  goToStep(step: number) {
-    if (step === 0) {
-      this.parsedData = null;
-      this.uploadError = null;
-      this.warnings = [];
-      this.userCount = 0;
-      this.isProcessingFile = false;
-    }
-    this.currentStep = step;
-  }
-
+  // Step 0: File operations
   downloadTemplate() {
     this.payrollService.getBulkEmployeeTemplate().subscribe({
-      next: (blob: Blob) => {
+      next: (blob) => {
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
@@ -428,162 +713,98 @@ export class EmployeeBulkUploadModalComponent {
     event.preventDefault();
     event.stopPropagation();
     this.isDragging = false;
+
     const files = event.dataTransfer?.files;
     if (files && files.length > 0) {
-      this.processFile(files[0]);
+      this.validateAndSetFile(files[0]);
     }
   }
 
   onFileSelected(event: Event) {
     const input = event.target as HTMLInputElement;
     if (input.files && input.files.length > 0) {
-      this.processFile(input.files[0]);
+      this.validateAndSetFile(input.files[0]);
     }
   }
 
-  processFile(file: File) {
-    const allowedExtensions = ['.csv', '.xlsx', '.xls'];
-    const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
+  removeFile() {
+    this.selectedFile = null;
+    this.uploadError = null;
+  }
 
-    if (!allowedExtensions.includes(fileExtension)) {
-      this.toastService.error('Por favor selecciona un archivo válido (.xlsx o .csv)');
+  private validateAndSetFile(file: File) {
+    const allowedExtensions = ['.csv', '.xlsx', '.xls'];
+    const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+    if (!allowedExtensions.includes(ext)) {
+      this.toastService.error('Por favor selecciona un archivo válido (.xlsx, .xls o .csv)');
       return;
     }
 
-    this.isProcessingFile = true;
+    if (file.size > 5 * 1024 * 1024) {
+      this.toastService.error('El archivo excede el límite de 5 MB');
+      return;
+    }
+
+    this.selectedFile = file;
     this.uploadError = null;
-    this.warnings = [];
-
-    const reader: FileReader = new FileReader();
-
-    reader.onload = (e: any) => {
-      try {
-        const bstr: string = e.target.result;
-        const wb: XLSX.WorkBook = XLSX.read(bstr, { type: 'binary' });
-        const wsname: string = wb.SheetNames[0];
-        const ws: XLSX.WorkSheet = wb.Sheets[wsname];
-
-        const rawData = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
-
-        if (!rawData || rawData.length < 2) {
-          this.toastService.error('El archivo debe contener al menos una fila de encabezados y una fila de datos');
-          this.isProcessingFile = false;
-          return;
-        }
-
-        const rawHeaders = rawData[0] as string[];
-        const headerMap: Record<number, string> = {};
-
-        rawHeaders.forEach((h, index) => {
-          if (!h) return;
-          const normalized = h.toString().trim().toLowerCase();
-          const dtoKey = this.HEADER_MAP[normalized];
-          if (dtoKey) {
-            headerMap[index] = dtoKey;
-          }
-        });
-
-        const employees: any[] = [];
-        const warnings: string[] = [];
-
-        for (let i = 1; i < rawData.length; i++) {
-          const row = rawData[i] as any[];
-          if (!row || row.length === 0) continue;
-
-          const employee: Record<string, any> = {};
-          let hasData = false;
-
-          row.forEach((cellValue, index) => {
-            const key = headerMap[index];
-            if (key) {
-              const val = cellValue === undefined || cellValue === null ? '' : String(cellValue).trim();
-
-              if (['base_salary', 'arl_risk_level'].includes(key)) {
-                const num = parseFloat(val);
-                employee[key] = isNaN(num) ? 0 : num;
-              } else if (key === 'is_user') {
-                const strVal = val.toLowerCase();
-                employee[key] = strVal === 'si' || strVal === 'yes' || strVal === 'true' || strVal === '1';
-              } else {
-                employee[key] = val;
-              }
-
-              if (val !== '') hasData = true;
-            }
-          });
-
-          if (hasData && employee['first_name'] && employee['document_number']) {
-            if (employee['is_user'] && !employee['email']) {
-              warnings.push(`Fila ${i + 1}: ${employee['first_name']} ${employee['last_name'] || ''} marcado como usuario pero sin email`);
-            }
-            employees.push(employee);
-          }
-        }
-
-        this.isProcessingFile = false;
-
-        if (employees.length === 0) {
-          this.toastService.warning('No se encontraron empleados válidos en el archivo');
-          return;
-        }
-
-        if (employees.length > 1000) {
-          this.toastService.error(`El archivo excede el límite de 1000 empleados (tiene ${employees.length}).`);
-          return;
-        }
-
-        this.parsedData = employees;
-        this.warnings = warnings;
-        this.userCount = employees.filter((e) => e.is_user).length;
-        // Auto-advance to step 1
-        this.currentStep = 1;
-      } catch (err) {
-        console.error('Error parsing file:', err);
-        this.isProcessingFile = false;
-        this.toastService.error('Error al procesar el archivo. Verifica el formato.');
-      }
-    };
-
-    reader.readAsBinaryString(file);
   }
 
-  confirmUpload() {
-    if (!this.parsedData) return;
+  // Step 0 -> 1: Analyze
+  analyzeFile() {
+    if (!this.selectedFile) return;
 
-    this.currentStep = 2;
-    this.isUploading = true;
+    this.isAnalyzing = true;
     this.uploadError = null;
+    this.currentStep = 1;
 
-    this.payrollService.uploadBulkEmployeesJson(this.parsedData).subscribe({
-      next: (response: any) => {
-        this.isUploading = false;
-        const data = response.data || response;
-        this.uploadResults = data;
+    this.payrollService.analyzeBulkEmployees(this.selectedFile).subscribe({
+      next: (result) => {
+        this.isAnalyzing = false;
+        this.analysisResult = result;
+        this.sessionId = result.session_id;
 
-        if (data.failed > 0 || !data.success) {
-          this.toastService.warning('La carga se completó con algunos errores.');
-        } else {
-          this.toastService.success(`${data.successful} empleados cargados exitosamente`);
-          this.uploadComplete.emit();
+        if (result.with_errors > 0) {
+          this.toastService.warning(`${result.with_errors} empleado(s) con errores detectados`);
         }
       },
-      error: (error: any) => {
-        this.isUploading = false;
-        this.uploadError = error?.error?.message || 'Error en la carga masiva';
-
-        if (error?.error?.details) {
-          this.uploadResults = error.error.details;
-        } else if (error?.error?.data) {
-          this.uploadResults = error.error.data;
-        }
-
-        this.toastService.error('Error en la carga masiva');
+      error: (error) => {
+        this.isAnalyzing = false;
+        this.currentStep = 0;
+        this.uploadError = typeof error === 'string' ? error : error?.error?.message || error?.message || 'Error al analizar el archivo';
+        this.toastService.error('Error al analizar el archivo');
       },
     });
   }
 
-  formatSalary(val: any): string {
-    if (!val) return '$0';
-    return `$${Number(val).toLocaleString('es-CO')}`;
+  // Step 1 -> 2: Upload
+  proceedWithUpload() {
+    if (!this.sessionId) return;
+
+    this.isUploading = true;
+    this.currentStep = 2;
+
+    this.payrollService.uploadBulkEmployeesFromSession(this.sessionId).subscribe({
+      next: (result) => {
+        this.isUploading = false;
+        this.uploadResults = result;
+
+        if (result.failed > 0) {
+          this.toastService.warning('La carga se completó con algunos errores.');
+        } else {
+          this.toastService.success(`${result.successful} empleado(s) cargados exitosamente`);
+        }
+      },
+      error: (error) => {
+        this.isUploading = false;
+        this.uploadError = typeof error === 'string' ? error : error?.error?.message || error?.message || 'Error en la carga';
+        this.toastService.error('Error en la carga masiva de empleados');
+      },
+    });
+  }
+
+  formatFileSize(bytes: number): string {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
 }

@@ -141,6 +141,7 @@ export class BulkEmployeeItemResultDto {
   status: 'success' | 'error';
   message: string;
   error?: string;
+  action?: 'created' | 'updated' | 'associated';
   user_created?: boolean;
   user_linked?: boolean;
 }
@@ -150,7 +151,36 @@ export class BulkEmployeeUploadResultDto {
   total_processed: number;
   successful: number;
   failed: number;
+  updated: number;
+  associated: number;
   users_created: number;
   users_linked: number;
   results: BulkEmployeeItemResultDto[];
+}
+
+export class BulkEmployeeAnalysisItemDto {
+  row_number: number;
+  name: string;
+  last_name: string;
+  document_type: string;
+  document_number: string;
+  base_salary: number;
+  position?: string;
+  department?: string;
+  contract_type: string;
+  is_user: boolean;
+  email?: string;
+  action: 'create' | 'update' | 'associate';
+  status: 'ready' | 'warning' | 'error';
+  warnings: string[];
+  errors: string[];
+}
+
+export class BulkEmployeeAnalysisResultDto {
+  session_id: string;
+  total_employees: number;
+  ready: number;
+  with_warnings: number;
+  with_errors: number;
+  employees: BulkEmployeeAnalysisItemDto[];
 }
