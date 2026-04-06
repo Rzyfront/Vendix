@@ -7,6 +7,7 @@ import { AppMetricsService } from './services/app-metrics.service';
 import { ServerMetricsService } from './services/server-metrics.service';
 import { MonitoringOverviewService } from './services/monitoring-overview.service';
 import { ResponseService } from '../../../common/responses/response.service';
+import { PerformanceMetricsService } from './services/performance-metrics.service';
 
 @Module({
   controllers: [MonitoringController],
@@ -17,6 +18,7 @@ import { ResponseService } from '../../../common/responses/response.service';
     AppMetricsService,
     ServerMetricsService,
     MonitoringOverviewService,
+    PerformanceMetricsService,
     ResponseService,
   ],
 })

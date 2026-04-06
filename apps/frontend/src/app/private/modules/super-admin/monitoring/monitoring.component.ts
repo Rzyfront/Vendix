@@ -12,6 +12,7 @@ import {
   StatusIndicatorComponent,
   ProcessInfoComponent,
   QueueStatsComponent,
+  SlowEndpointsComponent,
 } from './components';
 import {
   MonitoringOverview,
@@ -21,6 +22,9 @@ import {
   ServerInfo,
   TimeRange,
   MetricStatus,
+  PerformanceSnapshot,
+  PerformanceHistory,
+  TimeSeriesPoint,
 } from './interfaces';
 
 @Component({
@@ -35,37 +39,11 @@ import {
     StatusIndicatorComponent,
     ProcessInfoComponent,
     QueueStatsComponent,
+    SlowEndpointsComponent,
   ],
   providers: [MonitoringService],
   template: `
     <div style="background-color: var(--color-background);" class="space-y-6">
-      <!-- Header -->
-      <div class="flex items-center justify-between flex-wrap gap-4">
-        <div class="flex items-center gap-3">
-          <div
-            class="w-10 h-10 rounded-lg flex items-center justify-center"
-            style="background: linear-gradient(135deg, rgba(126, 215, 165, 0.8), rgba(126, 215, 165, 0.6));"
-          >
-            <app-icon name="activity" [size]="20" class="text-white"></app-icon>
-          </div>
-          <div>
-            <h2 class="text-xl font-bold" style="color: var(--color-text-primary);">
-              Monitoreo del Servidor
-            </h2>
-            <p class="text-sm" style="color: var(--color-text-muted);">
-              Metricas en tiempo real de infraestructura y aplicacion
-            </p>
-          </div>
-        </div>
-        <div class="flex items-center gap-2">
-          <app-status-indicator
-            [status]="overallStatus"
-            [label]="overallStatusLabel"
-          ></app-status-indicator>
-          <span class="text-xs" style="color: var(--color-text-muted);">Auto-refresh: 30s</span>
-        </div>
-      </div>
-
       <!-- Stats Cards -->
       <div class="stats-container">
         <app-stats
@@ -106,15 +84,23 @@ import {
         ></app-stats>
       </div>
 
-      <!-- Uptime bar -->
+      <!-- Status bar -->
       <div
-        class="rounded-card shadow-card p-4 flex items-center gap-4"
+        class="rounded-card shadow-card p-4 flex items-center justify-between flex-wrap gap-3"
         style="background: var(--color-surface); border: 1px solid var(--color-border);"
       >
-        <app-icon name="clock" [size]="18" style="color: var(--color-text-muted);"></app-icon>
-        <span style="color: var(--color-text-secondary);">
-          Uptime del servidor:
-          <strong style="color: var(--color-text-primary);">{{ formatUptime(overview?.server?.uptime) }}</strong>
+        <div class="flex items-center gap-4">
+          <app-status-indicator
+            [status]="overallStatus"
+            [label]="overallStatusLabel"
+          ></app-status-indicator>
+          <span class="text-sm" style="color: var(--color-text-secondary);">
+            <app-icon name="clock" [size]="14" style="display: inline; vertical-align: middle; margin-right: 4px; color: var(--color-text-muted);"></app-icon>
+            Uptime: <strong style="color: var(--color-text-primary);">{{ formatUptime(overview?.server?.uptime) }}</strong>
+          </span>
+        </div>
+        <span class="text-xs font-mono px-2 py-1 rounded-full" style="background: var(--color-background); color: var(--color-text-muted);">
+          Auto-refresh: 30s
         </span>
       </div>
 
@@ -232,6 +218,118 @@ import {
             secondaryColor="#f43f5e"
             [loading]="loadingRds"
           ></app-metric-chart>
+        </div>
+      </div>
+
+      <!-- Performance Section -->
+      <div
+        class="rounded-card shadow-card"
+        style="background: var(--color-surface); border: 1px solid var(--color-border);"
+      >
+        <div
+          class="flex justify-between items-center p-6"
+          style="border-bottom: 1px solid var(--color-border); background: linear-gradient(135deg, rgba(168,85,247,0.05) 0%, transparent 100%);"
+        >
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-purple-500/10">
+              <app-icon name="zap" [size]="16" class="text-purple-500"></app-icon>
+            </div>
+            <h3 class="text-lg font-semibold" style="color: var(--color-text-primary);">
+              Performance
+            </h3>
+            <span *ngIf="performanceSnapshot" class="text-xs font-mono px-2 py-0.5 rounded-full" style="background: var(--color-background); color: var(--color-text-muted);">
+              {{ performanceSnapshot.totalRecorded }} requests tracked
+            </span>
+          </div>
+          <app-time-range-selector
+            [selected]="performanceTimeRange"
+            (rangeChange)="onPerformanceTimeRangeChange($event)"
+          ></app-time-range-selector>
+        </div>
+
+        <div class="p-6 space-y-6">
+          <!-- Performance Stats Cards -->
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div class="p-3 rounded-xl text-center" style="background: var(--color-background); border: 1px solid var(--color-border);">
+              <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Avg Response</p>
+              <p class="text-xl font-bold font-mono" [class]="avgResponseTimeColor">{{ avgResponseTime }}</p>
+              <p class="text-[10px]" style="color: var(--color-text-muted);" *ngIf="performanceSnapshot">
+                p95: {{ performanceSnapshot.responseTime.p95.toFixed(0) }}ms
+              </p>
+            </div>
+            <div class="p-3 rounded-xl text-center" style="background: var(--color-background); border: 1px solid var(--color-border);">
+              <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Requests/seg</p>
+              <p class="text-xl font-bold font-mono text-blue-500">{{ reqPerSec }}</p>
+              <p class="text-[10px]" style="color: var(--color-text-muted);" *ngIf="performanceSnapshot">
+                {{ performanceSnapshot.activeRequests }} activos
+              </p>
+            </div>
+            <div class="p-3 rounded-xl text-center" style="background: var(--color-background); border: 1px solid var(--color-border);">
+              <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Error Rate (5m)</p>
+              <p class="text-xl font-bold font-mono" [class]="errorRateColor">{{ errorRate }}</p>
+              <p class="text-[10px]" style="color: var(--color-text-muted);" *ngIf="performanceSnapshot">
+                {{ performanceSnapshot.errors.last5min.errors5xx }} errores 5xx
+              </p>
+            </div>
+            <div class="p-3 rounded-xl text-center" style="background: var(--color-background); border: 1px solid var(--color-border);">
+              <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Event Loop p99</p>
+              <p class="text-xl font-bold font-mono" [class]="eventLoopColor">{{ eventLoopP99 }}</p>
+              <p class="text-[10px]" style="color: var(--color-text-muted);" *ngIf="performanceSnapshot?.eventLoop?.current">
+                mean: {{ performanceSnapshot!.eventLoop!.current!.mean.toFixed(1) }}ms
+              </p>
+            </div>
+          </div>
+
+          <!-- Charts Grid -->
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <app-metric-chart
+              label="Response Time (ms)"
+              [datapoints]="rtP50Points"
+              unit="ms"
+              color="#22c55e"
+              [secondaryDatapoints]="rtP95Points"
+              secondaryLabel="p95"
+              secondaryColor="#eab308"
+              [tertiaryDatapoints]="rtP99Points"
+              tertiaryLabel="p99"
+              tertiaryColor="#ef4444"
+              [loading]="loadingPerformance"
+            ></app-metric-chart>
+            <app-metric-chart
+              label="Throughput (req/s)"
+              [datapoints]="throughputPoints"
+              unit=""
+              color="#3b82f6"
+              [loading]="loadingPerformance"
+            ></app-metric-chart>
+          </div>
+
+          <!-- Slow Endpoints -->
+          <app-slow-endpoints
+            [endpoints]="performanceSnapshot?.slowestEndpoints ?? null"
+            [loading]="loadingPerformance"
+          ></app-slow-endpoints>
+
+          <!-- More Charts -->
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <app-metric-chart
+              label="Errores por minuto"
+              [datapoints]="errors4xxPoints"
+              unit=""
+              color="#eab308"
+              [secondaryDatapoints]="errors5xxPoints"
+              secondaryLabel="5xx"
+              secondaryColor="#ef4444"
+              [loading]="loadingPerformance"
+            ></app-metric-chart>
+            <app-metric-chart
+              label="Event Loop Lag p99 (ms)"
+              [datapoints]="eventLoopLagPoints"
+              unit="ms"
+              color="#a855f7"
+              [loading]="loadingPerformance"
+            ></app-metric-chart>
+          </div>
         </div>
       </div>
 
@@ -364,6 +462,11 @@ export class MonitoringComponent implements OnInit, OnDestroy {
   loadingRds = true;
   loadingApp = true;
 
+  performanceSnapshot: PerformanceSnapshot | null = null;
+  performanceHistory: PerformanceHistory | null = null;
+  loadingPerformance = true;
+  performanceTimeRange: TimeRange = '1h';
+
   ec2TimeRange: TimeRange = '1h';
   rdsTimeRange: TimeRange = '1h';
 
@@ -445,6 +548,95 @@ export class MonitoringComponent implements OnInit, OnDestroy {
     return `${this.overview.server.disk.used} / ${this.overview.server.disk.size}`;
   }
 
+  // Performance computed values
+  get avgResponseTime(): string {
+    return this.performanceSnapshot ? `${this.performanceSnapshot.responseTime.mean.toFixed(0)}ms` : '--';
+  }
+
+  get avgResponseTimeBg(): string {
+    const ms = this.performanceSnapshot?.responseTime.mean ?? 0;
+    if (ms >= 500) return 'bg-red-500/10';
+    if (ms >= 200) return 'bg-yellow-500/10';
+    return 'bg-green-500/10';
+  }
+
+  get avgResponseTimeColor(): string {
+    const ms = this.performanceSnapshot?.responseTime.mean ?? 0;
+    if (ms >= 500) return 'text-red-500';
+    if (ms >= 200) return 'text-yellow-500';
+    return 'text-green-500';
+  }
+
+  get reqPerSec(): string {
+    return this.performanceSnapshot ? `${this.performanceSnapshot.throughput.current.toFixed(1)}` : '--';
+  }
+
+  get errorRate(): string {
+    if (!this.performanceSnapshot) return '--';
+    const e = this.performanceSnapshot.errors.last5min;
+    if (e.total === 0) return '0%';
+    return `${(((e.errors4xx + e.errors5xx) / e.total) * 100).toFixed(1)}%`;
+  }
+
+  get errorRateBg(): string {
+    if (!this.performanceSnapshot) return 'bg-green-500/10';
+    const e = this.performanceSnapshot.errors.last5min;
+    const rate = e.total > 0 ? (e.errors4xx + e.errors5xx) / e.total * 100 : 0;
+    if (rate >= 5) return 'bg-red-500/10';
+    if (rate >= 1) return 'bg-yellow-500/10';
+    return 'bg-green-500/10';
+  }
+
+  get errorRateColor(): string {
+    if (!this.performanceSnapshot) return 'text-green-500';
+    const e = this.performanceSnapshot.errors.last5min;
+    const rate = e.total > 0 ? (e.errors4xx + e.errors5xx) / e.total * 100 : 0;
+    if (rate >= 5) return 'text-red-500';
+    if (rate >= 1) return 'text-yellow-500';
+    return 'text-green-500';
+  }
+
+  get eventLoopP99(): string {
+    return this.performanceSnapshot?.eventLoop?.current ? `${this.performanceSnapshot.eventLoop.current.p99.toFixed(1)}ms` : '--';
+  }
+
+  get eventLoopBg(): string {
+    const ms = this.performanceSnapshot?.eventLoop?.current?.p99 ?? 0;
+    if (ms >= 100) return 'bg-red-500/10';
+    if (ms >= 50) return 'bg-yellow-500/10';
+    return 'bg-green-500/10';
+  }
+
+  get eventLoopColor(): string {
+    const ms = this.performanceSnapshot?.eventLoop?.current?.p99 ?? 0;
+    if (ms >= 100) return 'text-red-500';
+    if (ms >= 50) return 'text-yellow-500';
+    return 'text-green-500';
+  }
+
+  // Time series mappers for charts
+  get rtP50Points(): TimeSeriesPoint[] {
+    return this.performanceHistory?.responseTimes?.map(r => ({ timestamp: r.timestamp, value: r.p50 })) || [];
+  }
+  get rtP95Points(): TimeSeriesPoint[] {
+    return this.performanceHistory?.responseTimes?.map(r => ({ timestamp: r.timestamp, value: r.p95 })) || [];
+  }
+  get rtP99Points(): TimeSeriesPoint[] {
+    return this.performanceHistory?.responseTimes?.map(r => ({ timestamp: r.timestamp, value: r.p99 })) || [];
+  }
+  get throughputPoints(): TimeSeriesPoint[] {
+    return this.performanceHistory?.throughput?.map(t => ({ timestamp: t.timestamp, value: t.requestsPerSecond })) || [];
+  }
+  get errors4xxPoints(): TimeSeriesPoint[] {
+    return this.performanceHistory?.errors?.map(e => ({ timestamp: e.timestamp, value: e.errors4xx })) || [];
+  }
+  get errors5xxPoints(): TimeSeriesPoint[] {
+    return this.performanceHistory?.errors?.map(e => ({ timestamp: e.timestamp, value: e.errors5xx })) || [];
+  }
+  get eventLoopLagPoints(): TimeSeriesPoint[] {
+    return this.performanceHistory?.eventLoopLag?.map(e => ({ timestamp: e.timestamp, value: e.p99 })) || [];
+  }
+
   get hitRate(): string {
     if (!this.appMetrics?.redis) return '0';
     const hits = this.appMetrics.redis.keyspaceHits;
@@ -478,6 +670,8 @@ export class MonitoringComponent implements OnInit, OnDestroy {
       .subscribe(() => {
         this.fetchOverview();
         this.fetchAppMetrics();
+        this.fetchPerformance();
+        this.fetchPerformanceHistory();
       });
 
     // Poll EC2/RDS metrics every 60s
@@ -508,6 +702,11 @@ export class MonitoringComponent implements OnInit, OnDestroy {
   onRdsTimeRangeChange(range: TimeRange): void {
     this.rdsTimeRange = range;
     this.fetchRdsMetrics();
+  }
+
+  onPerformanceTimeRangeChange(range: TimeRange): void {
+    this.performanceTimeRange = range;
+    this.fetchPerformanceHistory();
   }
 
   // -- Formatters --
@@ -595,6 +794,27 @@ export class MonitoringComponent implements OnInit, OnDestroy {
         this.rdsMetrics = data;
         this.loadingRds = false;
       });
+  }
+
+  private fetchPerformance(): void {
+    this.monitoringService.getPerformance().pipe(
+      map((res) => res.data),
+      catchError(() => of(null)),
+      takeUntil(this.destroy$),
+    ).subscribe((data) => {
+      this.performanceSnapshot = data;
+      this.loadingPerformance = false;
+    });
+  }
+
+  private fetchPerformanceHistory(): void {
+    this.monitoringService.getPerformanceHistory(this.performanceTimeRange).pipe(
+      map((res) => res.data),
+      catchError(() => of(null)),
+      takeUntil(this.destroy$),
+    ).subscribe((data) => {
+      this.performanceHistory = data;
+    });
   }
 
   private fetchAppMetrics(): void {

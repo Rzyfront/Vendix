@@ -125,3 +125,38 @@ export interface ServerInfo {
   disk: { filesystem: string; size: string; used: string; available: string; usePercent: string; mountedOn: string } | null;
   memory: { total: number; free: number; used: number; usedPercent: number };
 }
+
+// Performance Monitoring
+export interface PerformanceSnapshot {
+  responseTime: { p50: number; p95: number; p99: number; mean: number; min: number; max: number };
+  slowestEndpoints: SlowEndpoint[];
+  throughput: { current: number; history: { timestamp: string; count: number; totalDuration: number; errors4xx: number; errors5xx: number }[] };
+  eventLoop: { current: EventLoopStats | null; samples: (EventLoopStats & { timestamp: string })[] };
+  errors: { last1min: ErrorCounts; last5min: ErrorCounts; last60min: ErrorCounts };
+  activeRequests: number;
+  totalRecorded: number;
+}
+
+export interface SlowEndpoint {
+  path: string;
+  method: string;
+  avgDuration: number;
+  p95Duration: number;
+  count: number;
+}
+
+export interface EventLoopStats {
+  min: number; max: number; mean: number;
+  p50: number; p95: number; p99: number;
+}
+
+export interface ErrorCounts {
+  errors4xx: number; errors5xx: number; total: number;
+}
+
+export interface PerformanceHistory {
+  responseTimes: { timestamp: string; p50: number; p95: number; p99: number; mean: number }[];
+  throughput: { timestamp: string; requestsPerSecond: number }[];
+  errors: { timestamp: string; errors4xx: number; errors5xx: number }[];
+  eventLoopLag: { timestamp: string; p99: number }[];
+}

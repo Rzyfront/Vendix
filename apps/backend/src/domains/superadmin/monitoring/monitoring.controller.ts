@@ -10,6 +10,7 @@ import { RdsMetricsService } from './services/rds-metrics.service';
 import { AppMetricsService } from './services/app-metrics.service';
 import { ServerMetricsService } from './services/server-metrics.service';
 import { MetricsQueryDto } from './dto/metrics-query.dto';
+import { PerformanceMetricsService } from './services/performance-metrics.service';
 
 @ApiTags('Monitoring')
 @Controller('superadmin/monitoring')
@@ -22,6 +23,7 @@ export class MonitoringController {
     private readonly rdsMetricsService: RdsMetricsService,
     private readonly appMetricsService: AppMetricsService,
     private readonly serverMetricsService: ServerMetricsService,
+    private readonly performanceMetricsService: PerformanceMetricsService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -63,5 +65,21 @@ export class MonitoringController {
   async getServerInfo() {
     const data = this.serverMetricsService.getServerInfo();
     return this.responseService.success(data, 'Server info retrieved');
+  }
+
+  @Get('performance')
+  @ApiOperation({ summary: 'Get application performance metrics snapshot' })
+  @ApiResponse({ status: 200, description: 'Performance metrics retrieved' })
+  async getPerformance() {
+    const data = this.performanceMetricsService.getPerformanceSnapshot();
+    return this.responseService.success(data, 'Performance metrics retrieved');
+  }
+
+  @Get('performance/history')
+  @ApiOperation({ summary: 'Get performance time-series history' })
+  @ApiResponse({ status: 200, description: 'Performance history retrieved' })
+  async getPerformanceHistory(@Query() query: MetricsQueryDto) {
+    const data = this.performanceMetricsService.getPerformanceHistory(query.period || '1h');
+    return this.responseService.success(data, 'Performance history retrieved');
   }
 }

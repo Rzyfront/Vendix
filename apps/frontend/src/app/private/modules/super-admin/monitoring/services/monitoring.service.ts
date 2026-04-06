@@ -9,6 +9,8 @@ import {
   AppMetrics,
   ServerInfo,
   TimeRange,
+  PerformanceSnapshot,
+  PerformanceHistory,
 } from '../interfaces';
 
 @Injectable()
@@ -49,5 +51,14 @@ export class MonitoringService {
 
   getServerInfo(): Observable<{ data: ServerInfo }> {
     return this.http.get<{ data: ServerInfo }>(`${this.baseUrl}/server`);
+  }
+
+  getPerformance(): Observable<{ data: PerformanceSnapshot }> {
+    return this.http.get<{ data: PerformanceSnapshot }>(`${this.baseUrl}/performance`);
+  }
+
+  getPerformanceHistory(period: TimeRange = '1h'): Observable<{ data: PerformanceHistory }> {
+    const params = new HttpParams().set('period', period);
+    return this.http.get<{ data: PerformanceHistory }>(`${this.baseUrl}/performance/history`, { params });
   }
 }

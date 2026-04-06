@@ -46,6 +46,9 @@ export class MetricChartComponent
   @Input() secondaryDatapoints: TimeSeriesPoint[] | undefined | null;
   @Input() secondaryLabel: string = '';
   @Input() secondaryColor: string = '#ef4444';
+  @Input() tertiaryDatapoints: TimeSeriesPoint[] | undefined | null;
+  @Input() tertiaryLabel: string = '';
+  @Input() tertiaryColor: string = '#eab308';
   @Input() loading: boolean = false;
 
   @ViewChild('chartCanvas') chartCanvas!: ElementRef<HTMLCanvasElement>;
@@ -151,6 +154,23 @@ export class MetricChartComponent
         backgroundColor: this.secondaryColor + '20',
         borderWidth: 2,
         fill: true,
+        tension: 0.3,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+      });
+    }
+
+    if (this.tertiaryDatapoints && this.tertiaryDatapoints.length > 0) {
+      datasets.push({
+        label: this.tertiaryLabel || 'Tertiary',
+        data: this.tertiaryDatapoints.map((p) => ({
+          x: new Date(p.timestamp),
+          y: p.value,
+        })),
+        borderColor: this.tertiaryColor,
+        backgroundColor: this.tertiaryColor + '20',
+        borderWidth: 2,
+        fill: false,
         tension: 0.3,
         pointRadius: 0,
         pointHoverRadius: 4,

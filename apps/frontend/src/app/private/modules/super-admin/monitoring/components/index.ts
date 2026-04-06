@@ -3,3 +3,4 @@ export { TimeRangeSelectorComponent } from './time-range-selector/time-range-sel
 export { StatusIndicatorComponent } from './status-indicator/status-indicator.component';
 export { ProcessInfoComponent } from './docker-status/docker-status.component';
 export { QueueStatsComponent } from './queue-stats/queue-stats.component';
+export { SlowEndpointsComponent } from './slow-endpoints/slow-endpoints.component';
