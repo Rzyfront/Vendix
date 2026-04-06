@@ -1149,6 +1149,9 @@ export class PaymentsService {
           additionalData.completed_at = new Date();
         }
         break;
+      case 'pending_payment':
+        orderState = 'pending_payment';
+        break;
       case 'pending':
         orderState = 'created';
         break;

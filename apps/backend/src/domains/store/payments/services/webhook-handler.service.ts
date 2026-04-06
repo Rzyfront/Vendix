@@ -1,4 +1,5 @@
 import { Injectable, Logger, Inject, forwardRef, Optional } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { WebhookEvent } from '../interfaces';
 import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
@@ -10,6 +11,7 @@ export class WebhookHandlerService {
 
   constructor(
     private prisma: StorePrismaService,
+    private readonly eventEmitter: EventEmitter2,
     @Inject(forwardRef(() => OrderFlowService))
     private orderFlowService: OrderFlowService,
     @Optional() @Inject(forwardRef(() => PaymentLinksService))
@@ -173,12 +175,40 @@ export class WebhookHandlerService {
         .filter((p: any) => p.state === 'succeeded' || p.state === 'captured')
         .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
 
-      // Use OrderFlowService for state transitions
       if (totalPaid >= Number(order.grand_total)) {
         if (order.state === 'pending_payment') {
-          // Confirm payment through the flow service
-          await this.orderFlowService.confirmPayment(orderId);
-          this.logger.log(`Order ${orderId} payment confirmed via OrderFlowService`);
+          // Transicionar directamente con client unscoped (webhooks no tienen tenant context)
+          await client.orders.update({
+            where: { id: orderId },
+            data: {
+              state: 'processing',
+              paid_at: new Date(),
+              updated_at: new Date(),
+            },
+          });
+
+          // Actualizar pago pendiente a succeeded (si no fue actualizado ya por updatePaymentStatus)
+          const pendingPayment = order.payments.find((p: any) => p.state === 'pending');
+          if (pendingPayment) {
+            await client.payments.update({
+              where: { id: pendingPayment.id },
+              data: {
+                state: 'succeeded',
+                paid_at: new Date(),
+                updated_at: new Date(),
+              },
+            });
+          }
+
+          // Emitir evento de cambio de estado
+          this.eventEmitter.emit('order.status_changed', {
+            order_id: orderId,
+            store_id: order.store_id,
+            previous_state: 'pending_payment',
+            new_state: 'processing',
+          });
+
+          this.logger.log(`Order ${orderId} payment confirmed (unscoped webhook), moved to processing`);
         }
       }
     } catch (error) {
@@ -209,20 +239,39 @@ export class WebhookHandlerService {
 
         const mappedStatus = statusMap[txn.status];
         if (mappedStatus) {
-          await this.updatePaymentStatus(txn.id, mappedStatus, data);
+          // Usar reference (vendix_{storeId}_{orderId}_{timestamp}) que guardamos en el pago
+          const lookupKey = txn.reference || txn.id;
+          await this.updatePaymentStatus(lookupKey, mappedStatus, data);
 
-          // Auto-cancel order and release stock when payment is declined or errored
+          // Auto-cancel order when payment is declined or errored (unscoped, sin tenant context)
           if (mappedStatus === 'failed' || mappedStatus === 'cancelled') {
             try {
               const client = this.prisma.withoutScope();
               const payment = await client.payments.findFirst({
-                where: { transaction_id: txn.id },
+                where: { transaction_id: lookupKey },
               });
               if (payment) {
-                await this.orderFlowService.cancelOrder(payment.order_id, {
-                  reason: `Pago rechazado por Wompi: ${txn.status}`,
+                const cancelOrder = await client.orders.findUnique({
+                  where: { id: payment.order_id },
                 });
-                this.logger.log(`Order ${payment.order_id} auto-cancelled due to payment ${txn.status}`);
+                if (cancelOrder && ['created', 'pending_payment', 'processing'].includes(cancelOrder.state)) {
+                  await client.orders.update({
+                    where: { id: payment.order_id },
+                    data: {
+                      state: 'cancelled',
+                      updated_at: new Date(),
+                    },
+                  });
+
+                  this.eventEmitter.emit('order.status_changed', {
+                    order_id: payment.order_id,
+                    store_id: cancelOrder.store_id,
+                    previous_state: cancelOrder.state,
+                    new_state: 'cancelled',
+                  });
+
+                  this.logger.log(`Order ${payment.order_id} auto-cancelled due to payment ${txn.status}`);
+                }
               }
             } catch (cancelErr) {
               this.logger.warn(`Failed to auto-cancel order: ${cancelErr.message}`);
