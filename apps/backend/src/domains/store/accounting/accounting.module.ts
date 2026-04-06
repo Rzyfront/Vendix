@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { S3Module } from '../../../common/services/s3.module';
+import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
 
 // Chart of Accounts
 import { ChartOfAccountsController } from './chart-of-accounts/chart-of-accounts.controller';
@@ -79,6 +80,7 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
     FixedAssetCategoriesController,
   ],
   providers: [
+    ModuleFlowGuard,
     ChartOfAccountsService,
     JournalEntriesService,
     JournalEntryFlowService,

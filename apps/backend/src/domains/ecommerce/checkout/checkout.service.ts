@@ -854,6 +854,19 @@ export class CheckoutService {
 
     const storeId = RequestContextService.getStoreId();
     const reference = `vendix_${storeId}_${dto.order_id}_${Date.now()}`;
+
+    // Guardar la referencia en el pago pendiente para que el webhook lo encuentre
+    await this.store_prisma.payments.updateMany({
+      where: {
+        order_id: dto.order_id,
+        state: 'pending',
+      },
+      data: {
+        transaction_id: reference,
+        updated_at: new Date(),
+      },
+    });
+
     const amountInCents = Math.round(dto.amount * 100);
     const currency = dto.currency || 'COP';
 

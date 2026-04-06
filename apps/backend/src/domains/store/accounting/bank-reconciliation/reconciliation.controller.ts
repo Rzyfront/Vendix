@@ -1,5 +1,6 @@
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { ModuleFlowGuard, RequireModuleFlow } from '../../../../common/guards/module-flow.guard';
 import { UseGuards } from '@nestjs/common';
 import {
   Controller,
@@ -20,7 +21,8 @@ import { CreateReconciliationDto } from './dto/create-reconciliation.dto';
 import { ManualMatchDto } from './dto/manual-match.dto';
 
 @Controller('store/accounting/bank-reconciliation/reconciliations')
-@UseGuards(PermissionsGuard)
+@UseGuards(ModuleFlowGuard, PermissionsGuard)
+@RequireModuleFlow('accounting')
 export class ReconciliationController {
   constructor(
     private readonly reconciliation_service: ReconciliationService,

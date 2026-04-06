@@ -7,6 +7,7 @@ import {
   IsDateString,
   ValidateNested,
   Min,
+  Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
@@ -36,11 +37,15 @@ export class SalesOrderItemDto {
 
   @ApiProperty({ description: 'Discount percentage (optional)' })
   @IsNumber()
+  @Min(0)
+  @Max(100)
   @IsOptional()
   discount_percentage?: number;
 
   @ApiProperty({ description: 'Tax rate (optional)' })
   @IsNumber()
+  @Min(0)
+  @Max(100)
   @IsOptional()
   tax_rate?: number;
 

@@ -24,6 +24,8 @@ import { RequestContextInterceptor } from '@common/interceptors/request-context.
 
 import { AuditModule } from './common/audit/audit.module';
 import { AuditInterceptor } from './common/audit/audit.interceptor';
+import { PerformanceModule } from './domains/superadmin/monitoring/performance.module';
+import { PerformanceInterceptor } from './domains/superadmin/monitoring/interceptors/performance.interceptor';
 import { SecretsModule } from './common/config/secrets.module';
 import { DefaultPanelUIModule } from './common/services/default-panel-ui.module';
 import { HelpersModule } from './common/helpers/helpers.module';
@@ -58,11 +60,16 @@ import { VendixCacheModule } from './common/cache/cache.module';
     VendixCacheModule,
     AIEngineModule,
     EncryptionModule,
+    PerformanceModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
     RequestContextService,
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: PerformanceInterceptor,
+    },
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,

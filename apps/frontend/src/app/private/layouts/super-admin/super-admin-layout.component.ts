@@ -1,6 +1,6 @@
 import { Component, ViewChild, inject, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule, Router } from '@angular/router';
+import { RouterModule, Router, NavigationEnd } from '@angular/router';
 import {
   SidebarComponent,
   MenuItem,
@@ -9,7 +9,7 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { SupportService } from '../../modules/super-admin/support/services/support.service';
 import { Observable, Subject, BehaviorSubject, timer, combineLatest, of } from 'rxjs';
-import { takeUntil, map, switchMap, startWith } from 'rxjs/operators';
+import { takeUntil, map, switchMap, startWith, filter } from 'rxjs/operators';
 
 @Component({
   selector: 'app-super-admin-layout',
@@ -74,6 +74,7 @@ export class SuperAdminLayoutComponent implements OnInit, OnDestroy {
   openTicketsCount$ = new BehaviorSubject<number>(0);
   private destroy$ = new Subject<void>();
   private supportService = inject(SupportService);
+  private router = inject(Router);
 
   constructor(private authFacade: AuthFacade) {
     this.organizationName$ = this.authFacade.userOrganizationName$;
@@ -81,6 +82,13 @@ export class SuperAdminLayoutComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    // Dynamic breadcrumb based on route
+    this.updateBreadcrumb(this.router.url);
+    this.router.events.pipe(
+      filter((e): e is NavigationEnd => e instanceof NavigationEnd),
+      takeUntil(this.destroy$),
+    ).subscribe((e) => this.updateBreadcrumb(e.urlAfterRedirects));
+
     // Load support tickets stats for badge - refresh every 60 seconds
     timer(0, 60000).pipe(
       switchMap(() => this.supportService.getTicketStats()),
@@ -110,6 +118,32 @@ export class SuperAdminLayoutComponent implements OnInit, OnDestroy {
     current: 'Panel Principal',
   };
 
+  private readonly routeTitles: Record<string, string> = {
+    '/super-admin/dashboard': 'Panel Principal',
+    '/super-admin/monitoring': 'Monitoreo del Servidor',
+    '/super-admin/organizations': 'Organizaciones',
+    '/super-admin/stores': 'Tiendas',
+    '/super-admin/users': 'Usuarios',
+    '/super-admin/roles': 'Roles',
+    '/super-admin/payment-methods': 'Métodos de Pago',
+    '/super-admin/domains': 'Dominios',
+    '/super-admin/legal-documents': 'Documentos Legales',
+    '/super-admin/help-center': 'Centro de Ayuda',
+    '/super-admin/currencies': 'Monedas',
+    '/super-admin/settings/shipping': 'Envíos del Sistema',
+    '/super-admin/audit': 'Auditoría',
+    '/super-admin/billing': 'Facturación',
+    '/super-admin/support': 'Soporte',
+    '/super-admin/system/ai-engine': 'AI Engine',
+    '/super-admin/system/templates': 'Plantillas',
+    '/super-admin/system/settings': 'Configuración del Sistema',
+    '/super-admin/system/logs': 'Registros',
+    '/super-admin/system/backups': 'Copias de Seguridad',
+    '/super-admin/analytics/platform': 'Analíticas de Plataforma',
+    '/super-admin/analytics/users': 'Analíticas de Usuarios',
+    '/super-admin/analytics/performance': 'Rendimiento',
+  };
+
   user = {
     name: 'Usuario Administrador',
     role: 'Super Administrador',
@@ -122,6 +156,11 @@ export class SuperAdminLayoutComponent implements OnInit, OnDestroy {
       label: 'Panel Principal',
       icon: 'home',
       route: '/super-admin/dashboard',
+    },
+    {
+      label: 'Monitoreo',
+      icon: 'activity',
+      route: '/super-admin/monitoring',
     },
     {
       label: 'Organizaciones',
@@ -266,6 +305,14 @@ export class SuperAdminLayoutComponent implements OnInit, OnDestroy {
     } else {
       // Desktop: toggle collapsed state
       this.sidebarCollapsed = !this.sidebarCollapsed;
+    }
+  }
+
+  private updateBreadcrumb(url: string): void {
+    const path = url.split('?')[0];
+    const title = this.routeTitles[path];
+    if (title) {
+      this.breadcrumb = { parent: 'Super Administrador', current: title };
     }
   }
 }

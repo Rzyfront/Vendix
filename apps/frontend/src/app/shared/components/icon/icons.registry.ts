@@ -213,6 +213,9 @@ import {
   FlaskConical,
   Plug,
   Webhook,
+  // Monitoring icons
+  MemoryStick,
+  HeartPulse,
 } from 'lucide-angular';
 
 /**
@@ -494,6 +497,11 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'flask-conical': FlaskConical,
   'plug': Plug,
   'webhook': Webhook,
+
+  // Monitoring icons
+  'memory-stick': MemoryStick,
+  'heart-pulse': HeartPulse,
+  'hard-drive': HardDrive,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

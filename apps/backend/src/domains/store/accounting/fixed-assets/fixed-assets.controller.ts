@@ -14,6 +14,7 @@ import { FixedAssetsService } from './fixed-assets.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { ModuleFlowGuard, RequireModuleFlow } from '../../../../common/guards/module-flow.guard';
 import { CreateFixedAssetDto } from './dto/create-fixed-asset.dto';
 import { UpdateFixedAssetDto } from './dto/update-fixed-asset.dto';
 import { QueryFixedAssetsDto } from './dto/query-fixed-assets.dto';
@@ -21,7 +22,8 @@ import { DisposeAssetDto } from './dto/dispose-asset.dto';
 import { RunDepreciationDto } from './dto/run-depreciation.dto';
 
 @Controller('store/accounting/fixed-assets')
-@UseGuards(PermissionsGuard)
+@UseGuards(ModuleFlowGuard, PermissionsGuard)
+@RequireModuleFlow('accounting')
 export class FixedAssetsController {
   constructor(
     private readonly fixed_assets_service: FixedAssetsService,

@@ -127,6 +127,13 @@ export const superAdminRoutes: Routes = [
             '../../private/modules/super-admin/help-center/pages/article-form/article-form.component'
           ).then((c) => c.ArticleFormComponent),
       },
+      {
+        path: 'monitoring',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/monitoring/monitoring.component'
+          ).then((c) => c.MonitoringComponent),
+      },
       // Placeholder routes - modules under construction
       {
         path: 'billing',
@@ -187,9 +194,8 @@ export const superAdminRoutes: Routes = [
         path: 'system/backups',
         loadComponent: () =>
           import(
-            '../../shared/components/under-construction/under-construction.component'
-          ).then((c) => c.UnderConstructionComponent),
-        data: { title: 'Copias de Seguridad', description: 'El módulo de copias de seguridad está siendo desarrollado.' },
+            '../../private/modules/super-admin/backups/backups.component'
+          ).then((c) => c.BackupsComponent),
       },
     ],
   },

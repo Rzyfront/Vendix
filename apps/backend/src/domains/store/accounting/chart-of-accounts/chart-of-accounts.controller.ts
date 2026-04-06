@@ -1,5 +1,6 @@
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { ModuleFlowGuard, RequireModuleFlow } from '../../../../common/guards/module-flow.guard';
 import { UseGuards } from '@nestjs/common';
 import {
   Controller,
@@ -20,7 +21,8 @@ import { UpdateAccountDto } from './dto/update-account.dto';
 import { QueryAccountDto } from './dto/query-account.dto';
 
 @Controller('store/accounting/chart-of-accounts')
-@UseGuards(PermissionsGuard)
+@UseGuards(ModuleFlowGuard, PermissionsGuard)
+@RequireModuleFlow('accounting')
 export class ChartOfAccountsController {
   constructor(
     private readonly chart_of_accounts_service: ChartOfAccountsService,

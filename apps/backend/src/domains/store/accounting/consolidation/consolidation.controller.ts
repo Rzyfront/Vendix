@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { ModuleFlowGuard, RequireModuleFlow } from '../../../../common/guards/module-flow.guard';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { ConsolidationService } from './consolidation.service';
 import { IntercompanyDetectionService } from './intercompany-detection.service';
@@ -22,7 +23,8 @@ import { QueryTransactionsDto } from './dto/query-transactions.dto';
 import { CreateAdjustmentDto } from './dto/create-adjustment.dto';
 
 @Controller('store/accounting/consolidation')
-@UseGuards(PermissionsGuard)
+@UseGuards(ModuleFlowGuard, PermissionsGuard)
+@RequireModuleFlow('accounting')
 export class ConsolidationController {
   constructor(
     private readonly consolidation_service: ConsolidationService,

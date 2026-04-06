@@ -1,5 +1,6 @@
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { ModuleFlowGuard, RequireModuleFlow } from '../../../../common/guards/module-flow.guard';
 import { UseGuards } from '@nestjs/common';
 import {
   Controller,
@@ -19,7 +20,8 @@ import { CreateFiscalPeriodDto } from './dto/create-fiscal-period.dto';
 import { UpdateFiscalPeriodDto } from './dto/update-fiscal-period.dto';
 
 @Controller('store/accounting/fiscal-periods')
-@UseGuards(PermissionsGuard)
+@UseGuards(ModuleFlowGuard, PermissionsGuard)
+@RequireModuleFlow('accounting')
 export class FiscalPeriodsController {
   constructor(
     private readonly fiscal_periods_service: FiscalPeriodsService,

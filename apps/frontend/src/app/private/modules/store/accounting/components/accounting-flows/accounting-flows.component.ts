@@ -62,7 +62,7 @@ export class AccountingFlowsComponent implements OnInit {
     this.http.get<any>(`${environment.apiUrl}/store/settings`).subscribe({
       next: (res) => {
         const settings = res?.data?.settings || res?.data || res;
-        const flows = settings?.accounting_flows || {};
+        const flows = settings?.module_flows?.accounting || settings?.accounting_flows || {};
         this.flows = FLOW_DEFINITIONS.map((def) => ({
           ...def,
           enabled: flows[def.key] !== false,

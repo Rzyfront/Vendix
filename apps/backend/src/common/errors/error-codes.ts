@@ -1464,6 +1464,18 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Invalid file type — only images and PDFs are accepted',
   },
+
+  // Monitoring
+  MON_CW_001: {
+    code: 'MON_CW_001',
+    httpStatus: 502,
+    devMessage: 'CloudWatch API request failed',
+  },
+  MON_METRICS_001: {
+    code: 'MON_METRICS_001',
+    httpStatus: 500,
+    devMessage: 'Failed to collect server metrics',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export type ErrorCodeKey = keyof typeof ErrorCodes;

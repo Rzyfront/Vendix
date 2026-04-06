@@ -1,5 +1,6 @@
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { ModuleFlowGuard, RequireModuleFlow } from '../../../../common/guards/module-flow.guard';
 import { UseGuards } from '@nestjs/common';
 import {
   Controller,
@@ -22,7 +23,8 @@ import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto';
 import { QueryJournalEntryDto } from './dto/query-journal-entry.dto';
 
 @Controller('store/accounting/journal-entries')
-@UseGuards(PermissionsGuard)
+@UseGuards(ModuleFlowGuard, PermissionsGuard)
+@RequireModuleFlow('accounting')
 export class JournalEntriesController {
   constructor(
     private readonly journal_entries_service: JournalEntriesService,
