@@ -11,6 +11,21 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
+class CheckoutCartItemDto {
+  @IsInt()
+  @Min(1)
+  product_id: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  product_variant_id?: number;
+
+  @IsInt()
+  @Min(1)
+  quantity: number;
+}
+
 export class CheckoutDto {
   // Booking selections for bookable services
   @IsOptional()
@@ -21,10 +36,12 @@ export class CheckoutDto {
 
   @IsOptional()
   @IsInt()
+  @Min(1)
   shipping_method_id?: number;
 
   @IsOptional()
   @IsInt()
+  @Min(1)
   shipping_rate_id?: number;
 
   @IsOptional()
