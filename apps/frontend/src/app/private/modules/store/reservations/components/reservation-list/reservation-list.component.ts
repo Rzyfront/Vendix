@@ -89,14 +89,7 @@ export class ReservationListComponent {
 
   filterValues: FilterValues = {};
 
-  dropdownActions: DropdownAction[] = [
-    {
-      label: 'Nueva Reserva',
-      icon: 'plus',
-      action: 'create',
-      variant: 'primary',
-    },
-  ];
+  dropdownActions: DropdownAction[] = [];
 
   columns: TableColumn[] = [
     { key: 'booking_number', label: 'N. Reserva', sortable: true, priority: 1 },

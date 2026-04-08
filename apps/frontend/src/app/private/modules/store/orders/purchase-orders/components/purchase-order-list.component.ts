@@ -100,14 +100,7 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
   filterValues: FilterValues = {};
 
   // Dropdown actions
-  dropdownActions: DropdownAction[] = [
-    {
-      label: 'Nueva Orden',
-      icon: 'plus',
-      action: 'create',
-      variant: 'primary',
-    },
-  ];
+  dropdownActions: DropdownAction[] = [];
 
   // Table configuration
   table_columns: TableColumn[] = [

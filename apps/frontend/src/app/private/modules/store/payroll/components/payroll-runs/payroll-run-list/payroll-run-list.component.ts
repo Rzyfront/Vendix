@@ -95,14 +95,7 @@ export class PayrollRunListComponent {
     },
   ];
 
-  dropdownActions: DropdownAction[] = [
-    {
-      label: 'Nueva Nomina',
-      icon: 'plus',
-      action: 'create',
-      variant: 'primary',
-    },
-  ];
+  dropdownActions: DropdownAction[] = [];
 
   tableActions: TableAction[] = [
     {

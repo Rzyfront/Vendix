@@ -177,14 +177,7 @@ export class AdvanceListComponent {
   ];
 
   // Dropdown actions
-  dropdownActions: DropdownAction[] = [
-    {
-      label: 'Nuevo Adelanto',
-      icon: 'plus',
-      action: 'create',
-      variant: 'primary',
-    },
-  ];
+  dropdownActions: DropdownAction[] = [];
 
   onSearch(term: string): void {
     this.search.emit(term);

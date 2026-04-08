@@ -53,7 +53,7 @@ export class PayrollRulesService {
     const org_rules_by_year = settings?.payroll?.rules ?? {};
 
     return published.map(sys => {
-      const system_rules = sys.rules as PayrollRules;
+      const system_rules = sys.rules as unknown as PayrollRules;
       const org_rules = org_rules_by_year[String(sys.year)] as Partial<PayrollRules> | undefined;
 
       const diff: Record<string, { current: any; system: any }> = {};
@@ -104,7 +104,7 @@ export class PayrollRulesService {
       throw new NotFoundException(`No hay parámetros publicados para el año ${year}`);
     }
 
-    const system_rules = system.rules as PayrollRules;
+    const system_rules = system.rules as unknown as PayrollRules;
     return this.updateRulesForYear(year, system_rules);
   }
 

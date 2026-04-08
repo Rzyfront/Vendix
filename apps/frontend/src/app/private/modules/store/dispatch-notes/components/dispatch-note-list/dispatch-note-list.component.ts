@@ -103,14 +103,7 @@ export class DispatchNoteListComponent implements OnInit, OnDestroy {
 
   filter_values: FilterValues = {};
 
-  dropdown_actions: DropdownAction[] = [
-    {
-      label: 'Nueva Remision',
-      icon: 'plus',
-      action: 'create',
-      variant: 'primary',
-    },
-  ];
+  dropdown_actions: DropdownAction[] = [];
 
   // Table configuration
   table_columns: TableColumn[] = [

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PerformanceCollectorService, RequestRecord, MinuteBucket, EventLoopSample } from './performance-collector.service';
 
-interface ResponseTimeStats {
+export interface ResponseTimeStats {
   p50: number;
   p95: number;
   p99: number;
@@ -10,7 +10,7 @@ interface ResponseTimeStats {
   max: number;
 }
 
-interface SlowEndpoint {
+export interface SlowEndpoint {
   path: string;
   method: string;
   avgDuration: number;
@@ -18,7 +18,7 @@ interface SlowEndpoint {
   count: number;
 }
 
-interface ErrorCounts {
+export interface ErrorCounts {
   errors4xx: number;
   errors5xx: number;
   total: number;
