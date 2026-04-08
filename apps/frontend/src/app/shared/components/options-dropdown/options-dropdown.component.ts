@@ -50,6 +50,9 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
   /** Actions to display in the dropdown */
   @Input() actions: DropdownAction[] = [];
 
+  /** Whether to show the actions trigger button */
+  @Input() showActions: boolean = true;
+
   /** Current filter values */
   @Input() filterValues: FilterValues = {};
 
@@ -245,7 +248,7 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
   }
 
   get hasActions(): boolean {
-    return this.actions.length > 0;
+    return this.showActions && this.actions.length > 0;
   }
 
   get hasFilters(): boolean {

@@ -160,7 +160,7 @@ export class EmployeesService {
             id: dto.user_id,
             user_roles: {
               some: {
-                role: { name: UserRole.CUSTOMER },
+                roles: { name: UserRole.CUSTOMER },
               },
             },
           },
@@ -317,7 +317,7 @@ export class EmployeesService {
         }),
         user_roles: {
           none: {
-            role: {
+            roles: {
               name: UserRole.CUSTOMER,
             },
           },

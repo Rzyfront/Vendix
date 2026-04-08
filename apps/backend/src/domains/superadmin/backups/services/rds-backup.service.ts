@@ -22,7 +22,7 @@ import {
 } from '../../monitoring/constants/cloudwatch.constants';
 import { ConfigService } from '@nestjs/config';
 
-interface SnapshotInfo {
+export interface SnapshotInfo {
   id: string;
   type: 'automated' | 'manual';
   status: string;
@@ -32,7 +32,7 @@ interface SnapshotInfo {
   engine_version: string;
 }
 
-interface BackupStatus {
+export interface BackupStatus {
   last_backup: {
     id: string;
     created_at: string | null;
