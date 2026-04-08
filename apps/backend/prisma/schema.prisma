@@ -415,6 +415,19 @@ model organization_settings {
   organization    organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
 }
 
+model payroll_system_defaults {
+  id           Int       @id @default(autoincrement())
+  year         Int       @unique
+  rules        Json
+  decree_ref   String?   @db.VarChar(255)
+  notes        String?   @db.Text
+  is_published Boolean   @default(false)
+  published_at DateTime? @db.Timestamp(6)
+  published_by Int?
+  created_at   DateTime? @default(now()) @db.Timestamp(6)
+  updated_at   DateTime? @default(now()) @db.Timestamp(6)
+}
+
 model organization_payment_policies {
   id              Int @id @default(autoincrement())
   organization_id Int @unique
@@ -1984,6 +1997,7 @@ enum notification_type_enum {
   credit_completed
   new_review
   review_moderated
+  payroll_rules_update
 }
 
 model notifications {
@@ -3501,6 +3515,7 @@ model payroll_items {
   earnings             Json?
   deductions           Json?
   employer_costs       Json?
+  provisions           Json?
   total_earnings       Decimal   @default(0) @db.Decimal(12, 2)
   total_deductions     Decimal   @default(0) @db.Decimal(12, 2)
   total_employer_costs Decimal   @default(0) @db.Decimal(12, 2)

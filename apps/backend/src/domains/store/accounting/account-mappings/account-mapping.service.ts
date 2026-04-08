@@ -101,6 +101,31 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<string, { code: string; descriptio
   // Commissions
   'commission.calculated.expense': { code: '5295', description: 'Gastos Diversos - Comisiones' },
   'commission.calculated.payable': { code: '2335', description: 'Costos y Gastos por Pagar - Comisiones' },
+  // Nómina individual — gastos de nómina (débitos)
+  'payroll.approved.transport_subsidy': { code: '5105', description: 'Aux. Transporte Nómina' },
+  'payroll.approved.provision_severance': { code: '5205', description: 'Gasto Cesantías' },
+  'payroll.approved.provision_severance_interest': { code: '5205', description: 'Gasto Intereses Cesantías' },
+  'payroll.approved.provision_vacation': { code: '5205', description: 'Gasto Vacaciones' },
+  'payroll.approved.provision_bonus': { code: '5205', description: 'Gasto Prima de Servicios' },
+  'payroll.approved.health_employer': { code: '5110', description: 'EPS Empleador (Gasto)' },
+  'payroll.approved.pension_employer': { code: '5110', description: 'AFP Empleador (Gasto)' },
+  'payroll.approved.arl_expense': { code: '5110', description: 'ARL (Gasto)' },
+  'payroll.approved.sena_expense': { code: '5110', description: 'SENA (Gasto)' },
+  'payroll.approved.icbf_expense': { code: '5110', description: 'ICBF (Gasto)' },
+  'payroll.approved.compensation_fund_expense': { code: '5110', description: 'Caja Compensación (Gasto)' },
+  // Nómina individual — pasivos provisiones (créditos)
+  'payroll.approved.liability_severance': { code: '2610', description: 'Cesantías por Pagar' },
+  'payroll.approved.liability_severance_interest': { code: '2615', description: 'Intereses Cesantías por Pagar' },
+  'payroll.approved.liability_vacation': { code: '2620', description: 'Vacaciones por Pagar' },
+  'payroll.approved.liability_bonus': { code: '2625', description: 'Prima de Servicios por Pagar' },
+  // Nómina individual — aportes patronales por pagar (créditos)
+  'payroll.approved.health_employer_payable': { code: '2370', description: 'EPS Empleador por Pagar' },
+  'payroll.approved.pension_employer_payable': { code: '2380', description: 'AFP Empleador por Pagar' },
+  'payroll.approved.arl_payable': { code: '2370', description: 'ARL por Pagar' },
+  'payroll.approved.sena_payable': { code: '2370', description: 'SENA por Pagar' },
+  'payroll.approved.icbf_payable': { code: '2370', description: 'ICBF por Pagar' },
+  'payroll.approved.compensation_fund_payable': { code: '2370', description: 'Caja Compensación por Pagar' },
+  'payroll.approved.advance_deduction': { code: '1450', description: 'Descuento Anticipos Empleados' },
   // Cash Register
   'cash_register.opened.cash': { code: '1105', description: 'Caja (apertura)' },
   'cash_register.opened.cash_base': { code: '1110', description: 'Banco/Fondo base (apertura)' },

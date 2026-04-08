@@ -41,3 +41,14 @@ export interface PayrollRules {
 export interface PayrollSettingsSection {
   rules: Record<string, PayrollRules>;
 }
+
+/**
+ * Represents a system default update available for an org to apply.
+ */
+export interface PayrollUpdateAvailable {
+  year: number;
+  decree_ref: string | null;
+  published_at: Date | null;
+  has_diff: boolean;
+  diff: Record<string, { current: any; system: any }>;
+}

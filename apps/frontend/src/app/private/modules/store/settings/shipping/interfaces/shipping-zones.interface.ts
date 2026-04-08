@@ -1,6 +1,11 @@
 // ===== TYPES =====
 
-export type ShippingRateType = 'flat' | 'weight_based' | 'price_based' | 'carrier_calculated' | 'free';
+export type ShippingRateType =
+  | 'flat'
+  | 'weight_based'
+  | 'price_based'
+  | 'carrier_calculated'
+  | 'free';
 
 /**
  * Source type for zones/rates - tracks how they were created:
@@ -96,6 +101,13 @@ export interface SyncResult {
   };
 }
 
+// ===== NEW TYPES FOR UNIFIED VIEW =====
+
+export interface ZoneWithRates {
+  zone: ShippingZone;
+  rate: ShippingRate; // The rate for this method+zone combination
+}
+
 // ===== DTOs =====
 
 export interface CreateZoneDto {
@@ -123,4 +135,6 @@ export interface CreateRateDto {
   is_active?: boolean;
 }
 
-export interface UpdateRateDto extends Partial<Omit<CreateRateDto, 'shipping_zone_id'>> {}
+export interface UpdateRateDto extends Partial<
+  Omit<CreateRateDto, 'shipping_zone_id'>
+> {}

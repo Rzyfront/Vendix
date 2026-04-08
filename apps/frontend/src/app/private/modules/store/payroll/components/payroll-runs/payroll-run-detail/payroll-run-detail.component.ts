@@ -1,9 +1,19 @@
-import { Component, OnChanges, OnDestroy, SimpleChanges, Output, EventEmitter, Input, inject } from '@angular/core';
+import {
+  Component,
+  OnChanges,
+  OnDestroy,
+  SimpleChanges,
+  Output,
+  EventEmitter,
+  Input,
+  inject,
+  ChangeDetectionStrategy,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Actions, ofType } from '@ngrx/effects';
-import { Observable, Subject } from 'rxjs';
-import { takeUntil, take } from 'rxjs/operators';
+import { Subject } from 'rxjs';
+import { takeUntil, take, timeout } from 'rxjs/operators';
 import {
   calculatePayrollRun,
   calculatePayrollRunSuccess,
@@ -19,12 +29,23 @@ import {
   sendPayrollRunFailure,
   payPayrollRunFailure,
 } from '../../../state/actions/payroll.actions';
-import { selectCurrentPayrollRunLoading } from '../../../state/selectors/payroll.selectors';
 import { PayrollRun, PayrollItem } from '../../../interfaces/payroll.interface';
-import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
-import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
-import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
+import {
+  ModalComponent,
+  ButtonComponent,
+  IconComponent,
+  StepsLineComponent,
+  ResponsiveDataViewComponent,
+} from '../../../../../../../shared/components';
+import type {
+  TableColumn,
+  TableAction,
+  ItemListCardConfig,
+  StepsLineItem,
+  ButtonVariant,
+} from '../../../../../../../shared/components';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-detail.component';
 
 @Component({
   selector: 'vendix-payroll-run-detail',
@@ -34,351 +55,224 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
     ModalComponent,
     ButtonComponent,
     IconComponent,
+    StepsLineComponent,
+    ResponsiveDataViewComponent,
+    PayrollItemDetailComponent,
   ],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-modal
       [isOpen]="isOpen"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
-      title="Detalle de Nomina"
+      [title]="payrollRun?.payroll_number || 'Detalle de Nomina'"
+      [subtitle]="payrollRun ? getFrequencyLabel(payrollRun.frequency) : ''"
       size="xl"
     >
-      <div class="p-4 max-h-[75vh] overflow-y-auto" *ngIf="payrollRun">
-        <!-- Header Info -->
-        <div class="mb-4 flex flex-wrap items-center gap-3">
-          <span class="text-lg font-semibold text-text-primary">{{ payrollRun.payroll_number }}</span>
-          <span [class]="getStatusBadgeClass(payrollRun.status)" class="px-2 py-0.5 rounded-full text-xs font-medium">
-            {{ getStatusLabel(payrollRun.status) }}
-          </span>
-          <span class="text-sm text-text-secondary ml-auto">
-            {{ getFrequencyLabel(payrollRun.frequency) }}
-          </span>
-        </div>
+      <!-- Header slot: badge de estado -->
+      @if (payrollRun) {
+        <span slot="header"
+              [class]="getStatusBadgeClass(payrollRun.status)"
+              class="px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap">
+          {{ getStatusLabel(payrollRun.status) }}
+        </span>
+      }
 
-        <!-- Period Info -->
-        <div class="mb-4 p-3 bg-gray-50 rounded-lg grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div>
-            <span class="text-xs text-text-secondary block">Inicio del Período</span>
-            <span class="text-sm font-medium">{{ payrollRun.period_start | date:'dd/MM/yyyy' }}</span>
-          </div>
-          <div>
-            <span class="text-xs text-text-secondary block">Fin del Período</span>
-            <span class="text-sm font-medium">{{ payrollRun.period_end | date:'dd/MM/yyyy' }}</span>
-          </div>
-          <div>
-            <span class="text-xs text-text-secondary block">Fecha de Pago</span>
-            <span class="text-sm font-medium">{{ payrollRun.payment_date ? (payrollRun.payment_date | date:'dd/MM/yyyy') : 'Sin definir' }}</span>
-          </div>
-          <div>
-            <span class="text-xs text-text-secondary block">Items</span>
-            <span class="text-sm font-medium">{{ payrollRun.items?.length || 0 }} empleados</span>
-          </div>
-        </div>
+      @if (payrollRun) {
+        <div class="space-y-4">
 
-        <!-- Summary Totals -->
-        <div class="mb-6 grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div class="p-3 bg-blue-50 rounded-lg border border-blue-100">
-            <span class="text-xs text-blue-600 block">Total Devengado</span>
-            <span class="text-lg font-bold text-blue-800">{{ formatNumber(payrollRun.total_earnings) }}</span>
-          </div>
-          <div class="p-3 bg-red-50 rounded-lg border border-red-100">
-            <span class="text-xs text-red-600 block">Total Deducciones</span>
-            <span class="text-lg font-bold text-red-800">{{ formatNumber(payrollRun.total_deductions) }}</span>
-          </div>
-          <div class="p-3 bg-yellow-50 rounded-lg border border-yellow-100">
-            <span class="text-xs text-yellow-600 block">Costo Empleador</span>
-            <span class="text-lg font-bold text-yellow-800">{{ formatNumber(payrollRun.total_employer_costs) }}</span>
-          </div>
-          <div class="p-3 bg-green-50 rounded-lg border border-green-100">
-            <span class="text-xs text-green-600 block">Neto a Pagar</span>
-            <span class="text-lg font-bold text-green-800">{{ formatNumber(payrollRun.total_net_pay) }}</span>
-          </div>
-        </div>
-
-        <!-- Payroll Items Table -->
-        <div *ngIf="payrollRun.items && payrollRun.items.length > 0">
-          <h3 class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide">Desglose por Empleado</h3>
-
-          <!-- Desktop Table -->
-          <div class="hidden md:block overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="border-b border-border bg-gray-50">
-                  <th class="text-left py-2 px-3 font-medium text-text-secondary">Empleado</th>
-                  <th class="text-right py-2 px-3 font-medium text-text-secondary">Salario Base</th>
-                  <th class="text-center py-2 px-3 font-medium text-text-secondary">Días</th>
-                  <th class="text-right py-2 px-3 font-medium text-text-secondary">Devengado</th>
-                  <th class="text-right py-2 px-3 font-medium text-text-secondary">Deducciones</th>
-                  <th class="text-right py-2 px-3 font-medium text-text-secondary">Costo Emp.</th>
-                  <th class="text-right py-2 px-3 font-medium text-text-secondary">Neto</th>
-                  <th class="text-center py-2 px-3 font-medium text-text-secondary"></th>
-                </tr>
-              </thead>
-              <tbody>
-                <ng-container *ngFor="let item of payrollRun.items; let i = index">
-                  <tr class="border-b border-border hover:bg-gray-50 cursor-pointer" (click)="toggleItem(i)">
-                    <td class="py-2 px-3">
-                      {{ item.employee ? item.employee.first_name + ' ' + item.employee.last_name : 'Empleado #' + item.employee_id }}
-                    </td>
-                    <td class="py-2 px-3 text-right">{{ formatNumber(item.base_salary) }}</td>
-                    <td class="py-2 px-3 text-center">{{ item.worked_days }}</td>
-                    <td class="py-2 px-3 text-right text-blue-600">{{ formatNumber(item.total_earnings) }}</td>
-                    <td class="py-2 px-3 text-right text-red-600">{{ formatNumber(item.total_deductions) }}</td>
-                    <td class="py-2 px-3 text-right text-yellow-600">{{ formatNumber(item.total_employer_costs) }}</td>
-                    <td class="py-2 px-3 text-right font-semibold text-green-600">{{ formatNumber(item.net_pay) }}</td>
-                    <td class="py-2 px-3 text-center">
-                      <app-icon [name]="expandedItems[i] ? 'chevron-up' : 'chevron-down'" [size]="16"></app-icon>
-                    </td>
-                  </tr>
-                  <!-- Expanded Detail -->
-                  <tr *ngIf="expandedItems[i]">
-                    <td colspan="8" class="p-3 bg-gray-50">
-                      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <!-- Earnings -->
-                        <div>
-                          <h4 class="text-xs font-semibold text-blue-600 mb-2 uppercase">Devengados</h4>
-                          <div *ngFor="let entry of getEntries(item.earnings)" class="flex justify-between text-xs py-0.5">
-                            <span class="text-text-secondary">{{ entry[0] }}</span>
-                            <span>{{ formatNumber(entry[1]) }}</span>
-                          </div>
-                          <div *ngIf="getEntries(item.earnings).length === 0" class="text-xs text-text-secondary">Sin detalle</div>
-                        </div>
-                        <!-- Deductions -->
-                        <div>
-                          <h4 class="text-xs font-semibold text-red-600 mb-2 uppercase">Deducciones</h4>
-                          <div *ngFor="let entry of getEntries(item.deductions)" class="flex justify-between text-xs py-0.5">
-                            <span class="text-text-secondary">{{ entry[0] }}</span>
-                            <span>{{ formatNumber(entry[1]) }}</span>
-                          </div>
-                          <div *ngIf="getEntries(item.deductions).length === 0" class="text-xs text-text-secondary">Sin detalle</div>
-                        </div>
-                        <!-- Employer Costs -->
-                        <div>
-                          <h4 class="text-xs font-semibold text-yellow-600 mb-2 uppercase">Costos Empleador</h4>
-                          <div *ngFor="let entry of getEntries(item.employer_costs)" class="flex justify-between text-xs py-0.5">
-                            <span class="text-text-secondary">{{ entry[0] }}</span>
-                            <span>{{ formatNumber(entry[1]) }}</span>
-                          </div>
-                          <div *ngIf="getEntries(item.employer_costs).length === 0" class="text-xs text-text-secondary">Sin detalle</div>
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                </ng-container>
-              </tbody>
-            </table>
-          </div>
-
-          <!-- Mobile Cards -->
-          <div class="md:hidden space-y-3">
-            <div *ngFor="let item of payrollRun.items; let i = index"
-              class="bg-surface rounded-xl border border-border shadow-[0_2px_8px_rgba(0,0,0,0.07)] overflow-hidden">
-              <div class="p-3 cursor-pointer" (click)="toggleItem(i)">
-                <div class="flex justify-between items-start mb-2">
-                  <span class="font-medium text-sm text-text-primary">
-                    {{ item.employee ? item.employee.first_name + ' ' + item.employee.last_name : 'Empleado #' + item.employee_id }}
-                  </span>
-                  <app-icon [name]="expandedItems[i] ? 'chevron-up' : 'chevron-down'" [size]="16"></app-icon>
-                </div>
-                <div class="flex justify-between text-xs text-text-secondary">
-                  <span>{{ item.worked_days }} días</span>
-                  <span class="font-semibold text-green-600 text-sm">{{ formatNumber(item.net_pay) }}</span>
-                </div>
-              </div>
-              <div *ngIf="expandedItems[i]" class="px-3 pb-3 border-t border-border pt-2 space-y-3">
-                <div class="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <span class="text-text-secondary block">Devengado</span>
-                    <span class="text-blue-600 font-medium">{{ formatNumber(item.total_earnings) }}</span>
-                  </div>
-                  <div>
-                    <span class="text-text-secondary block">Deducciones</span>
-                    <span class="text-red-600 font-medium">{{ formatNumber(item.total_deductions) }}</span>
-                  </div>
-                  <div>
-                    <span class="text-text-secondary block">Costo Emp.</span>
-                    <span class="text-yellow-600 font-medium">{{ formatNumber(item.total_employer_costs) }}</span>
-                  </div>
-                  <div>
-                    <span class="text-text-secondary block">Salario Base</span>
-                    <span class="font-medium">{{ formatNumber(item.base_salary) }}</span>
-                  </div>
-                </div>
-                <!-- Detailed breakdown -->
-                <div *ngIf="getEntries(item.earnings).length > 0">
-                  <h4 class="text-xs font-semibold text-blue-600 mb-1">Devengados</h4>
-                  <div *ngFor="let entry of getEntries(item.earnings)" class="flex justify-between text-xs py-0.5">
-                    <span class="text-text-secondary">{{ entry[0] }}</span>
-                    <span>{{ formatNumber(entry[1]) }}</span>
-                  </div>
-                </div>
-                <div *ngIf="getEntries(item.deductions).length > 0">
-                  <h4 class="text-xs font-semibold text-red-600 mb-1">Deducciones</h4>
-                  <div *ngFor="let entry of getEntries(item.deductions)" class="flex justify-between text-xs py-0.5">
-                    <span class="text-text-secondary">{{ entry[0] }}</span>
-                    <span>{{ formatNumber(entry[1]) }}</span>
-                  </div>
-                </div>
-                <div *ngIf="getEntries(item.employer_costs).length > 0">
-                  <h4 class="text-xs font-semibold text-yellow-600 mb-1">Costos Empleador</h4>
-                  <div *ngFor="let entry of getEntries(item.employer_costs)" class="flex justify-between text-xs py-0.5">
-                    <span class="text-text-secondary">{{ entry[0] }}</span>
-                    <span>{{ formatNumber(entry[1]) }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- No Items (Empty State) -->
-        <div *ngIf="!payrollRun.items || payrollRun.items.length === 0"
-          class="py-12 flex flex-col items-center rounded-lg border-2 border-dashed border-border">
-          <div class="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mb-4">
-            <app-icon name="file-text" [size]="28" class="text-gray-400"></app-icon>
-          </div>
-          <p class="text-sm font-medium text-text-primary mb-1">No hay items en esta nomina</p>
-          <p class="text-xs text-text-secondary" *ngIf="payrollRun.status === 'draft'">
-            Calcule la nomina para generar el desglose por empleado.
-          </p>
-          <p class="text-xs text-text-secondary" *ngIf="payrollRun.status !== 'draft'">
-            Esta nomina no tiene items registrados.
-          </p>
-        </div>
-
-        <!-- State Transition Actions -->
-        <div class="mt-6 pt-4 border-t border-border"
-          *ngIf="payrollRun.status !== 'paid' && payrollRun.status !== 'cancelled'">
-          <h3 class="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Acciones</h3>
-
-          <!-- Fast-track: process all remaining steps -->
-          <div *ngIf="getRemainingSteps(payrollRun.status).length > 1 && !fastTracking"
-            class="mb-3 p-3 bg-primary/5 rounded-xl border border-primary/15">
-            <div class="flex items-start gap-3">
-              <div class="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                <app-icon name="zap" [size]="16" class="text-primary"></app-icon>
-              </div>
-              <div class="flex-1 min-w-0">
-                <span class="text-xs font-semibold text-text-primary block mb-0.5">Procesamiento rapido</span>
-                <span class="text-[11px] text-text-secondary block mb-2">
-                  {{ getRemainingStepsLabel(payrollRun.status) }}
-                </span>
-                <app-button
-                  variant="primary"
-                  size="sm"
-                  [fullWidth]="true"
-                  (clicked)="onFastTrack()"
-                  [loading]="(loading$ | async) || false"
-                >
-                  <app-icon name="skip-forward" [size]="16" slot="icon"></app-icon>
-                  Procesar Completo
-                </app-button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Fast-track progress indicator -->
-          <div *ngIf="fastTracking"
-            class="mb-3 p-3 bg-blue-50 rounded-xl border border-blue-200">
-            <div class="flex items-center gap-2 mb-2">
-              <div class="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-              <span class="text-xs font-semibold text-blue-800">Procesando: {{ fastTrackCurrentLabel }}</span>
-            </div>
-            <div class="w-full bg-blue-200 rounded-full h-1.5">
-              <div class="bg-blue-600 h-1.5 rounded-full transition-all duration-500"
-                [style.width.%]="fastTrackProgress"></div>
-            </div>
-          </div>
-
-          <!-- Step-by-step actions -->
-          <div class="space-y-2" *ngIf="!fastTracking">
-            <!-- Divider when fast-track is available -->
-            <div *ngIf="getRemainingSteps(payrollRun.status).length > 1"
-              class="flex items-center gap-3 py-1">
-              <div class="flex-1 h-px bg-border"></div>
-              <span class="text-[10px] font-bold text-text-secondary uppercase tracking-widest">Paso a paso</span>
-              <div class="flex-1 h-px bg-border"></div>
-            </div>
-
-            <!-- Draft: Calculate -->
-            <ng-container *ngIf="payrollRun.status === 'draft'">
-              <app-button
-                variant="primary"
-                [fullWidth]="true"
-                (clicked)="onCalculate()"
-                [loading]="(loading$ | async) || false"
-              >
-                <app-icon name="calculator" [size]="16" slot="icon"></app-icon>
-                Calcular Nomina
-              </app-button>
-            </ng-container>
-
-            <!-- Calculated: Approve -->
-            <ng-container *ngIf="payrollRun.status === 'calculated'">
-              <app-button
-                variant="success"
-                [fullWidth]="true"
-                (clicked)="onApprove()"
-                [loading]="(loading$ | async) || false"
-              >
-                <app-icon name="check-circle" [size]="16" slot="icon"></app-icon>
-                Aprobar
-              </app-button>
-            </ng-container>
-
-            <!-- Approved: Send -->
-            <ng-container *ngIf="payrollRun.status === 'approved'">
-              <app-button
-                variant="primary"
-                [fullWidth]="true"
-                (clicked)="onSend()"
-                [loading]="(loading$ | async) || false"
-              >
-                <app-icon name="send" [size]="16" slot="icon"></app-icon>
-                Enviar
-              </app-button>
-            </ng-container>
-
-            <!-- Sent/Accepted: Pay -->
-            <ng-container *ngIf="payrollRun.status === 'sent' || payrollRun.status === 'accepted'">
-              <app-button
-                variant="success"
-                [fullWidth]="true"
-                (clicked)="onPay()"
-                [loading]="(loading$ | async) || false"
-              >
-                <app-icon name="banknote" [size]="16" slot="icon"></app-icon>
-                Marcar Pagada
-              </app-button>
-            </ng-container>
-
-            <!-- Cancel -->
-            <app-button
-              variant="outline-danger"
-              [fullWidth]="true"
-              (clicked)="onCancel()"
-              [loading]="(loading$ | async) || false"
-            >
-              <app-icon name="x-circle" [size]="16" slot="icon"></app-icon>
-              Cancelar Nomina
-            </app-button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Footer -->
-      <div slot="footer">
-        <div class="flex items-center justify-end gap-2 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
-          <app-button
-            variant="outline"
+          <!-- 1. STEPS LINE -->
+          <app-steps-line
+            [steps]="statusSteps"
+            [currentStep]="currentStatusIndex"
             size="sm"
-            (clicked)="onClose()">
+            orientation="horizontal"
+          ></app-steps-line>
+
+          <!-- 3. PERIODO INFO -->
+          <div class="p-3 bg-[var(--color-background)] rounded-lg grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <span class="text-xs text-[var(--color-text-secondary)] block">Inicio del Periodo</span>
+              <span class="text-sm font-medium">{{ payrollRun.period_start | date:'dd/MM/yyyy' }}</span>
+            </div>
+            <div>
+              <span class="text-xs text-[var(--color-text-secondary)] block">Fin del Periodo</span>
+              <span class="text-sm font-medium">{{ payrollRun.period_end | date:'dd/MM/yyyy' }}</span>
+            </div>
+            <div>
+              <span class="text-xs text-[var(--color-text-secondary)] block">Fecha de Pago</span>
+              <span class="text-sm font-medium">{{ payrollRun.payment_date ? (payrollRun.payment_date | date:'dd/MM/yyyy') : 'Sin definir' }}</span>
+            </div>
+            <div>
+              <span class="text-xs text-[var(--color-text-secondary)] block">Items</span>
+              <span class="text-sm font-medium">{{ payrollRun.items?.length || 0 }} empleados</span>
+            </div>
+          </div>
+
+          <!-- 4. RESUMEN TOTALES -->
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div class="p-3 bg-blue-50 rounded-lg border border-blue-100">
+              <span class="text-xs text-blue-600 block">Total Devengado</span>
+              <span class="text-lg font-bold text-blue-800">{{ formatNumber(payrollRun.total_earnings) }}</span>
+            </div>
+            <div class="p-3 bg-red-50 rounded-lg border border-red-100">
+              <span class="text-xs text-red-600 block">Total Deducciones</span>
+              <span class="text-lg font-bold text-red-800">{{ formatNumber(payrollRun.total_deductions) }}</span>
+            </div>
+            <div class="p-3 bg-yellow-50 rounded-lg border border-yellow-100">
+              <span class="text-xs text-yellow-600 block">Costo Empleador</span>
+              <span class="text-lg font-bold text-yellow-800">{{ formatNumber(payrollRun.total_employer_costs) }}</span>
+            </div>
+            <div class="p-3 bg-green-50 rounded-lg border border-green-100">
+              <span class="text-xs text-green-600 block">Neto a Pagar</span>
+              <span class="text-lg font-bold text-green-800">{{ formatNumber(payrollRun.total_net_pay) }}</span>
+            </div>
+          </div>
+
+          <!-- 5. DESGLOSE POR EMPLEADO -->
+          @if (payrollRun.items && payrollRun.items.length > 0) {
+            <div>
+              <h3 class="text-sm font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide mb-3">
+                Desglose por Empleado
+              </h3>
+              <app-responsive-data-view
+                [data]="employeeTableData"
+                [columns]="employeeColumns"
+                [cardConfig]="employeeCardConfig"
+                tableSize="sm"
+                [hoverable]="true"
+                (rowClick)="onEmployeeClick($event)"
+                emptyMessage="No hay empleados en esta nomina"
+              ></app-responsive-data-view>
+            </div>
+          }
+
+          <!-- 6. EMPTY STATE (contextual segun status) -->
+          @if (!payrollRun.items || payrollRun.items.length === 0) {
+            <div class="text-center py-8 text-[var(--color-text-secondary)]">
+              @if (payrollRun.status === 'draft') {
+                <p class="text-sm">Esta nomina aun no ha sido calculada</p>
+                <p class="text-xs mt-1">Presione "Calcular Nomina" para generar el desglose por empleado</p>
+              } @else {
+                <p class="text-sm">No se encontro el desglose por empleado</p>
+                <p class="text-xs mt-1">El detalle de empleados no esta disponible para esta nomina</p>
+              }
+            </div>
+          }
+
+          <!-- 7. PROCESAMIENTO COMPLETO (en body, al final del scroll) -->
+          @if (showQuickProcess && !fastTracking) {
+            <div class="mt-6 pt-4 border-t border-[var(--color-border)]">
+              <label class="flex items-start gap-3 p-3 rounded-xl cursor-pointer select-none transition-all"
+                     [class]="quickProcessEnabled
+                       ? 'bg-[var(--color-primary)]/10 border-2 border-[var(--color-primary)]/30'
+                       : 'bg-[var(--color-background)] border border-[var(--color-border)] hover:border-[var(--color-primary)]/20'">
+                <input type="checkbox"
+                       [checked]="quickProcessEnabled"
+                       (change)="quickProcessEnabled = $any($event.target).checked"
+                       class="mt-0.5 w-4 h-4 rounded border-[var(--color-border)] text-[var(--color-primary)] focus:ring-[var(--color-primary)]" />
+                <div>
+                  <p class="text-sm font-semibold text-[var(--color-text-primary)]">Procesamiento completo</p>
+                  <p class="text-xs text-[var(--color-text-secondary)] mt-1">
+                    Al activar, la nomina se procesara automaticamente en los siguientes pasos:
+                  </p>
+                  <p class="text-xs font-medium text-[var(--color-primary)] mt-1">
+                    {{ remainingStepsDescription }}
+                  </p>
+                  <p class="text-[11px] text-[var(--color-text-secondary)] mt-1">
+                    Cada paso sera ejecutado secuencialmente. Si alguno falla, el proceso se detendra en ese punto.
+                  </p>
+                </div>
+              </label>
+            </div>
+          }
+
+          <!-- 8. CANCELAR NOMINA (en body, al final, con doble confirmacion) -->
+          @if (canProcess && payrollRun.status !== 'draft') {
+            <div class="mt-4 pt-4 border-t border-[var(--color-border)]">
+              @if (!cancelConfirmStep) {
+                <button (click)="cancelConfirmStep = 1"
+                        class="text-xs text-red-400 hover:text-red-600 underline underline-offset-2 transition-colors">
+                  Cancelar esta nomina
+                </button>
+              } @else if (cancelConfirmStep === 1) {
+                <div class="p-3 bg-red-50 rounded-xl border border-red-200">
+                  <p class="text-sm font-semibold text-red-700">Cancelar nomina {{ payrollRun.payroll_number }}</p>
+                  <p class="text-xs text-red-600 mt-1">
+                    Esta accion no se puede deshacer. Todos los asientos contables asociados permaneceran registrados.
+                  </p>
+                  <div class="flex items-center gap-2 mt-3">
+                    <app-button variant="danger" size="sm" (clicked)="cancelConfirmStep = 2">
+                      Si, quiero cancelar
+                    </app-button>
+                    <app-button variant="ghost" size="sm" (clicked)="cancelConfirmStep = 0">
+                      No, volver
+                    </app-button>
+                  </div>
+                </div>
+              } @else if (cancelConfirmStep === 2) {
+                <div class="p-3 bg-red-100 rounded-xl border-2 border-red-300">
+                  <p class="text-sm font-bold text-red-800">Confirmacion final</p>
+                  <p class="text-xs text-red-700 mt-1">
+                    Presione "Confirmar cancelacion" para cancelar definitivamente la nomina {{ payrollRun.payroll_number }}.
+                  </p>
+                  <div class="flex items-center gap-2 mt-3">
+                    <app-button variant="danger" size="sm" (clicked)="onCancelPayroll(); cancelConfirmStep = 0" [loading]="loading">
+                      Confirmar cancelacion
+                    </app-button>
+                    <app-button variant="ghost" size="sm" (clicked)="cancelConfirmStep = 0">
+                      No, volver
+                    </app-button>
+                  </div>
+                </div>
+              }
+            </div>
+          }
+
+        </div>
+      }
+
+      <!-- FOOTER (solo botones de accion y cerrar) -->
+      <div slot="footer">
+        <div class="flex items-center justify-between gap-3 w-full">
+
+          <!-- Izquierda: cerrar -->
+          <app-button variant="outline-danger" size="sm" (clicked)="onClose()">
             Cerrar
           </app-button>
+
+          <!-- Derecha: accion principal -->
+          <div class="flex items-center gap-2">
+            @if (fastTracking) {
+              <div class="flex items-center gap-2 px-3 py-2">
+                <div class="w-4 h-4 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin"></div>
+                <span class="text-xs font-semibold text-[var(--color-text-primary)]">{{ fastTrackCurrentLabel }}</span>
+              </div>
+            } @else if (canProcess) {
+              @if (quickProcessEnabled) {
+                <app-button variant="primary" (clicked)="onFastTrack()" [loading]="loading">
+                  <app-icon name="zap" [size]="16" class="mr-1"></app-icon>
+                  Procesar Completo
+                </app-button>
+              } @else {
+                <app-button [variant]="nextStepVariant" (clicked)="onNextStep()" [loading]="loading">
+                  {{ nextStepLabel }}
+                </app-button>
+              }
+            }
+          </div>
+
         </div>
       </div>
     </app-modal>
-  `
+
+    <!-- Sub-modal de detalle por empleado -->
+    <vendix-payroll-item-detail
+      [isOpen]="employeeDetailOpen"
+      [item]="selectedItem"
+      (isOpenChange)="employeeDetailOpen = $event"
+    ></vendix-payroll-item-detail>
+  `,
 })
 export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
   @Input() isOpen = false;
@@ -386,38 +280,119 @@ export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
   @Output() isOpenChange = new EventEmitter<boolean>();
 
   private currencyService = inject(CurrencyFormatService);
-  loading$: Observable<boolean>;
-  expandedItems: Record<number, boolean> = {};
-
-  // Fast-track state
-  fastTracking = false;
-  fastTrackCurrentLabel = '';
-  fastTrackProgress = 0;
+  private store = inject(Store);
+  private actions$ = inject(Actions);
 
   private destroy$ = new Subject<void>();
   private fastTrackCancel$ = new Subject<void>();
-  private actions$ = inject(Actions);
 
-  private readonly STEPS_ORDER = ['draft', 'calculated', 'approved', 'sent', 'paid'] as const;
-  private readonly STEP_CONFIG: Record<string, { label: string; totalWeight: number }> = {
-    draft: { label: 'Calculando nomina...', totalWeight: 25 },
-    calculated: { label: 'Aprobando...', totalWeight: 50 },
-    approved: { label: 'Enviando...', totalWeight: 75 },
-    sent: { label: 'Registrando pago...', totalWeight: 100 },
+  // ── StepsLine ─────────────────────────────────────────
+  statusSteps: StepsLineItem[] = [
+    { label: 'Borrador' },
+    { label: 'Calculada' },
+    { label: 'Aprobada' },
+    { label: 'Enviada' },
+    { label: 'Pagada' },
+  ];
+  currentStatusIndex = 0;
+
+  // ── Quick process ─────────────────────────────────────
+  quickProcessEnabled = false;
+  loading = false;
+
+  // ── Fast-track state ──────────────────────────────────
+  fastTracking = false;
+  fastTrackCurrentLabel = '';
+
+  // ── Cancel confirmation (0=hidden, 1=first confirm, 2=final confirm) ──
+  cancelConfirmStep: 0 | 1 | 2 = 0;
+
+  // ── Employee detail sub-modal ─────────────────────────
+  employeeDetailOpen = false;
+  selectedItem: PayrollItem | null = null;
+
+  // ── ResponsiveDataView ────────────────────────────────
+  employeeTableData: any[] = [];
+
+  employeeColumns: TableColumn[] = [
+    {
+      key: 'employee_name',
+      label: 'Empleado',
+      sortable: false,
+    },
+    {
+      key: 'base_salary_fmt',
+      label: 'Salario Base',
+      align: 'right',
+    },
+    {
+      key: 'worked_days',
+      label: 'Dias',
+      align: 'center',
+    },
+    {
+      key: 'total_earnings_fmt',
+      label: 'Devengado',
+      align: 'right',
+      cellClass: () => 'text-blue-600',
+    },
+    {
+      key: 'total_deductions_fmt',
+      label: 'Deducciones',
+      align: 'right',
+      cellClass: () => 'text-red-600',
+    },
+    {
+      key: 'net_pay_fmt',
+      label: 'Neto',
+      align: 'right',
+      cellClass: () => 'font-semibold text-green-600',
+    },
+  ];
+
+  employeeCardConfig: ItemListCardConfig = {
+    titleKey: 'employee_name',
+    subtitleKey: 'worked_days_label',
+    avatarFallbackIcon: 'user',
+    avatarShape: 'circle',
+    badgeKey: 'net_pay_fmt',
+    detailKeys: [
+      { key: 'total_earnings_fmt', label: 'Devengado' },
+      { key: 'total_deductions_fmt', label: 'Deducciones' },
+    ],
+    footerKey: 'net_pay_fmt',
+    footerLabel: 'Neto a Pagar',
+    footerStyle: 'prominent',
   };
 
-  constructor(private store: Store) {
-    this.loading$ = this.store.select(selectCurrentPayrollRunLoading);
-  }
+  // ── Step config ───────────────────────────────────────
+  private readonly STEPS_ORDER = ['draft', 'calculated', 'approved', 'sent', 'paid'] as const;
+  private readonly STEP_CONFIG: Record<string, { label: string }> = {
+    draft: { label: 'Calculando nomina...' },
+    calculated: { label: 'Aprobando...' },
+    approved: { label: 'Enviando...' },
+    sent: { label: 'Registrando pago...' },
+  };
 
-  ngOnChanges(changes: SimpleChanges) {
+  private readonly FAST_TRACK_TIMEOUT = 30_000;
+
+  // ── Lifecycle ─────────────────────────────────────────
+
+  ngOnChanges(changes: SimpleChanges): void {
     if (changes['payrollRun']) {
       const prev = changes['payrollRun'].previousValue;
       const curr = changes['payrollRun'].currentValue;
+
+      // Reset on payroll change
       if (prev?.id !== curr?.id) {
-        this.expandedItems = {};
+        this.quickProcessEnabled = false;
+        this.cancelConfirmStep = 0;
         this.stopFastTrack();
       }
+
+      // Always update derived state
+      this.updateStatusIndex();
+      this.rebuildTableData();
     }
   }
 
@@ -428,42 +403,105 @@ export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
     this.fastTrackCancel$.complete();
   }
 
-  toggleItem(index: number): void {
-    this.expandedItems[index] = !this.expandedItems[index];
+  // ── Computed getters ──────────────────────────────────
+
+  get showQuickProcess(): boolean {
+    if (!this.payrollRun) return false;
+    const remaining = this.getRemainingSteps(this.payrollRun.status);
+    return remaining.length > 1;
   }
 
-  getEntries(obj: Record<string, number> | undefined): [string, number][] {
-    if (!obj) return [];
-    return Object.entries(obj);
+  get remainingStepsDescription(): string {
+    if (!this.payrollRun) return '';
+    const remaining = this.getRemainingSteps(this.payrollRun.status);
+    return remaining.map(s => this.getStepActionLabel(s)).join(' \u2192 ');
   }
 
-  formatNumber(value: number): string {
-    return this.currencyService.format(Number(value) || 0);
+  get canProcess(): boolean {
+    return !!this.payrollRun && !['paid', 'cancelled'].includes(this.payrollRun.status);
   }
 
-  // ── Fast-track ──────────────────────────────────────────
-
-  getRemainingSteps(status: string): string[] {
-    const idx = this.STEPS_ORDER.indexOf(status as any);
-    if (idx === -1) return [];
-    return this.STEPS_ORDER.slice(idx + 1) as unknown as string[];
-  }
-
-  getRemainingStepsLabel(status: string): string {
-    const steps = this.getRemainingSteps(status);
+  get nextStepLabel(): string {
+    if (!this.payrollRun) return '';
     const labels: Record<string, string> = {
-      calculated: 'Calcular',
-      approved: 'Aprobar',
-      sent: 'Enviar',
-      paid: 'Pagar',
+      draft: 'Calcular Nomina',
+      calculated: 'Aprobar',
+      approved: 'Enviar',
+      sent: 'Marcar Pagada',
+      accepted: 'Marcar Pagada',
     };
-    return steps.map(s => labels[s] || s).join(' → ');
+    return labels[this.payrollRun.status] || '';
   }
+
+  get nextStepVariant(): ButtonVariant {
+    if (!this.payrollRun) return 'primary';
+    const variants: Record<string, ButtonVariant> = {
+      draft: 'primary',
+      calculated: 'success',
+      approved: 'primary',
+      sent: 'success',
+      accepted: 'success',
+    };
+    return variants[this.payrollRun.status] || 'primary';
+  }
+
+  // ── Employee detail ───────────────────────────────────
+
+  onEmployeeClick(row: any): void {
+    // Find the original PayrollItem from the row's _originalItem reference
+    this.selectedItem = row._originalItem || null;
+    this.employeeDetailOpen = true;
+  }
+
+  // ── Step actions ──────────────────────────────────────
+
+  onNextStep(): void {
+    if (!this.payrollRun) return;
+    this.loading = true;
+    const status = this.payrollRun.status;
+    const id = this.payrollRun.id;
+
+    const actionMap: Record<string, () => void> = {
+      draft: () => this.store.dispatch(calculatePayrollRun({ id })),
+      calculated: () => this.store.dispatch(approvePayrollRun({ id })),
+      approved: () => this.store.dispatch(sendPayrollRun({ id })),
+      sent: () => this.store.dispatch(payPayrollRun({ id })),
+      accepted: () => this.store.dispatch(payPayrollRun({ id })),
+    };
+
+    const dispatchFn = actionMap[status];
+    if (dispatchFn) {
+      // Listen for success/failure to reset loading
+      const successFailureMap = this.getSuccessFailureActions(status);
+      if (successFailureMap) {
+        this.actions$.pipe(
+          ofType(successFailureMap.success, successFailureMap.failure),
+          take(1),
+          takeUntil(this.destroy$),
+        ).subscribe(() => {
+          this.loading = false;
+        });
+      }
+      dispatchFn();
+    } else {
+      this.loading = false;
+    }
+  }
+
+  onCancelPayroll(): void {
+    if (this.payrollRun) {
+      this.store.dispatch(cancelPayrollRun({ id: this.payrollRun.id }));
+    }
+  }
+
+  // ── Fast-track ────────────────────────────────────────
 
   onFastTrack(): void {
     if (!this.payrollRun) return;
     this.fastTracking = true;
-    this.fastTrackCancel$ = new Subject<void>();
+    this.loading = true;
+    // Do NOT recreate fastTrackCancel$ — just signal to cancel previous subscriptions
+    this.fastTrackCancel$.next();
     this.dispatchNextStep(this.payrollRun.status, this.payrollRun.id);
   }
 
@@ -475,107 +513,141 @@ export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
     }
 
     this.fastTrackCurrentLabel = config.label;
-    this.fastTrackProgress = config.totalWeight - 25;
 
-    // Map status to action + success/failure actions
-    const actionMap: Record<string, { dispatch: any; success: any; failure: any; nextStatus: string }> = {
-      draft: {
-        dispatch: calculatePayrollRun({ id }),
-        success: calculatePayrollRunSuccess,
-        failure: calculatePayrollRunFailure,
-        nextStatus: 'calculated',
-      },
-      calculated: {
-        dispatch: approvePayrollRun({ id }),
-        success: approvePayrollRunSuccess,
-        failure: approvePayrollRunFailure,
-        nextStatus: 'approved',
-      },
-      approved: {
-        dispatch: sendPayrollRun({ id }),
-        success: sendPayrollRunSuccess,
-        failure: sendPayrollRunFailure,
-        nextStatus: 'sent',
-      },
-      sent: {
-        dispatch: payPayrollRun({ id }),
-        success: payPayrollRunSuccess,
-        failure: payPayrollRunFailure,
-        nextStatus: 'paid',
-      },
-    };
-
-    const step = actionMap[currentStatus];
-    if (!step) {
+    const successFailure = this.getSuccessFailureActions(currentStatus);
+    if (!successFailure) {
       this.stopFastTrack();
       return;
     }
 
-    // Listen for success or failure
+    const actionMap: Record<string, any> = {
+      draft: calculatePayrollRun({ id }),
+      calculated: approvePayrollRun({ id }),
+      approved: sendPayrollRun({ id }),
+      sent: payPayrollRun({ id }),
+    };
+
+    const dispatchAction = actionMap[currentStatus];
+    if (!dispatchAction) {
+      this.stopFastTrack();
+      return;
+    }
+
+    const nextStatusMap: Record<string, string> = {
+      draft: 'calculated',
+      calculated: 'approved',
+      approved: 'sent',
+      sent: 'paid',
+    };
+
+    // Listen for success or failure WITH timeout
     this.actions$.pipe(
-      ofType(step.success, step.failure),
+      ofType(successFailure.success, successFailure.failure),
       take(1),
+      timeout(this.FAST_TRACK_TIMEOUT),
       takeUntil(this.fastTrackCancel$),
       takeUntil(this.destroy$),
-    ).subscribe((action) => {
-      if (action.type === step.failure.type) {
+    ).subscribe({
+      next: (action) => {
+        if (action.type === successFailure.failure.type) {
+          this.stopFastTrack();
+          return;
+        }
+
+        const nextStatus = nextStatusMap[currentStatus];
+        if (nextStatus === 'paid') {
+          // All done
+          setTimeout(() => this.stopFastTrack(), 500);
+        } else {
+          this.dispatchNextStep(nextStatus, id);
+        }
+      },
+      error: () => {
+        // Timeout or other error
+        console.warn('[PayrollRunDetail] Fast-track timeout on step:', currentStatus);
         this.stopFastTrack();
-        return;
-      }
-
-      this.fastTrackProgress = this.STEP_CONFIG[currentStatus]?.totalWeight || 100;
-
-      if (step.nextStatus === 'paid') {
-        // All done
-        setTimeout(() => this.stopFastTrack(), 500);
-      } else {
-        this.dispatchNextStep(step.nextStatus, id);
-      }
+      },
     });
 
-    this.store.dispatch(step.dispatch);
+    this.store.dispatch(dispatchAction);
   }
 
   private stopFastTrack(): void {
     this.fastTracking = false;
     this.fastTrackCurrentLabel = '';
-    this.fastTrackProgress = 0;
+    this.loading = false;
     this.fastTrackCancel$.next();
   }
 
-  // ── Step-by-step actions ────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────
 
-  onCalculate(): void {
-    if (this.payrollRun) {
-      this.store.dispatch(calculatePayrollRun({ id: this.payrollRun.id }));
-    }
+  formatNumber(value: number): string {
+    return this.currencyService.format(Number(value) || 0);
   }
 
-  onApprove(): void {
-    if (this.payrollRun) {
-      this.store.dispatch(approvePayrollRun({ id: this.payrollRun.id }));
-    }
+  getRemainingSteps(status: string): string[] {
+    const idx = this.STEPS_ORDER.indexOf(status as any);
+    if (idx === -1) return [];
+    return this.STEPS_ORDER.slice(idx + 1) as unknown as string[];
   }
 
-  onSend(): void {
-    if (this.payrollRun) {
-      this.store.dispatch(sendPayrollRun({ id: this.payrollRun.id }));
-    }
+  private getStepActionLabel(step: string): string {
+    const labels: Record<string, string> = {
+      calculated: 'Calcular',
+      approved: 'Aprobar',
+      sent: 'Enviar',
+      paid: 'Pagar',
+    };
+    return labels[step] || step;
   }
 
-  onPay(): void {
-    if (this.payrollRun) {
-      this.store.dispatch(payPayrollRun({ id: this.payrollRun.id }));
-    }
+  private updateStatusIndex(): void {
+    const statusMap: Record<string, number> = {
+      draft: 0,
+      calculated: 1,
+      approved: 2,
+      sent: 3,
+      accepted: 3,
+      paid: 4,
+      cancelled: -1,
+      rejected: -1,
+    };
+    this.currentStatusIndex = statusMap[this.payrollRun?.status || 'draft'] ?? 0;
   }
 
-  onCancel(): void {
-    if (this.payrollRun) {
-      this.store.dispatch(cancelPayrollRun({ id: this.payrollRun.id }));
+  private rebuildTableData(): void {
+    if (!this.payrollRun?.items) {
+      this.employeeTableData = [];
+      return;
     }
+
+    this.employeeTableData = this.payrollRun.items.map((item) => ({
+      _originalItem: item,
+      employee_name: item.employee
+        ? `${item.employee.first_name} ${item.employee.last_name}`
+        : `Empleado #${item.employee_id}`,
+      base_salary_fmt: this.formatNumber(item.base_salary),
+      worked_days: item.worked_days,
+      worked_days_label: `${item.worked_days} dias`,
+      total_earnings_fmt: this.formatNumber(item.total_earnings),
+      total_deductions_fmt: this.formatNumber(item.total_deductions),
+      total_employer_costs_fmt: this.formatNumber(item.total_employer_costs),
+      net_pay_fmt: this.formatNumber(item.net_pay),
+    }));
   }
 
-  onClose() {
+  private getSuccessFailureActions(status: string): { success: any; failure: any } | null {
+    const map: Record<string, { success: any; failure: any }> = {
+      draft: { success: calculatePayrollRunSuccess, failure: calculatePayrollRunFailure },
+      calculated: { success: approvePayrollRunSuccess, failure: approvePayrollRunFailure },
+      approved: { success: sendPayrollRunSuccess, failure: sendPayrollRunFailure },
+      sent: { success: payPayrollRunSuccess, failure: payPayrollRunFailure },
+      accepted: { success: payPayrollRunSuccess, failure: payPayrollRunFailure },
+    };
+    return map[status] || null;
+  }
+
+  onClose(): void {
     this.stopFastTrack();
     this.isOpenChange.emit(false);
   }

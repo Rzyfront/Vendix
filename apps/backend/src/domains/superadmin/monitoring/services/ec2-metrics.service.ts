@@ -4,8 +4,8 @@ import type { Cache } from 'cache-manager';
 import { CloudWatchService, type MetricQuery } from './cloudwatch.service';
 import { MetricsQueryDto } from '../dto/metrics-query.dto';
 import {
-  EC2_INSTANCE_ID,
   autoGranularity,
+  MONITORING_CACHE_TTL,
   periodToSeconds,
   periodToStartTime,
 } from '../constants/cloudwatch.constants';
@@ -42,7 +42,7 @@ export class Ec2MetricsService {
     const endTime = new Date();
     const periodSeconds = periodToSeconds(granularity);
 
-    const dimensions = [{ Name: 'InstanceId', Value: EC2_INSTANCE_ID }];
+    const dimensions = [{ Name: 'InstanceId', Value: this.cloudWatchService.ec2InstanceId }];
     const namespace = 'AWS/EC2';
 
     const queries: MetricQuery[] = [
@@ -103,7 +103,7 @@ export class Ec2MetricsService {
       },
     };
 
-    await this.cache.set(cacheKey, result, 60000);
+    await this.cache.set(cacheKey, result, MONITORING_CACHE_TTL);
 
     return result;
   }

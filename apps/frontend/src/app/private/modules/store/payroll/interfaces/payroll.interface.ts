@@ -64,6 +64,7 @@ export interface PayrollItem {
   earnings: Record<string, number>;
   deductions: Record<string, number>;
   employer_costs: Record<string, number>;
+  provisions?: Record<string, number> | null;
   total_earnings: number;
   total_deductions: number;
   total_employer_costs: number;
@@ -344,4 +345,12 @@ export interface BankExportResult {
   file_name: string;
   record_count: number;
   total_amount: number;
+}
+
+export interface PayrollUpdateAvailable {
+  year: number;
+  decree_ref: string | null;
+  published_at: string | null;
+  has_diff: boolean;
+  diff: Record<string, { current: any; system: any }>;
 }

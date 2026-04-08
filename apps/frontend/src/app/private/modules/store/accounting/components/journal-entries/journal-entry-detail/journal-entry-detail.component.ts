@@ -182,7 +182,7 @@ import { DialogService } from '../../../../../../../shared/components/dialog/dia
               </app-button>
             }
             @if (entry?.status === 'posted') {
-              <app-button variant="outline" (clicked)="onVoid()">
+              <app-button variant="outline-danger" (clicked)="onVoid()">
                 <app-icon slot="icon" name="x" [size]="14"></app-icon>
                 Anular Asiento
               </app-button>

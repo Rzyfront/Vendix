@@ -1,6 +1,15 @@
 // Generic Options Dropdown Component
 // Uses CSS custom properties from the application theme
 
+// Mobile: override any host-level shadow/background from consumer templates
+@media (max-width: 1023px) {
+  :host {
+    box-shadow: none !important;
+    background: transparent !important;
+    border-radius: 0 !important;
+  }
+}
+
 .options-dropdown-container {
   position: relative;
   display: inline-flex;
@@ -16,8 +25,13 @@
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
+  padding: 0 0.75rem;
+  height: 2.5rem; // 40px mobile-first - matches inputsearch modern ($height-md-mobile)
   font-size: var(--fs-sm);
+
+  @media (min-width: 640px) {
+    height: 2.75rem; // 44px desktop - matches inputsearch modern ($height-md-desktop)
+  }
   font-weight: var(--fw-medium);
   font-family: var(--font-primary);
   background-color: var(--color-surface);
@@ -64,20 +78,26 @@
   }
 }
 
-// Responsive: Compact mode for mobile/tablet
+// Responsive: Compact mode for mobile/tablet (< 1024px)
+// Triggers become icon-only square buttons matching inputsearch sm height
 @media (max-width: 1023px) {
   .options-dropdown-container {
     flex-direction: row;
     align-items: center;
     gap: 0.5rem;
-    width: 100%;
   }
 
   .options-dropdown-trigger {
     min-width: auto;
-    flex: 1;
-    height: 40px;
-    padding: 0 0.75rem;
+    flex: none;
+    height: 2.5rem; // 40px - matches $height-md-mobile (inputsearch modern default)
+    width: 2.5rem;
+    padding: 0;
+    justify-content: center;
+    background-color: var(--color-surface);
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+    border-radius: 0.75rem; // 12px - matches inputsearch modern-border-radius
 
     &.actions-trigger {
       order: 1;
@@ -88,12 +108,11 @@
     }
 
     .trigger-label-text {
-      display: inline;
+      display: none;
     }
 
     .chevron-icon {
-      display: inline-flex;
-      margin-left: auto;
+      display: none;
     }
 
     .filter-count-badge {
@@ -116,32 +135,16 @@
   }
 }
 
-// Small mobile - icon only mode
-@media (max-width: 640px) {
+// Tablet+ (640px - 1023px) - match $height-md-desktop (inputsearch modern)
+@media (min-width: 640px) and (max-width: 1023px) {
   .options-dropdown-trigger {
-    min-width: 44px;
-    width: 44px;
-    height: 44px;
-    padding: 0;
-    justify-content: center;
-    flex: none;
-
-    .trigger-label-text {
-      display: none;
-    }
-
-    .chevron-icon {
-      display: none;
-    }
-
-    .filter-count-badge {
-      position: absolute;
-      top: -2px;
-      right: -2px;
-      margin-left: 0;
-    }
+    height: 2.75rem; // 44px - matches $height-md-desktop
+    width: 2.75rem;
   }
+}
 
+// Small mobile - dropdown alignment
+@media (max-width: 640px) {
   .options-dropdown-container {
     justify-content: flex-end;
   }

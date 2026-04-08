@@ -197,6 +197,13 @@ export const superAdminRoutes: Routes = [
             '../../private/modules/super-admin/backups/backups.component'
           ).then((c) => c.BackupsComponent),
       },
+      {
+        path: 'system/payroll-defaults',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/payroll-defaults/payroll-defaults.component'
+          ).then((c) => c.PayrollDefaultsComponent),
+      },
     ],
   },
 ];

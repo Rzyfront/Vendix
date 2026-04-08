@@ -49,6 +49,11 @@ export enum ServicePricingType {
   SUBSCRIPTION = 'subscription',
 }
 
+export enum BookingMode {
+  PROVIDER_REQUIRED = 'provider_required',
+  FREE_BOOKING = 'free_booking',
+}
+
 // DTO para especificar stock por ubicación
 export class StockByLocationDto {
   @IsInt()
@@ -326,6 +331,10 @@ export class CreateProductDto {
   requires_booking?: boolean;
 
   @IsOptional()
+  @IsEnum(BookingMode)
+  booking_mode?: BookingMode;
+
+  @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   is_recurring?: boolean;
@@ -490,6 +499,10 @@ export class UpdateProductDto {
   @IsBoolean()
   @Type(() => Boolean)
   requires_booking?: boolean;
+
+  @IsOptional()
+  @IsEnum(BookingMode)
+  booking_mode?: BookingMode;
 
   @IsOptional()
   @IsBoolean()
@@ -889,6 +902,10 @@ export class UpdateProductWithVariantsDto {
   @IsBoolean()
   @Type(() => Boolean)
   requires_booking?: boolean;
+
+  @IsOptional()
+  @IsEnum(BookingMode)
+  booking_mode?: BookingMode;
 
   @IsOptional()
   @IsBoolean()

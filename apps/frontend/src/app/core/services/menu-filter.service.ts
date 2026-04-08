@@ -103,7 +103,7 @@ export class MenuFilterService {
     'Cartera': 'cartera_dashboard',
     'Cuentas por Cobrar': 'cartera_receivables',
     'Cuentas por Pagar': 'cartera_payables',
-    'Aging Report': 'cartera_aging',
+    'Cartera por Vencimiento': 'cartera_aging',
     Reportes: 'accounting_reports',
     Nómina: 'payroll',
     Empleados: 'payroll_employees',
@@ -127,7 +127,7 @@ export class MenuFilterService {
     Seguridad: 'settings_security',
     // 'Dominios' supports both ORG_ADMIN (domains) and STORE_ADMIN (settings_domains)
     Dominios: ['domains', 'settings_domains'],
-    Envíos: 'settings_shipping',
+    'Métodos de Envío': 'settings_shipping',
     'Documentos Legales': 'settings_legal_documents',
 
     // Ayuda (padre + submódulos)

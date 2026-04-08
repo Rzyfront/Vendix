@@ -1,11 +1,11 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subject } from 'rxjs';
 import { takeUntil, finalize } from 'rxjs/operators';
 
 import { PayrollService } from '../../services/payroll.service';
-import { PayrollRules } from '../../interfaces/payroll.interface';
+import { PayrollRules, PayrollUpdateAvailable } from '../../interfaces/payroll.interface';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import {
@@ -33,6 +33,51 @@ interface SettingsCard {
   subsections: RuleSection[];
   includeArl?: boolean;
 }
+
+interface DiffEntry {
+  field: string;
+  current: any;
+  system: any;
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  minimum_wage: 'Salario mínimo',
+  transport_subsidy: 'Auxilio de transporte',
+  transport_subsidy_threshold: 'Umbral transporte (×SMMLV)',
+  retention_exempt_threshold: 'Umbral retención (×SMMLV)',
+  days_per_month: 'Días por mes',
+  days_per_year: 'Días por año',
+  severance_rate: 'Cesantías',
+  severance_interest_rate: 'Intereses cesantías',
+  vacation_rate: 'Vacaciones',
+  bonus_rate: 'Prima',
+  health_employee_rate: 'Salud (empleado)',
+  pension_employee_rate: 'Pensión (empleado)',
+  health_employer_rate: 'Salud (empleador)',
+  pension_employer_rate: 'Pensión (empleador)',
+  sena_rate: 'SENA',
+  icbf_rate: 'ICBF',
+  compensation_fund_rate: 'Caja de compensación',
+};
+
+const PERCENT_FIELDS = new Set([
+  'severance_rate',
+  'severance_interest_rate',
+  'vacation_rate',
+  'bonus_rate',
+  'health_employee_rate',
+  'pension_employee_rate',
+  'health_employer_rate',
+  'pension_employer_rate',
+  'sena_rate',
+  'icbf_rate',
+  'compensation_fund_rate',
+]);
+
+const CURRENCY_FIELDS = new Set([
+  'minimum_wage',
+  'transport_subsidy',
+]);
 
 @Component({
   selector: 'vendix-payroll-settings',
@@ -74,6 +119,87 @@ interface SettingsCard {
           </select>
         </div>
       </div>
+
+      <!-- Update Banner -->
+      @if (available_update()) {
+        <div class="mb-4 rounded-xl border border-blue-200 bg-blue-50 overflow-hidden">
+          <div class="flex flex-col sm:flex-row sm:items-start gap-3 px-4 py-3 md:px-5 md:py-4">
+            <div class="flex-shrink-0 w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+              <app-icon name="arrow-up-circle" [size]="18" class="text-blue-600" />
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold text-blue-900">
+                Parámetros de nómina actualizados disponibles
+              </p>
+              @if (available_update()!.decree_ref || available_update()!.published_at) {
+                <p class="text-xs text-blue-700 mt-0.5">
+                  @if (available_update()!.decree_ref) {
+                    {{ available_update()!.decree_ref }}
+                  }
+                  @if (available_update()!.decree_ref && available_update()!.published_at) {
+                    <span class="mx-1">—</span>
+                  }
+                  @if (available_update()!.published_at) {
+                    Publicado el {{ available_update()!.published_at | date:'d MMM yyyy' }}
+                  }
+                </p>
+              }
+            </div>
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <button
+                type="button"
+                (click)="toggleDiff()"
+                class="text-xs font-medium text-blue-700 hover:text-blue-900 underline underline-offset-2 transition-colors"
+              >
+                {{ show_diff() ? 'Ocultar cambios' : 'Ver cambios' }}
+              </button>
+              <button
+                type="button"
+                (click)="applyDefaults()"
+                [disabled]="applying_defaults"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+              >
+                @if (applying_defaults) {
+                  <span class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                  Aplicando...
+                } @else {
+                  <app-icon name="check-circle" [size]="13" />
+                  Aplicar valores oficiales
+                }
+              </button>
+            </div>
+          </div>
+
+          <!-- Diff Table -->
+          @if (show_diff() && diffEntries().length > 0) {
+            <div class="border-t border-blue-200 px-4 pb-3 md:px-5 md:pb-4 pt-3">
+              <p class="text-[10px] font-semibold text-blue-700 uppercase tracking-wider mb-2">
+                Cambios incluidos
+              </p>
+              <div class="overflow-x-auto rounded-lg border border-blue-200">
+                <table class="w-full text-xs">
+                  <thead>
+                    <tr class="bg-blue-100/60">
+                      <th class="text-left px-3 py-2 font-semibold text-blue-800">Campo</th>
+                      <th class="text-right px-3 py-2 font-semibold text-blue-800">Valor actual</th>
+                      <th class="text-right px-3 py-2 font-semibold text-blue-800">Valor oficial</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (entry of diffEntries(); track entry.field) {
+                      <tr class="border-t border-blue-100">
+                        <td class="px-3 py-2 text-text-primary font-medium">{{ getFieldLabel(entry.field) }}</td>
+                        <td class="px-3 py-2 text-right text-red-500 font-mono">{{ formatValue(entry.field, entry.current) }}</td>
+                        <td class="px-3 py-2 text-right text-green-600 font-mono font-semibold">{{ formatValue(entry.field, entry.system) }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          }
+        </div>
+      }
 
       <!-- Loading State -->
       <div *ngIf="loading" class="flex items-center justify-center py-12">
@@ -249,9 +375,23 @@ export class PayrollSettingsComponent implements OnInit, OnDestroy {
   editedFields: Partial<PayrollRules> = {};
   loading = false;
   saving = false;
+  applying_defaults = false;
   selectedYear = String(new Date().getFullYear());
   availableYears: string[] = [this.selectedYear];
   hasChanges = false;
+
+  available_update = signal<PayrollUpdateAvailable | null>(null);
+  show_diff = signal(false);
+
+  readonly diffEntries = computed<DiffEntry[]>(() => {
+    const update = this.available_update();
+    if (!update || !update.diff) return [];
+    return Object.entries(update.diff).map(([field, values]) => ({
+      field,
+      current: values.current,
+      system: values.system,
+    }));
+  });
 
   headerActions: StickyHeaderActionButton[] = [
     {
@@ -442,9 +582,11 @@ export class PayrollSettingsComponent implements OnInit, OnDestroy {
           this.availableYears = res.data.years;
           this.selectedYear = res.data.default_year;
           this.loadRules();
+          this.loadAvailableUpdates();
         },
         error: () => {
           this.loadRules();
+          this.loadAvailableUpdates();
         },
       });
   }
@@ -470,8 +612,10 @@ export class PayrollSettingsComponent implements OnInit, OnDestroy {
     this.selectedYear = year;
     this.editedFields = {};
     this.hasChanges = false;
+    this.show_diff.set(false);
     this.updateHeaderActions();
     this.loadRules();
+    this.loadAvailableUpdates();
   }
 
   private loadRules(): void {
@@ -491,6 +635,74 @@ export class PayrollSettingsComponent implements OnInit, OnDestroy {
           this.toastService.error('Error al cargar las reglas de nómina');
         },
       });
+  }
+
+  private loadAvailableUpdates(): void {
+    this.payrollService
+      .getAvailableUpdates()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (res) => {
+          const year = +this.selectedYear;
+          const update = res.data.find((u) => u.year === year && u.has_diff);
+          this.available_update.set(update ?? null);
+        },
+        error: () => {
+          // Fallo silencioso — el banner es opcional
+        },
+      });
+  }
+
+  toggleDiff(): void {
+    this.show_diff.update((v) => !v);
+  }
+
+  applyDefaults(): void {
+    const update = this.available_update();
+    if (!update || this.applying_defaults) return;
+
+    this.applying_defaults = true;
+    this.payrollService
+      .applySystemDefaults(update.year)
+      .pipe(
+        takeUntil(this.destroy$),
+        finalize(() => (this.applying_defaults = false)),
+      )
+      .subscribe({
+        next: () => {
+          this.toastService.success('Parámetros actualizados correctamente');
+          this.available_update.set(null);
+          this.show_diff.set(false);
+          this.editedFields = {};
+          this.hasChanges = false;
+          this.updateHeaderActions();
+          this.loadRules();
+        },
+        error: () => {
+          this.toastService.error('Error al aplicar los parámetros oficiales');
+        },
+      });
+  }
+
+  // --- Diff helpers ---
+
+  getFieldLabel(field: string): string {
+    return FIELD_LABELS[field] ?? field;
+  }
+
+  formatValue(field: string, value: any): string {
+    if (value === null || value === undefined) return '—';
+    if (CURRENCY_FIELDS.has(field)) {
+      return new Intl.NumberFormat('es-CO', {
+        style: 'currency',
+        currency: 'COP',
+        maximumFractionDigits: 0,
+      }).format(Number(value));
+    }
+    if (PERCENT_FIELDS.has(field)) {
+      return (Math.round(Number(value) * 10000) / 100).toFixed(2) + '%';
+    }
+    return String(value);
   }
 
   // --- Field value accessors ---

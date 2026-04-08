@@ -3,10 +3,7 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { CloudWatchService } from './cloudwatch.service';
 import { ServerMetricsService } from './server-metrics.service';
-import {
-  EC2_INSTANCE_ID,
-  RDS_DB_IDENTIFIER,
-} from '../constants/cloudwatch.constants';
+import { MONITORING_CACHE_TTL } from '../constants/cloudwatch.constants';
 
 @Injectable()
 export class MonitoringOverviewService {
@@ -34,13 +31,13 @@ export class MonitoringOverviewService {
             id: 'ec2_cpu',
             metricName: 'CPUUtilization',
             namespace: 'AWS/EC2',
-            dimensions: [{ Name: 'InstanceId', Value: EC2_INSTANCE_ID }],
+            dimensions: [{ Name: 'InstanceId', Value: this.cloudWatchService.ec2InstanceId }],
           },
           {
             id: 'ec2_status',
             metricName: 'StatusCheckFailed',
             namespace: 'AWS/EC2',
-            dimensions: [{ Name: 'InstanceId', Value: EC2_INSTANCE_ID }],
+            dimensions: [{ Name: 'InstanceId', Value: this.cloudWatchService.ec2InstanceId }],
           },
         ],
         startTime,
@@ -54,7 +51,7 @@ export class MonitoringOverviewService {
             metricName: 'CPUUtilization',
             namespace: 'AWS/RDS',
             dimensions: [
-              { Name: 'DBInstanceIdentifier', Value: RDS_DB_IDENTIFIER },
+              { Name: 'DBInstanceIdentifier', Value: this.cloudWatchService.rdsDbIdentifier },
             ],
           },
           {
@@ -62,7 +59,7 @@ export class MonitoringOverviewService {
             metricName: 'DatabaseConnections',
             namespace: 'AWS/RDS',
             dimensions: [
-              { Name: 'DBInstanceIdentifier', Value: RDS_DB_IDENTIFIER },
+              { Name: 'DBInstanceIdentifier', Value: this.cloudWatchService.rdsDbIdentifier },
             ],
           },
           {
@@ -70,7 +67,7 @@ export class MonitoringOverviewService {
             metricName: 'FreeStorageSpace',
             namespace: 'AWS/RDS',
             dimensions: [
-              { Name: 'DBInstanceIdentifier', Value: RDS_DB_IDENTIFIER },
+              { Name: 'DBInstanceIdentifier', Value: this.cloudWatchService.rdsDbIdentifier },
             ],
           },
           {
@@ -78,7 +75,7 @@ export class MonitoringOverviewService {
             metricName: 'FreeableMemory',
             namespace: 'AWS/RDS',
             dimensions: [
-              { Name: 'DBInstanceIdentifier', Value: RDS_DB_IDENTIFIER },
+              { Name: 'DBInstanceIdentifier', Value: this.cloudWatchService.rdsDbIdentifier },
             ],
           },
         ],
@@ -134,7 +131,7 @@ export class MonitoringOverviewService {
       timestamp: new Date().toISOString(),
     };
 
-    await this.cache.set(cacheKey, result, 60000);
+    await this.cache.set(cacheKey, result, MONITORING_CACHE_TTL);
 
     return result;
   }

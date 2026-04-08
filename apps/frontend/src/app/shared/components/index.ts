@@ -47,6 +47,7 @@ export { HelpSearchOverlayComponent } from './help-search-overlay/help-search-ov
 export { MarkdownEditorComponent } from './markdown-editor/markdown-editor.component';
 export { ScrollableTabsComponent } from './scrollable-tabs/scrollable-tabs.component';
 export { StepsLineComponent } from './steps-line/steps-line.component';
+export { ExpandableCardComponent } from './expandable-card/expandable-card.component';
 export { EmptyStateComponent } from './empty-state/empty-state.component';
 
 // Services

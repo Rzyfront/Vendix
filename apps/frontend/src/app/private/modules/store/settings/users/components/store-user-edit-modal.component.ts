@@ -25,11 +25,15 @@ import {
   ModalComponent,
   IconComponent,
   SettingToggleComponent,
+  BadgeComponent,
 } from '../../../../../../shared/components/index';
+import type { BadgeVariant } from '../../../../../../shared/components/index';
+import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
 import {
   ScrollableTabsComponent,
   ScrollableTab,
 } from '../../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
+import { APP_MODULES, AppModule } from '../../../../../../shared/constants/app-modules.constant';
 import { StoreUser } from '../interfaces/store-user.interface';
 import * as StoreUsersActions from '../state/actions/store-users.actions';
 import {
@@ -37,85 +41,6 @@ import {
   selectDetailLoading,
   selectAvailableRoles,
 } from '../state/selectors/store-users.selectors';
-
-interface PanelUIGroup {
-  label: string;
-  keys: { key: string; label: string }[];
-}
-
-const KEY_LABELS: Record<string, string> = {
-  dashboard: 'Dashboard',
-  pos: 'Punto de Venta',
-  products: 'Productos',
-  ecommerce: 'E-commerce',
-  orders: 'Pedidos',
-  orders_sales: 'Ventas',
-  orders_purchase_orders: 'Ordenes de compra',
-  orders_quotations: 'Cotizaciones',
-  inventory: 'Inventario',
-  inventory_pop: 'Punto de compra',
-  inventory_adjustments: 'Ajustes',
-  inventory_locations: 'Ubicaciones',
-  inventory_suppliers: 'Proveedores',
-  inventory_movements: 'Movimientos',
-  inventory_transfers: 'Transferencias',
-  customers: 'Clientes',
-  customers_all: 'Todos',
-  customers_reviews: 'Resenas',
-  marketing: 'Marketing',
-  marketing_promotions: 'Promociones',
-  marketing_coupons: 'Cupones',
-  analytics: 'Analiticas',
-  analytics_sales: 'Ventas',
-  analytics_traffic: 'Trafico',
-  analytics_performance: 'Rendimiento',
-  analytics_overview: 'Resumen',
-  expenses: 'Gastos',
-  invoicing: 'Facturacion',
-  accounting: 'Contabilidad',
-  accounting_journal_entries: 'Asientos',
-  accounting_fiscal_periods: 'Periodos fiscales',
-  accounting_chart_of_accounts: 'Plan de cuentas',
-  accounting_reports: 'Reportes',
-  payroll: 'Nomina',
-  payroll_employees: 'Empleados',
-  payroll_runs: 'Liquidaciones',
-  payroll_settings: 'Config nomina',
-  settings: 'Configuracion',
-  settings_general: 'General',
-  settings_payments: 'Pagos',
-  settings_appearance: 'Apariencia',
-  settings_security: 'Seguridad',
-  settings_domains: 'Dominios',
-  settings_shipping: 'Envios',
-  settings_legal_documents: 'Documentos legales',
-  settings_support: 'Soporte',
-  settings_users: 'Usuarios',
-  settings_roles: 'Roles',
-  settings_cash_registers: 'Cajas registradoras',
-  help: 'Ayuda',
-  help_support: 'Soporte',
-  help_center: 'Centro de ayuda',
-  // ORG_ADMIN keys
-  stores: 'Tiendas',
-  users: 'Usuarios',
-  domains: 'Dominios',
-  audit: 'Auditoria',
-  reports: 'Reportes',
-  billing: 'Facturacion',
-};
-
-const GROUP_PREFIXES: { prefix: string; label: string }[] = [
-  { prefix: 'orders_', label: 'Pedidos' },
-  { prefix: 'inventory_', label: 'Inventario' },
-  { prefix: 'customers_', label: 'Clientes' },
-  { prefix: 'marketing_', label: 'Marketing' },
-  { prefix: 'analytics_', label: 'Analiticas' },
-  { prefix: 'accounting_', label: 'Contabilidad' },
-  { prefix: 'payroll_', label: 'Nomina' },
-  { prefix: 'settings_', label: 'Configuracion' },
-  { prefix: 'help_', label: 'Ayuda' },
-];
 
 @Component({
   selector: 'app-store-user-edit-modal',
@@ -130,6 +55,8 @@ const GROUP_PREFIXES: { prefix: string; label: string }[] = [
     IconComponent,
     SettingToggleComponent,
     ScrollableTabsComponent,
+    InputsearchComponent,
+    BadgeComponent,
   ],
   template: `
     @if (isOpen) {
@@ -137,7 +64,7 @@ const GROUP_PREFIXES: { prefix: string; label: string }[] = [
       [isOpen]="true"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
-      size="lg"
+      size="xl"
       [title]="user ? (user.first_name + ' ' + user.last_name) : 'Usuario'"
       subtitle="Gestionar configuracion del usuario"
     >
@@ -165,88 +92,108 @@ const GROUP_PREFIXES: { prefix: string; label: string }[] = [
 
             <!-- ── General ─────────────────────────────────── -->
             @case ('info') {
-              <form [formGroup]="infoForm" class="space-y-3">
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <app-input
-                    formControlName="first_name"
-                    label="Nombre"
-                    placeholder="Juan"
-                    [required]="true"
-                    [control]="infoForm.get('first_name')"
-                  />
-                  <app-input
-                    formControlName="last_name"
-                    label="Apellido"
-                    placeholder="Perez"
-                    [required]="true"
-                    [control]="infoForm.get('last_name')"
-                  />
-                </div>
-                <app-input
-                  formControlName="email"
-                  label="Email"
-                  type="email"
-                  placeholder="juan&#64;ejemplo.com"
-                  [required]="true"
-                  [control]="infoForm.get('email')"
-                />
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <app-input
-                    formControlName="username"
-                    label="Username"
-                    placeholder="juan_perez"
-                    [control]="infoForm.get('username')"
-                  />
-                  <app-input
-                    formControlName="phone"
-                    label="Telefono"
-                    placeholder="+57 300 123 4567"
-                    [control]="infoForm.get('phone')"
-                  />
-                </div>
-
-                <!-- Info card -->
-                <div class="p-3 rounded-lg bg-surface border border-border">
-                  <div class="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <span class="text-text-secondary">Estado</span>
-                      <div class="mt-0.5">
-                        <span
-                          class="inline-block px-1.5 py-0.5 rounded-full text-[11px] font-medium"
-                          [class]="getStateBadgeClass(userDetail()?.state || '')"
-                        >{{ getStateLabel(userDetail()?.state || '') }}</span>
-                      </div>
-                    </div>
-                    <div>
-                      <span class="text-text-secondary">Creado</span>
-                      <p class="text-text-primary mt-0.5">{{ formatDate(userDetail()?.created_at || '') }}</p>
-                    </div>
-                    <div>
-                      <span class="text-text-secondary">Ultimo acceso</span>
-                      <p class="text-text-primary mt-0.5">{{ userDetail()?.last_login ? formatDate(userDetail()!.last_login!) : 'Nunca' }}</p>
-                    </div>
-                    <div>
-                      <span class="text-text-secondary">ID</span>
-                      <p class="text-text-primary mt-0.5">{{ userDetail()?.id }}</p>
-                    </div>
+              <div class="space-y-4">
+                <div class="flex items-center gap-2.5">
+                  <div class="p-1.5 bg-primary/10 rounded-lg">
+                    <app-icon name="user" [size]="16" class="text-primary" />
+                  </div>
+                  <div>
+                    <h4 class="text-sm font-semibold text-text-primary">Informacion General</h4>
+                    <p class="text-[10px] text-text-secondary">Datos basicos del usuario</p>
                   </div>
                 </div>
 
-                <div class="flex justify-end pt-1">
-                  <app-button
-                    variant="primary"
-                    size="sm"
-                    (clicked)="saveInfo()"
-                    [disabled]="infoForm.invalid || detailLoading()"
-                    [loading]="detailLoading()"
-                  >Guardar cambios</app-button>
+                <!-- Status bar -->
+                <div class="flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg border border-border bg-surface/50">
+                  <app-badge [variant]="getStateBadgeVariant(userDetail()?.state || '')" size="xs">
+                    {{ getStateLabel(userDetail()?.state || '') }}
+                  </app-badge>
+                  @for (role of userDetail()?.roles || []; track role.id) {
+                    <app-badge variant="primary" size="xsm" badgeStyle="outline">{{ role.name }}</app-badge>
+                  }
+                  @if ((userDetail()?.roles || []).length === 0) {
+                    <app-badge variant="neutral" size="xsm" badgeStyle="outline">Sin roles</app-badge>
+                  }
+                  <span class="text-[10px] text-text-secondary">·</span>
+                  <span class="text-[10px] text-text-secondary">
+                    <app-icon name="calendar" [size]="10" class="inline-block mr-0.5" />
+                    Creado {{ formatDate(userDetail()?.created_at || '') }}
+                  </span>
+                  @if (userDetail()?.last_login) {
+                    <span class="text-[10px] text-text-secondary">·</span>
+                    <span class="text-[10px] text-text-secondary">
+                      <app-icon name="clock" [size]="10" class="inline-block mr-0.5" />
+                      Ultimo acceso {{ formatDate(userDetail()!.last_login!) }}
+                    </span>
+                  }
                 </div>
-              </form>
+
+                <form [formGroup]="infoForm" class="space-y-3">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <app-input
+                      formControlName="first_name"
+                      label="Nombre"
+                      placeholder="Juan"
+                      [required]="true"
+                      [control]="infoForm.get('first_name')"
+                    />
+                    <app-input
+                      formControlName="last_name"
+                      label="Apellido"
+                      placeholder="Perez"
+                      [required]="true"
+                      [control]="infoForm.get('last_name')"
+                    />
+                  </div>
+                  <app-input
+                    formControlName="email"
+                    label="Email"
+                    type="email"
+                    placeholder="juan&#64;ejemplo.com"
+                    [required]="true"
+                    [control]="infoForm.get('email')"
+                  />
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <app-input
+                      formControlName="username"
+                      label="Username"
+                      placeholder="juan_perez"
+                      [control]="infoForm.get('username')"
+                    />
+                    <app-input
+                      formControlName="phone"
+                      label="Telefono"
+                      placeholder="+57 300 123 4567"
+                      [control]="infoForm.get('phone')"
+                    />
+                  </div>
+                </form>
+              </div>
             }
 
             <!-- ── Roles ───────────────────────────────────── -->
             @case ('roles') {
-              <div class="space-y-2">
+              <div class="space-y-3">
+                <div class="flex items-center gap-2.5">
+                  <div class="p-1.5 bg-primary/10 rounded-lg">
+                    <app-icon name="shield" [size]="16" class="text-primary" />
+                  </div>
+                  <div>
+                    <h4 class="text-sm font-semibold text-text-primary">Roles y Permisos</h4>
+                    <p class="text-[10px] text-text-secondary">Asigna roles para controlar el acceso del usuario</p>
+                  </div>
+                </div>
+
+                @if (availableRoles().length === 0) {
+                  <div class="text-center py-8">
+                    <div class="p-3 bg-surface rounded-full inline-block mb-2">
+                      <app-icon name="shield-off" [size]="28" class="text-text-secondary" />
+                    </div>
+                    <p class="text-sm font-medium text-text-primary">No hay roles disponibles</p>
+                    <p class="text-xs text-text-secondary mt-1">Crea roles desde Configuracion → Roles</p>
+                  </div>
+                }
+
                 @for (role of sortedRoles(); track role.id) {
                   <label
                     class="flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all min-h-[44px]"
@@ -264,10 +211,10 @@ const GROUP_PREFIXES: { prefix: string; label: string }[] = [
                       <div class="flex items-center gap-1.5">
                         <span class="text-sm font-medium text-text-primary">{{ role.name }}</span>
                         @if (role.is_system_role) {
-                          <span class="px-1.5 py-px text-[10px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded">Sistema</span>
+                          <app-badge variant="info" size="xsm">Sistema</app-badge>
                         }
                         @if (isRoleAssigned(role.id)) {
-                          <span class="px-1.5 py-px text-[10px] font-semibold bg-primary/10 text-primary rounded">Asignado</span>
+                          <app-badge variant="success" size="xsm">Asignado</app-badge>
                         }
                       </div>
                       @if (role.description) {
@@ -276,24 +223,27 @@ const GROUP_PREFIXES: { prefix: string; label: string }[] = [
                     </div>
                   </label>
                 }
-                @if (availableRoles().length === 0) {
-                  <p class="text-center py-6 text-sm text-text-secondary">No hay roles disponibles</p>
-                }
-                <div class="flex justify-end pt-2">
-                  <app-button
-                    variant="primary"
-                    size="sm"
-                    (clicked)="saveRoles()"
-                    [disabled]="detailLoading()"
-                    [loading]="detailLoading()"
-                  >Guardar roles</app-button>
-                </div>
               </div>
             }
 
-            <!-- ── Menu (Panel UI) ─────────────────────────── -->
+            <!-- ── Modulos (Panel UI) ─────────────────────────── -->
             @case ('panel_ui') {
               <div class="space-y-4">
+                <!-- Header -->
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2.5">
+                    <div class="p-1.5 bg-primary/10 rounded-lg">
+                      <app-icon name="layout" [size]="16" class="text-primary" />
+                    </div>
+                    <div>
+                      <h4 class="text-sm font-semibold text-text-primary">
+                        Modulos: {{ activePanelUITab() === 'STORE_ADMIN' ? 'Tienda' : 'Organizacion' }}
+                      </h4>
+                      <p class="text-[10px] text-text-secondary">Personaliza la visibilidad de herramientas</p>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- Sub-tabs por app_type -->
                 @if (isAdminOrOwner()) {
                   <div class="flex gap-1 p-1 bg-surface rounded-lg border border-border">
@@ -310,37 +260,87 @@ const GROUP_PREFIXES: { prefix: string; label: string }[] = [
                   </div>
                 }
 
-                @for (group of currentPanelUIGroups(); track group.label) {
-                  <div>
-                    <h4 class="text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-1.5 px-1">
-                      {{ group.label }}
-                    </h4>
-                    <div class="rounded-lg border border-border divide-y divide-border">
-                      @for (item of group.keys; track item.key) {
+                <!-- Busqueda -->
+                <app-inputsearch
+                  placeholder="Buscar modulos..."
+                  size="sm"
+                  [debounceTime]="200"
+                  (searchChange)="onModuleSearch($event)"
+                  class="block"
+                />
+
+                <!-- Modulos con hijos -->
+                <div class="compact-modules-grid">
+                  @for (module of filteredModulesWithChildren(); track module.key) {
+                    <div class="module-group is-parent">
+                      <div class="toggle-wrapper">
                         <app-setting-toggle
-                          [label]="item.label"
-                          [ngModel]="getPanelUIValue(activePanelUITab(), item.key)"
-                          (changed)="togglePanelUI(activePanelUITab(), item.key)"
+                          [label]="module.label"
+                          [description]="module.description"
+                          [ngModel]="getPanelUIValue(activePanelUITab(), module.key)"
+                          (changed)="onParentToggle($event, module)"
                         />
+                      </div>
+                      @if (module.children?.length) {
+                        <div class="children-grid">
+                          @for (child of module.children; track child.key) {
+                            <div class="child-item">
+                              <app-setting-toggle
+                                [label]="child.label"
+                                [ngModel]="getPanelUIValue(activePanelUITab(), child.key)"
+                                (changed)="togglePanelUI(activePanelUITab(), child.key)"
+                                [disabled]="!getPanelUIValue(activePanelUITab(), module.key)"
+                              />
+                            </div>
+                          }
+                        </div>
+                      }
+                    </div>
+                  }
+                </div>
+
+                <!-- Herramientas Directas -->
+                @if (filteredStandaloneModules().length > 0) {
+                  <div class="pt-3 border-t border-border">
+                    <h5 class="text-[11px] font-bold text-text-secondary uppercase tracking-wider mb-3">
+                      Herramientas Directas
+                    </h5>
+                    <div class="compact-modules-grid">
+                      @for (module of filteredStandaloneModules(); track module.key) {
+                        <div class="module-group">
+                          <app-setting-toggle
+                            [label]="module.label"
+                            [description]="module.description"
+                            [ngModel]="getPanelUIValue(activePanelUITab(), module.key)"
+                            (changed)="togglePanelUI(activePanelUITab(), module.key)"
+                          />
+                        </div>
                       }
                     </div>
                   </div>
                 }
-                <div class="flex justify-end pt-1">
-                  <app-button
-                    variant="primary"
-                    size="sm"
-                    (clicked)="savePanelUI()"
-                    [disabled]="detailLoading()"
-                    [loading]="detailLoading()"
-                  >Guardar menu</app-button>
-                </div>
+
+                @if (moduleSearchTerm() && filteredModulesWithChildren().length === 0 && filteredStandaloneModules().length === 0) {
+                  <p class="text-sm text-text-secondary text-center py-4">
+                    No se encontraron modulos para "{{ moduleSearchTerm() }}"
+                  </p>
+                }
               </div>
             }
 
             <!-- ── Seguridad ───────────────────────────────── -->
             @case ('security') {
               <div class="space-y-4">
+                <div class="flex items-center gap-2.5">
+                  <div class="p-1.5 bg-primary/10 rounded-lg">
+                    <app-icon name="lock" [size]="16" class="text-primary" />
+                  </div>
+                  <div>
+                    <h4 class="text-sm font-semibold text-text-primary">Seguridad</h4>
+                    <p class="text-[10px] text-text-secondary">Verificacion de email y contrasena</p>
+                  </div>
+                </div>
+
                 <!-- Email status -->
                 <div class="flex items-center gap-3 p-3 rounded-lg border border-border">
                   <app-icon
@@ -376,15 +376,6 @@ const GROUP_PREFIXES: { prefix: string; label: string }[] = [
                     [control]="passwordForm.get('confirm_password')"
                     [error]="passwordForm.errors?.['mismatch'] && passwordForm.get('confirm_password')?.touched ? 'Las contrasenas no coinciden' : ''"
                   />
-                  <div class="flex justify-end pt-1">
-                    <app-button
-                      variant="primary"
-                      size="sm"
-                      (clicked)="resetPassword()"
-                      [disabled]="passwordForm.invalid || detailLoading()"
-                      [loading]="detailLoading()"
-                    >Restablecer contrasena</app-button>
-                  </div>
                 </form>
               </div>
             }
@@ -392,8 +383,17 @@ const GROUP_PREFIXES: { prefix: string; label: string }[] = [
         </div>
       }
 
-      <div slot="footer" class="flex justify-end">
+      <div slot="footer" class="flex items-center justify-between w-full gap-3">
         <app-button variant="outline" size="sm" (clicked)="onCancel()">Cerrar</app-button>
+        @if (userDetail()) {
+          <app-button
+            variant="primary"
+            size="sm"
+            (clicked)="saveCurrentTab()"
+            [disabled]="isSaveDisabled()"
+            [loading]="detailLoading()"
+          >{{ getSaveLabel() }}</app-button>
+        }
       </div>
     </app-modal>
     }
@@ -402,6 +402,90 @@ const GROUP_PREFIXES: { prefix: string; label: string }[] = [
     `
       :host {
         display: block;
+      }
+
+      /* Reusar patron de settings-modal para modulos */
+      .compact-modules-grid {
+        columns: 280px auto;
+        column-gap: 0.75rem;
+      }
+
+      .module-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        break-inside: avoid;
+        margin-bottom: 0.75rem;
+        background: var(--color-surface, #fff);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg, 0.75rem);
+        padding: 0.75rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+      }
+
+      .module-group:last-child {
+        margin-bottom: 0;
+      }
+
+      .module-group.is-parent {
+        break-inside: avoid;
+      }
+
+      .children-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0;
+        padding-left: 1rem;
+        margin-top: 0.25rem;
+        position: relative;
+      }
+
+      .children-grid::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        border-left: 1.5px solid var(--color-secondary);
+        pointer-events: none;
+      }
+
+      .child-item {
+        position: relative;
+        padding: 0.2rem 0;
+      }
+
+      .child-item::before {
+        content: '';
+        position: absolute;
+        left: -1rem;
+        top: 0;
+        width: 0.6rem;
+        height: 50%;
+        border-left: 1.5px solid var(--color-secondary);
+        border-bottom: 1.5px solid var(--color-secondary);
+        border-bottom-left-radius: 6px;
+        pointer-events: none;
+      }
+
+      .child-item::after {
+        content: '';
+        position: absolute;
+        left: -1rem;
+        top: 50%;
+        bottom: 0;
+        border-left: 1.5px solid var(--color-secondary);
+        pointer-events: none;
+      }
+
+      .child-item:last-child::after {
+        display: none;
+      }
+
+      @media (max-width: 768px) {
+        .compact-modules-grid {
+          columns: 1;
+        }
       }
     `,
   ],
@@ -423,11 +507,12 @@ export class StoreUserEditModalComponent implements OnChanges {
   selectedRoleIds = signal<Set<number>>(new Set());
   localPanelUI = signal<Record<string, Record<string, boolean>>>({});
   activePanelUITab = signal('STORE_ADMIN');
+  moduleSearchTerm = signal('');
 
   tabItems: ScrollableTab[] = [
     { id: 'info', label: 'General', icon: 'user' },
     { id: 'roles', label: 'Roles', icon: 'shield' },
-    { id: 'panel_ui', label: 'Menu', icon: 'layout-dashboard' },
+    { id: 'panel_ui', label: 'Modulos', icon: 'layout-dashboard' },
     { id: 'security', label: 'Seguridad', icon: 'lock' },
   ];
 
@@ -466,13 +551,47 @@ export class StoreUserEditModalComponent implements OnChanges {
     );
   });
 
-  /** Dynamic panel UI groups for the active app_type tab */
-  currentPanelUIGroups = computed(() => {
-    const panelUI = this.localPanelUI();
+  /** Modules with children for the active app_type (filtered by search) */
+  filteredModulesWithChildren = computed(() => {
     const appType = this.activePanelUITab();
-    const keys = panelUI[appType];
-    if (!keys) return [];
-    return this.buildGroupsFromKeys(Object.keys(keys));
+    const modules = (APP_MODULES[appType] || []).filter(
+      (m: AppModule) => m.isParent && m.children && m.children.length > 0,
+    );
+    const term = this.moduleSearchTerm().toLowerCase().trim();
+    if (!term) return modules;
+
+    return modules
+      .map((module: AppModule) => {
+        const parentMatches =
+          module.label.toLowerCase().includes(term) ||
+          (module.description && module.description.toLowerCase().includes(term));
+        const matchingChildren = (module.children || []).filter(
+          (child: AppModule) =>
+            child.label.toLowerCase().includes(term) ||
+            (child.description && child.description.toLowerCase().includes(term)),
+        );
+        if (parentMatches) return module;
+        if (matchingChildren.length > 0) {
+          return { ...module, children: matchingChildren };
+        }
+        return null;
+      })
+      .filter(Boolean) as AppModule[];
+  });
+
+  /** Standalone modules for the active app_type (filtered by search) */
+  filteredStandaloneModules = computed(() => {
+    const appType = this.activePanelUITab();
+    const modules = (APP_MODULES[appType] || []).filter(
+      (m: AppModule) => !m.isParent || !m.children || m.children.length === 0,
+    );
+    const term = this.moduleSearchTerm().toLowerCase().trim();
+    if (!term) return modules;
+    return modules.filter(
+      (m: AppModule) =>
+        m.label.toLowerCase().includes(term) ||
+        (m.description && m.description.toLowerCase().includes(term)),
+    );
   });
 
   constructor() {
@@ -516,6 +635,7 @@ export class StoreUserEditModalComponent implements OnChanges {
     if (changes['isOpen'] && this.isOpen && this.user) {
       this.activeTab.set('info');
       this.activePanelUITab.set('STORE_ADMIN');
+      this.moduleSearchTerm.set('');
       this.passwordForm.reset();
       this.store.dispatch(StoreUsersActions.loadUserDetail({ id: this.user.id }));
       this.store.dispatch(StoreUsersActions.loadAvailableRoles());
@@ -564,10 +684,21 @@ export class StoreUserEditModalComponent implements OnChanges {
   }
 
   togglePanelUI(appType: string, key: string): void {
-    const current = JSON.parse(JSON.stringify(this.localPanelUI()));
-    if (!current[appType]) current[appType] = {};
-    current[appType][key] = !this.getPanelUIValue(appType, key);
-    this.localPanelUI.set(current);
+    this.setLocalPanelUIValue(appType, key, !this.getPanelUIValue(appType, key));
+  }
+
+  onParentToggle(isEnabled: boolean, parentModule: AppModule): void {
+    const appType = this.activePanelUITab();
+    this.setLocalPanelUIValue(appType, parentModule.key, isEnabled);
+    if (parentModule.children) {
+      parentModule.children.forEach((child) => {
+        this.setLocalPanelUIValue(appType, child.key, isEnabled);
+      });
+    }
+  }
+
+  onModuleSearch(term: string): void {
+    this.moduleSearchTerm.set(term);
   }
 
   savePanelUI(): void {
@@ -578,6 +709,13 @@ export class StoreUserEditModalComponent implements OnChanges {
         panel_ui: this.localPanelUI(),
       }),
     );
+  }
+
+  private setLocalPanelUIValue(appType: string, key: string, value: boolean): void {
+    const current = JSON.parse(JSON.stringify(this.localPanelUI()));
+    if (!current[appType]) current[appType] = {};
+    current[appType][key] = value;
+    this.localPanelUI.set(current);
   }
 
   // ── Security ───────────────────────────────────────────────────
@@ -595,39 +733,36 @@ export class StoreUserEditModalComponent implements OnChanges {
     this.passwordForm.reset();
   }
 
-  // ── Helpers ────────────────────────────────────────────────────
+  // ── Footer ─────────────────────────────────────────────────────
 
-  private buildGroupsFromKeys(keys: string[]): PanelUIGroup[] {
-    const grouped = new Map<string, { key: string; label: string }[]>();
-
-    for (const key of keys) {
-      let groupLabel = 'Principal';
-      for (const gp of GROUP_PREFIXES) {
-        if (key.startsWith(gp.prefix)) {
-          groupLabel = gp.label;
-          break;
-        }
-      }
-      if (!grouped.has(groupLabel)) grouped.set(groupLabel, []);
-      grouped.get(groupLabel)!.push({
-        key,
-        label: KEY_LABELS[key] || key,
-      });
+  saveCurrentTab(): void {
+    switch (this.activeTab()) {
+      case 'info': this.saveInfo(); break;
+      case 'roles': this.saveRoles(); break;
+      case 'panel_ui': this.savePanelUI(); break;
+      case 'security': this.resetPassword(); break;
     }
-
-    // Keep Principal first, then alphabetical
-    const result: PanelUIGroup[] = [];
-    if (grouped.has('Principal')) {
-      result.push({ label: 'Principal', keys: grouped.get('Principal')! });
-      grouped.delete('Principal');
-    }
-    for (const [label, items] of Array.from(grouped.entries()).sort((a, b) =>
-      a[0].localeCompare(b[0]),
-    )) {
-      result.push({ label, keys: items });
-    }
-    return result;
   }
+
+  getSaveLabel(): string {
+    const labels: Record<string, string> = {
+      info: 'Guardar cambios',
+      roles: 'Guardar roles',
+      panel_ui: 'Guardar modulos',
+      security: 'Restablecer contrasena',
+    };
+    return labels[this.activeTab()] || 'Guardar';
+  }
+
+  isSaveDisabled(): boolean {
+    switch (this.activeTab()) {
+      case 'info': return this.infoForm.invalid || this.detailLoading();
+      case 'security': return this.passwordForm.invalid || this.detailLoading();
+      default: return this.detailLoading();
+    }
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────
 
   passwordMatchValidator(group: FormGroup): { mismatch: boolean } | null {
     const password = group.get('new_password')?.value;
@@ -652,15 +787,15 @@ export class StoreUserEditModalComponent implements OnChanges {
     return map[state] || state;
   }
 
-  getStateBadgeClass(state: string): string {
-    const map: Record<string, string> = {
-      active: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
-      inactive: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
-      pending_verification: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
-      suspended: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
-      archived: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+  getStateBadgeVariant(state: string): BadgeVariant {
+    const map: Record<string, BadgeVariant> = {
+      active: 'success',
+      inactive: 'neutral',
+      pending_verification: 'warning',
+      suspended: 'error',
+      archived: 'neutral',
     };
-    return map[state] || 'bg-gray-100 text-gray-800';
+    return map[state] || 'neutral';
   }
 
   formatDate(dateString: string): string {

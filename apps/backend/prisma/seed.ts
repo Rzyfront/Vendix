@@ -16,6 +16,7 @@ import { seedHelpArticles } from './seeds/help-articles.seed';
 import { seedDefaultPayrollRules } from './seeds/default-payroll-rules.seed';
 import { seedIcaMunicipalRates } from './seeds/ica-municipal-rates.seed';
 import { seedAIEngineApps } from './seeds/ai-engine-apps.seed';
+import { seedPayrollSystemDefaults } from './seeds/payroll-system-defaults.seed';
 
 /**
  * Seed modules registry
@@ -125,6 +126,11 @@ const seedModules = [
     fn: seedAIEngineApps,
     description: 'Default AI application definitions (invoice OCR, etc.)',
   },
+  {
+    name: 'Payroll System Defaults',
+    fn: seedPayrollSystemDefaults,
+    description: 'Colombian payroll parameters baseline (2026)',
+  },
 ];
 
 /**
@@ -230,3 +236,4 @@ export * from './seeds/help-articles.seed';
 export * from './seeds/default-payroll-rules.seed';
 export * from './seeds/ica-municipal-rates.seed';
 export * from './seeds/ai-engine-apps.seed';
+export * from './seeds/payroll-system-defaults.seed';

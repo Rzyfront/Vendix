@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { execSync } from 'child_process';
+import { statfsSync } from 'fs';
 import * as os from 'os';
 import { VendixHttpException } from '../../../../common/errors/vendix-http.exception';
 import { ErrorCodes } from '../../../../common/errors/error-codes';
@@ -45,26 +45,33 @@ export class ServerMetricsService {
     }
   }
 
+  private formatBytes(bytes: number): string {
+    if (bytes === 0) return '0B';
+    const units = ['B', 'K', 'M', 'G', 'T', 'P'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    const value = bytes / Math.pow(1024, i);
+    return value >= 10
+      ? `${Math.round(value)}${units[i]}`
+      : `${value.toFixed(1)}${units[i]}`;
+  }
+
   private getDiskInfo(): any | null {
     try {
-      const output = execSync('df -h / | tail -1', {
-        timeout: 5000,
-        encoding: 'utf-8',
-      });
+      const stats = statfsSync('/');
+      const total = stats.bsize * stats.blocks;
+      const available = stats.bsize * stats.bavail;
+      const used = total - available;
+      const usePercent =
+        total > 0 ? ((used / total) * 100).toFixed(0) + '%' : '0%';
 
-      const parts = output.trim().split(/\s+/);
-      if (parts.length >= 6) {
-        return {
-          filesystem: parts[0],
-          size: parts[1],
-          used: parts[2],
-          available: parts[3],
-          usePercent: parts[4],
-          mountedOn: parts[5],
-        };
-      }
-
-      return null;
+      return {
+        filesystem: '/',
+        size: this.formatBytes(total),
+        used: this.formatBytes(used),
+        available: this.formatBytes(available),
+        usePercent,
+        mountedOn: '/',
+      };
     } catch (error) {
       this.logger.warn(`Failed to collect disk info: ${error.message}`);
       return null;

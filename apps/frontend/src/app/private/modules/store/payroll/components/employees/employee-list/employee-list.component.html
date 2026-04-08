@@ -16,19 +16,7 @@
             size="sm" placeholder="Buscar empleados..." [debounceTime]="300" [ngModel]="searchTerm"
             (ngModelChange)="onSearchChange($event)"></app-inputsearch>
 
-          <app-button variant="outline" size="sm"
-            customClasses="w-9 h-9 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
-            (clicked)="bulkUpload.emit()" title="Carga Masiva">
-            <app-icon slot="icon" name="upload" [size]="18"></app-icon>
-          </app-button>
-
-          <app-button variant="outline" size="sm"
-            customClasses="w-9 h-9 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
-            (clicked)="create.emit()" title="Nuevo Empleado">
-            <app-icon slot="icon" name="plus" [size]="18"></app-icon>
-          </app-button>
-
-          <app-options-dropdown class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+          <app-options-dropdown
             [filters]="filterConfigs" [filterValues]="filterValues" [actions]="dropdownActions" [isLoading]="loading"
             (filterChange)="onFilterChange($event)" (clearAllFilters)="onClearFilters()"
             (actionClick)="onActionClick($event)"></app-options-dropdown>

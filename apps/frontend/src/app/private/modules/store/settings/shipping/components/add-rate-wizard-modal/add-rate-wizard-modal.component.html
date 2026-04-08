@@ -1,0 +1,161 @@
+<app-modal
+  [isOpen]="true"
+  [showCloseButton]="true"
+  [title]="is_edit_mode() ? 'Editar Tarifa' : 'Nueva Tarifa de Envío'"
+  [subtitle]="is_edit_mode() ? 'Modifica los datos de la tarifa existente' : 'Configura una nueva tarifa de envío'"
+  size="md"
+  (closed)="close.emit()">
+
+  <!-- Ícono en slot header -->
+  <div slot="header">
+    <div class="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center border border-indigo-100">
+      <app-icon name="truck" [size]="20" class="text-indigo-600" />
+    </div>
+  </div>
+
+  <!-- Stepper en el cuerpo -->
+  <div class="mb-2">
+    <app-steps-line [steps]="steps" [currentStep]="current_step()" size="sm" />
+  </div>
+
+  <!-- Step 1: Seleccionar Zona -->
+  @if (current_step() === 0) {
+    <div class="wizard-content">
+      <p class="wizard-hint">Selecciona una zona existente o crea una nueva</p>
+
+      @if (is_loading_zones()) {
+        <div class="flex items-center justify-center gap-2 py-8 text-sm text-secondary">
+          <app-icon name="loader-2" [size]="16" class="animate-spin" />
+          Actualizando zonas...
+        </div>
+      }
+
+      @for (zone of zones_list(); track zone.id) {
+        <button
+          type="button"
+          class="zone-card"
+          [class.zone-card--selected]="selected_zone_id() === zone.id"
+          (click)="selectZone(zone.id)"
+        >
+          <app-icon
+            name="map-pin"
+            [size]="20"
+            [class]="selected_zone_id() === zone.id ? 'text-primary' : 'text-secondary'"
+          />
+          <div class="zone-card__info">
+            <span class="zone-card__name">{{ zone.name }}</span>
+            <span class="zone-card__detail">{{ formatCountries(zone.countries) }}</span>
+          </div>
+          <div
+            class="zone-card__check"
+            [class.zone-card__check--active]="selected_zone_id() === zone.id"
+          >
+            @if (selected_zone_id() === zone.id) {
+              <app-icon name="check" [size]="14" class="text-white" />
+            }
+          </div>
+        </button>
+      }
+
+      <!-- Crear zona nueva -->
+      <button type="button" class="zone-card zone-card--create" (click)="show_zone_creation.set(true)">
+        <app-icon name="plus-circle" [size]="18" class="text-primary" />
+        <span class="text-primary font-medium text-sm">Crear zona nueva</span>
+      </button>
+    </div>
+  }
+
+  <!-- Step 2: Configurar Tarifa -->
+  @if (current_step() === 1) {
+    <div class="wizard-content">
+      <p class="wizard-hint">Tipo de tarifa</p>
+      <div class="rate-types-grid">
+        @for (rt of rate_types; track rt.value) {
+          <button
+            type="button"
+            class="rate-type-card"
+            [class.rate-type-card--selected]="rate_form.get('type')?.value === rt.value"
+            (click)="selectRateType(rt.value)"
+          >
+            <app-icon [name]="rt.icon" [size]="20" />
+            <span class="rate-type-card__label">{{ rt.label }}</span>
+          </button>
+        }
+      </div>
+
+      <form [formGroup]="rate_form" class="rate-form">
+        @if (rate_form.get('type')?.value !== 'free') {
+          <div class="form-field">
+            <label class="form-label">Costo base</label>
+            <app-input type="number" formControlName="base_cost" placeholder="0" prefixText="$" />
+          </div>
+        }
+
+        @if (rate_form.get('type')?.value === 'weight_based' || rate_form.get('type')?.value === 'price_based') {
+          <div class="form-field">
+            <label class="form-label">{{ variableLabel }}</label>
+            <app-input type="number" formControlName="per_unit_cost" placeholder="0" prefixText="$" />
+          </div>
+          <div class="form-row">
+            <div class="form-field">
+              <label class="form-label">{{ minLabel }}</label>
+              <app-input type="number" formControlName="min_val" placeholder="Sin mínimo" />
+            </div>
+            <div class="form-field">
+              <label class="form-label">{{ maxLabel }}</label>
+              <app-input type="number" formControlName="max_val" placeholder="Sin máximo" />
+            </div>
+          </div>
+        }
+
+        <div class="form-field">
+          <label class="form-label">Envío gratis desde</label>
+          <app-input
+            type="number"
+            formControlName="free_shipping_threshold"
+            placeholder="Dejar vacío para no aplicar"
+            prefixText="$"
+            hint="Si el pedido supera este monto, el envío será gratis"
+          />
+        </div>
+
+        <div class="strategy-summary">
+          <app-icon name="info" [size]="16" class="text-primary" />
+          <p class="strategy-summary__text" [innerHTML]="strategySummary"></p>
+        </div>
+
+        <app-setting-toggle
+          formControlName="is_active"
+          label="Tarifa activa"
+          description="Las tarifas inactivas no se aplican en el checkout"
+        />
+      </form>
+    </div>
+  }
+
+  <!-- Footer estándar -->
+  <div slot="footer" class="flex items-center justify-between w-full">
+    @if (current_step() === 0) {
+      <app-button variant="outline" (clicked)="close.emit()">Cancelar</app-button>
+      <app-button [disabled]="!can_proceed_step1()" (clicked)="goToStep(1)">
+        <app-icon slot="icon" name="arrow-right" [size]="16" />
+        Siguiente
+      </app-button>
+    }
+    @if (current_step() === 1) {
+      <app-button variant="outline" (clicked)="goToStep(0)">
+        <app-icon slot="icon" name="arrow-left" [size]="16" />
+        Anterior
+      </app-button>
+      <app-button [loading]="is_saving()" (clicked)="onSubmit()">
+        {{ is_edit_mode() ? 'Guardar Cambios' : 'Guardar Tarifa' }}
+      </app-button>
+    }
+  </div>
+
+</app-modal>
+
+<!-- Sub-modal zona (FUERA del modal principal, evitar anidamiento) -->
+@if (show_zone_creation()) {
+  <app-zone-modal mode="create" (close)="show_zone_creation.set(false)" (saved)="onZoneCreated()" />
+}

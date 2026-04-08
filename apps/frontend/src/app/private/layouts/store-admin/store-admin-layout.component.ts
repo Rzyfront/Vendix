@@ -396,7 +396,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy, AfterViewIn
           route: '/admin/accounting/payables',
         },
         {
-          label: 'Aging Report',
+          label: 'Cartera por Vencimiento',
           icon: 'circle',
           route: '/admin/accounting/aging',
         },
@@ -484,6 +484,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy, AfterViewIn
           route: '/admin/settings/payments',
         },
         {
+          label: 'Métodos de Envío',
+          icon: 'circle',
+          route: '/admin/settings/shipping',
+        },
+        {
           label: 'Apariencia',
           icon: 'circle',
           route: '/admin/settings/appearance',
@@ -497,11 +502,6 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy, AfterViewIn
           label: 'Dominios',
           icon: 'circle',
           route: '/admin/settings/domains',
-        },
-        {
-          label: 'Envíos',
-          icon: 'circle',
-          route: '/admin/settings/shipping',
         },
         {
           label: 'Documentos Legales',
@@ -586,6 +586,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy, AfterViewIn
 
   ngAfterViewInit(): void {
     this.sidebarReady = true;
+    this.cdr.detectChanges();
   }
 
   /**

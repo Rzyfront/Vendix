@@ -164,6 +164,7 @@ export class AutoEntryService {
       'depreciation.monthly': 'auto_depreciation',
       'disposal.fixed_asset': 'auto_depreciation',
       'withholding.applied': 'auto_expense',
+      'payroll_item': 'auto_payroll',
       'settlement.paid': 'auto_payroll',
       'ar_write_off': 'adjustment',
       'ap_payment': 'auto_purchase',
@@ -567,104 +568,83 @@ export class AutoEntryService {
   }) {
     const lines: (AutoEntryLine | null)[] = [];
 
-    // === DEBIT LINES: Split by cost center ===
-    const cc_labels: Record<string, string> = {
-      administrative: 'Admin',
-      operational: 'Operativo',
-      sales: 'Ventas',
-    };
-
+    // === DEBIT LINES ===
     if (data.cost_center_breakdown && Object.keys(data.cost_center_breakdown).length > 0) {
-      const centers = Object.entries(data.cost_center_breakdown);
-
-      // Track running totals for rounding correction on the last center
-      let acc_earnings = 0;
-      let acc_employer_costs = 0;
-
-      for (let i = 0; i < centers.length; i++) {
-        const [cc, amounts] = centers[i];
-        const is_last = i === centers.length - 1;
-        const label = cc_labels[cc] || cc;
-
-        // For the last center, use remainder to avoid rounding mismatch
-        const earnings = is_last
-          ? data.total_earnings - acc_earnings
-          : amounts.earnings;
-        const employer_costs = is_last
-          ? data.total_employer_costs - acc_employer_costs
-          : amounts.employer_costs;
-
-        acc_earnings += earnings;
-        acc_employer_costs += employer_costs;
-
-        if (earnings > 0) {
+      for (const [cc, amounts] of Object.entries(data.cost_center_breakdown)) {
+        if (amounts.earnings > 0) {
           lines.push(
             await this.resolveAccountLine(
               data.organization_id,
               `payroll.approved.payroll_expense.${cc}`,
-              `Sueldos y Salarios - ${label}`,
-              earnings, 0, data.store_id,
+              `Gasto nómina (${cc})`, amounts.earnings, 0, data.store_id,
             ),
           );
         }
-
-        if (employer_costs > 0) {
+        if (amounts.employer_costs > 0) {
           lines.push(
             await this.resolveAccountLine(
               data.organization_id,
               `payroll.approved.social_security.${cc}`,
-              `Aportes Patronales - ${label}`,
-              employer_costs, 0, data.store_id,
+              `Seguridad social (${cc})`, amounts.employer_costs, 0, data.store_id,
             ),
           );
         }
       }
     } else {
-      // Backwards compatibility: no breakdown, use generic keys
+      if (data.total_earnings > 0) {
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payroll.approved.payroll_expense',
+            'Gasto nómina', data.total_earnings, 0, data.store_id,
+          ),
+        );
+      }
+      if (data.total_employer_costs > 0) {
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payroll.approved.social_security',
+            'Seguridad social', data.total_employer_costs, 0, data.store_id,
+          ),
+        );
+      }
+    }
+
+    // === CREDIT LINES ===
+    if (data.total_net_pay > 0) {
       lines.push(
         await this.resolveAccountLine(
-          data.organization_id, 'payroll.approved.payroll_expense',
-          'Payroll Expense', data.total_earnings, 0, data.store_id,
-        ),
-      );
-      lines.push(
-        await this.resolveAccountLine(
-          data.organization_id, 'payroll.approved.social_security',
-          'Social Security Expense', data.total_employer_costs, 0, data.store_id,
+          data.organization_id, 'payroll.approved.salaries_payable',
+          'Salarios por pagar', 0, data.total_net_pay, data.store_id,
         ),
       );
     }
 
-    // === CREDIT LINES: Shared liabilities (no split needed) ===
-    lines.push(
-      await this.resolveAccountLine(
-        data.organization_id, 'payroll.approved.salaries_payable',
-        'Salarios por Pagar', 0, data.total_net_pay, data.store_id,
-      ),
-    );
-    lines.push(
-      await this.resolveAccountLine(
-        data.organization_id, 'payroll.approved.health_payable',
-        'EPS por Pagar', 0, data.health_deduction, data.store_id,
-      ),
-    );
-    lines.push(
-      await this.resolveAccountLine(
-        data.organization_id, 'payroll.approved.pension_payable',
-        'Pensión por Pagar', 0, data.pension_deduction, data.store_id,
-      ),
-    );
+    if (data.health_deduction > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id, 'payroll.approved.health_payable',
+          'EPS por pagar', 0, data.health_deduction, data.store_id,
+        ),
+      );
+    }
 
-    // Balance check: remaining deductions → withholdings
-    const total_debit = data.total_earnings + data.total_employer_costs;
-    const total_credit = data.total_net_pay + data.health_deduction + data.pension_deduction;
-    const remaining = total_debit - total_credit;
+    if (data.pension_deduction > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id, 'payroll.approved.pension_payable',
+          'Pensión por pagar', 0, data.pension_deduction, data.store_id,
+        ),
+      );
+    }
 
-    if (Math.abs(remaining) > 0.001) {
+    // Withholdings = total debits - (net_pay + health + pension)
+    const total_debits = data.total_earnings + data.total_employer_costs;
+    const remaining = total_debits - (data.total_net_pay + data.health_deduction + data.pension_deduction);
+    if (remaining > 0.001) {
       lines.push(
         await this.resolveAccountLine(
           data.organization_id, 'payroll.approved.withholdings',
-          'Retenciones y Deducciones', 0, remaining, data.store_id,
+          'Retenciones y deducciones', 0, remaining, data.store_id,
         ),
       );
     }
@@ -675,43 +655,268 @@ export class AutoEntryService {
       organization_id: data.organization_id,
       store_id: data.store_id,
       entry_date: new Date(),
-      description: `Nómina aprobada #${data.payroll_run_id}`,
+      description: `Nómina Aprobada - Run #${data.payroll_run_id}`,
       lines,
       user_id: data.user_id,
     });
   }
 
   /**
-   * payroll.paid: Debit Salaries Payable, Credit Bank
+   * payroll.paid: Individual journal entries per employee (detail breakdown).
+   * Creates one entry per payroll_item with full earnings/deductions/provisions/employer_costs detail.
    */
   async onPayrollPaid(data: {
     payroll_run_id: number;
     organization_id: number;
     store_id?: number;
-    total_net_pay: number;
     user_id?: number;
-  }) {
-    const lines = await Promise.all([
-      this.resolveAccountLine(
-        data.organization_id, 'payroll.paid.salaries_payable',
-        'Salaries Payable', data.total_net_pay, 0, data.store_id,
-      ),
-      this.resolveAccountLine(
-        data.organization_id, 'payroll.paid.bank',
-        'Bank', 0, data.total_net_pay, data.store_id,
-      ),
-    ]);
+    payroll_items: Array<{
+      payroll_item_id: number;
+      employee_id: number;
+      cost_center: string;
+      earnings: { base_salary: number; transport_subsidy: number; total: number } | null;
+      deductions: { health: number; pension: number; retention: number; advance_deduction: number; total: number } | null;
+      employer_costs: { health: number; pension: number; arl: number; sena: number; icbf: number; compensation_fund: number; total: number } | null;
+      provisions: { severance: number; severance_interest: number; vacation: number; bonus: number; total: number } | null;
+      net_pay: number;
+    }>;
+  }): Promise<{ created: number; failed: number; errors: string[] }> {
+    const result = { created: 0, failed: 0, errors: [] as string[] };
 
-    return this.createAutoEntry({
-      source_type: 'payroll.paid',
-      source_id: data.payroll_run_id,
-      organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Payroll paid #${data.payroll_run_id}`,
-      lines,
-      user_id: data.user_id,
-    });
+    for (const item of data.payroll_items) {
+      try {
+        const e = item.earnings ?? { base_salary: 0, transport_subsidy: 0, total: 0 };
+        const d = item.deductions ?? { health: 0, pension: 0, retention: 0, advance_deduction: 0, total: 0 };
+        const ec = item.employer_costs ?? { health: 0, pension: 0, arl: 0, sena: 0, icbf: 0, compensation_fund: 0, total: 0 };
+        const p = item.provisions ?? { severance: 0, severance_interest: 0, vacation: 0, bonus: 0, total: 0 };
+        const cost_center = item.cost_center || 'administrative';
+
+        const lines: (AutoEntryLine | null)[] = [];
+
+        // === DEBIT LINES: earnings ===
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id,
+            `payroll.approved.payroll_expense.${cost_center}`,
+            'Sueldo básico', e.base_salary, 0, data.store_id,
+          ),
+        );
+
+        if (e.transport_subsidy > 0) {
+          lines.push(
+            await this.resolveAccountLine(
+              data.organization_id, 'payroll.approved.transport_subsidy',
+              'Aux. transporte', e.transport_subsidy, 0, data.store_id,
+            ),
+          );
+        }
+
+        // === DEBIT LINES: provisions (gasto) ===
+        if (p.severance > 0) {
+          lines.push(
+            await this.resolveAccountLine(
+              data.organization_id, 'payroll.approved.provision_severance',
+              'Gasto cesantías', p.severance, 0, data.store_id,
+            ),
+          );
+        }
+        if (p.severance_interest > 0) {
+          lines.push(
+            await this.resolveAccountLine(
+              data.organization_id, 'payroll.approved.provision_severance_interest',
+              'Gasto int. cesantías', p.severance_interest, 0, data.store_id,
+            ),
+          );
+        }
+        if (p.vacation > 0) {
+          lines.push(
+            await this.resolveAccountLine(
+              data.organization_id, 'payroll.approved.provision_vacation',
+              'Gasto vacaciones', p.vacation, 0, data.store_id,
+            ),
+          );
+        }
+        if (p.bonus > 0) {
+          lines.push(
+            await this.resolveAccountLine(
+              data.organization_id, 'payroll.approved.provision_bonus',
+              'Gasto prima', p.bonus, 0, data.store_id,
+            ),
+          );
+        }
+
+        // === DEBIT LINES: aportes patronales (gasto) ===
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payroll.approved.health_employer',
+            'EPS empleador', ec.health, 0, data.store_id,
+          ),
+        );
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payroll.approved.pension_employer',
+            'AFP empleador', ec.pension, 0, data.store_id,
+          ),
+        );
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payroll.approved.arl_expense',
+            'ARL', ec.arl, 0, data.store_id,
+          ),
+        );
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payroll.approved.sena_expense',
+            'SENA', ec.sena, 0, data.store_id,
+          ),
+        );
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payroll.approved.icbf_expense',
+            'ICBF', ec.icbf, 0, data.store_id,
+          ),
+        );
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payroll.approved.compensation_fund_expense',
+            'Caja compensación', ec.compensation_fund, 0, data.store_id,
+          ),
+        );
+
+        // === CREDIT LINES: deducciones empleado ===
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payroll.approved.health_payable',
+            'EPS empleado', 0, d.health, data.store_id,
+          ),
+        );
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payroll.approved.pension_payable',
+            'AFP empleado', 0, d.pension, data.store_id,
+          ),
+        );
+
+        if (d.retention > 0) {
+          lines.push(
+            await this.resolveAccountLine(
+              data.organization_id, 'payroll.approved.withholdings',
+              'Retención', 0, d.retention, data.store_id,
+            ),
+          );
+        }
+
+        if (d.advance_deduction > 0) {
+          lines.push(
+            await this.resolveAccountLine(
+              data.organization_id, 'payroll.approved.advance_deduction',
+              'Anticipo descuento', 0, d.advance_deduction, data.store_id,
+            ),
+          );
+        }
+
+        // === CREDIT LINES: nómina por pagar ===
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payroll.approved.salaries_payable',
+            'Nómina por pagar', 0, item.net_pay, data.store_id,
+          ),
+        );
+
+        // === CREDIT LINES: provisiones por pagar ===
+        if (p.severance > 0) {
+          lines.push(
+            await this.resolveAccountLine(
+              data.organization_id, 'payroll.approved.liability_severance',
+              'Cesantías por pagar', 0, p.severance, data.store_id,
+            ),
+          );
+        }
+        if (p.severance_interest > 0) {
+          lines.push(
+            await this.resolveAccountLine(
+              data.organization_id, 'payroll.approved.liability_severance_interest',
+              'Intereses cesantías por pagar', 0, p.severance_interest, data.store_id,
+            ),
+          );
+        }
+        if (p.vacation > 0) {
+          lines.push(
+            await this.resolveAccountLine(
+              data.organization_id, 'payroll.approved.liability_vacation',
+              'Vacaciones por pagar', 0, p.vacation, data.store_id,
+            ),
+          );
+        }
+        if (p.bonus > 0) {
+          lines.push(
+            await this.resolveAccountLine(
+              data.organization_id, 'payroll.approved.liability_bonus',
+              'Prima por pagar', 0, p.bonus, data.store_id,
+            ),
+          );
+        }
+
+        // === CREDIT LINES: aportes patronales por pagar ===
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payroll.approved.health_employer_payable',
+            'EPS empleador por pagar', 0, ec.health, data.store_id,
+          ),
+        );
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payroll.approved.pension_employer_payable',
+            'AFP empleador por pagar', 0, ec.pension, data.store_id,
+          ),
+        );
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payroll.approved.arl_payable',
+            'ARL por pagar', 0, ec.arl, data.store_id,
+          ),
+        );
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payroll.approved.sena_payable',
+            'SENA por pagar', 0, ec.sena, data.store_id,
+          ),
+        );
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payroll.approved.icbf_payable',
+            'ICBF por pagar', 0, ec.icbf, data.store_id,
+          ),
+        );
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id, 'payroll.approved.compensation_fund_payable',
+            'Caja comp. por pagar', 0, ec.compensation_fund, data.store_id,
+          ),
+        );
+
+        await this.createAutoEntry({
+          source_type: 'payroll_item',
+          source_id: item.payroll_item_id,
+          organization_id: data.organization_id,
+          store_id: data.store_id,
+          entry_date: new Date(),
+          description: `Nómina Pago Empleado #${item.employee_id} - Run #${data.payroll_run_id}`,
+          lines,
+          user_id: data.user_id,
+        });
+
+        result.created++;
+      } catch (err) {
+        result.failed++;
+        result.errors.push(`Employee #${item.employee_id}: ${err.message}`);
+        this.logger.error(
+          `Failed to create entry for employee #${item.employee_id}: ${err.message}`,
+        );
+      }
+    }
+
+    return result;
   }
 
   /**

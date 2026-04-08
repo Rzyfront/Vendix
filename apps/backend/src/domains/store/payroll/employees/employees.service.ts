@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
+import { UserRole } from '../../../../domains/auth/enums/user-role.enum';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { QueryEmployeeDto } from './dto/query-employee.dto';
@@ -152,6 +153,24 @@ export class EmployeesService {
         }
       }
 
+      // Validate user does not have CUSTOMER role
+      if (dto.user_id) {
+        const is_customer = await this.prisma.withoutScope().users.findFirst({
+          where: {
+            id: dto.user_id,
+            user_roles: {
+              some: {
+                role: { name: UserRole.CUSTOMER },
+              },
+            },
+          },
+        });
+
+        if (is_customer) {
+          throw new BadRequestException('Los usuarios con rol Cliente no pueden ser vinculados como empleados.');
+        }
+      }
+
       const result = await this.prisma.$transaction(async (tx) => {
         const employee = await tx.employees.create({
           data: {
@@ -296,6 +315,13 @@ export class EmployeesService {
         ...(linked_user_ids.length > 0 && {
           id: { notIn: linked_user_ids },
         }),
+        user_roles: {
+          none: {
+            role: {
+              name: UserRole.CUSTOMER,
+            },
+          },
+        },
       },
       select: {
         id: true,
