@@ -221,6 +221,8 @@ function getPucAccounts(): PucAccountInput[] {
     a('143510', 'Mercancías en Tránsito', 'asset', 'debit', '1435'),
     a('1440', 'Bienes Raíces para la Venta', 'asset', 'debit', '14'),
     a('144005', 'Bienes Raíces para la Venta', 'asset', 'debit', '1440'),
+    a('1450', 'Anticipos y Avances a Empleados', 'asset', 'debit', '14'),
+    a('145005', 'Anticipos y Avances a Empleados', 'asset', 'debit', '1450'),
     a('1455', 'Materiales, Repuestos y Accesorios', 'asset', 'debit', '14'),
     a('145505', 'Materiales, Repuestos y Accesorios', 'asset', 'debit', '1455'),
     a('1465', 'Inventarios en Tránsito', 'asset', 'debit', '14'),
@@ -408,6 +410,8 @@ function getPucAccounts(): PucAccountInput[] {
     a('261505', 'Provisión para Impuesto de Renta', 'liability', 'credit', '2615'),
     a('2620', 'Pensiones de Jubilación', 'liability', 'credit', '26'),
     a('262005', 'Pensiones de Jubilación', 'liability', 'credit', '2620'),
+    a('2625', 'Prima de Servicios por Pagar', 'liability', 'credit', '26'),
+    a('262505', 'Prima de Servicios por Pagar', 'liability', 'credit', '2625'),
 
     // ── Grupo 27: Diferidos ──
     a('27', 'Diferidos', 'liability', 'credit', '2'),

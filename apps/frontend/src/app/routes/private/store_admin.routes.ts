@@ -367,10 +367,23 @@ export const storeAdminRoutes: Routes = [
           },
           {
             path: 'shipping',
-            loadComponent: () =>
-              import('../../private/modules/store/settings/shipping/shipping-settings.component').then(
-                (c) => c.ShippingSettingsComponent,
-              ),
+            children: [
+              {
+                path: '',
+                pathMatch: 'full',
+                loadComponent: () =>
+                  import(
+                    '../../private/modules/store/settings/shipping/pages/shipping-dashboard/shipping-dashboard.component'
+                  ).then((c) => c.ShippingDashboardComponent),
+              },
+              {
+                path: ':methodId',
+                loadComponent: () =>
+                  import(
+                    '../../private/modules/store/settings/shipping/pages/method-detail/method-detail.component'
+                  ).then((c) => c.MethodDetailComponent),
+              },
+            ],
           },
           {
             path: 'appearance',

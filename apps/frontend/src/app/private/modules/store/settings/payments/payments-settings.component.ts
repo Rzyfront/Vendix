@@ -265,8 +265,8 @@ import {
     <!-- Configure Payment Method Modal -->
     <app-modal
       [isOpen]="show_config_modal()"
-      [title]="'Configurar ' + (config_method?.display_name || '')"
-      subtitle="Ingresa las credenciales para este método de pago"
+      [title]="edit_mode() ? 'Editar ' + (editing_store_method?.display_name || config_method?.display_name || '') : 'Configurar ' + (config_method?.display_name || '')"
+      [subtitle]="edit_mode() ? 'Actualiza la configuración de este método de pago' : 'Ingresa las credenciales para este método de pago'"
       size="md"
       (closed)="closeConfigModal()"
     >
@@ -385,8 +385,8 @@ import {
 
       <div slot="footer" class="flex justify-end gap-3">
         <app-button variant="ghost" (clicked)="closeConfigModal()">Cancelar</app-button>
-        <app-button variant="primary" [loading]="config_saving()" (clicked)="saveConfigAndEnable()">
-          Configurar y Agregar
+        <app-button variant="primary" [loading]="config_saving()" (clicked)="edit_mode() ? saveEdit() : saveConfigAndEnable()">
+          {{ edit_mode() ? 'Guardar Cambios' : 'Configurar y Agregar' }}
         </app-button>
       </div>
     </app-modal>
@@ -574,6 +574,8 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
 
   // Config modal state
   show_config_modal = signal(false);
+  edit_mode = signal(false);
+  editing_store_method: StorePaymentMethod | null = null;
   config_method: SystemPaymentMethod | null = null;
   config_form: FormGroup = new FormGroup({});
   config_fields: Array<{ key: string; title: string; type: string; required: boolean; description: string; enum_values?: string[]; default_value?: any }> = [];
@@ -1017,6 +1019,8 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
 
   closeConfigModal(): void {
     this.show_config_modal.set(false);
+    this.edit_mode.set(false);
+    this.editing_store_method = null;
     this.config_method = null;
     this.config_fields = [];
     this.wompiTestResult = null;
@@ -1139,7 +1143,65 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
   }
 
   editMethod(method: CombinedPaymentMethod): void {
-    this.toast_service.info('Funcionalidad de edición próximamente');
+    if (!method.is_store_method || !method.store_payment_method) return;
+
+    const store_method = method.store_payment_method;
+    const sys_method = store_method.system_payment_method;
+
+    this.edit_mode.set(true);
+    this.editing_store_method = store_method;
+    this.config_method = sys_method;
+
+    if (sys_method?.config_schema) {
+      this.buildConfigForm(sys_method.config_schema);
+      this.config_form.patchValue(store_method.custom_config || {});
+    } else {
+      this.config_fields = [];
+      this.config_form = this.fb.group({ display_name: [store_method.display_name] });
+    }
+
+    this.wompiTestResult = null;
+    this.show_config_modal.set(true);
+  }
+
+  saveEdit(): void {
+    if (!this.editing_store_method) return;
+
+    const store_method = this.editing_store_method;
+    const has_config = !!this.config_method?.config_schema;
+
+    if (has_config) {
+      const required = this.config_method!.config_schema?.['required'] || [];
+      for (const key of required) {
+        if (!this.config_form.value[key]) {
+          this.toast_service.error(`El campo "${key}" es requerido`);
+          return;
+        }
+      }
+    }
+
+    this.config_saving.set(true);
+
+    const update_data = has_config
+      ? { custom_config: this.config_form.value as Record<string, any> }
+      : { display_name: this.config_form.value['display_name'] as string };
+
+    this.payment_methods_service
+      .updateStorePaymentMethod(store_method.id, update_data)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.toast_service.success('Método de pago actualizado correctamente');
+          this.config_saving.set(false);
+          this.closeConfigModal();
+          this.loadPaymentMethods();
+          this.loadPaymentMethodStats();
+        },
+        error: (error: any) => {
+          this.toast_service.error('Error al actualizar: ' + (error.error?.message || error.message));
+          this.config_saving.set(false);
+        },
+      });
   }
 
   getStateLabel(state: string): string {

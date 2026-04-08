@@ -16,9 +16,11 @@ import {
   DescribeDBInstancesCommand,
 } from '@aws-sdk/client-rds';
 import {
-  RDS_DB_IDENTIFIER,
+  RDS_DB_IDENTIFIER_DEFAULT,
   AWS_REGION_DEFAULT,
+  MONITORING_CACHE_TTL,
 } from '../../monitoring/constants/cloudwatch.constants';
+import { ConfigService } from '@nestjs/config';
 
 interface SnapshotInfo {
   id: string;
@@ -54,11 +56,16 @@ interface BackupStatus {
 export class RdsBackupService {
   private readonly logger = new Logger(RdsBackupService.name);
   private readonly rdsClient: RDSClient;
+  private readonly rdsDbIdentifier: string;
 
-  constructor(@Inject(CACHE_MANAGER) private readonly cache: Cache) {
+  constructor(
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
+    private readonly configService: ConfigService,
+  ) {
     this.rdsClient = new RDSClient({
-      region: process.env.AWS_REGION || AWS_REGION_DEFAULT,
+      region: this.configService.get<string>('AWS_REGION') || AWS_REGION_DEFAULT,
     });
+    this.rdsDbIdentifier = this.configService.get<string>('RDS_DB_IDENTIFIER') || RDS_DB_IDENTIFIER_DEFAULT;
   }
 
   async listSnapshots(): Promise<SnapshotInfo[]> {
@@ -70,13 +77,13 @@ export class RdsBackupService {
       const [automated, manual] = await Promise.all([
         this.rdsClient.send(
           new DescribeDBSnapshotsCommand({
-            DBInstanceIdentifier: RDS_DB_IDENTIFIER,
+            DBInstanceIdentifier: this.rdsDbIdentifier,
             SnapshotType: 'automated',
           }),
         ),
         this.rdsClient.send(
           new DescribeDBSnapshotsCommand({
-            DBInstanceIdentifier: RDS_DB_IDENTIFIER,
+            DBInstanceIdentifier: this.rdsDbIdentifier,
             SnapshotType: 'manual',
           }),
         ),
@@ -106,7 +113,7 @@ export class RdsBackupService {
         return b.created_at.localeCompare(a.created_at);
       });
 
-      await this.cache.set(cacheKey, result, 60000);
+      await this.cache.set(cacheKey, result, MONITORING_CACHE_TTL);
 
       return result;
     } catch (error) {
@@ -124,7 +131,7 @@ export class RdsBackupService {
       const [instanceResult, snapshots] = await Promise.all([
         this.rdsClient.send(
           new DescribeDBInstancesCommand({
-            DBInstanceIdentifier: RDS_DB_IDENTIFIER,
+            DBInstanceIdentifier: this.rdsDbIdentifier,
           }),
         ),
         this.listSnapshots(),
@@ -158,7 +165,7 @@ export class RdsBackupService {
         },
         retention_days: instance.BackupRetentionPeriod || 0,
         instance: {
-          id: instance.DBInstanceIdentifier || RDS_DB_IDENTIFIER,
+          id: instance.DBInstanceIdentifier || this.rdsDbIdentifier,
           class: instance.DBInstanceClass || '',
           engine: `${instance.Engine || ''} ${instance.EngineVersion || ''}`.trim(),
           storage_gb: instance.AllocatedStorage || 0,
@@ -166,7 +173,7 @@ export class RdsBackupService {
         },
       };
 
-      await this.cache.set(cacheKey, result, 60000);
+      await this.cache.set(cacheKey, result, MONITORING_CACHE_TTL);
 
       return result;
     } catch (error) {
@@ -182,7 +189,7 @@ export class RdsBackupService {
     try {
       const result = await this.rdsClient.send(
         new CreateDBSnapshotCommand({
-          DBInstanceIdentifier: RDS_DB_IDENTIFIER,
+          DBInstanceIdentifier: this.rdsDbIdentifier,
           DBSnapshotIdentifier: snapshotId,
         }),
       );

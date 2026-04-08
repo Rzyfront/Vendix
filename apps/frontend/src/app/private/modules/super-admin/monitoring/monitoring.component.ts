@@ -5,6 +5,7 @@ import { takeUntil, map, catchError, filter } from 'rxjs/operators';
 import { of } from 'rxjs';
 import { StatsComponent } from '../../../../shared/components';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
+import { formatBytes as _formatBytes } from '../../../../core/utils/format.utils';
 import { MonitoringService } from './services';
 import {
   MetricChartComponent,
@@ -724,12 +725,7 @@ export class MonitoringComponent implements OnInit, OnDestroy {
   }
 
   formatBytes(bytes?: number): string {
-    if (bytes === undefined || bytes === null) return '--';
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(Math.abs(bytes)) / Math.log(k));
-    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+    return _formatBytes(bytes);
   }
 
   // -- Private helpers --

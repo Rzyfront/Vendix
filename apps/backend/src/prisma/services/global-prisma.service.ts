@@ -487,4 +487,9 @@ export class GlobalPrismaService extends BasePrismaService {
   get commission_calculations() {
     return this.baseClient.commission_calculations;
   }
+
+  // Payroll system defaults (global - no scoping)
+  get payroll_system_defaults() {
+    return this.baseClient.payroll_system_defaults;
+  }
 }

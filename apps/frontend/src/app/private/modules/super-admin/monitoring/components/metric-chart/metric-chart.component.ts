@@ -12,6 +12,7 @@ import { CommonModule } from '@angular/common';
 import { Chart, registerables } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import { TimeSeriesPoint } from '../../interfaces';
+import { formatBytes } from '../../../../../../core/utils/format.utils';
 
 Chart.register(...registerables);
 
@@ -64,18 +65,10 @@ export class MetricChartComponent
   formatValue(value: number | null): string {
     if (value === null) return '--';
     if (this.unit === '%') return `${value.toFixed(1)}%`;
-    if (this.unit === 'bytes') return this.formatBytes(value);
+    if (this.unit === 'bytes') return formatBytes(value);
     if (this.unit === 'ms') return `${value.toFixed(2)} ms`;
     if (this.unit === 'ops') return `${value.toFixed(0)} ops`;
     return `${value.toFixed(1)} ${this.unit}`;
-  }
-
-  private formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(Math.abs(bytes)) / Math.log(k));
-    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
   }
 
   ngAfterViewInit(): void {

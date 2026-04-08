@@ -4,8 +4,8 @@ import type { Cache } from 'cache-manager';
 import { CloudWatchService, type MetricQuery } from './cloudwatch.service';
 import { MetricsQueryDto } from '../dto/metrics-query.dto';
 import {
-  RDS_DB_IDENTIFIER,
   autoGranularity,
+  MONITORING_CACHE_TTL,
   periodToSeconds,
   periodToStartTime,
 } from '../constants/cloudwatch.constants';
@@ -43,7 +43,7 @@ export class RdsMetricsService {
     const periodSeconds = periodToSeconds(granularity);
 
     const dimensions = [
-      { Name: 'DBInstanceIdentifier', Value: RDS_DB_IDENTIFIER },
+      { Name: 'DBInstanceIdentifier', Value: this.cloudWatchService.rdsDbIdentifier },
     ];
     const namespace = 'AWS/RDS';
 
@@ -103,7 +103,7 @@ export class RdsMetricsService {
       },
     };
 
-    await this.cache.set(cacheKey, result, 60000);
+    await this.cache.set(cacheKey, result, MONITORING_CACHE_TTL);
 
     return result;
   }

@@ -8,7 +8,7 @@ import {
 } from '@aws-sdk/client-cloudwatch';
 import { VendixHttpException } from '../../../../common/errors/vendix-http.exception';
 import { ErrorCodes } from '../../../../common/errors/error-codes';
-import { AWS_REGION_DEFAULT } from '../constants/cloudwatch.constants';
+import { AWS_REGION_DEFAULT, EC2_INSTANCE_ID_DEFAULT, RDS_DB_IDENTIFIER_DEFAULT } from '../constants/cloudwatch.constants';
 
 export interface MetricDataResult {
   timestamps: string[];
@@ -27,6 +27,8 @@ export interface MetricQuery {
 export class CloudWatchService {
   private readonly logger = new Logger(CloudWatchService.name);
   private readonly client: CloudWatchClient;
+  readonly ec2InstanceId: string;
+  readonly rdsDbIdentifier: string;
 
   constructor(private readonly configService: ConfigService) {
     const region =
@@ -42,6 +44,8 @@ export class CloudWatchService {
     }
 
     this.client = new CloudWatchClient(clientConfig);
+    this.ec2InstanceId = this.configService.get<string>('EC2_INSTANCE_ID') || EC2_INSTANCE_ID_DEFAULT;
+    this.rdsDbIdentifier = this.configService.get<string>('RDS_DB_IDENTIFIER') || RDS_DB_IDENTIFIER_DEFAULT;
   }
 
   async getMetricData(params: {

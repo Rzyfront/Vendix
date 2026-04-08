@@ -1,5 +1,5 @@
-export const EC2_INSTANCE_ID = 'i-097972b9868de9cd8';
-export const RDS_DB_IDENTIFIER = 'vendix-db';
+export const EC2_INSTANCE_ID_DEFAULT = 'i-097972b9868de9cd8';
+export const RDS_DB_IDENTIFIER_DEFAULT = 'vendix-db';
 export const AWS_REGION_DEFAULT = 'us-east-1';
 
 export type Granularity = '1m' | '5m' | '15m' | '1h';
@@ -59,3 +59,6 @@ export const RDS_METRICS = [
   { name: 'ReadLatency', unit: 'Seconds' },
   { name: 'WriteLatency', unit: 'Seconds' },
 ] as const;
+
+/** Cache TTL for monitoring/backup queries (1 minute) */
+export const MONITORING_CACHE_TTL = 60 * 1000;

@@ -35,6 +35,14 @@ interface EmployerCostsBreakdown {
   total: number;
 }
 
+interface ProvisionsBreakdown {
+  severance: number;           // proportional_salary * severance_rate (1/12)
+  severance_interest: number;  // severance * (severance_interest_rate / 12)
+  vacation: number;            // proportional_salary * vacation_rate (15/360)
+  bonus: number;               // proportional_salary * bonus_rate (1/12)
+  total: number;
+}
+
 export interface PayrollItemCalculation {
   employee_id: number;
   base_salary: number;
@@ -42,6 +50,7 @@ export interface PayrollItemCalculation {
   earnings: EarningsBreakdown;
   deductions: DeductionsBreakdown;
   employer_costs: EmployerCostsBreakdown;
+  provisions: ProvisionsBreakdown;
   total_earnings: number;
   total_deductions: number;
   total_employer_costs: number;
@@ -128,6 +137,7 @@ export class PayrollCalculationService {
             earnings: calc.earnings as any,
             deductions: calc.deductions as any,
             employer_costs: calc.employer_costs as any,
+            provisions: calc.provisions as any,
             total_earnings: new Prisma.Decimal(calc.total_earnings),
             total_deductions: new Prisma.Decimal(calc.total_deductions),
             total_employer_costs: new Prisma.Decimal(calc.total_employer_costs),
@@ -225,6 +235,13 @@ export class PayrollCalculationService {
       health_employer + pension_employer + arl_cost + sena_cost + icbf_cost + compensation_fund_cost,
     );
 
+    // Provisions (monthly accrual)
+    const severance = this.round(proportional_salary * rules.severance_rate);
+    const severance_interest = this.round(severance * (rules.severance_interest_rate / 12));
+    const vacation = this.round(proportional_salary * rules.vacation_rate);
+    const bonus = this.round(proportional_salary * rules.bonus_rate);
+    const total_provisions = this.round(severance + severance_interest + vacation + bonus);
+
     const net_pay = this.round(total_earnings - total_deductions);
 
     return {
@@ -251,6 +268,13 @@ export class PayrollCalculationService {
         icbf: icbf_cost,
         compensation_fund: compensation_fund_cost,
         total: total_employer_costs,
+      },
+      provisions: {
+        severance,
+        severance_interest,
+        vacation,
+        bonus,
+        total: total_provisions,
       },
       total_earnings,
       total_deductions,

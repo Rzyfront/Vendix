@@ -169,7 +169,7 @@ export class PayrollFlowService {
         approved_by_user_id: context.user_id,
         approved_at: new Date(),
       },
-      include: PAYROLL_RUN_INCLUDE,
+      include: PAYROLL_RUN_DETAIL_INCLUDE,
     });
 
     // Build cost center breakdown from payroll items
@@ -186,7 +186,7 @@ export class PayrollFlowService {
     this.event_emitter.emit('payroll.approved', {
       payroll_run_id: id,
       organization_id: run.organization_id,
-      store_id: run.store_id,
+      store_id: run.store_id ?? undefined,
       total_earnings: Number(run.total_earnings || 0),
       total_employer_costs: Number(run.total_employer_costs || 0),
       total_deductions: Number(run.total_deductions || 0),
@@ -247,7 +247,7 @@ export class PayrollFlowService {
         xml_document: provider_response.xml_document || null,
         sent_at: provider_response.success ? new Date() : null,
       },
-      include: PAYROLL_RUN_INCLUDE,
+      include: PAYROLL_RUN_DETAIL_INCLUDE,
     });
 
     this.logger.log(
@@ -272,16 +272,24 @@ export class PayrollFlowService {
         status: 'paid',
         payment_date: new Date(),
       },
-      include: PAYROLL_RUN_INCLUDE,
+      include: PAYROLL_RUN_DETAIL_INCLUDE,
     });
 
     this.event_emitter.emit('payroll.paid', {
       payroll_run_id: id,
       organization_id: run.organization_id,
-      store_id: run.store_id,
-      total_net_pay: Number(run.total_net_pay || 0),
-      payment_date: new Date(),
+      store_id: run.store_id ?? undefined,
       user_id: this.getContext().user_id,
+      payroll_items: ((run as any).payroll_items ?? []).map((item: any) => ({
+        payroll_item_id: item.id,
+        employee_id: item.employee_id,
+        cost_center: item.employee?.cost_center ?? 'administrative',
+        earnings: item.earnings,
+        deductions: item.deductions,
+        employer_costs: item.employer_costs,
+        provisions: item.provisions,
+        net_pay: Number(item.net_pay ?? 0),
+      })),
     });
 
     this.logger.log(`Payroll run #${id} marked as paid`);
@@ -303,7 +311,7 @@ export class PayrollFlowService {
       data: {
         status: 'cancelled',
       },
-      include: PAYROLL_RUN_INCLUDE,
+      include: PAYROLL_RUN_DETAIL_INCLUDE,
     });
 
     this.logger.log(`Payroll run #${id} cancelled`);
@@ -488,7 +496,7 @@ export class PayrollFlowService {
   async getDianStatus(id: number) {
     const run = await this.prisma.payroll_runs.findFirst({
       where: { id },
-      include: PAYROLL_RUN_INCLUDE,
+      include: PAYROLL_RUN_DETAIL_INCLUDE,
     });
 
     if (!run) {

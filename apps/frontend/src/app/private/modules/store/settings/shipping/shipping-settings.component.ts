@@ -25,7 +25,8 @@ import {
   CardComponent,
 } from '../../../../../../app/shared/components/index';
 import { ShippingMethodsModalComponent } from './components/shipping-methods-modal.component';
-import { ZoneModalComponent, RatesModalComponent } from './components/index';
+import { ZoneModalComponent } from './components/index';
+import { RatesModalComponent } from './components/rates-modal/rates-modal.component';
 import { ModalComponent } from '../../../../../../app/shared/components/index';
 import {
   ScrollableTabsComponent,

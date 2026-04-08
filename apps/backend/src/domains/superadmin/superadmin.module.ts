@@ -18,6 +18,7 @@ import { AIEngineConfigModule } from './ai-engine/ai-engine.module';
 import { HelpCenterAdminModule } from './help-center/help-center-admin.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { BackupModule } from './backups/backups.module';
+import { PayrollDefaultsModule } from './payroll-defaults/payroll-defaults.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { BackupModule } from './backups/backups.module';
     HelpCenterAdminModule,
     MonitoringModule,
     BackupModule,
+    PayrollDefaultsModule,
   ],
   providers: [GlobalPrismaService],
   exports: [GlobalPrismaService],

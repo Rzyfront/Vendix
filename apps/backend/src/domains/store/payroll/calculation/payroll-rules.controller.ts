@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, ParseIntPipe } from '@nestjs/common';
 import { PayrollRulesService } from './payroll-rules.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { UpdatePayrollRulesDto } from './dto/update-payroll-rules.dto';
@@ -14,6 +14,18 @@ export class PayrollRulesController {
   async getConfiguredYears() {
     const result = await this.payroll_rules_service.getConfiguredYears();
     return this.response_service.success(result);
+  }
+
+  @Get('available-updates')
+  async getAvailableUpdates() {
+    const updates = await this.payroll_rules_service.getAvailableUpdates();
+    return this.response_service.success(updates);
+  }
+
+  @Post(':year/apply-defaults')
+  async applySystemDefaults(@Param('year', ParseIntPipe) year: number) {
+    const rules = await this.payroll_rules_service.applySystemDefaults(year);
+    return this.response_service.success(rules);
   }
 
   @Get(':year')

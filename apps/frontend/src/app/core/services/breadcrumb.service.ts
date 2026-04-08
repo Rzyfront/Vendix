@@ -890,7 +890,7 @@ export class BreadcrumbService {
     },
     {
       path: '/admin/accounting/aging',
-      title: 'Aging Report',
+      title: 'Cartera por Vencimiento',
       parent: 'Contabilidad',
       icon: 'bar-chart-2',
     },

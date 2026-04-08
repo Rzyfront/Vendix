@@ -1,6 +1,7 @@
 import { Component, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ProcessInfo } from '../../interfaces';
+import { formatBytes } from '../../../../../../core/utils/format.utils';
 
 @Component({
   selector: 'app-process-info',
@@ -79,10 +80,6 @@ export class ProcessInfoComponent {
   }
 
   formatBytes(bytes: number): string {
-    if (!bytes) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(Math.abs(bytes)) / Math.log(k));
-    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+    return formatBytes(bytes);
   }
 }

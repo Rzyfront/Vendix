@@ -213,18 +213,11 @@ export class SettingsService {
       }
     }
 
-    // Bidirectional sync: module_flows.accounting <-> accounting_flows
-    if (dto.module_flows?.accounting) {
-      // module_flows.accounting was written → sync to legacy accounting_flows
-      const { enabled, ...flow_toggles } = dto.module_flows.accounting;
-      if (Object.keys(flow_toggles).length > 0) {
-        updatedSettings.accounting_flows = {
-          ...(updatedSettings.accounting_flows || {}),
-          ...flow_toggles,
-        } as any;
-      }
-    } else if (dto.accounting_flows) {
-      // Legacy accounting_flows was written → sync to module_flows.accounting
+    // @deprecated: Sync bidireccional eliminada. module_flows es source of truth.
+    // accounting_flows se mantiene en lectura como fallback legacy (Fase 2: eliminar).
+
+    // Legacy accounting_flows writes → sync a module_flows.accounting
+    if (dto.accounting_flows) {
       if (!updatedSettings.module_flows) {
         updatedSettings.module_flows = {
           accounting: { enabled: true, ...dto.accounting_flows } as any,

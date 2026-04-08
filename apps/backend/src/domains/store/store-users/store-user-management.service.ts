@@ -225,7 +225,6 @@ export class StoreUserManagementService {
               },
             },
             user_settings: {
-              where: { app_type: 'STORE_ADMIN' },
               select: { config: true },
             },
           },
@@ -245,8 +244,9 @@ export class StoreUserManagementService {
     // Merge user's panel_ui with defaults so the frontend sees ALL available keys
     const defaults = await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
     const defaultPanelUI = defaults.panel_ui; // { ORG_ADMIN: {...}, STORE_ADMIN: {...}, ... }
-    const userConfig = (user_settings[0]?.config as any) || {};
+    const userConfig = (user_settings?.config as any) || {};
     const userPanelUI = userConfig.panel_ui || {};
+
 
     // Merge: default keys as base, user overrides on top
     const mergedPanelUI: Record<string, Record<string, boolean>> = {};
@@ -401,7 +401,7 @@ export class StoreUserManagementService {
 
     // Read existing user_settings to preserve preferences
     const existing = await this.prisma.user_settings.findFirst({
-      where: { user_id: userId, app_type: 'STORE_ADMIN' },
+      where: { user_id: userId },
     });
 
     const existingConfig = (existing?.config as any) || {};
@@ -410,19 +410,20 @@ export class StoreUserManagementService {
       panel_ui: dto.panel_ui,
     };
 
-    await this.prisma.user_settings.upsert({
-      where: {
-        user_id: userId,
-      },
-      create: {
-        user_id: userId,
-        app_type: 'STORE_ADMIN',
-        config: newConfig,
-      },
-      update: {
-        config: newConfig,
-      },
-    });
+    if (existing) {
+      await this.prisma.user_settings.update({
+        where: { user_id: userId },
+        data: { config: newConfig, updated_at: new Date() },
+      });
+    } else {
+      await this.prisma.user_settings.create({
+        data: {
+          user_id: userId,
+          app_type: 'STORE_ADMIN',
+          config: newConfig,
+        },
+      });
+    }
 
     return this.findOne(userId);
   }

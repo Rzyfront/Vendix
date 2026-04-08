@@ -230,7 +230,7 @@ export class AccountingEventsListener {
         user_id: event.approved_by,
         cost_center_breakdown: event.cost_center_breakdown,
       });
-      this.logger.log(`Auto-entry created for payroll.approved #${event.payroll_run_id}`);
+      this.logger.log(`Auto-entry created for payroll.approved #${event.payroll_run_id} (consolidated)`);
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for payroll.approved #${event.payroll_run_id}: ${error.message}`,
@@ -244,9 +244,17 @@ export class AccountingEventsListener {
     payroll_run_id: number;
     organization_id: number;
     store_id?: number;
-    total_net_pay: number;
-    payment_date: Date;
     user_id?: number;
+    payroll_items: Array<{
+      payroll_item_id: number;
+      employee_id: number;
+      cost_center: string;
+      earnings: any;
+      deductions: any;
+      employer_costs: any;
+      provisions: any;
+      net_pay: number;
+    }>;
   }) {
     try {
       if (!await this.isFlowEnabled(event.store_id, 'payroll')) return;
@@ -254,13 +262,13 @@ export class AccountingEventsListener {
         payroll_run_id: event.payroll_run_id,
         organization_id: event.organization_id,
         store_id: event.store_id,
-        total_net_pay: Number(event.total_net_pay),
         user_id: event.user_id,
+        payroll_items: event.payroll_items ?? [],
       });
-      this.logger.log(`Auto-entry created for payroll.paid #${event.payroll_run_id}`);
+      this.logger.log(`Auto-entries created for payroll.paid #${event.payroll_run_id} (${event.payroll_items?.length ?? 0} employees)`);
     } catch (error) {
       this.logger.error(
-        `Failed to create auto-entry for payroll.paid #${event.payroll_run_id}: ${error.message}`,
+        `Failed to create auto-entries for payroll.paid #${event.payroll_run_id}: ${error.message}`,
         error.stack,
       );
     }

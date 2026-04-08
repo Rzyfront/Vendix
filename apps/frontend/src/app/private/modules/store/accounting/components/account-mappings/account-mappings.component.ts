@@ -127,6 +127,31 @@ const MAPPING_LABELS: Record<string, string> = {
   'payroll.approved.social_security.administrative': 'Seg. Social (Administrativo)',
   'payroll.approved.social_security.operational': 'Seg. Social (Operativo)',
   'payroll.approved.social_security.sales': 'Seg. Social (Ventas)',
+  // Nómina individual — gastos (débitos)
+  'payroll.approved.transport_subsidy': 'Aux. Transporte (Gasto)',
+  'payroll.approved.provision_severance': 'Gasto Cesantias',
+  'payroll.approved.provision_severance_interest': 'Gasto Intereses Cesantias',
+  'payroll.approved.provision_vacation': 'Gasto Vacaciones',
+  'payroll.approved.provision_bonus': 'Gasto Prima de Servicios',
+  'payroll.approved.health_employer': 'EPS Empleador (Gasto)',
+  'payroll.approved.pension_employer': 'AFP Empleador (Gasto)',
+  'payroll.approved.arl_expense': 'ARL (Gasto)',
+  'payroll.approved.sena_expense': 'SENA (Gasto)',
+  'payroll.approved.icbf_expense': 'ICBF (Gasto)',
+  'payroll.approved.compensation_fund_expense': 'Caja Compensacion (Gasto)',
+  // Nómina individual — pasivos provisiones (créditos)
+  'payroll.approved.liability_severance': 'Cesantias por Pagar',
+  'payroll.approved.liability_severance_interest': 'Intereses Cesantias por Pagar',
+  'payroll.approved.liability_vacation': 'Vacaciones por Pagar',
+  'payroll.approved.liability_bonus': 'Prima de Servicios por Pagar',
+  // Nómina individual — aportes patronales por pagar (créditos)
+  'payroll.approved.health_employer_payable': 'EPS Empleador por Pagar',
+  'payroll.approved.pension_employer_payable': 'AFP Empleador por Pagar',
+  'payroll.approved.arl_payable': 'ARL por Pagar',
+  'payroll.approved.sena_payable': 'SENA por Pagar',
+  'payroll.approved.icbf_payable': 'ICBF por Pagar',
+  'payroll.approved.compensation_fund_payable': 'Caja Compensacion por Pagar',
+  'payroll.approved.advance_deduction': 'Descuento Anticipos',
   // Wompi
   'payment.received.wompi': 'Pasarela Wompi',
   // Cuotas de Credito

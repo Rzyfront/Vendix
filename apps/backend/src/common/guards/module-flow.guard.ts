@@ -3,6 +3,7 @@ import {
   ExecutionContext,
   ForbiddenException,
   Injectable,
+  Logger,
   SetMetadata,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -14,6 +15,7 @@ export const RequireModuleFlow = (module: 'accounting' | 'payroll' | 'invoicing'
 
 @Injectable()
 export class ModuleFlowGuard implements CanActivate {
+  private readonly logger = new Logger(ModuleFlowGuard.name);
   private cache = new Map<string, { enabled: boolean; expires: number }>();
 
   constructor(
@@ -70,7 +72,23 @@ export class ModuleFlowGuard implements CanActivate {
       return true;
     } catch (error) {
       if (error instanceof ForbiddenException) throw error;
-      return true; // On DB error, fail open
+
+      // Fail-closed: usar cache expirado como fallback, sino denegar
+      const stale = this.cache.get(cache_key);
+      if (stale) {
+        this.logger.warn(
+          `DB error for module "${module}" store ${store_id}, using expired cache (enabled=${stale.enabled})`,
+        );
+        if (!stale.enabled) {
+          throw new ForbiddenException(`Module "${module}" is disabled for this store`);
+        }
+        return true;
+      }
+
+      this.logger.warn(
+        `DB error for module "${module}" store ${store_id}, no cache available — denying access`,
+      );
+      return false;
     }
   }
 }

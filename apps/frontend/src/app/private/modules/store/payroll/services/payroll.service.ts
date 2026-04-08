@@ -29,6 +29,7 @@ import {
   AdvanceManualPaymentDto,
   EmployeeAdvanceSummary,
   BankExportResult,
+  PayrollUpdateAvailable,
 } from '../interfaces/payroll.interface';
 import {
   BulkEmployeeAnalysisResult,
@@ -194,6 +195,14 @@ export class PayrollService {
 
   updatePayrollRules(year: number, rules: Partial<PayrollRules>): Observable<ApiResponse<PayrollRules>> {
     return this.http.patch<ApiResponse<PayrollRules>>(this.getApiUrl(`rules/${year}`), rules);
+  }
+
+  getAvailableUpdates(): Observable<ApiResponse<PayrollUpdateAvailable[]>> {
+    return this.http.get<ApiResponse<PayrollUpdateAvailable[]>>(this.getApiUrl('rules/available-updates'));
+  }
+
+  applySystemDefaults(year: number): Observable<ApiResponse<PayrollRules>> {
+    return this.http.post<ApiResponse<PayrollRules>>(this.getApiUrl(`rules/${year}/apply-defaults`), {});
   }
 
   // ─── Settlements ───────────────────────────────────────
