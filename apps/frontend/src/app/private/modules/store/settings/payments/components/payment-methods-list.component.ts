@@ -127,7 +127,7 @@ export class PaymentMethodsListComponent {
     {
       label: 'Edit',
       icon: 'edit',
-      variant: 'secondary',
+      variant: 'info',
       action: (row: StorePaymentMethod) => this.edit.emit(row),
       show: (row: StorePaymentMethod) => row.state !== 'archived',
     },

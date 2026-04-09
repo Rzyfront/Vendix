@@ -226,13 +226,13 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       label: 'Editar',
       icon: 'edit',
       action: (store) => this.editStore(store),
-      variant: 'success',
+      variant: 'info',
     },
     {
       label: 'Configuración',
       icon: 'settings',
       action: (store) => this.openSettingsModal(store),
-      variant: 'secondary',
+      variant: 'ghost',
     },
     {
       label: 'Eliminar',

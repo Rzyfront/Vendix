@@ -290,7 +290,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
       label: 'Editar',
       icon: 'edit',
       action: (org) => this.editOrganization(org),
-      variant: 'success',
+      variant: 'info',
     },
     {
       label: 'Eliminar',

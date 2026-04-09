@@ -161,7 +161,7 @@ export class PayrollDefaultsComponent implements OnInit, OnDestroy {
       label: 'Editar',
       icon: 'edit',
       action: (rec: PayrollSystemDefault) => this.openEditModal(rec),
-      variant: 'success',
+      variant: 'info',
       show: (rec: PayrollSystemDefault) => !rec.is_published,
     },
     {
@@ -175,7 +175,7 @@ export class PayrollDefaultsComponent implements OnInit, OnDestroy {
       label: 'Publicar',
       icon: 'send',
       action: (rec: PayrollSystemDefault) => this.confirmPublish(rec),
-      variant: 'primary',
+      variant: 'success',
       show: (rec: PayrollSystemDefault) => !rec.is_published,
     },
     {

@@ -281,7 +281,7 @@ export class StoreUsersSettingsComponent implements OnInit {
     {
       label: 'Gestionar',
       icon: 'edit',
-      variant: 'primary',
+      variant: 'info',
       action: (user: StoreUser) => this.openEditModal(user),
     },
     {

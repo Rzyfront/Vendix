@@ -313,6 +313,22 @@ export class ItemListComponent {
   }
 
   /**
+   * Get resolved action variant class
+   */
+  getActionVariant(action: TableAction, item: any): string {
+    const variant = typeof action.variant === 'function' ? action.variant(item) : (action.variant || 'ghost');
+    return `action-${variant}`;
+  }
+
+  /**
+   * Get resolved menu item variant class
+   */
+  getMenuItemVariant(action: TableAction, item: any): string {
+    const variant = typeof action.variant === 'function' ? action.variant(item) : (action.variant || 'ghost');
+    return `menu-item-${variant}`;
+  }
+
+  /**
    * Get visible actions for an item (excluding menu actions)
    */
   getVisibleActions(item: any): TableAction[] {

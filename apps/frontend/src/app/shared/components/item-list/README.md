@@ -45,6 +45,41 @@ interface ItemListCardConfig {
 }
 ```
 
+## Action Variants
+
+Los botones de accion en las cards usan un estilo circular pastel con colores basados en tokens CSS del tema. Soportan variant estatico o dinamico (funcion).
+
+| Variant     | Token CSS               | Color     |
+| ----------- | ----------------------- | --------- |
+| `ghost`     | `--color-text-secondary`| Gris (default) |
+| `primary`   | `--color-primary`       | Color del tema  |
+| `secondary` | `--color-text-primary`  | Neutro          |
+| `success`   | `--color-success`       | Verde           |
+| `danger`    | `--color-error`         | Rojo            |
+| `warning`   | `--color-warning`       | Naranja         |
+| `info`      | `--color-info`          | Azul            |
+| `gaming`    | `--color-gaming`        | Violeta         |
+| `royal`     | `--color-royal`         | Dorado/ambar    |
+| `muted`     | `--color-muted`         | Gris sutil      |
+
+### Variant dinamico
+
+`variant` acepta `((item: any) => string)` para cambiar el color segun el estado del item:
+
+```typescript
+actions: TableAction[] = [
+  {
+    label: (item) => (item.is_active ? 'Desactivar' : 'Activar'),
+    icon: (item) => (item.is_active ? 'toggle-right' : 'toggle-left'),
+    variant: (item) => (item.is_active ? 'success' : 'secondary'),
+    action: (item) => this.toggle(item),
+  },
+];
+```
+
+> `label`, `icon` y `variant` soportan funciones dinamicas. Se resuelven por item.
+> Las primeras 2 acciones se muestran como botones circulares. El resto va al dropdown menu (icono `more-horizontal`).
+
 ## Importante
 
 - Diseñado especificamente para mobile-first (responsivo inverso de `app-table`)

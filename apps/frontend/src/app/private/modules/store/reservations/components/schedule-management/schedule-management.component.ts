@@ -26,6 +26,7 @@ import {
   ResponsiveDataViewComponent,
   ModalComponent,
   ScrollableTabsComponent,
+  EmptyStateComponent,
 } from '../../../../../../shared/components';
 import type {
   TableColumn,
@@ -68,6 +69,7 @@ interface BookableService {
     SelectorComponent,
     ResponsiveDataViewComponent,
     ScrollableTabsComponent,
+    EmptyStateComponent,
     WeeklyScheduleEditorComponent,
     ExceptionsManagerComponent,
   ],
@@ -128,6 +130,10 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
     return all.filter(s => (s.name || '').toLowerCase().includes(query));
   });
 
+  // Live schedule stats (updated in real-time from editor)
+  liveWeeklyHours = signal<number | null>(null);
+  liveActiveDays = signal<number | null>(null);
+
   // Bio editing
   editingBio = signal(false);
   bioValue = signal('');
@@ -135,9 +141,9 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
 
   // Modal tabs
   readonly detailTabs = [
-    { id: 'services', label: 'Servicios' },
-    { id: 'schedule', label: 'Horario' },
-    { id: 'exceptions', label: 'Excepciones' },
+    { id: 'services', label: 'Servicios', icon: 'layers' },
+    { id: 'schedule', label: 'Horario', icon: 'clock' },
+    { id: 'exceptions', label: 'Excepciones', icon: 'calendar-x' },
   ];
 
   // Provider table columns
@@ -164,9 +170,12 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
     {
       key: 'services',
       label: 'Servicios',
-      priority: 2,
-      transform: (val: any) =>
-        val?.length ? `${val.length} servicio${val.length > 1 ? 's' : ''}` : 'Sin servicios',
+      priority: 1,
+      transform: (val: any) => {
+        if (!val?.length) return 'Sin servicios';
+        if (val.length <= 2) return val.map((s: any) => s.product?.name || 'Servicio').join(', ');
+        return `${val.length} servicios`;
+      },
     },
   ];
 
@@ -178,14 +187,45 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
     subtitleKey: 'employee.position',
     subtitleTransform: (item: any) => item.employee?.position || 'Sin cargo',
     avatarFallbackIcon: 'user',
+    avatarShape: 'circle',
     badgeKey: 'is_active',
     badgeConfig: {
       type: 'custom',
       colorMap: { true: '#10b981', false: '#9ca3af' },
     },
+    badgeTransform: (v: any) => (v ? 'Activo' : 'Inactivo'),
+    detailKeys: [
+      {
+        key: 'services',
+        label: 'Servicios',
+        icon: 'layers',
+        transform: (v: any) => {
+          if (!v?.length) return 'Ninguno';
+          if (v.length <= 2) return v.map((s: any) => s.product?.name || 'Servicio').join(', ');
+          return `${v.length} servicios`;
+        },
+      },
+      {
+        key: 'services',
+        label: 'Duración prom.',
+        icon: 'clock',
+        transform: (v: any) => {
+          if (!v?.length) return '—';
+          const durations = v
+            .map((s: any) => s.product?.service_duration_minutes)
+            .filter((d: any) => d != null);
+          if (!durations.length) return '—';
+          const avg = Math.round(
+            durations.reduce((a: number, b: number) => a + b, 0) / durations.length,
+          );
+          return `${avg} min`;
+        },
+      },
+    ],
     footerKey: 'services',
-    footerTransform: (val: any) =>
-      val?.length ? `${val.length} servicio${val.length > 1 ? 's' : ''}` : 'Sin servicios',
+    footerLabel: 'Servicios asignados',
+    footerStyle: 'prominent',
+    footerTransform: (val: any) => (val?.length ? `${val.length}` : '0'),
   };
 
   // Provider row actions
@@ -193,13 +233,13 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
     {
       label: 'Configurar',
       icon: 'settings',
-      variant: 'primary',
+      variant: 'info',
       action: (item: any) => this.selectProvider(item),
     },
     {
       label: ((item: any) => (item.is_active ? 'Desactivar' : 'Activar')) as any,
-      icon: 'toggle-right',
-      variant: 'ghost',
+      icon: ((item: any) => (item.is_active ? 'toggle-right' : 'toggle-left')) as any,
+      variant: (item: any) => (item.is_active ? 'success' : 'danger'),
       action: (item: any) => this.toggleActive(item),
     },
   ];
@@ -221,6 +261,8 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
     this.isDetailModalOpen.set(false);
     this.selectedProvider.set(null);
     this.activeTab.set('services');
+    this.liveWeeklyHours.set(null);
+    this.liveActiveDays.set(null);
   }
 
   loadProviders(): void {
@@ -414,6 +456,22 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
 
   getServiceCount(provider: ServiceProvider): number {
     return provider.services?.length || 0;
+  }
+
+  getActiveDaysCount(provider: ServiceProvider): number {
+    if (this.liveActiveDays() !== null) return this.liveActiveDays()!;
+    if (!provider.schedules) return 0;
+    return provider.schedules.filter(s => s.is_active).length;
+  }
+
+  getLiveWeeklyHours(provider: ServiceProvider): number {
+    if (this.liveWeeklyHours() !== null) return this.liveWeeklyHours()!;
+    return this.getWeeklyHours(provider);
+  }
+
+  onScheduleChanged(stats: { activeDays: number; weeklyHours: number }): void {
+    this.liveActiveDays.set(stats.activeDays);
+    this.liveWeeklyHours.set(stats.weeklyHours);
   }
 
   isServiceAssigned(productId: number): boolean {

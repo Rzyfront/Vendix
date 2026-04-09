@@ -118,7 +118,7 @@ export class UsersComponent implements OnInit, OnDestroy {
       label: 'Editar',
       icon: 'edit',
       action: (user: User) => this.editUser(user),
-      variant: 'success',
+      variant: 'info',
     },
     {
       label: 'Eliminar',

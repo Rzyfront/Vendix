@@ -179,7 +179,7 @@ export class ConsolidationSessionsComponent implements OnInit, OnDestroy {
     {
       label: 'Ver',
       icon: 'eye',
-      variant: 'primary',
+      variant: 'secondary',
       action: (row: ConsolidationSession) => this.onRowClick(row),
     },
   ];

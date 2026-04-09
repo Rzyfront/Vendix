@@ -37,6 +37,7 @@ import {
 } from '../../../inventory/interfaces';
 import { PurchaseOrderStats } from './purchase-order-stats.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { PurchaseOrderPrintService } from '../services/purchase-order-print.service';
 
 @Component({
   selector: 'app-purchase-order-list',
@@ -58,6 +59,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 })
 export class PurchaseOrderListComponent implements OnInit, OnDestroy {
   private currencyService = inject(CurrencyFormatService);
+  private printService = inject(PurchaseOrderPrintService);
 
   @Output() viewOrder = new EventEmitter<PurchaseOrder>();
   @Output() create = new EventEmitter<void>();
@@ -167,7 +169,15 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
       label: 'View Details',
       icon: 'eye',
       action: (order: PurchaseOrder) => this.viewOrderDetails(order),
-      variant: 'ghost',
+      variant: 'secondary',
+    },
+    {
+      label: 'Imprimir',
+      icon: 'printer',
+      action: (order: PurchaseOrder) => this.printService.printPurchaseOrder(order),
+      variant: 'info',
+      show: (order: PurchaseOrder) =>
+        ['ordered', 'partial', 'received'].includes(order.status),
     },
     {
       label: 'Cancel Order',

@@ -555,7 +555,7 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
     {
       label: 'Editar',
       icon: 'edit',
-      variant: 'ghost',
+      variant: 'info',
       action: (row: CashRegister) => this.openEditRegisterModal(row),
     },
     {
@@ -694,7 +694,7 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
     {
       label: 'Ver',
       icon: 'eye',
-      variant: 'primary',
+      variant: 'secondary',
       action: (row: CashRegisterSession) => this.onViewDetail(row),
     },
   ];

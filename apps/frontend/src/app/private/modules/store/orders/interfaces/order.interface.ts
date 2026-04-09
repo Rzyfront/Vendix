@@ -536,7 +536,7 @@ export interface OrderActionConfig {
   id: string;
   label: string;
   icon: string;
-  variant?: 'primary' | 'success' | 'danger' | 'warning';
+  variant?: 'primary' | 'secondary' | 'success' | 'danger' | 'warning' | 'info' | 'ghost';
   type?: 'button' | 'alert';
   color?: string;
   manualStateTarget?: OrderState;

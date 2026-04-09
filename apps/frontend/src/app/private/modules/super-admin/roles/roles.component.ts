@@ -179,13 +179,13 @@ export class RolesComponent implements OnInit, OnDestroy {
       label: 'Editar',
       icon: 'edit',
       action: (role: Role) => this.editRole(role),
-      variant: 'success',
+      variant: 'info',
     },
     {
       label: 'Permisos',
       icon: 'settings',
       action: (role: Role) => this.openPermissionsModal(role),
-      variant: 'secondary',
+      variant: 'ghost',
     },
     {
       label: 'Eliminar',

@@ -103,7 +103,7 @@ export class ExpensesListComponent {
     {
       label: 'Editar',
       icon: 'edit',
-      variant: 'primary',
+      variant: 'info',
       action: (row: Expense) => this.edit.emit(row),
     },
   ];

@@ -10,16 +10,17 @@
 
   <!-- Provider List -->
   <div class="md:space-y-4">
-    <app-card [responsive]="true" [padding]="false" customClasses="md:min-h-[400px]">
-      <!-- Sticky search header -->
-      <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
+    <app-card [responsive]="true" [padding]="false" customClasses="md:max-h-[600px] md:overflow-y-auto">
+      <!-- Search header -->
+      <div
+        class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
         <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-          <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
-            Proveedores
-            @if (providers().length > 0) {
-              <span class="text-text-secondary font-normal">({{ filteredProviders().length }})</span>
-            }
+          <!-- Title -->
+          <h2 class="text-[13px] font-semibold text-text-secondary tracking-wide md:text-lg md:font-semibold md:text-text-primary md:tracking-normal">
+            Proveedores <span class="font-normal text-text-secondary/50 md:font-semibold md:text-text-primary">({{ filteredProviders().length }})</span>
           </h2>
+
+          <!-- Search row -->
           <div class="flex items-center gap-2 w-full md:w-auto">
             <app-inputsearch
               class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
@@ -34,32 +35,39 @@
               (clicked)="startAddProvider()"
               title="Agregar Proveedor"
             >
-              <app-icon name="plus" [size]="18" slot="icon"></app-icon>
+              <app-icon slot="icon" name="plus" [size]="18"></app-icon>
             </app-button>
           </div>
         </div>
       </div>
 
       <!-- Provider data view -->
-      <app-responsive-data-view
-        [data]="filteredProviders()"
-        [columns]="providerColumns"
-        [cardConfig]="providerCardConfig"
-        [actions]="providerActions"
-        [loading]="loading()"
-        emptyIcon="users"
-        emptyTitle="Sin proveedores"
-        emptyDescription="Agrega empleados como proveedores de servicio"
-        emptyActionText="Agregar Proveedor"
-        [showEmptyAction]="true"
-        (emptyActionClick)="startAddProvider()"
-        (rowClick)="selectProvider($event)"
-      />
+      <div class="px-2 pb-2 pt-3 md:p-4">
+        <app-responsive-data-view
+          [data]="filteredProviders()"
+          [columns]="providerColumns"
+          [cardConfig]="providerCardConfig"
+          [actions]="providerActions"
+          [loading]="loading()"
+          emptyIcon="users"
+          emptyTitle="Sin proveedores"
+          emptyDescription="Agrega empleados como proveedores de servicio"
+          emptyActionText="Agregar Proveedor"
+          [showEmptyAction]="true"
+          (emptyActionClick)="startAddProvider()"
+          (rowClick)="selectProvider($event)"
+        />
+      </div>
 
       <!-- Add Provider Form (inline collapse) -->
       @if (showAddForm()) {
         <div class="px-4 pb-4 md:px-6 md:pb-6 border-t border-border pt-4">
-          <h3 class="text-sm font-semibold text-text-primary mb-3">Agregar Nuevo Proveedor</h3>
+          <div class="flex items-center gap-2 mb-3">
+            <div class="w-8 h-8 rounded-lg bg-[var(--color-primary)] bg-opacity-10 flex items-center justify-center">
+              <app-icon name="user-plus" [size]="16" class="text-[var(--color-primary)]"/>
+            </div>
+            <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">Agregar Nuevo Proveedor</h3>
+          </div>
           <app-selector
             label="Empleado"
             placeholder="Seleccionar empleado..."
@@ -69,45 +77,79 @@
           />
           <div class="flex justify-end gap-2 mt-3">
             <app-button variant="ghost" size="sm" (clicked)="showAddForm.set(false)">Cancelar</app-button>
-            <app-button variant="primary" size="sm" [disabled]="!selectedEmployeeId() || addingProvider()" [loading]="addingProvider()" (clicked)="addProvider()">Agregar</app-button>
+            <app-button variant="primary" size="sm" [disabled]="!selectedEmployeeId() || addingProvider()" [loading]="addingProvider()" (clicked)="addProvider()">
+              <app-icon name="plus" [size]="14" slot="icon"/>
+              Agregar
+            </app-button>
           </div>
         </div>
       }
     </app-card>
   </div>
 
-  <!-- Provider Detail MODAL -->
+  <!-- ═══════════════════════════════════════ -->
+  <!-- Provider Detail MODAL                   -->
+  <!-- ═══════════════════════════════════════ -->
   <app-modal
     [isOpen]="isDetailModalOpen()"
     (closed)="closeDetailModal()"
-    [title]="selectedProvider() ? getProviderDisplayName(selectedProvider()!) : ''"
-    [subtitle]="selectedProvider()?.employee?.position || 'Configuracion del proveedor'"
+    title="Configuración del Proveedor"
+    [subtitle]="selectedProvider() ? getProviderDisplayName(selectedProvider()!) : ''"
     size="lg"
   >
     @if (selectedProvider(); as p) {
-      <!-- Provider header inside modal -->
-      <div class="flex items-center justify-between mb-4 pb-3 border-b border-[var(--color-border)]">
-        <div class="flex items-center gap-3">
-          <div class="provider-avatar" [class.active]="p.is_active">
+      <!-- ▸ Profile Card -->
+      <div class="provider-profile-header">
+        <div class="profile-top">
+          <div class="profile-avatar" [class.active]="p.is_active">
             {{ getInitials(p) }}
           </div>
-          <div>
-            <div class="flex items-center gap-2">
-              <app-badge [variant]="p.is_active ? 'success' : 'neutral'" size="xsm">
-                {{ p.is_active ? 'Activo' : 'Inactivo' }}
-              </app-badge>
-              <span class="text-xs text-[var(--color-text-muted)]">{{ getServiceCount(p) }} servicios · {{ getWeeklyHours(p) }}h/sem</span>
+          <div class="profile-info">
+            <h2 class="profile-name">{{ getProviderDisplayName(p) }}</h2>
+            <div class="profile-position">
+              <app-icon name="briefcase" [size]="12"/>
+              <span>{{ p.employee?.position || 'Sin cargo asignado' }}</span>
+            </div>
+          </div>
+          <div class="profile-toggle">
+            <app-badge [variant]="p.is_active ? 'success' : 'neutral'" size="sm">
+              {{ p.is_active ? 'Activo' : 'Inactivo' }}
+            </app-badge>
+            <app-toggle
+              [checked]="p.is_active"
+              [ariaLabel]="p.is_active ? 'Desactivar proveedor' : 'Activar proveedor'"
+              (toggled)="toggleActive(p)"
+            />
+          </div>
+        </div>
+
+        <!-- ▸ Stat Cards -->
+        <div class="stats-row">
+          <div class="stat-card stat-primary">
+            <app-icon name="layers" [size]="18"/>
+            <div class="stat-content">
+              <span class="stat-number">{{ getServiceCount(p) }}</span>
+              <span class="stat-label">Servicios</span>
+            </div>
+          </div>
+          <div class="stat-card stat-info">
+            <app-icon name="clock" [size]="18"/>
+            <div class="stat-content">
+              <span class="stat-number">{{ getLiveWeeklyHours(p) }}h</span>
+              <span class="stat-label">Semanal</span>
+            </div>
+          </div>
+          <div class="stat-card stat-success">
+            <app-icon name="calendar-check" [size]="18"/>
+            <div class="stat-content">
+              <span class="stat-number">{{ getActiveDaysCount(p) }}</span>
+              <span class="stat-label">Días</span>
             </div>
           </div>
         </div>
-        <app-toggle
-          [checked]="p.is_active"
-          [ariaLabel]="p.is_active ? 'Desactivar' : 'Activar'"
-          (toggled)="toggleActive(p)"
-        />
       </div>
 
-      <!-- Tabs -->
+      <!-- ▸ Tabs -->
       <app-scrollable-tabs
         [tabs]="detailTabs"
         [activeTab]="activeTab()"
@@ -115,46 +157,90 @@
         (tabChange)="activeTab.set($event); serviceSearchQuery.set('')"
       />
 
-      <div class="mt-4">
-        <!-- Tab: Servicios -->
+      <div class="tab-body">
+        <!-- ═══ Tab: Servicios ═══ -->
         @if (activeTab() === 'services') {
-          <div class="space-y-3">
+          <div class="services-section">
             <app-inputsearch
               size="sm"
               placeholder="Buscar servicio..."
               (searchChange)="serviceSearchQuery.set($event)"
             />
-            @for (service of filteredServices(); track service.id) {
-              <div class="flex items-center justify-between py-2 px-3 rounded-lg border border-[var(--color-border)] hover:border-[var(--color-primary)] transition-colors">
-                <div class="flex-1 min-w-0">
-                  <span class="text-sm font-medium text-[var(--color-text-primary)]">{{ service.name }}</span>
-                  @if (service.service_duration_minutes) {
-                    <span class="text-xs text-[var(--color-text-muted)] ml-1">· {{ service.service_duration_minutes }} min</span>
-                  }
-                </div>
-                <app-toggle
-                  [checked]="isServiceAssigned(service.id)"
-                  [ariaLabel]="'Asignar ' + service.name"
-                  (toggled)="toggleServiceAssignment(service.id, !isServiceAssigned(service.id))"
-                />
+
+            @if (filteredServices().length > 0) {
+              <div class="services-grid">
+                @for (service of filteredServices(); track service.id) {
+                  <div class="service-card" [class.assigned]="isServiceAssigned(service.id)">
+                    <div class="service-card-left">
+                      <div class="service-icon" [class.active]="isServiceAssigned(service.id)">
+                        <app-icon name="briefcase" [size]="16"/>
+                      </div>
+                      <div class="service-info">
+                        <span class="service-name">{{ service.name }}</span>
+                        <div class="service-details">
+                          @if (service.service_duration_minutes) {
+                            <span class="service-meta-item">
+                              <app-icon name="clock" [size]="12"/>
+                              {{ service.service_duration_minutes }} min
+                            </span>
+                          }
+                          @if (service.base_price) {
+                            <span class="service-meta-item">
+                              <app-icon name="dollar-sign" [size]="12"/>
+                              {{ service.base_price | number:'1.0-0' }}
+                            </span>
+                          }
+                          @if (!service.service_duration_minutes && !service.base_price) {
+                            <span class="service-meta-item">Sin detalles</span>
+                          }
+                        </div>
+                      </div>
+                    </div>
+                    <app-toggle
+                      [checked]="isServiceAssigned(service.id)"
+                      [ariaLabel]="'Asignar ' + service.name"
+                      (toggled)="toggleServiceAssignment(service.id, !isServiceAssigned(service.id))"
+                    />
+                  </div>
+                }
               </div>
-            }
-            @if (allServices().length === 0) {
-              <p class="text-sm text-[var(--color-text-muted)] text-center py-4">No hay servicios con reserva configurados</p>
+            } @else if (allServices().length === 0) {
+              <app-empty-state
+                icon="briefcase"
+                title="Sin servicios"
+                description="No hay servicios con reserva configurados en tu tienda"
+                [showActionButton]="false"
+              />
+            } @else {
+              <app-empty-state
+                icon="search"
+                title="Sin resultados"
+                description="No se encontraron servicios con ese nombre"
+                [showActionButton]="false"
+              />
             }
           </div>
         }
 
-        <!-- Tab: Horario -->
+        <!-- ═══ Tab: Horario ═══ -->
         @if (activeTab() === 'schedule') {
-          <app-weekly-schedule-editor [providerId]="p.id"/>
+          <app-weekly-schedule-editor [providerId]="p.id" (scheduleChanged)="onScheduleChanged($event)"/>
         }
 
-        <!-- Tab: Excepciones -->
+        <!-- ═══ Tab: Excepciones ═══ -->
         @if (activeTab() === 'exceptions') {
           <app-exceptions-manager [providerId]="p.id"/>
         }
       </div>
     }
+
+    <!-- ▸ Footer -->
+    <div slot="footer">
+      <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+        <app-button variant="outline" (clicked)="closeDetailModal()">
+          Cerrar
+        </app-button>
+      </div>
+    </div>
   </app-modal>
 </div>

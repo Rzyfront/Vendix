@@ -252,7 +252,7 @@ export class TemplatesComponent implements OnInit, OnDestroy {
       label: 'Edit',
       icon: 'edit',
       action: (template) => this.editTemplate(template),
-      variant: 'success',
+      variant: 'info',
     },
     {
       label: 'Delete',

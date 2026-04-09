@@ -680,6 +680,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
         item.state === 'enabled' ? 'Desactivar' : 'Activar',
       icon: (item: CombinedPaymentMethod) =>
         item.state === 'enabled' ? 'pause' : 'check-circle',
+      variant: 'ghost',
       action: (item: CombinedPaymentMethod) => this.toggleMethod(item),
       show: (item: CombinedPaymentMethod) => item.is_store_method,
     },
@@ -688,7 +689,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
       icon: 'edit',
       action: (item: CombinedPaymentMethod) => this.editMethod(item),
       show: (item: CombinedPaymentMethod) => item.is_store_method,
-      variant: 'primary',
+      variant: 'info',
     },
   ];
 

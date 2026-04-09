@@ -95,13 +95,13 @@ export class EmployeeListComponent {
     {
       label: 'Ver',
       icon: 'eye',
-      variant: 'primary',
+      variant: 'secondary',
       action: (row: Employee) => this.detail.emit(row),
     },
     {
       label: 'Editar',
       icon: 'edit',
-      variant: 'primary',
+      variant: 'info',
       action: (row: Employee) => this.edit.emit(row),
     },
   ];

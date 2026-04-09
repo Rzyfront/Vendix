@@ -135,7 +135,7 @@ export class MovementListComponent {
     {
       label: 'Ver Detalle',
       icon: 'eye',
-      variant: 'primary',
+      variant: 'secondary',
       action: (item: InventoryMovement) => this.viewDetail.emit(item),
     },
   ];

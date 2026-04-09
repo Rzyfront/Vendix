@@ -136,25 +136,17 @@ export class PaymentTimeoutCleanupJob {
           data: { status: 'cancelled', updated_at: new Date() },
         });
 
-        const stockLevel = await tx.stock_levels.findUnique({
+        const stockLevel = await tx.stock_levels.findFirst({
           where: {
-            product_id_product_variant_id_location_id: {
-              product_id: reservation.product_id,
-              product_variant_id: reservation.product_variant_id,
-              location_id: reservation.location_id,
-            },
+            product_id: reservation.product_id,
+            product_variant_id: reservation.product_variant_id ?? null,
+            location_id: reservation.location_id,
           },
         });
 
         if (stockLevel) {
           await tx.stock_levels.update({
-            where: {
-              product_id_product_variant_id_location_id: {
-                product_id: reservation.product_id,
-                product_variant_id: reservation.product_variant_id,
-                location_id: reservation.location_id,
-              },
-            },
+            where: { id: stockLevel.id },
             data: {
               quantity_reserved: Math.max(
                 0,
@@ -212,25 +204,17 @@ export class PaymentTimeoutCleanupJob {
         data: { status: 'expired', updated_at: new Date() },
       });
 
-      const stockLevel = await tx.stock_levels.findUnique({
+      const stockLevel = await tx.stock_levels.findFirst({
         where: {
-          product_id_product_variant_id_location_id: {
-            product_id: reservation.product_id,
-            product_variant_id: reservation.product_variant_id,
-            location_id: reservation.location_id,
-          },
+          product_id: reservation.product_id,
+          product_variant_id: reservation.product_variant_id ?? null,
+          location_id: reservation.location_id,
         },
       });
 
       if (stockLevel) {
         await tx.stock_levels.update({
-          where: {
-            product_id_product_variant_id_location_id: {
-              product_id: reservation.product_id,
-              product_variant_id: reservation.product_variant_id,
-              location_id: reservation.location_id,
-            },
-          },
+          where: { id: stockLevel.id },
           data: {
             quantity_reserved: Math.max(
               0,

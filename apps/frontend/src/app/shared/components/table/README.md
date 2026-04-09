@@ -61,11 +61,51 @@ interface TableAction {
   label: string | ((item: any) => string);
   icon?: string | ((item: any) => string);
   action: (item: any) => void;
-  variant?: "primary" | "secondary" | "danger" | "ghost" | "success";
+  variant?: "primary" | "secondary" | "danger" | "ghost" | "success" | "warning" | "info" | "gaming" | "royal" | "muted" | ((item: any) => string);
   disabled?: (item: any) => boolean;
   show?: (item: any) => boolean;
 }
 ```
+
+### Action Variants
+
+Los botones de accion usan un estilo glassmorphism pastel con gradientes suaves basados en variables CSS del tema. Si el tema cambia, los colores se adaptan automaticamente.
+
+| Variant     | Color base                | Estilo                                        |
+| ----------- | ------------------------- | --------------------------------------------- |
+| `ghost`     | `--color-text-secondary`  | Sin fondo, solo texto. Default si se omite     |
+| `primary`   | `--color-primary`         | Gradiente pastel del color primario del tema   |
+| `secondary` | `--color-text-primary`    | Fondo neutro gris sutil                        |
+| `success`   | `--color-success`         | Gradiente pastel verde                         |
+| `danger`    | `--color-error`           | Gradiente pastel rojo                          |
+| `warning`   | `--color-warning`         | Gradiente pastel naranja                       |
+| `info`      | `--color-info`            | Gradiente pastel azul                          |
+| `gaming`    | `--color-gaming`          | Gradiente pastel violeta                       |
+| `royal`     | `--color-royal`           | Gradiente pastel dorado/ambar                  |
+| `muted`     | `--color-muted`           | Gradiente pastel gris neutro                   |
+
+### Variant dinamico
+
+`variant` acepta una funcion `(item) => string` para cambiar el estilo segun el estado del item:
+
+```typescript
+providerActions: TableAction[] = [
+  {
+    label: "Configurar",
+    icon: "settings",
+    variant: "secondary",
+    action: (item) => this.selectProvider(item),
+  },
+  {
+    label: (item) => (item.is_active ? "Desactivar" : "Activar"),
+    icon: (item) => (item.is_active ? "toggle-right" : "toggle-left"),
+    variant: (item) => (item.is_active ? "success" : "secondary"),
+    action: (item) => this.toggleActive(item),
+  },
+];
+```
+
+> `label`, `icon` y `variant` soportan funciones dinamicas. Se resuelven por fila.
 
 ## Importante
 

@@ -100,11 +100,10 @@
         <div class="footer-actions-wrap relative">
           <div class="footer-actions flex gap-2">
             <!-- First two visible actions -->
-            <button *ngFor="let action of getVisibleActions(item).slice(0, 2)" class="footer-action-btn" [ngClass]="{
-                'action-danger': action.variant === 'danger',
-                'action-primary': action.variant === 'primary',
-                'action-disabled': isActionDisabled(action, item)
-              }" [disabled]="isActionDisabled(action, item)" [title]="getActionLabel(action, item)"
+            <button *ngFor="let action of getVisibleActions(item).slice(0, 2)"
+              class="footer-action-btn"
+              [ngClass]="[getActionVariant(action, item), isActionDisabled(action, item) ? 'action-disabled' : '']"
+              [disabled]="isActionDisabled(action, item)" [title]="getActionLabel(action, item)"
               (click)="executeAction(action, item, $event)">
               <app-icon [name]="getActionIcon(action, item) || 'circle'" [size]="18"></app-icon>
             </button>
@@ -119,11 +118,10 @@
           <!-- Dropdown Menu for overflow actions -->
           <div *ngIf="activeMenuIndex === i && actions && actions.length > 2" class="card-menu-dropdown"
             (click)="$event.stopPropagation()">
-            <button *ngFor="let action of getVisibleActions(item).slice(2)" class="menu-item" [ngClass]="{
-                'menu-item-danger': action.variant === 'danger',
-                'menu-item-primary': action.variant === 'primary',
-                'menu-item-disabled': isActionDisabled(action, item)
-              }" [disabled]="isActionDisabled(action, item)" (click)="executeAction(action, item, $event)">
+            <button *ngFor="let action of getVisibleActions(item).slice(2)"
+              class="menu-item"
+              [ngClass]="[getMenuItemVariant(action, item), isActionDisabled(action, item) ? 'menu-item-disabled' : '']"
+              [disabled]="isActionDisabled(action, item)" (click)="executeAction(action, item, $event)">
               <app-icon *ngIf="getActionIcon(action, item)" [name]="getActionIcon(action, item)" [size]="14"></app-icon>
               <span>{{ getActionLabel(action, item) }}</span>
             </button>

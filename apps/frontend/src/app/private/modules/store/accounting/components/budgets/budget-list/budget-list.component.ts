@@ -125,7 +125,7 @@ export class BudgetListComponent implements OnInit, OnDestroy {
     {
       label: 'Editar',
       icon: 'edit',
-      variant: 'primary',
+      variant: 'info',
       action: (row: Budget) => this.onEdit(row),
     },
     {

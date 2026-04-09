@@ -162,7 +162,7 @@ export class AdjustmentListComponent {
     {
       label: 'Ver Detalle',
       icon: 'eye',
-      variant: 'primary',
+      variant: 'secondary',
       action: (item: InventoryAdjustment) => this.viewDetail.emit(item),
     },
   ];

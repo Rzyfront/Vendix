@@ -5,6 +5,7 @@ import { HttpClient } from '@angular/common/http';
 import {
   FormBuilder,
   FormGroup,
+  FormsModule,
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
@@ -23,6 +24,7 @@ import {
   EmptyStateComponent,
   InputComponent,
   SelectorComponent,
+  PaginationComponent,
 } from '../../../../../../app/shared/components';
 import { StickyHeaderComponent } from '../../../../../../app/shared/components/sticky-header/sticky-header.component';
 
@@ -31,6 +33,7 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     ReactiveFormsModule,
     CurrencyPipe,
     CardComponent,
@@ -40,6 +43,7 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
     EmptyStateComponent,
     InputComponent,
     SelectorComponent,
+    PaginationComponent,
     StickyHeaderComponent,
   ],
   template: `
@@ -156,14 +160,22 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
                   Wallet
                 </h3>
               </div>
-              <app-button
-                *ngIf="wallet"
-                variant="primary"
-                size="sm"
-                (clicked)="showTopUpForm = !showTopUpForm"
-              >
-                {{ showTopUpForm ? 'Cancelar' : 'Recargar' }}
-              </app-button>
+              <div *ngIf="wallet" class="flex items-center gap-2">
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  (clicked)="showAdjustForm = !showAdjustForm; showTopUpForm = false"
+                >
+                  {{ showAdjustForm ? 'Cancelar' : 'Ajustar' }}
+                </app-button>
+                <app-button
+                  variant="primary"
+                  size="sm"
+                  (clicked)="showTopUpForm = !showTopUpForm; showAdjustForm = false"
+                >
+                  {{ showTopUpForm ? 'Cancelar' : 'Recargar' }}
+                </app-button>
+              </div>
             </div>
 
             <!-- Wallet Loading -->
@@ -301,87 +313,220 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
                 </form>
               </div>
 
+              <!-- Adjust Form -->
+              <div
+                *ngIf="showAdjustForm"
+                class="p-4 rounded-lg mb-4"
+                style="background: var(--color-background); border: 1px solid var(--color-border);"
+              >
+                <h4 class="font-semibold mb-3" style="color: var(--color-text-primary)">
+                  Ajustar Wallet
+                </h4>
+                <form [formGroup]="adjustForm" (ngSubmit)="adjustWallet()">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <app-selector
+                      label="Tipo"
+                      formControlName="type"
+                      [options]="adjustTypeOptions"
+                    ></app-selector>
+                    <app-input
+                      label="Monto"
+                      [currency]="true"
+                      formControlName="amount"
+                      placeholder="0"
+                      [prefixIcon]="true"
+                    >
+                      <span slot="prefix-icon">$</span>
+                    </app-input>
+                    <div class="sm:col-span-2">
+                      <app-input
+                        label="Razón"
+                        formControlName="reason"
+                        placeholder="Ej: Corrección de saldo, bonificación..."
+                      ></app-input>
+                    </div>
+                    <div class="sm:col-span-2">
+                      <app-input
+                        label="Referencia (opcional)"
+                        formControlName="reference"
+                        placeholder="Ej: Ticket #123"
+                      ></app-input>
+                    </div>
+                  </div>
+                  <div
+                    *ngIf="adjustError"
+                    class="mt-2 p-2 rounded text-sm"
+                    style="background: var(--color-error-light); color: var(--color-error);"
+                  >
+                    {{ adjustError }}
+                  </div>
+                  <div class="flex gap-2 justify-end mt-3">
+                    <app-button variant="ghost" size="sm" (clicked)="showAdjustForm = false">
+                      Cancelar
+                    </app-button>
+                    <app-button
+                      [variant]="adjustForm.get('type')?.value === 'debit' ? 'danger' : 'primary'"
+                      size="sm"
+                      [loading]="adjustLoading"
+                      [disabled]="!adjustForm.valid"
+                      (clicked)="adjustWallet()"
+                    >
+                      {{ adjustForm.get('type')?.value === 'debit' ? 'Debitar' : 'Acreditar' }}
+                    </app-button>
+                  </div>
+                </form>
+              </div>
+
               <!-- Transaction History -->
               <div>
-                <h4
-                  class="font-semibold mb-3"
-                  style="color: var(--color-text-primary)"
-                >
-                  Historial de Movimientos
-                </h4>
-                <app-empty-state
-                  *ngIf="walletHistory.length === 0"
-                  icon="inbox"
-                  message="No hay movimientos aún"
-                ></app-empty-state>
-                <div
-                  *ngIf="walletHistory.length > 0"
-                  class="flex flex-col"
-                >
-                  <div
-                    *ngFor="let tx of walletHistory"
-                    class="flex justify-between items-center py-3"
-                    style="border-bottom: 1px solid var(--color-border)"
+                <!-- Header with filters toggle -->
+                <div class="flex items-center justify-between mb-3">
+                  <h4
+                    class="font-semibold"
+                    style="color: var(--color-text-primary)"
                   >
-                    <div class="flex items-center gap-3">
-                      <div
-                        class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-                        [style.background]="
-                          tx.type === 'credit' || tx.type === 'release'
-                            ? 'var(--color-success-light)'
-                            : 'var(--color-error-light)'
-                        "
-                        [style.color]="
-                          tx.type === 'credit' || tx.type === 'release'
-                            ? 'var(--color-success)'
-                            : 'var(--color-error)'
-                        "
-                      >
-                        {{
-                          tx.type === 'credit' || tx.type === 'release'
-                            ? '↓'
-                            : '↑'
-                        }}
-                      </div>
-                      <div>
-                        <p
-                          class="text-sm font-medium"
-                          style="color: var(--color-text-primary)"
+                    Historial de Movimientos
+                  </h4>
+                  <div class="flex items-center gap-2">
+                    <app-button
+                      *ngIf="hasActiveFilters"
+                      variant="ghost"
+                      size="sm"
+                      (clicked)="clearHistoryFilters()"
+                    >
+                      Limpiar
+                    </app-button>
+                    <app-button
+                      variant="ghost"
+                      size="sm"
+                      (clicked)="showHistoryFilters = !showHistoryFilters"
+                    >
+                      <app-icon name="filter" [size]="14"></app-icon>
+                      Filtros
+                    </app-button>
+                  </div>
+                </div>
+
+                <!-- Filter row (collapsible) -->
+                <div
+                  *ngIf="showHistoryFilters"
+                  class="grid grid-cols-1 sm:grid-cols-3 gap-2 p-3 rounded-lg mb-3"
+                  style="background: var(--color-background); border: 1px solid var(--color-border);"
+                >
+                  <app-selector
+                    label="Tipo"
+                    [options]="historyTypeOptions"
+                    [(ngModel)]="historyFilterType"
+                    (ngModelChange)="onHistoryFilterChange()"
+                    placeholder="Todos"
+                  ></app-selector>
+                  <app-input
+                    label="Desde"
+                    type="date"
+                    [(ngModel)]="historyDateFrom"
+                    (ngModelChange)="onHistoryFilterChange()"
+                  ></app-input>
+                  <app-input
+                    label="Hasta"
+                    type="date"
+                    [(ngModel)]="historyDateTo"
+                    (ngModelChange)="onHistoryFilterChange()"
+                  ></app-input>
+                </div>
+
+                <!-- Loading -->
+                <div *ngIf="loadingHistory" class="flex justify-center py-4">
+                  <app-spinner></app-spinner>
+                </div>
+
+                <!-- Content -->
+                <ng-container *ngIf="!loadingHistory">
+                  <app-empty-state
+                    *ngIf="walletHistory.length === 0"
+                    icon="inbox"
+                    message="No hay movimientos aún"
+                  ></app-empty-state>
+                  <div
+                    *ngIf="walletHistory.length > 0"
+                    class="flex flex-col"
+                  >
+                    <div
+                      *ngFor="let tx of walletHistory"
+                      class="flex justify-between items-center py-3"
+                      style="border-bottom: 1px solid var(--color-border)"
+                    >
+                      <div class="flex items-center gap-3">
+                        <div
+                          class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+                          [style.background]="
+                            tx.type === 'credit' || tx.type === 'release'
+                              ? 'var(--color-success-light)'
+                              : 'var(--color-error-light)'
+                          "
+                          [style.color]="
+                            tx.type === 'credit' || tx.type === 'release'
+                              ? 'var(--color-success)'
+                              : 'var(--color-error)'
+                          "
                         >
-                          {{ getTransactionLabel(tx.type) }}
+                          {{
+                            tx.type === 'credit' || tx.type === 'release'
+                              ? '↓'
+                              : '↑'
+                          }}
+                        </div>
+                        <div>
+                          <p
+                            class="text-sm font-medium"
+                            style="color: var(--color-text-primary)"
+                          >
+                            {{ getTransactionLabel(tx.type) }}
+                          </p>
+                          <p
+                            class="text-xs"
+                            style="color: var(--color-text-muted)"
+                          >
+                            {{ tx.description || tx.reference_type || '-' }}
+                          </p>
+                        </div>
+                      </div>
+                      <div class="text-right">
+                        <p
+                          class="text-sm font-bold"
+                          [style.color]="
+                            tx.type === 'credit' || tx.type === 'release'
+                              ? 'var(--color-success)'
+                              : 'var(--color-error)'
+                          "
+                        >
+                          {{
+                            tx.type === 'credit' || tx.type === 'release'
+                              ? '+'
+                              : '-'
+                          }}{{ tx.amount | currency }}
                         </p>
                         <p
                           class="text-xs"
                           style="color: var(--color-text-muted)"
                         >
-                          {{ tx.description || tx.reference_type || '-' }}
+                          {{ tx.created_at | date : 'short' }}
                         </p>
                       </div>
                     </div>
-                    <div class="text-right">
-                      <p
-                        class="text-sm font-bold"
-                        [style.color]="
-                          tx.type === 'credit' || tx.type === 'release'
-                            ? 'var(--color-success)'
-                            : 'var(--color-error)'
-                        "
-                      >
-                        {{
-                          tx.type === 'credit' || tx.type === 'release'
-                            ? '+'
-                            : '-'
-                        }}{{ tx.amount | currency }}
-                      </p>
-                      <p
-                        class="text-xs"
-                        style="color: var(--color-text-muted)"
-                      >
-                        {{ tx.created_at | date : 'short' }}
-                      </p>
-                    </div>
                   </div>
-                </div>
+
+                  <!-- Pagination -->
+                  <div *ngIf="historyTotalPages > 1" class="mt-4 flex justify-center">
+                    <app-pagination
+                      [currentPage]="historyPage"
+                      [totalPages]="historyTotalPages"
+                      [total]="historyTotal"
+                      [limit]="historyLimit"
+                      infoStyle="page"
+                      (pageChange)="onHistoryPageChange($event)"
+                    ></app-pagination>
+                  </div>
+                </ng-container>
               </div>
             </div>
 
@@ -426,6 +571,36 @@ export class CustomerDetailsComponent implements OnInit {
     { value: 'bank_transfer', label: 'Transferencia' },
   ];
 
+  // Adjust wallet
+  showAdjustForm = false;
+  adjustLoading = false;
+  adjustError: string | null = null;
+  adjustForm: FormGroup;
+  adjustTypeOptions = [
+    { value: 'credit', label: 'Crédito (abonar)' },
+    { value: 'debit', label: 'Débito (descontar)' },
+  ];
+
+  // Filtros de historial
+  historyFilterType = '';
+  historyDateFrom = '';
+  historyDateTo = '';
+  showHistoryFilters = false;
+  historyTypeOptions = [
+    { value: '', label: 'Todos' },
+    { value: 'credit', label: 'Créditos' },
+    { value: 'debit', label: 'Débitos' },
+    { value: 'hold', label: 'Retenciones' },
+    { value: 'release', label: 'Liberaciones' },
+  ];
+
+  // Paginación de historial
+  historyPage = 1;
+  historyLimit = 20;
+  historyTotal = 0;
+  historyTotalPages = 0;
+  loadingHistory = false;
+
   private walletApiUrl = `${environment.apiUrl}/store/wallets`;
 
   constructor(
@@ -439,6 +614,12 @@ export class CustomerDetailsComponent implements OnInit {
       amount: [null, [Validators.required, Validators.min(1)]],
       description: [''],
       payment_method: ['cash'],
+    });
+    this.adjustForm = this.fb.group({
+      type: ['credit', [Validators.required]],
+      amount: [null, [Validators.required, Validators.min(0.01)]],
+      reason: ['', [Validators.required]],
+      reference: [''],
     });
   }
 
@@ -488,19 +669,30 @@ export class CustomerDetailsComponent implements OnInit {
 
   loadWalletHistory(): void {
     if (!this.customerId) return;
-    this.http
-      .get<any>(
-        `${this.walletApiUrl}/${this.customerId}/history?page=1&limit=20`,
-      )
-      .subscribe({
-        next: (res) => {
-          const data = res.data || res;
-          this.walletHistory = Array.isArray(data) ? data : data?.data || [];
-        },
-        error: () => {
-          this.walletHistory = [];
-        },
-      });
+    this.loadingHistory = true;
+
+    let url = `${this.walletApiUrl}/${this.customerId}/history?page=${this.historyPage}&limit=${this.historyLimit}`;
+    if (this.historyFilterType) url += `&type=${this.historyFilterType}`;
+    if (this.historyDateFrom) url += `&date_from=${this.historyDateFrom}`;
+    if (this.historyDateTo) url += `&date_to=${this.historyDateTo}`;
+
+    this.http.get<any>(url).subscribe({
+      next: (res) => {
+        const payload = res.data || res;
+        this.walletHistory = Array.isArray(payload) ? payload : payload?.data || [];
+        const meta = payload?.meta;
+        if (meta) {
+          this.historyTotal = meta.total || 0;
+          this.historyTotalPages = meta.total_pages || 0;
+          this.historyPage = meta.page || 1;
+        }
+        this.loadingHistory = false;
+      },
+      error: () => {
+        this.walletHistory = [];
+        this.loadingHistory = false;
+      },
+    });
   }
 
   topUpWallet(): void {
@@ -518,6 +710,7 @@ export class CustomerDetailsComponent implements OnInit {
           this.showTopUpForm = false;
           this.topUpForm.reset({ payment_method: 'cash' });
           this.loadWallet();
+          this.historyPage = 1;
           this.loadWalletHistory();
         },
         error: (err) => {
@@ -559,6 +752,54 @@ export class CustomerDetailsComponent implements OnInit {
       release: 'Liberación',
     };
     return labels[type] || type;
+  }
+
+  adjustWallet(): void {
+    if (!this.adjustForm.valid || !this.customerId) return;
+    this.adjustLoading = true;
+    this.adjustError = null;
+
+    this.http
+      .post<any>(
+        `${this.walletApiUrl}/${this.customerId}/adjust`,
+        this.adjustForm.value,
+      )
+      .subscribe({
+        next: () => {
+          this.adjustLoading = false;
+          this.showAdjustForm = false;
+          this.adjustForm.reset({ type: 'credit' });
+          this.loadWallet();
+          this.historyPage = 1;
+          this.loadWalletHistory();
+        },
+        error: (err) => {
+          this.adjustLoading = false;
+          this.adjustError = extractApiErrorMessage(err);
+        },
+      });
+  }
+
+  onHistoryFilterChange(): void {
+    this.historyPage = 1;
+    this.loadWalletHistory();
+  }
+
+  clearHistoryFilters(): void {
+    this.historyFilterType = '';
+    this.historyDateFrom = '';
+    this.historyDateTo = '';
+    this.historyPage = 1;
+    this.loadWalletHistory();
+  }
+
+  onHistoryPageChange(page: number): void {
+    this.historyPage = page;
+    this.loadWalletHistory();
+  }
+
+  get hasActiveFilters(): boolean {
+    return !!this.historyFilterType || !!this.historyDateFrom || !!this.historyDateTo;
   }
 
   goBack(): void {

@@ -352,16 +352,19 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
     {
       label: 'Abrir',
       icon: 'external-link',
+      variant: 'ghost',
       action: (item: StoreDomain) => this.openDomainInNewTab(item),
     },
     {
       label: 'Editar',
       icon: 'edit',
+      variant: 'info',
       action: (item: StoreDomain) => this.openEditModal(item),
     },
     {
       label: 'Establecer Principal',
       icon: 'star',
+      variant: 'ghost',
       action: (item: StoreDomain) => this.setAsPrimary(item),
       disabled: (row: StoreDomain) => row.is_primary,
     },

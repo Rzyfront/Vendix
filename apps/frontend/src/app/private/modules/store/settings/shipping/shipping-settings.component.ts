@@ -517,7 +517,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
     {
       label: 'Configurar',
       icon: 'settings',
-      variant: 'secondary',
+      variant: 'ghost',
       action: (row: StoreShippingMethod) =>
         this.openEditShippingMethodModal(row),
       show: (row: StoreShippingMethod) => row.is_active,
@@ -607,7 +607,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
     {
       label: 'Editar',
       icon: 'edit',
-      variant: 'ghost',
+      variant: 'info',
       action: (zone: ShippingZone) => this.openZoneModal('edit', zone),
     },
     {

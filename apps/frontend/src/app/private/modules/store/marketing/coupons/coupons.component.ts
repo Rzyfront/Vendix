@@ -253,7 +253,7 @@ export class CouponsComponent implements OnInit {
     {
       label: 'Editar',
       icon: 'edit',
-      variant: 'primary',
+      variant: 'info',
       action: (item: Coupon) => this.openEditModal(item),
     },
     {
