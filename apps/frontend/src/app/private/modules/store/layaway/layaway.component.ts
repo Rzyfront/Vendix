@@ -18,6 +18,7 @@ import {
 } from './state/selectors/layaway.selectors';
 import { LayawayPlan } from './interfaces/layaway.interface';
 import { CurrencyFormatService, CurrencyPipe } from '../../../../shared/pipes/currency';
+import { LayawayPrintService } from './services/layaway-print.service';
 import {
   TableColumn,
   TableAction,
@@ -46,6 +47,7 @@ export class LayawayComponent implements OnInit {
   private store = inject(Store);
   private router = inject(Router);
   private currencyService = inject(CurrencyFormatService);
+  private printService = inject(LayawayPrintService);
 
   layaways = this.store.selectSignal(selectLayaways);
   loading = this.store.selectSignal(selectLayawaysLoading);
@@ -165,6 +167,13 @@ export class LayawayComponent implements OnInit {
       variant: 'secondary',
       action: (item: LayawayPlan) =>
         this.router.navigate(['/admin/orders/layaway', item.id]),
+    },
+    {
+      label: 'Imprimir',
+      icon: 'printer',
+      variant: 'info',
+      action: (item: LayawayPlan) => this.printService.printLayawayPlan(item),
+      show: (item: LayawayPlan) => item.state !== 'cancelled',
     },
   ];
 

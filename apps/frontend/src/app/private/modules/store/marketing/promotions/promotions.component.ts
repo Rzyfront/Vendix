@@ -28,6 +28,7 @@ import {
 } from './interfaces/promotion.interface';
 import { PromotionListComponent } from './components/promotion-list/promotion-list.component';
 import { PromotionFormModalComponent } from './components/promotion-form-modal/promotion-form-modal.component';
+import { PromotionsService } from './services/promotions.service';
 
 @Component({
   selector: 'app-promotions',
@@ -122,6 +123,7 @@ import { PromotionFormModalComponent } from './components/promotion-form-modal/p
 })
 export class PromotionsComponent implements OnInit, OnDestroy {
   private store = inject(Store);
+  private promotions_service = inject(PromotionsService);
   private currency_service = inject(CurrencyFormatService);
   private dialog_service = inject(DialogService);
   private toast_service = inject(ToastService);
@@ -137,6 +139,7 @@ export class PromotionsComponent implements OnInit, OnDestroy {
   // Modal
   show_form_modal = false;
   selected_promotion: Promotion | null = null;
+  edit_loading = false;
 
   ngOnInit(): void {
     this.store.dispatch(PromotionsActions.loadPromotions());
@@ -194,8 +197,17 @@ export class PromotionsComponent implements OnInit, OnDestroy {
   }
 
   openEditModal(promotion: Promotion): void {
-    this.selected_promotion = promotion;
-    this.show_form_modal = true;
+    this.edit_loading = true;
+    this.promotions_service.getPromotion(promotion.id).subscribe({
+      next: (res) => {
+        this.selected_promotion = res.data;
+        this.show_form_modal = true;
+        this.edit_loading = false;
+      },
+      error: () => {
+        this.edit_loading = false;
+      },
+    });
   }
 
   closeFormModal(): void {

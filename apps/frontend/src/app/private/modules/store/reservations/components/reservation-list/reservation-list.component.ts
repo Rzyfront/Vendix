@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -18,6 +18,7 @@ import {
   EmptyStateComponent,
 } from '../../../../../../shared/components';
 import { Booking, BookingStatus } from '../../interfaces/reservation.interface';
+import { ReservationPrintService } from '../../services/reservation-print.service';
 
 @Component({
   selector: 'app-reservation-list',
@@ -38,6 +39,8 @@ import { Booking, BookingStatus } from '../../interfaces/reservation.interface';
   styleUrls: ['./reservation-list.component.scss'],
 })
 export class ReservationListComponent {
+  private printService = inject(ReservationPrintService);
+
   @Input() bookings: Booking[] = [];
   @Input() loading = false;
   @Input() totalItems = 0;
@@ -233,6 +236,13 @@ export class ReservationListComponent {
       action: (row: any) => this.cancel.emit(row),
       show: (row: any) =>
         row.status === 'pending' || row.status === 'confirmed',
+    },
+    {
+      label: 'Imprimir',
+      icon: 'printer',
+      variant: 'info',
+      action: (row: any) => this.printService.printReservation(row),
+      show: (row: any) => !['cancelled', 'no_show'].includes(row.status),
     },
   ];
 

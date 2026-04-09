@@ -39,6 +39,7 @@ import {
   PaymentStatus,
 } from '../../interfaces/order.interface';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { OrderPrintService } from '../../services/order-print.service';
 
 @Component({
   selector: 'app-orders-list',
@@ -60,6 +61,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 })
 export class OrdersListComponent implements OnInit, OnDestroy {
   private currencyService = inject(CurrencyFormatService);
+  private printService = inject(OrderPrintService);
 
   // State
   orders: Order[] = [];
@@ -235,6 +237,13 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       icon: 'eye',
       action: (order: Order) => this.viewOrderDetails(order),
       variant: 'secondary',
+    },
+    {
+      label: 'Imprimir',
+      icon: 'printer',
+      action: (order: Order) => this.printService.printOrder(order),
+      variant: 'info',
+      show: (order: Order) => !['cancelled', 'refunded'].includes(order.state),
     },
     {
       label: 'Cancel Order',
