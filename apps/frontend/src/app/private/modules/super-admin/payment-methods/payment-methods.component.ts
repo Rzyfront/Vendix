@@ -155,14 +155,14 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
       icon: 'edit',
       action: (paymentMethod: PaymentMethod) =>
         this.editPaymentMethod(paymentMethod),
-      variant: 'success',
+      variant: 'info',
     },
     {
       label: 'Toggle Estado',
       icon: 'toggle',
       action: (paymentMethod: PaymentMethod) =>
         this.togglePaymentMethod(paymentMethod),
-      variant: 'secondary',
+      variant: 'ghost',
     },
     {
       label: 'Eliminar',

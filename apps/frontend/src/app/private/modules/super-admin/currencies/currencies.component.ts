@@ -141,7 +141,7 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
       label: 'Editar',
       icon: 'edit',
       action: (currency: Currency) => this.editCurrency(currency),
-      variant: 'success',
+      variant: 'info',
     },
     {
       label: 'Eliminar',

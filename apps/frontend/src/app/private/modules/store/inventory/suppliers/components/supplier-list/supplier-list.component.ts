@@ -125,7 +125,7 @@ export class SupplierListComponent {
     {
       label: 'Editar',
       icon: 'edit',
-      variant: 'primary',
+      variant: 'info',
       action: (item: Supplier) => this.edit.emit(item),
     },
     {

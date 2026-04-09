@@ -166,7 +166,7 @@ export class SupportComponent implements OnInit {
     {
       label: 'Ver',
       icon: 'eye',
-      variant: 'ghost',
+      variant: 'secondary',
       action: (row: any) => this.viewTicket(row),
     },
     {

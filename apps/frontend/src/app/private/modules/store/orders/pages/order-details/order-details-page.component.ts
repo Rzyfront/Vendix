@@ -300,7 +300,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
           actions.push({ id: 'pay', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' });
         }
         if (this.isPrivilegedUser()) {
-          actions.push({ id: 'edit-order', label: 'Modificar Orden', icon: 'edit', variant: 'warning' });
+          actions.push({ id: 'edit-order', label: 'Modificar Orden', icon: 'edit', variant: 'info' });
         }
         actions.push({ id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' });
         break;

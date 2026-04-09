@@ -283,7 +283,7 @@ export class PayrollSettlementsPageComponent implements OnInit, OnDestroy {
     {
       label: 'Ver',
       icon: 'eye',
-      variant: 'primary',
+      variant: 'secondary',
       action: (item: PayrollSettlement) => this.viewSettlement(item),
     },
     {

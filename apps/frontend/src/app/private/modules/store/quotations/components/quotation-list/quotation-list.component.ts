@@ -248,7 +248,7 @@ export class QuotationListComponent {
     {
       label: 'Editar',
       icon: 'edit',
-      variant: 'primary',
+      variant: 'info',
       action: (item: Quotation) => this.edit.emit(item),
       show: (item: Quotation) => item.status === 'draft',
     },

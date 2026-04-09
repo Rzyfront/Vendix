@@ -162,7 +162,7 @@ export class LayawayComponent implements OnInit {
     {
       label: 'Ver Detalle',
       icon: 'eye',
-      variant: 'primary',
+      variant: 'secondary',
       action: (item: LayawayPlan) =>
         this.router.navigate(['/admin/orders/layaway', item.id]),
     },

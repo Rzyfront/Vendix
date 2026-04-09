@@ -319,7 +319,7 @@ export class LocationsComponent implements OnInit, OnDestroy {
     {
       label: 'Editar',
       icon: 'edit',
-      variant: 'primary',
+      variant: 'info',
       action: (item: InventoryLocation) => this.openEditModal(item),
     },
     {

@@ -238,7 +238,7 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
     {
       label: 'Editar',
       icon: 'pencil',
-      variant: 'primary',
+      variant: 'info',
       action: (item: any) => this.editRate(item),
     },
     {

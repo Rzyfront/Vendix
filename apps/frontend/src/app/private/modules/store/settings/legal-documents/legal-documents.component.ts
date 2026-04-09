@@ -221,7 +221,7 @@ export class LegalDocumentsComponent implements OnInit {
     {
       label: 'Editar',
       icon: 'edit-2',
-      variant: 'ghost',
+      variant: 'info',
       action: (item: StoreLegalDocument) => this.openEditModal(item),
     },
     {

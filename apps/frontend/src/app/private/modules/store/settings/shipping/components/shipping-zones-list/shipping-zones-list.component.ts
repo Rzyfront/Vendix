@@ -210,7 +210,7 @@ export class ShippingZonesListComponent {
         label: 'Editar',
         icon: 'edit',
         action: (zone: ShippingZone) => this.edit.emit(zone),
-        variant: 'ghost' as const,
+        variant: 'info' as const,
       },
       {
         label: 'Eliminar',

@@ -234,7 +234,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       label: 'View Details',
       icon: 'eye',
       action: (order: Order) => this.viewOrderDetails(order),
-      variant: 'ghost',
+      variant: 'secondary',
     },
     {
       label: 'Cancel Order',

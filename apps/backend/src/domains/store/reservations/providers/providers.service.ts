@@ -54,7 +54,12 @@ export class ProvidersService {
   async create(dto: CreateProviderDto) {
     // Verify employee exists and belongs to store
     const employee = await this.prisma.employees.findFirst({
-      where: { id: dto.employee_id, store_id: this.storeId },
+      where: {
+        id: dto.employee_id,
+        employee_stores: {
+          some: { store_id: this.storeId, status: 'active' },
+        },
+      },
     });
 
     if (!employee) {
@@ -164,10 +169,14 @@ export class ProvidersService {
 
     const linkedIds = existingProviderEmployeeIds.map(p => p.employee_id);
 
+    // employees is org-scoped automatically by StorePrismaService middleware.
+    // Filter by store assignment via employee_stores junction table.
     return this.prisma.employees.findMany({
       where: {
-        store_id: this.storeId,
         status: 'active',
+        employee_stores: {
+          some: { store_id: this.storeId, status: 'active' },
+        },
         ...(linkedIds.length > 0 && { id: { notIn: linkedIds } }),
       },
       select: { id: true, first_name: true, last_name: true, position: true },

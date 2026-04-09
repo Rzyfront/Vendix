@@ -317,7 +317,7 @@ export class HelpCenterAdminComponent implements OnInit {
     {
       label: 'Editar',
       icon: 'edit-2',
-      variant: 'ghost',
+      variant: 'info',
       action: (item: HelpArticle) => this.navigateToEdit(item),
     },
     {

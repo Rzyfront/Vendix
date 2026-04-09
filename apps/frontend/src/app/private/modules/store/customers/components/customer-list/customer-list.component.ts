@@ -246,13 +246,13 @@ export class CustomerListComponent implements OnInit {
     {
       label: 'Ver',
       icon: 'eye',
-      variant: 'ghost',
+      variant: 'secondary',
       action: (row: any) => this.viewDetail.emit(row),
     },
     {
       label: 'Editar',
       icon: 'edit',
-      variant: 'ghost',
+      variant: 'info',
       action: (row: any) => this.edit.emit(row),
     },
     {

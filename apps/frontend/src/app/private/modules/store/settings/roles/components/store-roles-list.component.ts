@@ -255,7 +255,7 @@ export class StoreRolesListComponent {
     {
       label: 'Editar',
       icon: 'edit',
-      variant: 'ghost',
+      variant: 'info',
       action: (row: StoreRole) => this.edit.emit(row),
       show: (row: StoreRole) => !row.system_role,
     },

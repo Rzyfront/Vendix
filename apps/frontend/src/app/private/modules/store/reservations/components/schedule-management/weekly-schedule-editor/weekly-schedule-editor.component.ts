@@ -3,6 +3,7 @@ import {
   ChangeDetectionStrategy,
   inject,
   input,
+  output,
   signal,
   effect,
   untracked,
@@ -45,6 +46,7 @@ export class WeeklyScheduleEditorComponent implements OnDestroy {
   private destroy$ = new Subject<void>();
 
   readonly providerId = input.required<number>();
+  readonly scheduleChanged = output<{ activeDays: number; weeklyHours: number }>();
 
   days = signal<ScheduleDay[]>([]);
   loading = signal(false);
@@ -117,6 +119,7 @@ export class WeeklyScheduleEditorComponent implements OnDestroy {
         };
       }),
     );
+    this.emitStats();
   }
 
   // Calculate bar position as percentage
@@ -154,10 +157,23 @@ export class WeeklyScheduleEditorComponent implements OnDestroy {
     return `${h}${ampm}`;
   }
 
+  private emitStats(): void {
+    const days = this.days();
+    const active = days.filter(d => d.is_active);
+    let totalMin = 0;
+    for (const d of active) {
+      const [sh, sm] = d.start_time.split(':').map(Number);
+      const [eh, em] = d.end_time.split(':').map(Number);
+      totalMin += (eh * 60 + em) - (sh * 60 + sm);
+    }
+    this.scheduleChanged.emit({ activeDays: active.length, weeklyHours: Math.round(totalMin / 60) });
+  }
+
   toggleDay(index: number): void {
     const updated = [...this.days()];
     updated[index] = { ...updated[index], is_active: !updated[index].is_active };
     this.days.set(updated);
+    this.emitStats();
   }
 
   startEditing(index: number): void {
@@ -178,6 +194,7 @@ export class WeeklyScheduleEditorComponent implements OnDestroy {
     const updated = [...this.days()];
     updated[index] = { ...updated[index], [field]: value };
     this.days.set(updated);
+    this.emitStats();
   }
 
   // Quick actions
@@ -195,6 +212,7 @@ export class WeeklyScheduleEditorComponent implements OnDestroy {
       return { ...d, is_active: true, start_time: '08:00', end_time: '20:00', editing: false };
     });
     this.days.set(updated);
+    this.emitStats();
   }
 
   copyToAll(): void {
@@ -208,6 +226,7 @@ export class WeeklyScheduleEditorComponent implements OnDestroy {
       editing: false,
     }));
     this.days.set(updated);
+    this.emitStats();
   }
 
   save(): void {

@@ -174,7 +174,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       label: 'View Details',
       icon: 'eye',
       action: (order: OrderListItem) => this.viewOrderDetails(order),
-      variant: 'primary',
+      variant: 'secondary',
     },
     {
       label: 'Print Invoice',
@@ -286,6 +286,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
         variant: 'ghost',
       },
     ];
+
 
     // Card configuration for mobile
     this.cardConfig = {

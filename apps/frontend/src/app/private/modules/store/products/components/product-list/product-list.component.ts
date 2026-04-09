@@ -248,7 +248,7 @@ export class ProductListComponent implements OnChanges {
       label: 'Edit',
       icon: 'edit',
       action: (product: Product) => this.edit.emit(product),
-      variant: 'primary',
+      variant: 'info',
     },
     {
       label: 'Eliminar',

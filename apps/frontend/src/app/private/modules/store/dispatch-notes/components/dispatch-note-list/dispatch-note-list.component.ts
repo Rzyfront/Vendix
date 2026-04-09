@@ -162,7 +162,7 @@ export class DispatchNoteListComponent implements OnInit, OnDestroy {
       label: 'Ver Detalle',
       icon: 'eye',
       action: (dn: DispatchNote) => this.viewDetail.emit(dn),
-      variant: 'ghost',
+      variant: 'secondary',
     },
     {
       label: 'Confirmar',
@@ -189,7 +189,7 @@ export class DispatchNoteListComponent implements OnInit, OnDestroy {
       label: 'Imprimir',
       icon: 'printer',
       action: (dn: DispatchNote) => this.printService.printDispatchNote(dn),
-      variant: 'ghost',
+      variant: 'info',
       show: (dn: DispatchNote) => ['delivered', 'invoiced'].includes(dn.status),
     },
     {

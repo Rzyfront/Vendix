@@ -205,7 +205,7 @@ export class ReceivablesComponent implements OnInit, OnDestroy {
     {
       label: 'Ver Detalle',
       icon: 'eye',
-      variant: 'ghost',
+      variant: 'secondary',
       action: (row: AccountReceivable) => this.openDetailModal(row),
     },
     {

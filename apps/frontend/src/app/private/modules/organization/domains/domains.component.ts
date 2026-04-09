@@ -397,7 +397,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
       label: 'Editar',
       icon: 'edit',
       action: (domain: Domain) => this.editDomain(domain),
-      variant: 'primary',
+      variant: 'info',
     },
     {
       label: 'Verificar DNS',

@@ -216,6 +216,10 @@ import {
   // Monitoring icons
   MemoryStick,
   HeartPulse,
+  // Schedule management icons
+  ToggleRight,
+  EyeOff,
+  CalendarX,
 } from 'lucide-angular';
 
 /**
@@ -502,6 +506,11 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'memory-stick': MemoryStick,
   'heart-pulse': HeartPulse,
   'hard-drive': HardDrive,
+
+  // Schedule management icons
+  'toggle-right': ToggleRight,
+  'eye-off': EyeOff,
+  'calendar-x': CalendarX,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

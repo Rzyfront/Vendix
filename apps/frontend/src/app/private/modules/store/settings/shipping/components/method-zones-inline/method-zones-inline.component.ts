@@ -141,7 +141,7 @@ export class MethodZonesInlineComponent {
       {
         label: 'Editar',
         icon: 'pencil',
-        variant: 'primary',
+        variant: 'info',
         action: (item: any) => this.editRate.emit(item._rate),
       },
       {

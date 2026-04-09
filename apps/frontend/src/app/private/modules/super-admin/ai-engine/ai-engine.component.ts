@@ -176,7 +176,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
       label: 'Editar',
       icon: 'edit',
       action: (config: AIEngineConfig) => this.editConfig(config),
-      variant: 'success',
+      variant: 'info',
     },
     {
       label: 'Eliminar',
@@ -250,7 +250,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
       label: 'Editar',
       icon: 'edit',
       action: (app: AIEngineApp) => this.editApp(app),
-      variant: 'success',
+      variant: 'info',
     },
     {
       label: 'Eliminar',

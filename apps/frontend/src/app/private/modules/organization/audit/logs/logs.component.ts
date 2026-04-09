@@ -94,7 +94,7 @@ export class LogsComponent implements OnInit, OnDestroy {
       label: 'Ver Detalle',
       icon: 'eye',
       action: (log: AuditLog) => this.viewDetail(log),
-      variant: 'ghost'
+      variant: 'secondary'
     }
   ];
 

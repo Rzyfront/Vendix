@@ -235,7 +235,7 @@ export class PayablesComponent implements OnInit, OnDestroy {
     {
       label: 'Ver Detalle',
       icon: 'eye',
-      variant: 'ghost',
+      variant: 'secondary',
       action: (row: AccountPayable) => this.openDetailModal(row),
     },
     {

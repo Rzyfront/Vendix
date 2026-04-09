@@ -68,6 +68,39 @@ Wrapper responsivo que muestra `app-table` en desktop (>=768px) y `app-item-list
 | `emptyClearFiltersClick` | `EventEmitter<void>`                  | Click en limpiar filtros        |
 | `emptyRefreshClick`      | `EventEmitter<void>`                  | Click en actualizar             |
 
+## Action Variants
+
+Las acciones (`TableAction[]`) se renderizan en tabla (desktop) y cards (mobile) con estilos glassmorphism pastel. Todos los variants usan tokens CSS del tema.
+
+| Variant     | Token CSS               | Color          |
+| ----------- | ----------------------- | -------------- |
+| `ghost`     | `--color-text-secondary`| Gris (default) |
+| `primary`   | `--color-primary`       | Color del tema  |
+| `secondary` | `--color-text-primary`  | Neutro          |
+| `success`   | `--color-success`       | Verde           |
+| `danger`    | `--color-error`         | Rojo            |
+| `warning`   | `--color-warning`       | Naranja         |
+| `info`      | `--color-info`          | Azul            |
+| `gaming`    | `--color-gaming`        | Violeta         |
+| `royal`     | `--color-royal`         | Dorado/ambar    |
+| `muted`     | `--color-muted`         | Gris sutil      |
+
+`variant` acepta un string estatico o una funcion `(item) => string` para color dinamico por fila:
+
+```typescript
+actions: TableAction[] = [
+  { label: 'Ver', icon: 'eye', variant: 'info', action: (item) => this.view(item) },
+  { label: 'Eliminar', icon: 'trash', variant: 'danger', action: (item) => this.delete(item) },
+  {
+    label: (item) => (item.is_active ? 'Desactivar' : 'Activar'),
+    variant: (item) => (item.is_active ? 'success' : 'muted'),
+    action: (item) => this.toggle(item),
+  },
+];
+```
+
+> En desktop: botones rectangulares con gradiente pastel. En mobile: botones circulares con color solido pastel.
+
 ## Importante
 
 - Re-exporta `TableColumn`, `TableAction`, `TableSize`, `SortDirection`, `ItemListCardConfig`, `ItemListSize`

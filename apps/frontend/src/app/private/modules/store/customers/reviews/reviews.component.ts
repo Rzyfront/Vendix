@@ -490,14 +490,14 @@ export class ReviewsComponent implements OnInit, OnDestroy {
     {
       label: 'Aprobar',
       icon: 'check',
-      variant: 'primary',
+      variant: 'success',
       show: (item: Review) => item.state !== 'approved',
       action: (item: Review) => this.onApprove(item),
     },
     {
       label: 'Rechazar',
       icon: 'x',
-      variant: 'ghost',
+      variant: 'danger',
       show: (item: Review) => item.state !== 'rejected',
       action: (item: Review) => this.onReject(item),
     },

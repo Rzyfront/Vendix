@@ -198,14 +198,14 @@ export class ReservationListComponent {
     {
       label: 'Confirmar',
       icon: 'check',
-      variant: 'ghost',
+      variant: 'success',
       action: (row: any) => this.confirm.emit(row),
       show: (row: any) => row.status === 'pending',
     },
     {
       label: 'Completar',
       icon: 'check-circle',
-      variant: 'ghost',
+      variant: 'success',
       action: (row: any) => this.complete.emit(row),
       show: (row: any) =>
         row.status === 'confirmed' || row.status === 'in_progress',

@@ -83,7 +83,7 @@ export class ShippingMethodsComponent implements OnInit {
   ];
 
   actions: TableAction[] = [
-    { label: 'Editar', icon: 'edit', variant: 'ghost', action: (method) => this.openEditModal(method) },
+    { label: 'Editar', icon: 'edit', variant: 'info', action: (method) => this.openEditModal(method) },
     { label: 'Eliminar', icon: 'trash-2', variant: 'danger', action: (method) => this.deleteMethod(method) },
   ];
 

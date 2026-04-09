@@ -101,7 +101,7 @@ export class PayrollRunListComponent {
     {
       label: 'Ver Detalle',
       icon: 'eye',
-      variant: 'primary',
+      variant: 'secondary',
       action: (row: PayrollRun) => this.detail.emit(row),
     },
   ];

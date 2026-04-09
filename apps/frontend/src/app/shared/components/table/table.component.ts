@@ -36,7 +36,7 @@ export interface TableAction {
   label: string | ((item: any) => string);
   icon?: string | ((item: any) => string);
   action: (item: any) => void;
-  variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'success';
+  variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'success' | 'warning' | 'info' | 'gaming' | 'royal' | 'muted' | ((item: any) => string);
   disabled?: (item: any) => boolean;
   show?: (item: any) => boolean;
 }
@@ -286,64 +286,9 @@ export class TableComponent implements AfterContentInit {
   }
 
   getActionClasses(action: TableAction, item: any): string {
-    const baseClasses = [
-      'inline-flex',
-      'items-center',
-      'gap-1',
-      'px-2',
-      'py-1',
-      'rounded',
-      'text-xs',
-      'font-medium',
-      'transition-all',
-      'duration-150',
-      'focus:outline-none',
-      'focus:ring-2',
-      'focus:ring-offset-1',
-    ];
-
-    const variantClasses = {
-      primary: [
-        'bg-primary',
-        'text-white',
-        'hover:bg-primary/90',
-        'focus:ring-primary/50',
-      ],
-      secondary: [
-        'bg-muted',
-        'text-text-primary',
-        'hover:bg-muted/80',
-        'focus:ring-muted/50',
-      ],
-      danger: [
-        'bg-red-600',
-        'text-white',
-        'hover:bg-red-700',
-        'focus:ring-red-500',
-      ],
-      ghost: [
-        'text-text-secondary',
-        'hover:bg-muted/20',
-        'hover:text-text-primary',
-        'focus:ring-muted/50',
-      ],
-      success: [
-        'bg-green-600',
-        'text-white',
-        'hover:bg-green-700',
-        'focus:ring-green-500',
-      ],
-    };
-
-    const disabledClasses = this.isActionDisabled(action, item)
-      ? ['opacity-50', 'cursor-not-allowed']
-      : ['cursor-pointer'];
-
-    return [
-      ...baseClasses,
-      ...variantClasses[action.variant || 'ghost'],
-      ...disabledClasses,
-    ].join(' ');
+    const variant = typeof action.variant === 'function' ? action.variant(item) : (action.variant || 'ghost');
+    const disabled = this.isActionDisabled(action, item);
+    return `action-${variant}${disabled ? ' action-disabled' : ''}`;
   }
 
   /**

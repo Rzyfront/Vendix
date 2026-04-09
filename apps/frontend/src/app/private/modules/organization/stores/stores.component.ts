@@ -330,7 +330,7 @@ export class StoresComponent implements OnInit, OnDestroy {
       label: 'Editar',
       icon: 'edit',
       action: (store) => this.editStore(store),
-      variant: 'primary',
+      variant: 'info',
     },
     {
       label: 'Configuración',
