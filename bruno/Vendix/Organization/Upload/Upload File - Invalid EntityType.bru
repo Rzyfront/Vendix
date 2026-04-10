@@ -1,0 +1,30 @@
+meta {
+  name: Upload File - Invalid EntityType
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{url}}/upload
+  body: multipartForm
+  auth: inherit
+}
+
+body:multipartForm {
+  entityType: invalid_entity_type
+  file: file:///home/dmin/Vendix/bruno/test-files/test-image.png
+}
+
+tests {
+  test("Rejects invalid entityType with 400", function() {
+    expect(res.status).to.equal(400);
+  });
+
+  test("Error message mentions valid values", function() {
+    expect(res.body.message).to.be.an('array');
+    const msg = res.body.message[0];
+    expect(msg).to.include('entityType');
+    expect(msg).to.include('products');
+    expect(msg).to.include('avatars');
+  });
+}
