@@ -17,6 +17,7 @@ import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { ImageContext } from '@common/config/image-presets';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
+import { GetPresignedUrlDto } from './dto';
 
 @ApiTags('Upload')
 @ApiBearerAuth()
@@ -175,7 +176,9 @@ export class UploadController {
 
     @Get('presigned-url')
     @ApiOperation({ summary: 'Get a temporary URL for a file' })
-    async getUrl(@Query('key') key: string) {
+    async getUrl(@Query() query: GetPresignedUrlDto) {
+        const key = query.key;
+
         const context = RequestContextService.getContext();
         const orgId = context?.organization_id;
 
@@ -194,7 +197,9 @@ export class UploadController {
 
         const expectedOrgPrefix = this.s3PathHelper.buildOrgPath(org);
 
-        if (!key.startsWith(expectedOrgPrefix)) {
+        // Normalize key to resolve path segments before checking prefix
+        const normalizedKey = key.split('/').filter((s) => s && s !== '.').join('/');
+        if (!normalizedKey.startsWith(expectedOrgPrefix)) {
             throw new ForbiddenException('You do not have permission to access this file');
         }
 

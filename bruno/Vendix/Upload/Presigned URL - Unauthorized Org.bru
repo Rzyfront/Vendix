@@ -1,0 +1,17 @@
+meta {
+  name: Presigned URL - Unauthorized Org
+  type: http
+  seq: 6
+}
+
+get {
+  url: http://{{url}}/upload/presigned-url?key=organizations/other-org-99/products/img.webp
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("key from different org is forbidden", function() {
+    expect(res.status).to.equal(403);
+  });
+}

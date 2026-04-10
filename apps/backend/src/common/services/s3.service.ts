@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
     S3Client,
@@ -173,6 +173,7 @@ export class S3Service {
      * @param expiresIn Expiration time in seconds (default 1 hour)
      */
     async getPresignedUrl(key: string, expiresIn = 3600): Promise<string> {
+        this.validateS3Key(key);
         try {
             const command = new GetObjectCommand({
                 Bucket: this.bucketName,
@@ -191,6 +192,7 @@ export class S3Service {
      * @param key Path of the file in S3
      */
     async deleteFile(key: string): Promise<void> {
+        this.validateS3Key(key);
         try {
             const command = new DeleteObjectCommand({
                 Bucket: this.bucketName,
@@ -397,6 +399,36 @@ export class S3Service {
         } catch (error) {
             this.logger.error(`Error downloading image from S3: ${error.message}`);
             throw error;
+        }
+    }
+
+    /**
+     * Validates that an S3 key does not contain path traversal sequences.
+     * Defense-in-depth: called before any S3 read/delete operation.
+     * @throws BadRequestException if the key contains path traversal patterns
+     */
+    private validateS3Key(key: string): void {
+        if (typeof key !== 'string' || !key) {
+            throw new BadRequestException('Invalid S3 key');
+        }
+
+        let decoded: string;
+        try {
+            decoded = decodeURIComponent(key);
+        } catch {
+            throw new BadRequestException('Invalid S3 key: malformed encoding');
+        }
+
+        if (decoded.includes('\0') || key.includes('%00')) {
+            throw new BadRequestException('Invalid S3 key: null byte detected');
+        }
+
+        if (decoded.includes('..\\') || decoded.includes('../') || key.includes('../')) {
+            throw new BadRequestException('Invalid S3 key: path traversal detected');
+        }
+
+        if (decoded.split('/').some((s) => s === '..')) {
+            throw new BadRequestException('Invalid S3 key: path traversal detected');
         }
     }
 }
