@@ -160,6 +160,20 @@ export const storeEcommercePublicRoutes: Routes = [
           ).then((c) => c.BookingComponent),
       },
       {
+        path: 'fila',
+        loadComponent: () =>
+          import(
+            '../../public/ecommerce/pages/queue-register/queue-register.component'
+          ).then((c) => c.QueueRegisterComponent),
+      },
+      {
+        path: 'factura/:token',
+        loadComponent: () =>
+          import(
+            '../../public/ecommerce/pages/invoice-data/invoice-data.component'
+          ).then((c) => c.InvoiceDataComponent),
+      },
+      {
         path: 'account/reservations',
         canActivate: [AuthGuard],
         loadComponent: () =>

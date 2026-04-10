@@ -19,8 +19,8 @@
             size="sm" placeholder="Buscar gastos..." [debounceTime]="300" [ngModel]="searchTerm"
             (ngModelChange)="onSearchChange($event)"></app-inputsearch>
 
-          <app-button variant="outline" size="sm"
-            customClasses="w-9 h-9 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
+          <app-button variant="outline" size="md"
+            customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
             (clicked)="create.emit()" title="Nuevo Gasto">
             <app-icon slot="icon" name="plus" [size]="18"></app-icon>
           </app-button>

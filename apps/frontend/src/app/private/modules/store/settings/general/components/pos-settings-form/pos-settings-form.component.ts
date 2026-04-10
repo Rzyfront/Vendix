@@ -63,6 +63,13 @@ export class PosSettingsForm implements OnInit, OnChanges {
       require_closing_count: new FormControl(true),
       track_non_cash_payments: new FormControl(true),
     }),
+    customer_queue: new FormGroup({
+      enabled: new FormControl(false),
+      queue_expiry_hours: new FormControl(12),
+      max_queue_size: new FormControl(0),
+      require_email: new FormControl(false),
+      require_phone: new FormControl(false),
+    }),
   });
 
   daysOfWeek = [
@@ -161,6 +168,27 @@ export class PosSettingsForm implements OnInit, OnChanges {
 
   get trackNonCashPaymentsControl(): FormControl<boolean> {
     return this.form.get('cash_register.track_non_cash_payments') as FormControl<boolean>;
+  }
+
+  // Customer Queue getters
+  get customerQueueEnabledControl(): FormControl<boolean> {
+    return this.form.get('customer_queue.enabled') as FormControl<boolean>;
+  }
+
+  get queueExpiryHoursControl(): FormControl<number> {
+    return this.form.get('customer_queue.queue_expiry_hours') as FormControl<number>;
+  }
+
+  get maxQueueSizeControl(): FormControl<number> {
+    return this.form.get('customer_queue.max_queue_size') as FormControl<number>;
+  }
+
+  get requireEmailControl(): FormControl<boolean> {
+    return this.form.get('customer_queue.require_email') as FormControl<boolean>;
+  }
+
+  get requirePhoneControl(): FormControl<boolean> {
+    return this.form.get('customer_queue.require_phone') as FormControl<boolean>;
   }
 
   get isWebSerialSupported(): boolean {

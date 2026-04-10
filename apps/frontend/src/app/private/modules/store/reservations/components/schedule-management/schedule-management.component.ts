@@ -319,6 +319,11 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
       });
   }
 
+  cancelAddProvider(): void {
+    this.showAddForm.set(false);
+    this.selectedEmployeeId.set(null);
+  }
+
   addProvider(): void {
     const employeeId = Number(this.selectedEmployeeId());
     if (!employeeId) {
@@ -342,6 +347,7 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
         next: (provider) => {
           this.toastService.success('Proveedor creado exitosamente');
           this.showAddForm.set(false);
+          this.selectedEmployeeId.set(null);
           this.loadProviders();
           this.selectProvider(provider);
         },

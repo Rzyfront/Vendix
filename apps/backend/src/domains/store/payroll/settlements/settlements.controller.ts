@@ -29,7 +29,7 @@ export class SettlementsController {
   ) {}
 
   @Get()
-  @Permissions('payroll:read')
+  @Permissions('store:payroll:settlements:read')
   async findAll(@Query() query_dto: QuerySettlementDto) {
     const result = await this.settlements_service.findAll(query_dto);
     return this.response_service.paginated(
@@ -43,7 +43,7 @@ export class SettlementsController {
   // --- Static Routes (MUST be before :id) ---
 
   @Get('stats')
-  @Permissions('payroll:read')
+  @Permissions('store:payroll:settlements:read')
   async getStats() {
     const result = await this.settlements_service.getStats();
     return this.response_service.success(result);
@@ -52,14 +52,14 @@ export class SettlementsController {
   // --- Parameter Routes ---
 
   @Get(':id')
-  @Permissions('payroll:read')
+  @Permissions('store:payroll:settlements:read')
   async findOne(@Param('id') id: string) {
     const result = await this.settlements_service.findOne(+id);
     return this.response_service.success(result);
   }
 
   @Post()
-  @Permissions('payroll:write')
+  @Permissions('store:payroll:settlements:create')
   @HttpCode(HttpStatus.CREATED)
   async createAndCalculate(@Body() create_dto: CreateSettlementDto) {
     const result = await this.settlement_flow_service.createAndCalculate(create_dto);
@@ -67,14 +67,14 @@ export class SettlementsController {
   }
 
   @Post(':id/recalculate')
-  @Permissions('payroll:write')
+  @Permissions('store:payroll:settlements:manage')
   async recalculate(@Param('id') id: string) {
     const result = await this.settlement_flow_service.recalculate(+id);
     return this.response_service.success(result, 'Settlement recalculated successfully');
   }
 
   @Patch(':id/approve')
-  @Permissions('payroll:write')
+  @Permissions('store:payroll:settlements:manage')
   async approve(
     @Param('id') id: string,
     @Body() approve_dto: ApproveSettlementDto,
@@ -84,14 +84,14 @@ export class SettlementsController {
   }
 
   @Patch(':id/pay')
-  @Permissions('payroll:write')
+  @Permissions('store:payroll:settlements:manage')
   async pay(@Param('id') id: string) {
     const result = await this.settlement_flow_service.pay(+id);
     return this.response_service.success(result, 'Settlement paid successfully');
   }
 
   @Patch(':id/cancel')
-  @Permissions('payroll:write')
+  @Permissions('store:payroll:settlements:manage')
   async cancel(@Param('id') id: string) {
     const result = await this.settlement_flow_service.cancel(+id);
     return this.response_service.success(result, 'Settlement cancelled successfully');

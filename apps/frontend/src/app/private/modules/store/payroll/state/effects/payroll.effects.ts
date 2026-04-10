@@ -5,6 +5,7 @@ import { of } from 'rxjs';
 import { map, switchMap, exhaustMap, catchError, withLatestFrom, tap } from 'rxjs/operators';
 import { PayrollService } from '../../services/payroll.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import * as PayrollActions from '../actions/payroll.actions';
 import { selectPayrollState } from '../selectors/payroll.selectors';
 
@@ -36,7 +37,7 @@ export class PayrollEffects {
           ),
           catchError((error) =>
             of(PayrollActions.loadEmployeesFailure({
-              error: error.error?.message || error.message || 'Error loading employees'
+              error: parseApiError(error).userMessage
             }))
           )
         )
@@ -68,7 +69,7 @@ export class PayrollEffects {
           ),
           catchError((error) =>
             of(PayrollActions.loadEmployeeFailure({
-              error: error.error?.message || error.message || 'Error loading employee'
+              error: parseApiError(error).userMessage
             }))
           )
         )
@@ -86,7 +87,7 @@ export class PayrollEffects {
           ),
           catchError((error) =>
             of(PayrollActions.createEmployeeFailure({
-              error: error.error?.message || error.message || 'Error creating employee'
+              error: parseApiError(error).userMessage
             }))
           )
         )
@@ -104,7 +105,7 @@ export class PayrollEffects {
           ),
           catchError((error) =>
             of(PayrollActions.updateEmployeeFailure({
-              error: error.error?.message || error.message || 'Error updating employee'
+              error: parseApiError(error).userMessage
             }))
           )
         )
@@ -122,7 +123,7 @@ export class PayrollEffects {
           ),
           catchError((error) =>
             of(PayrollActions.terminateEmployeeFailure({
-              error: error.error?.message || error.message || 'Error terminating employee'
+              error: parseApiError(error).userMessage
             }))
           )
         )
@@ -154,7 +155,7 @@ export class PayrollEffects {
           ),
           catchError((error) =>
             of(PayrollActions.loadEmployeeStatsFailure({
-              error: error.error?.message || error.message || 'Error loading employee stats'
+              error: parseApiError(error).userMessage
             }))
           )
         )
@@ -185,7 +186,7 @@ export class PayrollEffects {
           ),
           catchError((error) =>
             of(PayrollActions.loadPayrollRunsFailure({
-              error: error.error?.message || error.message || 'Error loading payroll runs'
+              error: parseApiError(error).userMessage
             }))
           )
         )
@@ -218,7 +219,7 @@ export class PayrollEffects {
           ),
           catchError((error) =>
             of(PayrollActions.loadPayrollRunFailure({
-              error: error.error?.message || error.message || 'Error loading payroll run'
+              error: parseApiError(error).userMessage
             }))
           )
         )
@@ -236,7 +237,7 @@ export class PayrollEffects {
           ),
           catchError((error) =>
             of(PayrollActions.createPayrollRunFailure({
-              error: error.error?.message || error.message || 'Error creating payroll run'
+              error: parseApiError(error).userMessage
             }))
           )
         )
@@ -252,7 +253,7 @@ export class PayrollEffects {
           map((response) => PayrollActions.calculatePayrollRunSuccess({ payrollRun: response.data })),
           catchError((error) =>
             of(PayrollActions.calculatePayrollRunFailure({
-              error: error.error?.message || error.message || 'Error calculating payroll'
+              error: parseApiError(error).userMessage
             }))
           )
         )
@@ -268,7 +269,7 @@ export class PayrollEffects {
           map((response) => PayrollActions.approvePayrollRunSuccess({ payrollRun: response.data })),
           catchError((error) =>
             of(PayrollActions.approvePayrollRunFailure({
-              error: error.error?.message || error.message || 'Error approving payroll'
+              error: parseApiError(error).userMessage
             }))
           )
         )
@@ -284,7 +285,7 @@ export class PayrollEffects {
           map((response) => PayrollActions.sendPayrollRunSuccess({ payrollRun: response.data })),
           catchError((error) =>
             of(PayrollActions.sendPayrollRunFailure({
-              error: error.error?.message || error.message || 'Error sending payroll'
+              error: parseApiError(error).userMessage
             }))
           )
         )
@@ -300,7 +301,7 @@ export class PayrollEffects {
           map((response) => PayrollActions.payPayrollRunSuccess({ payrollRun: response.data })),
           catchError((error) =>
             of(PayrollActions.payPayrollRunFailure({
-              error: error.error?.message || error.message || 'Error paying payroll'
+              error: parseApiError(error).userMessage
             }))
           )
         )
@@ -316,7 +317,7 @@ export class PayrollEffects {
           map((response) => PayrollActions.cancelPayrollRunSuccess({ payrollRun: response.data })),
           catchError((error) =>
             of(PayrollActions.cancelPayrollRunFailure({
-              error: error.error?.message || error.message || 'Error cancelling payroll'
+              error: parseApiError(error).userMessage
             }))
           )
         )
@@ -418,7 +419,7 @@ export class PayrollEffects {
           ),
           catchError((error) =>
             of(PayrollActions.loadPayrollRunStatsFailure({
-              error: error.error?.message || error.message || 'Error loading payroll stats'
+              error: parseApiError(error).userMessage
             }))
           )
         )

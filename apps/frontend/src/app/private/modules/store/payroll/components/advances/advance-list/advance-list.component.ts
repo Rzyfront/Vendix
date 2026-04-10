@@ -83,6 +83,15 @@ export class AdvanceListComponent {
       transform: (val: any) => `${val || 0}`,
     },
     {
+      key: 'progress',
+      label: 'Progreso',
+      transform: (_val: any, row: any) => {
+        const paid = row?.advance_installments?.filter((i: any) => i.status === 'paid').length || 0;
+        const total = row?.advance_installments?.length || row?.installments || 0;
+        return total > 0 ? `${paid}/${total}` : '-';
+      },
+    },
+    {
       key: 'status',
       label: 'Estado',
       badge: true,

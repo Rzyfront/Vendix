@@ -43,24 +43,19 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
       (cancel)="onCancel()"
       [size]="'md'"
       [showCloseButton]="true"
+      title="Abrir Caja"
+      subtitle="Selecciona una caja e ingresa el monto de apertura"
     >
-      <!-- Header -->
-      <div slot="header" class="flex items-center gap-3">
-        <div
-          class="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center"
-        >
-          <app-icon
-            name="unlock"
-            [size]="20"
-            class="text-green-600"
-          ></app-icon>
-        </div>
-        <div>
-          <h2 class="text-lg font-semibold text-text-primary">Abrir Caja</h2>
-          <p class="text-sm text-text-secondary">
-            Selecciona una caja e ingresa el monto de apertura
-          </p>
-        </div>
+      <!-- Header icon -->
+      <div
+        slot="header"
+        class="w-10 h-10 rounded-[var(--radius-lg)] bg-green-100 flex items-center justify-center flex-shrink-0"
+      >
+        <app-icon
+          name="unlock"
+          [size]="20"
+          class="text-green-600"
+        ></app-icon>
       </div>
 
       <!-- Body -->

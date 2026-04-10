@@ -7,6 +7,7 @@ export * from './payroll-runs/payroll-run-create/payroll-run-create.component';
 export * from './payroll-runs/payroll-run-detail/payroll-run-detail.component';
 export * from './payroll-runs/payroll-item-detail/payroll-item-detail.component';
 export * from './payroll-settings/payroll-settings.component';
+export * from './settlements/settlement-list/settlement-list.component';
 export * from './settlements/settlement-create/settlement-create.component';
 export * from './settlements/settlement-detail/settlement-detail.component';
 export * from './advances/advance-create/advance-create.component';

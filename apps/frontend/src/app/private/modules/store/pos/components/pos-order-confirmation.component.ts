@@ -413,6 +413,8 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
       },
       cashier: this.cashierName,
       transactionId: this.orderNumber,
+      invoiceDataToken: this.orderData?.invoiceDataToken,
+      invoiceDataQrUrl: this.orderData?.invoiceDataQrUrl,
     };
 
     this.ticketService.printTicket(ticketData, { printReceipt: true }).subscribe({

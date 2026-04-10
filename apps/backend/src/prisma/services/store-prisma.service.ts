@@ -273,6 +273,9 @@ export class StorePrismaService extends BasePrismaService {
       employee_advance_payments: {
         advance: { organization_id: context.organization_id },
       },
+      employee_advance_installments: {
+        advance: { organization_id: context.organization_id },
+      },
       promotion_products: { promotions: { store_id: context.store_id } },
       promotion_categories: { promotions: { store_id: context.store_id } },
       order_promotions: { orders: { store_id: context.store_id } },
@@ -762,6 +765,10 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.employee_advance_payments;
   }
 
+  get employee_advance_installments() {
+    return this.scoped_client.employee_advance_installments;
+  }
+
   // Quotations models
   get quotations() {
     return this.scoped_client.quotations;
@@ -943,6 +950,16 @@ export class StorePrismaService extends BasePrismaService {
 
   get commission_calculations() {
     return this.scoped_client.commission_calculations;
+  }
+
+  // Customer Queue (manually scoped by store_id in service layer)
+  get customer_queue() {
+    return this.baseClient.customer_queue;
+  }
+
+  // Invoice Data Requests (manually scoped by store_id in service layer, public access by token)
+  get invoice_data_requests() {
+    return this.baseClient.invoice_data_requests;
   }
 
   // Global tables (no store scoping)

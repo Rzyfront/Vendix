@@ -249,6 +249,28 @@ export class CashRegisterSettingsDto {
   track_non_cash_payments?: boolean;
 }
 
+export class CustomerQueueSettingsDto {
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  queue_expiry_hours?: number;
+
+  @IsOptional()
+  @IsNumber()
+  max_queue_size?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  require_email?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  require_phone?: boolean;
+}
+
 export class PosSettingsDto {
   @ApiProperty({ example: false, required: false })
   @IsOptional()
@@ -329,6 +351,12 @@ export class PosSettingsDto {
   @IsOptional()
   @IsBoolean()
   show_onscreen_keypad?: boolean;
+
+  @ApiProperty({ type: () => CustomerQueueSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CustomerQueueSettingsDto)
+  customer_queue?: CustomerQueueSettingsDto;
 }
 
 export class ReceiptsSettingsDto {

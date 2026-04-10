@@ -21,7 +21,7 @@ Tooltip contextual que aparece al hacer hover sobre el host. Soporta posicionami
 | -------- | --------------- | --------- | ------------------------------------------------------------------------------------------------- |
 | size     | TooltipSize     | 'md'      | Tamano: 'sm' \| 'md' \| 'lg'                                                                      |
 | position | TooltipPosition | 'top'     | Posicion: 'top' \| 'bottom' \| 'left' \| 'right'                                                  |
-| color    | TooltipColor    | 'default' | Esquema de color: 'default' \| 'primary' \| 'secondary' \| 'accent' \| 'destructive' \| 'warning' |
+| color    | TooltipColor    | 'default' | Esquema de color: 'default' \| 'primary' \| 'secondary' \| 'accent' \| 'destructive' \| 'warning' \| 'ai' |
 | visible  | boolean         | false     | Control manual de visibilidad (no requerido si se usa hover automatico)                           |
 | delay    | number          | 200       | Milisegundos de retardo antes de mostrar                                                          |
 

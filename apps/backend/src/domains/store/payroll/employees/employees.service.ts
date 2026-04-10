@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
@@ -167,7 +167,7 @@ export class EmployeesService {
         });
 
         if (is_customer) {
-          throw new BadRequestException('Los usuarios con rol Cliente no pueden ser vinculados como empleados.');
+          throw new VendixHttpException(ErrorCodes.PAYROLL_VALIDATE_002);
         }
       }
 

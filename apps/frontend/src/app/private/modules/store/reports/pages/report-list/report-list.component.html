@@ -1,0 +1,54 @@
+<div class="reports-page">
+  <!-- Header -->
+  <div class="page-header">
+    <div class="header-text">
+      <h1 class="page-title">Centro de Reportes</h1>
+      <p class="page-subtitle">Genera y exporta reportes de tu negocio</p>
+    </div>
+  </div>
+
+  <!-- Search + Chips -->
+  <div class="filters-section">
+    <vendix-report-search (searchChange)="onSearchChange($event)" />
+
+    <vendix-report-category-chips
+      [activeCategory]="activeCategory()"
+      (categoryChange)="onCategoryChange($event)"
+    />
+  </div>
+
+  <!-- Grouped Reports Grid -->
+  <div class="reports-content">
+    @for (group of filteredGroups(); track group.category.id) {
+      <section class="category-group">
+        <!-- Category separator -->
+        <div class="category-header" [style.--cat-color]="group.category.color">
+          <div class="category-line"></div>
+          <div class="category-label">
+            <app-icon [name]="group.category.icon" [size]="16" />
+            <span>{{ group.category.label }}</span>
+            <span class="category-count">{{ group.reports.length }}</span>
+          </div>
+          <div class="category-line"></div>
+        </div>
+
+        <!-- Cards Grid -->
+        <div class="cards-grid">
+          @for (report of group.reports; track report.id) {
+            <vendix-report-card
+              [report]="report"
+              [style.animation-delay]="($index * 30) + 'ms'"
+              (selected)="onReportSelected($event)"
+            />
+          }
+        </div>
+      </section>
+    } @empty {
+      <div class="empty-state">
+        <app-icon name="search" [size]="48" class="empty-icon" />
+        <h3>No se encontraron reportes</h3>
+        <p>Intenta con otros terminos de busqueda o selecciona otra categoria</p>
+      </div>
+    }
+  </div>
+</div>

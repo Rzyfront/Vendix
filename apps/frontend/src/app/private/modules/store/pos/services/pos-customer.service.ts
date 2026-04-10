@@ -307,6 +307,25 @@ export class PosCustomerService {
   }
 
   /**
+   * Lookup customer by document number across the organization
+   */
+  lookupByDocument(documentNumber: string, documentType?: string): Observable<PosCustomer | null> {
+    let params = new HttpParams().set('document_number', documentNumber);
+    if (documentType) {
+      params = params.set('document_type', documentType);
+    }
+
+    return this.http.get<any>(`${this.apiUrl}/lookup`, { params }).pipe(
+      map((response) => {
+        const data = response?.data;
+        if (!data) return null;
+        return this.mapApiCustomerToPosCustomer(data.customer);
+      }),
+      catchError(() => of(null)),
+    );
+  }
+
+  /**
    * Map API customer response to PosCustomer
    */
   private mapApiCustomerToPosCustomer(apiCustomer: any): PosCustomer {

@@ -4,7 +4,7 @@
 .table-container {
   position: relative;
   overflow: hidden;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-lg);
   border: var(--border-width) solid var(--color-border);
   background-color: var(--color-surface);
   box-shadow: var(--shadow-sm);
@@ -726,11 +726,11 @@
 
     // Variante muted
     &.action-muted {
-      color: var(--color-muted, #94a3b8);
+      color: var(--color-neutral, #94a3b8);
       background: linear-gradient(
         135deg,
-        color-mix(in srgb, var(--color-muted, #94a3b8) 8%, var(--color-surface)),
-        color-mix(in srgb, var(--color-muted, #94a3b8) 14%, var(--color-surface))
+        color-mix(in srgb, var(--color-neutral, #94a3b8) 8%, var(--color-surface)),
+        color-mix(in srgb, var(--color-neutral, #94a3b8) 14%, var(--color-surface))
       );
       opacity: 1;
       border-radius: var(--radius-md, 8px);
@@ -738,8 +738,8 @@
       &:hover:not(:disabled) {
         background: linear-gradient(
           135deg,
-          color-mix(in srgb, var(--color-muted, #94a3b8) 14%, var(--color-surface)),
-          color-mix(in srgb, var(--color-muted, #94a3b8) 22%, var(--color-surface))
+          color-mix(in srgb, var(--color-neutral, #94a3b8) 14%, var(--color-surface)),
+          color-mix(in srgb, var(--color-neutral, #94a3b8) 22%, var(--color-surface))
         );
         transform: translateY(-1px);
         box-shadow: var(--shadow-sm);

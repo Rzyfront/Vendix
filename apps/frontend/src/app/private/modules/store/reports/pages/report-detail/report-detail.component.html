@@ -1,0 +1,96 @@
+@if (report(); as report) {
+  <div class="report-detail">
+    <!-- Header -->
+    <div class="detail-header">
+      <div class="header-left">
+        <button class="back-btn" (click)="goBack()">
+          <app-icon name="chevron-left" [size]="20" />
+          <span>Reportes</span>
+        </button>
+        <div class="header-info">
+          <div class="title-row">
+            <app-icon [name]="report.icon" [size]="24" [style.color]="categoryColor()" />
+            <h1 class="report-title">{{ report.title }}</h1>
+          </div>
+          <div class="meta-row">
+            <span class="category-badge" [style.--badge-color]="categoryColor()">
+              {{ categoryLabel() }}
+            </span>
+            <span class="report-description">{{ report.description }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-actions">
+        @if (report.fullViewRoute) {
+          <app-button
+            variant="outline"
+            size="sm"
+            (clicked)="goToFullView()"
+          >
+            <app-icon slot="icon" name="external-link" [size]="16" />
+            Ver reporte completo
+          </app-button>
+        }
+        @if (hasGenerated() && reportData() && reportData()!.length > 0) {
+          <vendix-export-button
+            [loading]="!!exporting()"
+            (export)="exportReport()"
+          />
+        }
+      </div>
+    </div>
+
+    <!-- Filters Bar -->
+    <div class="filters-bar">
+      @if (report.requiresDateRange) {
+        <vendix-date-range-filter
+          [value]="dateRange()"
+          (valueChange)="onDateRangeChange($event)"
+        />
+      }
+      @if (report.requiresFiscalPeriod) {
+        <app-selector
+          [options]="fiscalPeriodOptions()"
+          placeholder="Seleccionar periodo fiscal..."
+          size="sm"
+          (valueChange)="onFiscalPeriodChange($event)"
+        />
+      }
+      <app-button
+        variant="primary"
+        size="sm"
+        [loading]="!!loading()"
+        (clicked)="generateReport()"
+      >
+        <app-icon slot="icon" name="play" [size]="16" />
+        Generar Reporte
+      </app-button>
+    </div>
+
+    <!-- Results Area -->
+    <div class="results-area">
+      @if (!hasGenerated()) {
+        <!-- Initial empty state -->
+        <div class="empty-initial">
+          <app-icon name="file-bar-chart" [size]="48" class="empty-icon" />
+          <h3>Configura y genera tu reporte</h3>
+          <p>Selecciona el rango de fechas y haz clic en "Generar Reporte"</p>
+        </div>
+      } @else {
+        <!-- Report Table -->
+        <vendix-report-table
+          [columns]="report.columns"
+          [data]="reportData() || []"
+          [loading]="!!loading()"
+        />
+      }
+    </div>
+  </div>
+} @else {
+  <!-- Report not found -->
+  <div class="not-found">
+    <app-icon name="alert-triangle" [size]="48" />
+    <h3>Reporte no encontrado</h3>
+    <app-button (clicked)="goBack()">Volver a reportes</app-button>
+  </div>
+}

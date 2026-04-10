@@ -497,10 +497,10 @@ export class PosTicketPrinterComponent implements OnInit {
     });
   }
 
-  printOrder(): void {
+  async printOrder(): Promise<void> {
     if (!this.ticketData) return;
 
-    const printContent = this.generatePrintContent();
+    const printContent = await this.generatePrintContent();
     const printWindow = window.open('', '_blank');
     if (printWindow) {
       printWindow.document.write(printContent);
@@ -509,10 +509,10 @@ export class PosTicketPrinterComponent implements OnInit {
     }
   }
 
-  private generatePrintContent(): string {
+  private async generatePrintContent(): Promise<string> {
     if (!this.ticketData) return '';
 
-    const html = this.ticketService.generateTicketHTML(this.ticketData);
+    const html = await this.ticketService.generateTicketHTML(this.ticketData);
 
     return `
       <html>

@@ -813,6 +813,26 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'User already linked to another employee',
   },
+  PAYROLL_BULK_006: {
+    code: 'PAYROLL_BULK_006',
+    httpStatus: 409,
+    devMessage: 'Username already exists for this organization',
+  },
+  PAYROLL_BULK_007: {
+    code: 'PAYROLL_BULK_007',
+    httpStatus: 409,
+    devMessage: 'Email already exists for this organization',
+  },
+  PAYROLL_BULK_008: {
+    code: 'PAYROLL_BULK_008',
+    httpStatus: 400,
+    devMessage: 'Unexpected error processing employee in bulk upload',
+  },
+  PAYROLL_VALIDATE_002: {
+    code: 'PAYROLL_VALIDATE_002',
+    httpStatus: 400,
+    devMessage: 'User with CUSTOMER role cannot be linked as employee',
+  },
 
   // Accounting
   ACC_FIND_001: {
@@ -980,6 +1000,16 @@ export const ErrorCodes = {
     code: 'ADV_PAYMENT_001',
     httpStatus: 400,
     devMessage: 'Payment amount exceeds pending balance',
+  },
+  ADV_INSTALLMENT_001: {
+    code: 'ADV_INSTALLMENT_001',
+    httpStatus: 404,
+    devMessage: 'Installment not found',
+  },
+  ADV_INSTALLMENT_002: {
+    code: 'ADV_INSTALLMENT_002',
+    httpStatus: 400,
+    devMessage: 'Installment already paid',
   },
 
   // ===== BANK RECONCILIATION =====

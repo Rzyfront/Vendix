@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnDestroy, inject } from '@angular/core';
+import { Component, input, output, signal, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -9,7 +9,9 @@ import { ToastService } from '../../../../../../../shared/components/toast/toast
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
+import { StepsLineComponent } from '../../../../../../../shared/components/steps-line/steps-line.component';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import type { StepsLineItem } from '../../../../../../../shared/components';
 
 @Component({
   selector: 'app-settlement-detail',
@@ -19,244 +21,290 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
     ModalComponent,
     ButtonComponent,
     IconComponent,
+    StepsLineComponent,
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
-      title="Detalle de Liquidacion"
+      [title]="settlement()?.settlement_number || 'Detalle de Liquidacion'"
+      [subtitle]="settlement()?.employee ? (settlement()!.employee.first_name + ' ' + settlement()!.employee.last_name) : ''"
       size="xl"
     >
-      <div class="p-4 max-h-[75vh] overflow-y-auto" *ngIf="settlement">
+      <!-- Header slot: badge de estado -->
+      <ng-container *ngIf="settlement() as s">
+        <span slot="header"
+              [class]="getStatusBadgeClass(s.status)"
+              class="px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap">
+          {{ getStatusLabel(s.status) }}
+        </span>
+      </ng-container>
 
-        <!-- Header -->
-        <div class="mb-4 flex flex-wrap items-center gap-3">
-          <span class="text-lg font-semibold text-text-primary">{{ settlement.settlement_number }}</span>
-          <span [class]="getStatusBadgeClass(settlement.status)" class="px-2 py-0.5 rounded-full text-xs font-medium">
-            {{ getStatusLabel(settlement.status) }}
-          </span>
-        </div>
+      <div class="space-y-4" *ngIf="settlement() as s">
 
-        <!-- Employee Info -->
-        <div class="mb-4 p-3 bg-gray-50 rounded-lg" *ngIf="settlement.employee">
+        <!-- 1. STEPS LINE -->
+        <app-steps-line
+          [steps]="statusSteps"
+          [currentStep]="currentStatusIndex"
+          size="sm"
+          orientation="horizontal"
+        ></app-steps-line>
+
+        <!-- 2. EMPLOYEE INFO -->
+        <div class="p-3 bg-gray-50 rounded-lg" *ngIf="s.employee">
           <h3 class="text-xs font-bold text-text-secondary uppercase tracking-wider mb-2">Empleado</h3>
           <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
             <div>
               <span class="text-xs text-text-secondary block">Nombre</span>
-              <span class="text-sm font-medium">{{ settlement.employee.first_name }} {{ settlement.employee.last_name }}</span>
+              <span class="text-sm font-medium">{{ s.employee.first_name }} {{ s.employee.last_name }}</span>
             </div>
             <div>
               <span class="text-xs text-text-secondary block">Documento</span>
-              <span class="text-sm font-medium">{{ settlement.employee.document_number }}</span>
+              <span class="text-sm font-medium">{{ s.employee.document_number }}</span>
             </div>
             <div>
               <span class="text-xs text-text-secondary block">Cargo</span>
-              <span class="text-sm font-medium">{{ settlement.employee.position || '-' }}</span>
+              <span class="text-sm font-medium">{{ s.employee.position || '-' }}</span>
             </div>
           </div>
         </div>
 
-        <!-- Employment Info -->
-        <div class="mb-4 p-3 bg-gray-50 rounded-lg grid grid-cols-2 md:grid-cols-3 gap-3">
+        <!-- 3. EMPLOYMENT INFO -->
+        <div class="p-3 bg-gray-50 rounded-lg grid grid-cols-2 md:grid-cols-3 gap-3">
           <div>
             <span class="text-xs text-text-secondary block">Fecha Ingreso</span>
-            <span class="text-sm font-medium">{{ settlement.hire_date | date:'dd/MM/yyyy' }}</span>
+            <span class="text-sm font-medium">{{ s.hire_date | date:'dd/MM/yyyy' }}</span>
           </div>
           <div>
             <span class="text-xs text-text-secondary block">Fecha Terminacion</span>
-            <span class="text-sm font-medium">{{ settlement.termination_date | date:'dd/MM/yyyy' }}</span>
+            <span class="text-sm font-medium">{{ s.termination_date | date:'dd/MM/yyyy' }}</span>
           </div>
           <div>
             <span class="text-xs text-text-secondary block">Dias Trabajados</span>
-            <span class="text-sm font-medium">{{ settlement.days_worked }}</span>
+            <span class="text-sm font-medium">{{ s.days_worked }}</span>
           </div>
           <div>
             <span class="text-xs text-text-secondary block">Motivo</span>
-            <span class="text-sm font-medium">{{ getReasonLabel(settlement.termination_reason) }}</span>
+            <span class="text-sm font-medium">{{ getReasonLabel(s.termination_reason) }}</span>
           </div>
           <div>
             <span class="text-xs text-text-secondary block">Tipo Contrato</span>
-            <span class="text-sm font-medium">{{ getContractLabel(settlement.contract_type) }}</span>
+            <span class="text-sm font-medium">{{ getContractLabel(s.contract_type) }}</span>
           </div>
           <div>
             <span class="text-xs text-text-secondary block">Salario Base</span>
-            <span class="text-sm font-medium">{{ formatNumber(settlement.base_salary) }}</span>
+            <span class="text-sm font-medium">{{ formatNumber(s.base_salary) }}</span>
           </div>
         </div>
 
-        <!-- Prestaciones -->
-        <div class="mb-4">
+        <!-- 4. PRESTACIONES SOCIALES -->
+        <div>
           <h3 class="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Prestaciones Sociales</h3>
           <div class="bg-surface rounded-lg border border-border overflow-hidden">
             <table class="w-full text-sm">
               <tbody>
                 <tr class="border-b border-border">
                   <td class="py-2 px-3 text-text-secondary">Cesantias</td>
-                  <td class="py-2 px-3 text-right font-medium">{{ formatNumber(settlement.severance) }}</td>
+                  <td class="py-2 px-3 text-right font-medium">{{ formatNumber(s.severance) }}</td>
                 </tr>
                 <tr class="border-b border-border">
                   <td class="py-2 px-3 text-text-secondary">Intereses sobre Cesantias</td>
-                  <td class="py-2 px-3 text-right font-medium">{{ formatNumber(settlement.severance_interest) }}</td>
+                  <td class="py-2 px-3 text-right font-medium">{{ formatNumber(s.severance_interest) }}</td>
                 </tr>
                 <tr class="border-b border-border">
                   <td class="py-2 px-3 text-text-secondary">Prima de Servicios</td>
-                  <td class="py-2 px-3 text-right font-medium">{{ formatNumber(settlement.bonus) }}</td>
+                  <td class="py-2 px-3 text-right font-medium">{{ formatNumber(s.bonus) }}</td>
                 </tr>
                 <tr class="border-b border-border">
                   <td class="py-2 px-3 text-text-secondary">Vacaciones</td>
-                  <td class="py-2 px-3 text-right font-medium">{{ formatNumber(settlement.vacation) }}</td>
+                  <td class="py-2 px-3 text-right font-medium">{{ formatNumber(s.vacation) }}</td>
                 </tr>
                 <tr class="border-b border-border">
                   <td class="py-2 px-3 text-text-secondary">Salario Pendiente</td>
-                  <td class="py-2 px-3 text-right font-medium">{{ formatNumber(settlement.pending_salary) }}</td>
+                  <td class="py-2 px-3 text-right font-medium">{{ formatNumber(s.pending_salary) }}</td>
                 </tr>
-                <tr *ngIf="settlement.indemnification > 0">
+                <tr *ngIf="s.indemnification > 0">
                   <td class="py-2 px-3 text-text-secondary">Indemnizacion</td>
-                  <td class="py-2 px-3 text-right font-medium text-blue-600">{{ formatNumber(settlement.indemnification) }}</td>
+                  <td class="py-2 px-3 text-right font-medium text-blue-600">{{ formatNumber(s.indemnification) }}</td>
                 </tr>
               </tbody>
             </table>
           </div>
         </div>
 
-        <!-- Deductions -->
-        <div class="mb-4">
+        <!-- 5. CALCULATION BREAKDOWN -->
+        <div class="p-3 bg-indigo-50 rounded-lg border border-indigo-100">
+          <h3 class="text-xs font-bold text-indigo-700 uppercase tracking-wider mb-2">
+            Como se Calcula
+          </h3>
+          <div class="space-y-1.5 text-xs text-indigo-800">
+            <p><span class="font-semibold">Cesantias:</span> Salario &times; Dias trabajados &divide; 360</p>
+            <p><span class="font-semibold">Intereses Cesantias:</span> Cesantias &times; Dias trabajados &times; 12% &divide; 360</p>
+            <p><span class="font-semibold">Prima:</span> Salario &times; Dias trabajados en semestre &divide; 360</p>
+            <p><span class="font-semibold">Vacaciones:</span> Salario &times; Dias trabajados &divide; 720</p>
+            <p *ngIf="s.indemnification > 0"><span class="font-semibold">Indemnizacion:</span> Aplica por despido sin justa causa segun tipo de contrato</p>
+          </div>
+        </div>
+
+        <!-- 6. DEDUCTIONS -->
+        <div>
           <h3 class="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Deducciones</h3>
           <div class="bg-surface rounded-lg border border-border overflow-hidden">
             <table class="w-full text-sm">
               <tbody>
                 <tr class="border-b border-border">
                   <td class="py-2 px-3 text-text-secondary">Salud</td>
-                  <td class="py-2 px-3 text-right font-medium text-red-600">{{ formatNumber(settlement.health_deduction) }}</td>
+                  <td class="py-2 px-3 text-right font-medium text-red-600">{{ formatNumber(s.health_deduction) }}</td>
                 </tr>
                 <tr class="border-b border-border">
                   <td class="py-2 px-3 text-text-secondary">Pension</td>
-                  <td class="py-2 px-3 text-right font-medium text-red-600">{{ formatNumber(settlement.pension_deduction) }}</td>
+                  <td class="py-2 px-3 text-right font-medium text-red-600">{{ formatNumber(s.pension_deduction) }}</td>
                 </tr>
-                <tr *ngIf="settlement.other_deductions > 0">
+                <tr *ngIf="s.other_deductions > 0">
                   <td class="py-2 px-3 text-text-secondary">Otras Deducciones</td>
-                  <td class="py-2 px-3 text-right font-medium text-red-600">{{ formatNumber(settlement.other_deductions) }}</td>
+                  <td class="py-2 px-3 text-right font-medium text-red-600">{{ formatNumber(s.other_deductions) }}</td>
                 </tr>
               </tbody>
             </table>
           </div>
         </div>
 
-        <!-- Totals -->
-        <div class="mb-6 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <!-- 7. TOTALS -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div class="p-3 bg-blue-50 rounded-lg border border-blue-100">
             <span class="text-xs text-blue-600 block">Total Bruto</span>
-            <span class="text-lg font-bold text-blue-800">{{ formatNumber(settlement.gross_settlement) }}</span>
+            <span class="text-lg font-bold text-blue-800">{{ formatNumber(s.gross_settlement) }}</span>
           </div>
           <div class="p-3 bg-red-50 rounded-lg border border-red-100">
             <span class="text-xs text-red-600 block">Total Deducciones</span>
-            <span class="text-lg font-bold text-red-800">{{ formatNumber(settlement.total_deductions) }}</span>
+            <span class="text-lg font-bold text-red-800">{{ formatNumber(s.total_deductions) }}</span>
           </div>
           <div class="p-3 bg-green-50 rounded-lg border border-green-100">
             <span class="text-xs text-green-600 block">NETO A PAGAR</span>
-            <span class="text-xl font-bold text-green-800">{{ formatNumber(settlement.net_settlement) }}</span>
+            <span class="text-xl font-bold text-green-800">{{ formatNumber(s.net_settlement) }}</span>
           </div>
         </div>
 
-        <!-- Notes -->
-        <div *ngIf="settlement.notes" class="mb-4 p-3 bg-yellow-50 rounded-lg border border-yellow-100">
+        <!-- 8. NOTES -->
+        <div *ngIf="s.notes" class="p-3 bg-yellow-50 rounded-lg border border-yellow-100">
           <h3 class="text-xs font-bold text-yellow-700 uppercase tracking-wider mb-1">Notas</h3>
-          <p class="text-sm text-yellow-800">{{ settlement.notes }}</p>
+          <p class="text-sm text-yellow-800">{{ s.notes }}</p>
         </div>
 
-        <!-- Actions -->
-        <div class="mt-6 pt-4 border-t border-border"
-          *ngIf="settlement.status !== 'paid' && settlement.status !== 'cancelled'">
-          <h3 class="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Acciones</h3>
-          <div class="space-y-2">
-            <!-- Recalculate -->
-            <ng-container *ngIf="settlement.status === 'calculated' || settlement.status === 'draft'">
-              <app-button
-                variant="outline"
-                [fullWidth]="true"
-                (clicked)="onRecalculate()"
-                [loading]="actionLoading"
-              >
-                <app-icon name="refresh-cw" [size]="16" slot="icon"></app-icon>
+        <!-- 9. CANCEL WITH DOUBLE CONFIRMATION -->
+        <ng-container *ngIf="s.status !== 'paid' && s.status !== 'cancelled'">
+          <div class="mt-4 pt-4 border-t border-border">
+            <ng-container *ngIf="cancelConfirmStep === 0">
+              <button (click)="cancelConfirmStep = 1"
+                      class="text-xs text-red-400 hover:text-red-600 underline underline-offset-2 transition-colors">
+                Cancelar esta liquidacion
+              </button>
+            </ng-container>
+            <ng-container *ngIf="cancelConfirmStep === 1">
+              <div class="p-3 bg-red-50 rounded-xl border border-red-200">
+                <p class="text-sm font-semibold text-red-700">Cancelar liquidacion {{ s.settlement_number }}</p>
+                <p class="text-xs text-red-600 mt-1">Esta accion no se puede deshacer.</p>
+                <div class="flex items-center gap-2 mt-3">
+                  <app-button variant="danger" size="sm" (clicked)="cancelConfirmStep = 2">
+                    Si, quiero cancelar
+                  </app-button>
+                  <app-button variant="ghost" size="sm" (clicked)="cancelConfirmStep = 0">
+                    No, volver
+                  </app-button>
+                </div>
+              </div>
+            </ng-container>
+            <ng-container *ngIf="cancelConfirmStep === 2">
+              <div class="p-3 bg-red-100 rounded-xl border-2 border-red-300">
+                <p class="text-sm font-bold text-red-800">Confirmacion final</p>
+                <p class="text-xs text-red-700 mt-1">
+                  Presione "Confirmar cancelacion" para cancelar definitivamente la liquidacion {{ s.settlement_number }}.
+                </p>
+                <div class="flex items-center gap-2 mt-3">
+                  <app-button variant="danger" size="sm" (clicked)="onCancel(); cancelConfirmStep = 0" [loading]="actionLoading()">
+                    Confirmar cancelacion
+                  </app-button>
+                  <app-button variant="ghost" size="sm" (clicked)="cancelConfirmStep = 0">
+                    No, volver
+                  </app-button>
+                </div>
+              </div>
+            </ng-container>
+          </div>
+        </ng-container>
+
+      </div>
+
+      <!-- FOOTER -->
+      <div slot="footer">
+        <div class="flex items-center justify-between gap-3 w-full">
+          <!-- Left: close -->
+          <app-button variant="outline-danger" size="sm" (clicked)="onClose()">
+            Cerrar
+          </app-button>
+
+          <!-- Right: action buttons -->
+          <div class="flex items-center gap-2">
+            <app-button
+              *ngIf="settlement()?.status === 'paid' || settlement()?.status === 'calculated' || settlement()?.status === 'approved'"
+              variant="outline" size="sm"
+              (clicked)="onDownloadPdf()" [loading]="downloadLoading()">
+              <app-icon name="download" [size]="14"></app-icon>
+              <span class="ml-1">PDF</span>
+            </app-button>
+
+            <ng-container *ngIf="settlement()?.status === 'calculated' || settlement()?.status === 'draft'">
+              <app-button variant="outline" size="sm" (clicked)="onRecalculate()" [loading]="actionLoading()">
                 Recalcular
               </app-button>
             </ng-container>
 
-            <!-- Approve -->
-            <ng-container *ngIf="settlement.status === 'calculated'">
-              <app-button
-                variant="success"
-                [fullWidth]="true"
-                (clicked)="onApprove()"
-                [loading]="actionLoading"
-              >
-                <app-icon name="check-circle" [size]="16" slot="icon"></app-icon>
-                Aprobar Liquidacion
+            <ng-container *ngIf="settlement()?.status === 'calculated'">
+              <app-button variant="success" size="sm" (clicked)="onApprove()" [loading]="actionLoading()">
+                Aprobar
               </app-button>
             </ng-container>
 
-            <!-- Pay -->
-            <ng-container *ngIf="settlement.status === 'approved'">
-              <app-button
-                variant="success"
-                [fullWidth]="true"
-                (clicked)="onPay()"
-                [loading]="actionLoading"
-              >
-                <app-icon name="banknote" [size]="16" slot="icon"></app-icon>
-                Pagar y Terminar Contrato
+            <ng-container *ngIf="settlement()?.status === 'approved'">
+              <app-button variant="success" size="sm" (clicked)="onPay()" [loading]="actionLoading()">
+                Pagar
               </app-button>
             </ng-container>
-
-            <!-- Cancel -->
-            <app-button
-              variant="outline-danger"
-              [fullWidth]="true"
-              (clicked)="onCancel()"
-              [loading]="actionLoading"
-            >
-              <app-icon name="x-circle" [size]="16" slot="icon"></app-icon>
-              Cancelar Liquidacion
-            </app-button>
           </div>
-        </div>
-      </div>
-
-      <!-- Footer -->
-      <div slot="footer">
-        <div class="flex items-center justify-end gap-2 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
-          <app-button
-            *ngIf="settlement?.status === 'paid' || settlement?.status === 'calculated' || settlement?.status === 'approved'"
-            variant="outline"
-            size="sm"
-            (clicked)="onDownloadPdf()"
-            [loading]="downloadLoading"
-          >
-            <app-icon name="download" [size]="14"></app-icon>
-            <span class="ml-1">PDF</span>
-          </app-button>
-          <app-button variant="outline" size="sm" (clicked)="onClose()">
-            Cerrar
-          </app-button>
         </div>
       </div>
     </app-modal>
   `,
 })
 export class SettlementDetailComponent implements OnDestroy {
-  @Input() isOpen = false;
-  @Input() settlement: PayrollSettlement | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() updated = new EventEmitter<void>();
+  readonly isOpen = input(false);
+  readonly settlement = input<PayrollSettlement | null>(null);
+  readonly isOpenChange = output<boolean>();
+  readonly updated = output<void>();
 
   private payrollService = inject(PayrollService);
   private toastService = inject(ToastService);
   private currencyService = inject(CurrencyFormatService);
   private destroy$ = new Subject<void>();
 
-  actionLoading = false;
-  downloadLoading = false;
+  actionLoading = signal(false);
+  downloadLoading = signal(false);
+  cancelConfirmStep: 0 | 1 | 2 = 0;
+
+  // ── StepsLine ─────────────────────────────────────────
+  statusSteps: StepsLineItem[] = [
+    { label: 'Borrador' },
+    { label: 'Calculada' },
+    { label: 'Aprobada' },
+    { label: 'Pagada' },
+  ];
+
+  get currentStatusIndex(): number {
+    const status = this.settlement()?.status;
+    const map: Record<string, number> = { draft: 0, calculated: 1, approved: 2, paid: 3, cancelled: -1 };
+    return map[status || 'draft'] ?? 0;
+  }
 
   ngOnDestroy(): void {
     this.destroy$.next();
@@ -268,104 +316,101 @@ export class SettlementDetailComponent implements OnDestroy {
   }
 
   onRecalculate(): void {
-    if (!this.settlement) return;
-    this.actionLoading = true;
-    this.payrollService.recalculateSettlement(this.settlement.id)
+    if (!this.settlement()) return;
+    this.actionLoading.set(true);
+    this.payrollService.recalculateSettlement(this.settlement()!.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: (res) => {
-          this.settlement = res.data;
-          this.actionLoading = false;
+        next: () => {
+          this.actionLoading.set(false);
           this.toastService.show({ variant: 'success', description: 'Liquidacion recalculada' });
           this.updated.emit();
         },
         error: () => {
-          this.actionLoading = false;
+          this.actionLoading.set(false);
           this.toastService.show({ variant: 'error', description: 'Error al recalcular' });
         },
       });
   }
 
   onApprove(): void {
-    if (!this.settlement) return;
-    this.actionLoading = true;
-    this.payrollService.approveSettlement(this.settlement.id)
+    if (!this.settlement()) return;
+    this.actionLoading.set(true);
+    this.payrollService.approveSettlement(this.settlement()!.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: (res) => {
-          this.settlement = res.data;
-          this.actionLoading = false;
+        next: () => {
+          this.actionLoading.set(false);
           this.toastService.show({ variant: 'success', description: 'Liquidacion aprobada' });
           this.updated.emit();
         },
         error: () => {
-          this.actionLoading = false;
+          this.actionLoading.set(false);
           this.toastService.show({ variant: 'error', description: 'Error al aprobar' });
         },
       });
   }
 
   onPay(): void {
-    if (!this.settlement) return;
-    this.actionLoading = true;
-    this.payrollService.paySettlement(this.settlement.id)
+    if (!this.settlement()) return;
+    this.actionLoading.set(true);
+    this.payrollService.paySettlement(this.settlement()!.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: (res) => {
-          this.settlement = res.data;
-          this.actionLoading = false;
+        next: () => {
+          this.actionLoading.set(false);
           this.toastService.show({ variant: 'success', description: 'Liquidacion pagada y contrato terminado' });
           this.updated.emit();
         },
         error: () => {
-          this.actionLoading = false;
+          this.actionLoading.set(false);
           this.toastService.show({ variant: 'error', description: 'Error al pagar' });
         },
       });
   }
 
   onCancel(): void {
-    if (!this.settlement) return;
-    this.actionLoading = true;
-    this.payrollService.cancelSettlement(this.settlement.id)
+    if (!this.settlement()) return;
+    this.actionLoading.set(true);
+    this.payrollService.cancelSettlement(this.settlement()!.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: (res) => {
-          this.settlement = res.data;
-          this.actionLoading = false;
+        next: () => {
+          this.actionLoading.set(false);
           this.toastService.show({ variant: 'success', description: 'Liquidacion cancelada' });
           this.updated.emit();
         },
         error: () => {
-          this.actionLoading = false;
+          this.actionLoading.set(false);
           this.toastService.show({ variant: 'error', description: 'Error al cancelar' });
         },
       });
   }
 
   onDownloadPdf(): void {
-    if (!this.settlement) return;
-    this.downloadLoading = true;
-    this.payrollService.getSettlementPayslip(this.settlement.id)
+    if (!this.settlement()) return;
+    this.downloadLoading.set(true);
+    this.payrollService.getSettlementPayslip(this.settlement()!.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (blob) => {
           const url = window.URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = `liquidacion-${this.settlement!.settlement_number}.pdf`;
+          a.download = `liquidacion-${this.settlement()!.settlement_number}.pdf`;
           a.click();
           window.URL.revokeObjectURL(url);
-          this.downloadLoading = false;
+          this.downloadLoading.set(false);
         },
         error: () => {
-          this.downloadLoading = false;
+          this.downloadLoading.set(false);
           this.toastService.show({ variant: 'error', description: 'Error al descargar PDF' });
         },
       });
   }
 
   onClose(): void {
+    this.cancelConfirmStep = 0;
     this.isOpenChange.emit(false);
   }
 
@@ -394,11 +439,12 @@ export class SettlementDetailComponent implements OnDestroy {
   getReasonLabel(reason: string): string {
     const labels: Record<string, string> = {
       voluntary_resignation: 'Renuncia Voluntaria',
-      just_cause_dismissal: 'Despido con Justa Causa',
-      unjust_cause_dismissal: 'Despido sin Justa Causa',
+      just_cause: 'Despido con Justa Causa',
+      without_just_cause: 'Despido sin Justa Causa',
       mutual_agreement: 'Mutuo Acuerdo',
-      contract_expiration: 'Vencimiento Contrato',
+      contract_expiry: 'Vencimiento Contrato',
       retirement: 'Jubilacion',
+      death: 'Muerte del Trabajador',
     };
     return labels[reason] || reason || '-';
   }

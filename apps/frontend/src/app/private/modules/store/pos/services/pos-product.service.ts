@@ -352,6 +352,12 @@ export class PosProductService {
         has_variants: product.has_variants ?? productVariants.length > 0,
         product_variants: productVariants,
         pricing_type: product.pricing_type || 'unit',
+        // Campos de servicio y reserva
+        product_type: product.product_type || 'physical',
+        requires_booking: product.requires_booking === true,
+        booking_mode: product.booking_mode || null,
+        service_duration_minutes: product.service_duration_minutes || null,
+        service_modality: product.service_modality || null,
         _rawStockLevels: product.stock_levels,
         _rawStockQuantity: product.stock_quantity,
         _rawImageUrl: product.image_url,

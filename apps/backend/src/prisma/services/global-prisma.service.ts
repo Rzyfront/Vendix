@@ -492,4 +492,9 @@ export class GlobalPrismaService extends BasePrismaService {
   get payroll_system_defaults() {
     return this.baseClient.payroll_system_defaults;
   }
+
+  // Customer Queue
+  get customer_queue() {
+    return this.baseClient.customer_queue;
+  }
 }

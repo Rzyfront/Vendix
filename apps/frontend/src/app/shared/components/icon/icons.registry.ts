@@ -220,6 +220,14 @@ import {
   ToggleRight,
   EyeOff,
   CalendarX,
+  // Reports module icons
+  PackageSearch,
+  Tags,
+  FileBarChart,
+  FileStack,
+  PiggyBank,
+  MonitorCheck,
+  Crown,
 } from 'lucide-angular';
 
 /**
@@ -511,6 +519,15 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'toggle-right': ToggleRight,
   'eye-off': EyeOff,
   'calendar-x': CalendarX,
+
+  // Reports module icons
+  'package-search': PackageSearch,
+  'tags': Tags,
+  'file-bar-chart': FileBarChart,
+  'file-stack': FileStack,
+  'piggy-bank': PiggyBank,
+  'monitor-check': MonitorCheck,
+  'crown': Crown,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

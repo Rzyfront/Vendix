@@ -1,0 +1,32 @@
+<div
+  class="report-card"
+  (click)="onClick()"
+  (mouseenter)="showTooltip = true"
+  (mouseleave)="showTooltip = false"
+  [style.--card-color]="categoryColor"
+>
+  <!-- Icon Badge -->
+  <div class="card-icon">
+    <app-icon [name]="report().icon" [size]="20" />
+  </div>
+
+  <!-- Content -->
+  <div class="card-content">
+    <h4 class="card-title">{{ report().title }}</h4>
+    <p class="card-description">{{ report().description }}</p>
+  </div>
+
+  <!-- Category Badge (subtle) -->
+  <span class="card-badge">{{ categoryLabel }}</span>
+
+  <!-- Tooltip on hover -->
+  @if (showTooltip) {
+    <div class="card-tooltip">
+      <div class="tooltip-header">
+        <app-icon [name]="report().icon" [size]="16" />
+        <span>{{ report().title }}</span>
+      </div>
+      <p class="tooltip-body">{{ report().detailedDescription }}</p>
+    </div>
+  }
+</div>

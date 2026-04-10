@@ -16,6 +16,8 @@ import {
   PaymentReceivedEvent,
   NewCustomerEvent,
 } from './interfaces/notification-events.interface';
+import { QueueEntryEvent } from '../customer-queue/interfaces/queue-events.interface';
+import { InvoiceDataRequestEvent } from '../invoicing/invoice-data-requests/interfaces/invoice-data-request-events.interface';
 
 @Injectable()
 export class NotificationsEventsListener {
@@ -619,6 +621,76 @@ export class NotificationsEventsListener {
       'Nueva Reseña',
       `${event.customer_name} dejó una reseña de ${'★'.repeat(event.rating)}${'☆'.repeat(5 - event.rating)} para ${event.product_name}`,
       { review_id: event.review_id, product_id: event.product_id },
+    );
+  }
+
+  // ===== CUSTOMER QUEUE EVENTS =====
+
+  @OnEvent('queue.entry_added')
+  async handleQueueEntryAdded(event: QueueEntryEvent) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'customer_queue_new',
+      'Nuevo cliente en cola',
+      `${event.first_name} ${event.last_name} se registró en la cola (posición #${event.position})`,
+      { entry_id: event.entry_id, token: event.token, position: event.position },
+    );
+  }
+
+  @OnEvent('queue.entry_selected')
+  async handleQueueEntrySelected(event: QueueEntryEvent) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'customer_queue_selected',
+      'Cliente seleccionado de cola',
+      `${event.first_name} ${event.last_name} fue seleccionado`,
+      { entry_id: event.entry_id, token: event.token },
+    );
+  }
+
+  @OnEvent('queue.entry_consumed')
+  async handleQueueEntryConsumed(event: QueueEntryEvent) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'customer_queue_consumed',
+      'Cliente procesado',
+      `${event.first_name} ${event.last_name} fue procesado`,
+      { entry_id: event.entry_id, token: event.token },
+    );
+  }
+
+  @OnEvent('queue.entry_cancelled')
+  async handleQueueEntryCancelled(event: QueueEntryEvent) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'customer_queue_cancelled',
+      'Cliente cancelado de cola',
+      `${event.first_name} ${event.last_name} fue removido de la cola`,
+      { entry_id: event.entry_id, token: event.token },
+    );
+  }
+
+  @OnEvent('queue.entry_released')
+  async handleQueueEntryReleased(event: QueueEntryEvent) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'customer_queue_released',
+      'Cliente liberado',
+      `${event.first_name} ${event.last_name} volvió a la cola`,
+      { entry_id: event.entry_id, token: event.token },
+    );
+  }
+
+  // ===== INVOICE DATA REQUEST EVENTS =====
+
+  @OnEvent('invoice_data_request.submitted')
+  async handleInvoiceDataRequestSubmitted(event: InvoiceDataRequestEvent) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'invoice_data_request_submitted',
+      'Solicitud de factura recibida',
+      `${event.customer_name || 'Un cliente'} (${event.document_number || 'S/D'}) envió datos para facturación de la orden #${event.order_id}`,
+      { request_id: event.request_id, order_id: event.order_id, token: event.token },
     );
   }
 

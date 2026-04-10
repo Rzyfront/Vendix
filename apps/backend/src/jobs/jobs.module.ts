@@ -14,6 +14,7 @@ import { EmbeddingSyncJob } from './embedding-sync.job';
 import { ArAgingUpdateJob } from './ar-aging-update.job';
 import { ApAgingUpdateJob } from './ap-aging-update.job';
 import { PaymentTimeoutCleanupJob } from './payment-timeout-cleanup.job';
+import { QueueExpiryCleanupJob } from './queue-expiry-cleanup.job';
 import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
@@ -36,6 +37,7 @@ import { PrismaModule } from '../prisma/prisma.module';
     ArAgingUpdateJob,
     ApAgingUpdateJob,
     PaymentTimeoutCleanupJob,
+    QueueExpiryCleanupJob,
   ],
 })
 export class JobsModule {}

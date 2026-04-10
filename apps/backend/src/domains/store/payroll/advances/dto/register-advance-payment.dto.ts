@@ -21,4 +21,9 @@ export class RegisterAdvancePaymentDto {
   @IsString()
   @MaxLength(255)
   notes?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  installment_id?: number;
 }

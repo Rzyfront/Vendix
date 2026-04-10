@@ -98,7 +98,8 @@
   --color-info: #3b82f6;
   --color-gaming: #8b5cf6;
   --color-royal: #f59e0b;
-  --color-muted: #94a3b8;
+  --color-neutral: #94a3b8;
+  --color-muted: rgba(148, 163, 184, 0.1);
 
   /* Alias for backward compatibility */
   --text: var(--color-text-primary);
@@ -231,7 +232,8 @@
   --color-info: #60a5fa;
   --color-gaming: #a78bfa;
   --color-royal: #fbbf24;
-  --color-muted: #9aa6b2;
+  --color-neutral: #9aa6b2;
+  --color-muted: rgba(154, 166, 178, 0.15);
 
   /* Alias for backward compatibility (Dark theme) */
   --text: var(--color-text-primary);

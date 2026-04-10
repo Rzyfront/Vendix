@@ -25,7 +25,7 @@ export class AdvancesController {
   ) {}
 
   @Get()
-  @Permissions('payroll:read')
+  @Permissions('store:payroll:advances:read')
   async findAll(@Query() query_dto: QueryAdvanceDto) {
     const result = await this.advances_service.findAll(query_dto);
     return this.response_service.paginated(
@@ -39,14 +39,14 @@ export class AdvancesController {
   // --- Static Routes (MUST be before :id) ---
 
   @Get('stats')
-  @Permissions('payroll:read')
+  @Permissions('store:payroll:advances:read')
   async getStats() {
     const result = await this.advances_service.getStats();
     return this.response_service.success(result);
   }
 
   @Get('employee/:employeeId/summary')
-  @Permissions('payroll:read')
+  @Permissions('store:payroll:advances:read')
   async getEmployeeAdvanceSummary(@Param('employeeId') employeeId: string) {
     const result = await this.advances_service.getEmployeeAdvanceSummary(+employeeId);
     return this.response_service.success(result);
@@ -55,14 +55,14 @@ export class AdvancesController {
   // --- Parameter Routes ---
 
   @Get(':id')
-  @Permissions('payroll:read')
+  @Permissions('store:payroll:advances:read')
   async findOne(@Param('id') id: string) {
     const result = await this.advances_service.findOne(+id);
     return this.response_service.success(result);
   }
 
   @Post()
-  @Permissions('payroll:write')
+  @Permissions('store:payroll:advances:create')
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() create_dto: CreateAdvanceDto) {
     const result = await this.advances_service.create(create_dto);
@@ -70,28 +70,28 @@ export class AdvancesController {
   }
 
   @Patch(':id/approve')
-  @Permissions('payroll:write')
+  @Permissions('store:payroll:advances:approve')
   async approve(@Param('id') id: string, @Body() dto: ApproveAdvanceDto) {
     const result = await this.advances_service.approve(+id, dto);
     return this.response_service.success(result, 'Advance approved successfully');
   }
 
   @Patch(':id/reject')
-  @Permissions('payroll:write')
+  @Permissions('store:payroll:advances:approve')
   async reject(@Param('id') id: string) {
     const result = await this.advances_service.reject(+id);
     return this.response_service.success(result, 'Advance rejected');
   }
 
   @Patch(':id/cancel')
-  @Permissions('payroll:write')
+  @Permissions('store:payroll:advances:manage')
   async cancel(@Param('id') id: string) {
     const result = await this.advances_service.cancel(+id);
     return this.response_service.success(result, 'Advance cancelled');
   }
 
   @Post(':id/pay')
-  @Permissions('payroll:write')
+  @Permissions('store:payroll:advances:manage')
   @HttpCode(HttpStatus.OK)
   async registerManualPayment(
     @Param('id') id: string,
@@ -99,5 +99,16 @@ export class AdvancesController {
   ) {
     const result = await this.advances_service.registerManualPayment(+id, dto);
     return this.response_service.success(result, 'Payment registered successfully');
+  }
+
+  @Patch(':id/installments/:installmentId/pay')
+  @Permissions('store:payroll:advances:manage')
+  async payInstallment(
+    @Param('id') id: string,
+    @Param('installmentId') installmentId: string,
+    @Body() dto: RegisterAdvancePaymentDto,
+  ) {
+    const result = await this.advances_service.payInstallment(+id, +installmentId, dto);
+    return this.response_service.success(result, 'Installment payment registered');
   }
 }

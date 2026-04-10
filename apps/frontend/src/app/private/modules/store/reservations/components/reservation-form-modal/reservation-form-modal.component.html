@@ -39,101 +39,133 @@
   <!-- Step 0: Service + Date + Channel -->
   @if (currentStep() === 0) {
     <div class="step-content fade-in">
-      @if (loadingServices()) {
-        <div class="loading-state">
-          <app-spinner size="md" color="primary"></app-spinner>
-          <span class="loading-text">Cargando servicios...</span>
+
+      <!-- Pre-selected product chip (when opened from POS) -->
+      @if (initialProduct()) {
+        <div class="flex items-center gap-2 p-3 bg-primary/5 border border-primary/20 rounded-lg mb-4">
+          <app-icon name="package" [size]="16" class="text-primary flex-shrink-0"></app-icon>
+          <span class="font-medium text-text-primary text-sm">{{ initialProduct().name }}</span>
+          <span class="ml-auto text-xs text-text-secondary bg-primary/10 px-2 py-0.5 rounded-full">Pre-seleccionado</span>
         </div>
-      } @else if (services().length === 0) {
-        <div class="empty-state">
-          <div class="empty-icon-wrapper">
-            <app-icon name="briefcase" [size]="32"></app-icon>
+      }
+
+      <!-- Service search (hidden when product is pre-selected) -->
+      @if (!initialProduct()) {
+        @if (loadingServices()) {
+          <div class="loading-state">
+            <app-spinner size="md" color="primary"></app-spinner>
+            <span class="loading-text">Cargando servicios...</span>
           </div>
-          <h4 class="empty-title">Sin servicios disponibles</h4>
-          <p class="empty-description">No hay servicios configurados para reserva. Agrega servicios desde el catálogo de productos.</p>
-        </div>
-      } @else {
-        <!-- Service Search -->
-        <div class="service-search-wrapper">
-          <app-icon name="search" [size]="16" class="search-prefix-icon"></app-icon>
-          <input
-            type="text"
-            class="search-input"
-            placeholder="Buscar servicio..."
-            [value]="serviceSearch()"
-            (input)="serviceSearch.set($any($event.target).value)"
-          />
-          @if (serviceSearch()) {
-            <button class="search-clear-btn" (click)="serviceSearch.set('')">
-              <app-icon name="x" [size]="14"></app-icon>
-            </button>
-          }
-        </div>
-
-        <div class="services-grid">
-          @for (service of filteredServices(); track service.id) {
-            <button
-              class="service-card"
-              [class.selected]="selectedService()?.id === service.id"
-              (click)="selectService(service)">
-              <div class="card-header">
-                <span class="service-name">{{ service.name }}</span>
-                @if (selectedService()?.id === service.id) {
-                  <div class="selected-badge">
-                    <app-icon name="circle-check" [size]="16"></app-icon>
-                  </div>
-                }
-              </div>
-              <div class="card-details">
-                @if (service.service_duration_minutes) {
-                  <span class="detail-badge duration-badge">
-                    <app-icon name="clock" [size]="12"></app-icon>
-                    {{ service.service_duration_minutes }} min
-                  </span>
-                }
-                @if (service.base_price) {
-                  <span class="detail-badge price-badge">
-                    ${{ service.base_price | number:'1.0-0' }}
-                  </span>
-                }
-              </div>
-            </button>
-          }
-        </div>
-
-        @if (hasMoreServices()) {
-          <p class="services-hint">
-            Mostrando 5 de {{ services().length }} servicios. Usa el buscador para encontrar más.
-          </p>
-        }
-        @if (serviceSearch() && filteredServices().length === 0) {
-          <p class="services-hint">No se encontraron servicios para "{{ serviceSearch() }}"</p>
-        }
-
-        <!-- Date + Channel below services -->
-        @if (selectedService()) {
-          <div class="date-channel-row">
-            <div class="form-section">
-              <div class="section-header">
-                <div class="section-icon-badge schedule-badge">
-                  <app-icon name="calendar" [size]="14"></app-icon>
-                </div>
-                <span class="section-title"><span class="title-text">Fecha</span><span class="title-required">*</span></span>
-              </div>
-              <app-input type="date" [ngModel]="selectedDate()" (ngModelChange)="selectedDate.set($event)" placeholder="Selecciona fecha" [required]="true"></app-input>
+        } @else if (services().length === 0) {
+          <div class="empty-state">
+            <div class="empty-icon-wrapper">
+              <app-icon name="briefcase" [size]="32"></app-icon>
             </div>
-            <div class="form-section">
-              <div class="section-header">
-                <div class="section-icon-badge channel-badge-icon">
-                  <app-icon name="radio" [size]="14"></app-icon>
+            <h4 class="empty-title">Sin servicios disponibles</h4>
+            <p class="empty-description">No hay servicios configurados para reserva. Agrega servicios desde el catálogo de productos.</p>
+          </div>
+        } @else {
+          <!-- Service Search -->
+          <div class="service-search-wrapper">
+            <app-icon name="search" [size]="16" class="search-prefix-icon"></app-icon>
+            <input
+              type="text"
+              class="search-input"
+              placeholder="Buscar servicio..."
+              [value]="serviceSearch()"
+              (input)="serviceSearch.set($any($event.target).value)"
+            />
+            @if (serviceSearch()) {
+              <button class="search-clear-btn" (click)="serviceSearch.set('')">
+                <app-icon name="x" [size]="14"></app-icon>
+              </button>
+            }
+          </div>
+
+          <div class="services-grid">
+            @for (service of filteredServices(); track service.id) {
+              <button
+                class="service-card"
+                [class.selected]="selectedService()?.id === service.id"
+                (click)="selectService(service)">
+                <div class="card-header">
+                  <span class="service-name">{{ service.name }}</span>
+                  @if (selectedService()?.id === service.id) {
+                    <div class="selected-badge">
+                      <app-icon name="circle-check" [size]="16"></app-icon>
+                    </div>
+                  }
                 </div>
-                <span class="section-title"><span class="title-text">Canal</span></span>
+                <div class="card-details">
+                  @if (service.service_duration_minutes) {
+                    <span class="detail-badge duration-badge">
+                      <app-icon name="clock" [size]="12"></app-icon>
+                      {{ service.service_duration_minutes }} min
+                    </span>
+                  }
+                  @if (service.base_price) {
+                    <span class="detail-badge price-badge">
+                      ${{ service.base_price | number:'1.0-0' }}
+                    </span>
+                  }
+                </div>
+              </button>
+            }
+          </div>
+
+          @if (hasMoreServices()) {
+            <p class="services-hint">
+              Mostrando 5 de {{ services().length }} servicios. Usa el buscador para encontrar más.
+            </p>
+          }
+          @if (serviceSearch() && filteredServices().length === 0) {
+            <p class="services-hint">No se encontraron servicios para "{{ serviceSearch() }}"</p>
+          }
+        }
+      }
+
+      <!-- Date + Channel (always visible when service is selected) -->
+      @if (selectedService()) {
+        <div class="date-channel-row">
+          <div class="form-section">
+            <div class="section-header">
+              <div class="section-icon-badge schedule-badge">
+                <app-icon name="calendar" [size]="14"></app-icon>
               </div>
-              <app-selector [ngModel]="selectedChannel()" (ngModelChange)="selectedChannel.set($event)" [options]="channelOptions" placeholder="Canal"></app-selector>
+              <span class="section-title"><span class="title-text">Fecha</span><span class="title-required">*</span></span>
             </div>
+            <app-input type="date" [ngModel]="selectedDate()" (ngModelChange)="selectedDate.set($event)" placeholder="Selecciona fecha" [required]="true"></app-input>
+          </div>
+          <div class="form-section">
+            <div class="section-header">
+              <div class="section-icon-badge channel-badge-icon">
+                <app-icon name="radio" [size]="14"></app-icon>
+              </div>
+              <span class="section-title"><span class="title-text">Canal</span></span>
+            </div>
+            <app-selector [ngModel]="selectedChannel()" (ngModelChange)="selectedChannel.set($event)" [options]="channelOptions" placeholder="Canal"></app-selector>
+          </div>
+        </div>
+
+        <!-- Opción agenda directa (modo proveedor requerido) -->
+        @if (!isFreeBooking()) {
+          <div class="mt-4 flex flex-col items-center gap-2">
+            <div class="flex items-center gap-2 w-full">
+              <div class="flex-1 h-px bg-border"></div>
+              <span class="text-xs text-text-secondary px-2">o</span>
+              <div class="flex-1 h-px bg-border"></div>
+            </div>
+            <button type="button"
+              class="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg border border-border bg-surface hover:border-primary/40 hover:bg-primary/5 transition-all text-sm font-medium text-text-secondary hover:text-primary group"
+              (click)="goDirectBooking()">
+              <app-icon name="zap" [size]="16" class="text-text-secondary group-hover:text-primary transition-colors"></app-icon>
+              Agendar directamente
+              <span class="text-xs text-text-secondary/60 font-normal group-hover:text-primary/60">— sin proveedor ni horario específico</span>
+            </button>
           </div>
         }
       }
+
     </div>
   }
 

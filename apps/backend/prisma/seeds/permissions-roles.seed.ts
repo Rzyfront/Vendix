@@ -1525,6 +1525,12 @@ export async function seedPermissionsAndRoles(
       method: 'GET',
     },
     {
+      name: 'store:reports:read',
+      description: 'Ver reportes generales',
+      path: '/api/store/reports',
+      method: 'GET',
+    },
+    {
       name: 'store:expenses:approve',
       description: 'Approve expenses',
       path: '/api/store/expenses',
@@ -1945,6 +1951,50 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/payroll/rules',
       method: 'PATCH',
     },
+    // Nómina - Adelantos
+    {
+      name: 'store:payroll:advances:read',
+      description: 'Leer adelantos de empleados',
+      path: '/api/store/payroll/advances',
+      method: 'GET',
+    },
+    {
+      name: 'store:payroll:advances:create',
+      description: 'Crear adelantos de empleados',
+      path: '/api/store/payroll/advances',
+      method: 'POST',
+    },
+    {
+      name: 'store:payroll:advances:approve',
+      description: 'Aprobar/rechazar adelantos',
+      path: '/api/store/payroll/advances',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:payroll:advances:manage',
+      description: 'Gestionar adelantos (cancelar, pagos manuales)',
+      path: '/api/store/payroll/advances',
+      method: 'PATCH',
+    },
+    // Nómina - Liquidaciones de empleado (prestaciones sociales)
+    {
+      name: 'store:payroll:settlements:read',
+      description: 'Leer liquidaciones de empleado',
+      path: '/api/store/payroll/settlements',
+      method: 'GET',
+    },
+    {
+      name: 'store:payroll:settlements:create',
+      description: 'Crear liquidaciones de empleado',
+      path: '/api/store/payroll/settlements',
+      method: 'POST',
+    },
+    {
+      name: 'store:payroll:settlements:manage',
+      description: 'Gestionar liquidaciones (recalcular, aprobar, pagar, cancelar)',
+      path: '/api/store/payroll/settlements',
+      method: 'PATCH',
+    },
 
     {
       name: 'superadmin:stores:create',
@@ -2061,6 +2111,194 @@ export async function seedPermissionsAndRoles(
       description: 'Gestionar reglas de comisiones',
       path: '/api/store/commissions/rules',
       method: 'POST',
+    },
+
+    // ──── Cola Virtual ────
+    {
+      name: 'store:customer_queue:read',
+      description: 'Ver cola virtual de clientes',
+      path: '/api/store/customer-queue',
+      method: 'GET',
+    },
+    {
+      name: 'store:customer_queue:manage',
+      description: 'Gestionar cola virtual (seleccionar, consumir, cancelar)',
+      path: '/api/store/customer-queue/:id',
+      method: 'POST',
+    },
+
+    // ──── Exógenos (DIAN) ────
+    {
+      name: 'exogenous:read',
+      description: 'Leer reportes exógenos',
+      path: '/api/store/exogenous/reports',
+      method: 'GET',
+    },
+    {
+      name: 'exogenous:write',
+      description: 'Generar y enviar reportes exógenos',
+      path: '/api/store/exogenous/reports/generate',
+      method: 'POST',
+    },
+
+    // ──── Habeas Data ────
+    {
+      name: 'habeas-data:read-consents',
+      description: 'Leer consentimientos y estadísticas de habeas data',
+      path: '/api/store/habeas-data/stats',
+      method: 'GET',
+    },
+    {
+      name: 'habeas-data:update-consents',
+      description: 'Actualizar consentimientos de habeas data',
+      path: '/api/store/habeas-data/users/:id/consents',
+      method: 'PATCH',
+    },
+    {
+      name: 'habeas-data:export-data',
+      description: 'Exportar datos de un usuario (habeas data)',
+      path: '/api/store/habeas-data/users/:id/data-export',
+      method: 'POST',
+    },
+    {
+      name: 'habeas-data:anonymize',
+      description: 'Anonimizar datos de un usuario (habeas data)',
+      path: '/api/store/habeas-data/users/:id/anonymize',
+      method: 'POST',
+    },
+
+    // ──── Paystubs (Nómina) ────
+    {
+      name: 'payroll:read',
+      description: 'Leer comprobantes de nómina',
+      path: '/api/store/payroll/items/:id/payslip',
+      method: 'GET',
+    },
+    {
+      name: 'payroll:write',
+      description: 'Generar comprobantes de nómina',
+      path: '/api/store/payroll/runs/:id/generate-payslips',
+      method: 'POST',
+    },
+
+    // ──── ICA ────
+    {
+      name: 'taxes:ica:read',
+      description: 'Leer tasas y calcular ICA',
+      path: '/api/store/taxes/ica/rates',
+      method: 'GET',
+    },
+    {
+      name: 'taxes:ica:report',
+      description: 'Generar reportes de ICA',
+      path: '/api/store/taxes/ica/report',
+      method: 'GET',
+    },
+
+    // ──── Retención en la Fuente ────
+    {
+      name: 'withholding:read',
+      description: 'Leer conceptos y valores de retención',
+      path: '/api/store/withholding-tax/concepts',
+      method: 'GET',
+    },
+    {
+      name: 'withholding:write',
+      description: 'Crear y actualizar conceptos de retención',
+      path: '/api/store/withholding-tax/concepts',
+      method: 'POST',
+    },
+    {
+      name: 'withholding:delete',
+      description: 'Eliminar conceptos de retención',
+      path: '/api/store/withholding-tax/concepts/:id',
+      method: 'DELETE',
+    },
+
+    // ──── Conciliación Bancaria ────
+    {
+      name: 'store:accounting:bank_reconciliation:read',
+      description: 'Leer cuentas bancarias, transacciones y conciliaciones',
+      path: '/api/store/accounting/bank-reconciliation/accounts',
+      method: 'GET',
+    },
+    {
+      name: 'store:accounting:bank_reconciliation:create',
+      description: 'Crear cuentas bancarias, importar transacciones y conciliaciones',
+      path: '/api/store/accounting/bank-reconciliation/accounts',
+      method: 'POST',
+    },
+    {
+      name: 'store:accounting:bank_reconciliation:update',
+      description: 'Actualizar cuentas bancarias, matcher y conciliaciones',
+      path: '/api/store/accounting/bank-reconciliation/reconciliations/:id/auto-match',
+      method: 'POST',
+    },
+    {
+      name: 'store:accounting:bank_reconciliation:delete',
+      description: 'Eliminar cuentas bancarias, transacciones y conciliaciones',
+      path: '/api/store/accounting/bank-reconciliation/accounts/:id',
+      method: 'DELETE',
+    },
+
+    // ──── Presupuestos ────
+    {
+      name: 'store:accounting:budgets:read',
+      description: 'Leer presupuestos y reportes de variación',
+      path: '/api/store/accounting/budgets',
+      method: 'GET',
+    },
+    {
+      name: 'store:accounting:budgets:create',
+      description: 'Crear presupuestos',
+      path: '/api/store/accounting/budgets',
+      method: 'POST',
+    },
+    {
+      name: 'store:accounting:budgets:update',
+      description: 'Actualizar, aprobar, activar y cerrar presupuestos',
+      path: '/api/store/accounting/budgets/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:accounting:budgets:delete',
+      description: 'Eliminar presupuestos',
+      path: '/api/store/accounting/budgets/:id',
+      method: 'DELETE',
+    },
+
+    // ──── Consolidación Contable ────
+    {
+      name: 'store:accounting:consolidation:read',
+      description: 'Leer sesiones, transacciones y reportes de consolidación',
+      path: '/api/store/accounting/consolidation/sessions',
+      method: 'GET',
+    },
+    {
+      name: 'store:accounting:consolidation:write',
+      description: 'Crear, iniciar y gestionar sesiones de consolidación',
+      path: '/api/store/accounting/consolidation/sessions',
+      method: 'POST',
+    },
+
+    // ──── Activos Fijos ────
+    {
+      name: 'store:accounting:fixed_assets:read',
+      description: 'Leer activos fijos, categorías y reportes',
+      path: '/api/store/accounting/fixed-assets',
+      method: 'GET',
+    },
+    {
+      name: 'store:accounting:fixed_assets:write',
+      description: 'Crear, actualizar, depreciar y retirar activos fijos',
+      path: '/api/store/accounting/fixed-assets',
+      method: 'POST',
+    },
+    {
+      name: 'store:accounting:fixed_assets:delete',
+      description: 'Eliminar activos fijos y categorías',
+      path: '/api/store/accounting/fixed-assets/:id',
+      method: 'DELETE',
     },
   ];
 
@@ -2266,7 +2504,12 @@ export async function seedPermissionsAndRoles(
         p.name.startsWith('store:') ||
         p.name.startsWith('audit.') ||
         p.name.startsWith('email.') ||
-        p.name.startsWith('domains.')) &&
+        p.name.startsWith('domains.') ||
+        p.name.startsWith('exogenous:') ||
+        p.name.startsWith('habeas-data:') ||
+        p.name.startsWith('payroll:') ||
+        p.name.startsWith('taxes:') ||
+        p.name.startsWith('withholding:')) &&
       !p.name.includes('super_admin') &&
       !p.name.startsWith('system.') &&
       !p.name.startsWith('security.') &&
@@ -2292,6 +2535,11 @@ export async function seedPermissionsAndRoles(
   const managerPermissions = allPermissions.filter(
     (p) =>
       p.name.startsWith('store:') ||
+      p.name.startsWith('exogenous:') ||
+      p.name.startsWith('habeas-data:') ||
+      p.name.startsWith('payroll:') ||
+      p.name.startsWith('taxes:') ||
+      p.name.startsWith('withholding:') ||
       p.name.includes('organization:users:read') ||
       p.name.includes('organization:users:search') ||
       p.name.includes('organization:stores:read') ||
@@ -2360,7 +2608,18 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:dispatch_notes:void') ||
       p.name.includes('store:dispatch_notes:invoice') ||
       p.name.includes('store:reviews:read') ||
-      p.name.includes('store:reviews:moderate'),
+      p.name.includes('store:reviews:moderate') ||
+      p.name === 'store:payroll:advances:read' ||
+      // Permisos de lectura para nuevos dominios
+      p.name === 'exogenous:read' ||
+      p.name === 'habeas-data:read-consents' ||
+      p.name === 'payroll:read' ||
+      p.name === 'taxes:ica:read' ||
+      p.name === 'withholding:read' ||
+      p.name === 'store:accounting:bank_reconciliation:read' ||
+      p.name === 'store:accounting:budgets:read' ||
+      p.name === 'store:accounting:consolidation:read' ||
+      p.name === 'store:accounting:fixed_assets:read',
   );
 
   for (const permission of supervisorPermissions) {
@@ -2547,6 +2806,9 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:stock-transfers:read') ||
       // Notificaciones - lectura
       p.name.includes('store:notifications:read') ||
+      // Cola virtual - leer y gestionar
+      p.name.includes('store:customer_queue:read') ||
+      p.name.includes('store:customer_queue:manage') ||
       // Dominios públicos
       p.name.includes('domains.resolve') ||
       p.name.includes('domains.check') ||

@@ -63,59 +63,45 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
     >
       <!-- Products Header -->
       <div class="px-3 lg:px-6 py-3 lg:py-4 border-b border-border product-header">
-        <div
-          class="flex flex-col gap-3"
-        >
-          <!-- Title Row (desktop only) -->
-          <div class="hidden lg:flex items-center justify-between">
-            <h2 class="text-lg font-semibold text-text-primary">
-              Productos Disponibles ({{ filteredProducts.length }})
-            </h2>
-          </div>
+        <!-- Single header row: count badge + search + filters -->
+        <div class="flex items-center gap-2 lg:gap-3 w-full">
+          <!-- Input de búsqueda -->
+          <app-inputsearch
+            class="flex-1"
+            size="sm"
+            placeholder="Buscar productos..."
+            [debounceTime]="300"
+            [(ngModel)]="searchQuery"
+            (searchChange)="onSearch($event)"
+          />
 
-          <!-- Search Row -->
-          <div
-            class="flex items-center gap-2 lg:gap-3 w-full"
+          <!-- Componente de filtros -->
+          <app-options-dropdown
+            [filters]="filterConfigs"
+            [filterValues]="filterValues"
+            [isLoading]="loading"
+            title="Filtros"
+            triggerLabel="Filtros"
+            (filterChange)="onOptionsFilterChange($event)"
+            (clearAllFilters)="onClearFilters()"
+            class="shrink-0"
+          ></app-options-dropdown>
+
+          <!-- Botón cliente -->
+          <app-button
+            variant="outline"
+            size="md"
+            customClasses="w-10 sm:w-11 !px-0 bg-surface !rounded-[10px] shrink-0"
+            (clicked)="openCustomerModal.emit()"
+            [title]="selectedCustomer ? selectedCustomer.name : 'Agregar cliente'"
           >
-            <!-- Input de búsqueda -->
-            <app-inputsearch
-              class="flex-1"
-              size="sm"
-              placeholder="Buscar productos..."
-              [debounceTime]="300"
-              [(ngModel)]="searchQuery"
-              (searchChange)="onSearch($event)"
-            />
-
-            <!-- Componente de filtros -->
-            <app-options-dropdown
-              [filters]="filterConfigs"
-              [filterValues]="filterValues"
-              [isLoading]="loading"
-              title="Filtros"
-              triggerLabel="Filtros"
-              (filterChange)="onOptionsFilterChange($event)"
-              (clearAllFilters)="onClearFilters()"
-              class="shrink-0"
-            ></app-options-dropdown>
-
-            <!-- Scale connect/disconnect button -->
-            <button
-              *ngIf="showScaleButton"
-              (click)="toggleScaleConnection()"
-              class="shrink-0 p-2 rounded-lg border border-border transition-colors"
-              [ngClass]="{
-                'bg-green-50 border-green-300 text-green-600': scaleConnectionStatus === 'connected',
-                'bg-red-50 border-red-300 text-red-500': scaleConnectionStatus === 'error',
-                'bg-surface text-text-secondary hover:border-primary': scaleConnectionStatus === 'disconnected',
-                'bg-yellow-50 border-yellow-300 text-yellow-600 cursor-wait': scaleConnectionStatus === 'connecting'
-              }"
-              [disabled]="scaleConnectionStatus === 'connecting'"
-              [title]="scaleConnectionStatus === 'connected' ? 'Báscula conectada — clic para desconectar' : 'Conectar báscula'"
-            >
-              <app-icon name="scale" [size]="18"></app-icon>
-            </button>
-          </div>
+            <app-icon
+              slot="icon"
+              [name]="selectedCustomer ? 'user-check' : 'user-plus'"
+              [size]="18"
+              [class]="selectedCustomer ? 'text-primary' : ''"
+            ></app-icon>
+          </app-button>
         </div>
       </div>
 
@@ -169,7 +155,7 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
           <div
             *ngFor="let product of filteredProducts; trackBy: trackByProductId"
             (click)="onAddToCart(product)"
-            class="group relative bg-surface border border-border rounded-2xl shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer overflow-hidden product-card"
+            class="group relative bg-surface border border-border rounded-card shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer overflow-hidden product-card"
             [class]="
               product.track_inventory !== false && product.stock === 0
                 ? 'opacity-60 cursor-not-allowed'
@@ -446,12 +432,15 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   @Input() set refreshTrigger(value: number) {
     if (value > 0) this.loadProducts();
   }
+  @Input() selectedCustomer: any = null;
 
   @Output() productSelected = new EventEmitter<any>();
   @Output() productAddedToCart = new EventEmitter<{
     product: any;
     quantity: number;
   }>();
+  @Output() bookingRequired = new EventEmitter<any>();
+  @Output() openCustomerModal = new EventEmitter<void>();
 
   private destroy$ = new Subject<void>();
   private searchSubject$ = new Subject<string>();
@@ -726,6 +715,12 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   }
 
   async onAddToCart(product: any): Promise<void> {
+    // Interceptar servicios que requieren reserva (SIEMPRE antes de validaciones de precio)
+    if (product.product_type === 'service' || product.requires_booking === true) {
+      this.bookingRequired.emit(product);
+      return;
+    }
+
     if (product.price <= 0) {
       this.dialogService
         .confirm({
@@ -749,6 +744,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
       this.selectedProductForVariant = product;
       return;
     }
+
 
     await this.addToCartNormal(product);
   }
