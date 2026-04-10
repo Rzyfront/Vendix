@@ -87,21 +87,36 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
             class="shrink-0"
           ></app-options-dropdown>
 
-          <!-- Botón cliente -->
-          <app-button
-            variant="outline"
-            size="md"
-            customClasses="w-10 sm:w-11 !px-0 bg-surface !rounded-[10px] shrink-0"
-            (clicked)="openCustomerModal.emit()"
-            [title]="selectedCustomer ? selectedCustomer.name : 'Agregar cliente'"
-          >
-            <app-icon
-              slot="icon"
-              [name]="selectedCustomer ? 'user-check' : 'user-plus'"
-              [size]="18"
-              [class]="selectedCustomer ? 'text-primary' : ''"
-            ></app-icon>
-          </app-button>
+          <!-- Botón cliente / Cola -->
+          @if (queueEnabled && queueCount > 0) {
+            <button
+              class="relative flex items-center justify-center w-10 sm:w-11 h-10 sm:h-11 rounded-[10px] bg-accent/10 hover:bg-accent/20 transition-colors border border-accent/30 shrink-0"
+              (click)="openQueueModal.emit()"
+              title="Cola de clientes ({{ queueCount }})"
+            >
+              <app-icon name="users" [size]="18" class="text-accent"></app-icon>
+              <span
+                class="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 flex items-center justify-center rounded-full bg-accent text-white text-xs font-bold px-1"
+              >
+                {{ queueCount }}
+              </span>
+            </button>
+          } @else {
+            <app-button
+              variant="outline"
+              size="md"
+              customClasses="w-10 sm:w-11 !px-0 bg-surface !rounded-[10px] shrink-0"
+              (clicked)="openCustomerModal.emit()"
+              [title]="selectedCustomer ? selectedCustomer.name : 'Agregar cliente'"
+            >
+              <app-icon
+                slot="icon"
+                [name]="selectedCustomer ? 'user-check' : 'user-plus'"
+                [size]="18"
+                [class]="selectedCustomer ? 'text-primary' : ''"
+              ></app-icon>
+            </app-button>
+          }
         </div>
       </div>
 
@@ -433,6 +448,8 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
     if (value > 0) this.loadProducts();
   }
   @Input() selectedCustomer: any = null;
+  @Input() queueEnabled = false;
+  @Input() queueCount = 0;
 
   @Output() productSelected = new EventEmitter<any>();
   @Output() productAddedToCart = new EventEmitter<{
@@ -441,6 +458,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   }>();
   @Output() bookingRequired = new EventEmitter<any>();
   @Output() openCustomerModal = new EventEmitter<void>();
+  @Output() openQueueModal = new EventEmitter<void>();
 
   private destroy$ = new Subject<void>();
   private searchSubject$ = new Subject<string>();
