@@ -30,6 +30,7 @@ export class UploadController {
         categories: ImageContext.CATEGORY,
         logos: ImageContext.LOGO,
         store_logos: ImageContext.LOGO,
+        store_favicons: ImageContext.LOGO,
         receipts: ImageContext.RECEIPT,
     };
 
@@ -113,6 +114,12 @@ export class UploadController {
                 path = this.s3PathHelper.buildStoreLogoPath(org, store);
                 break;
             }
+            case UploadEntityType.STORE_FAVICONS: {
+                if (!storeId) throw new BadRequestException('Store context required for favicon uploads');
+                const store = await this.getStoreWithSlug(storeId);
+                path = this.s3PathHelper.buildFaviconPath(org, store);
+                break;
+            }
             case UploadEntityType.AVATARS: {
                 const userId = context?.user_id;
                 if (!userId) throw new BadRequestException('User context required for avatar uploads');
@@ -129,6 +136,8 @@ export class UploadController {
             case UploadEntityType.LOGOS:
                 path = this.s3PathHelper.buildOrgEntityPath(org, entityType);
                 break;
+            default:
+                throw new BadRequestException(`Unsupported entity type: ${entityType}`);
         }
 
         if (entityId) {
@@ -140,7 +149,7 @@ export class UploadController {
 
         // Always generate thumbnails for listings-heavy entities, or if explicitly requested
         const isMain = isMainImage === 'true' ||
-            [UploadEntityType.AVATARS, UploadEntityType.BRANDS, UploadEntityType.CATEGORIES, UploadEntityType.STORE_LOGOS].includes(entityType);
+            [UploadEntityType.AVATARS, UploadEntityType.BRANDS, UploadEntityType.CATEGORIES, UploadEntityType.STORE_LOGOS, UploadEntityType.STORE_FAVICONS].includes(entityType);
 
         if (file.mimetype.startsWith('image/')) {
             const context = this.ENTITY_TO_CONTEXT[entityType] ?? ImageContext.DEFAULT;
