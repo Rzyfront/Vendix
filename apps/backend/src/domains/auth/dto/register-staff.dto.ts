@@ -28,7 +28,7 @@ export class RegisterStaffDto {
     description: 'Correo electrónico del staff',
   })
   @IsEmail()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'El email es requerido' })
   @MaxLength(255)
   email: string;
 
