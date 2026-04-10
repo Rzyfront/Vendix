@@ -78,6 +78,7 @@ export class CheckoutDto {
 
 class CheckoutBookingDto {
   @IsInt()
+  @Min(1)
   product_id: number;
 
   @IsDateString()
