@@ -124,9 +124,9 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
                 ></app-inputsearch>
                 <app-button
                   variant="outline"
-                  size="sm"
+                  size="md"
                   (clicked)="openRegisterModal()"
-                  customClasses="w-9 h-9 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
+                  customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
                   title="Nueva Caja"
                 >
                   <app-icon slot="icon" name="plus" [size]="18"></app-icon>

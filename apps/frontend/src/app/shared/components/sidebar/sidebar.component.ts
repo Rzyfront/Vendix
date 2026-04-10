@@ -21,6 +21,7 @@ export interface MenuItem {
   icon: string;
   iconSize?: number | string;
   route?: string;
+  queryParams?: Record<string, string>;
   children?: MenuItem[];
   badge?: string;
   action?: (item: MenuItem) => void;
@@ -109,6 +110,7 @@ export interface MenuItem {
             <ng-container *ngIf="!item.children">
               <a
                 [routerLink]="item.route"
+                [queryParams]="item.queryParams || null"
                 routerLinkActive="active"
                 #rla="routerLinkActive"
                 [class.active]="rla.isActive"
@@ -153,6 +155,7 @@ export interface MenuItem {
                   <ng-container *ngIf="!child.action">
                     <a
                       [routerLink]="child.route"
+                      [queryParams]="child.queryParams || null"
                       routerLinkActive="active"
                       #rlaChild="routerLinkActive"
                       [class.active]="rlaChild.isActive"

@@ -115,8 +115,8 @@ import { StoreUser, StoreUserState } from './interfaces/store-user.interface';
               />
               <app-button
                 variant="outline"
-                size="sm"
-                customClasses="w-9 h-9 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
+                size="md"
+                customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
                 (clicked)="openCreateModal()"
                 title="Nuevo Usuario"
               >

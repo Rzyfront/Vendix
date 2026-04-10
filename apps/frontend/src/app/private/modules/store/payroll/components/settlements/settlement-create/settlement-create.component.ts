@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, inject } from '@angular/core';
+import { Component, input, output, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Subject } from 'rxjs';
@@ -25,7 +25,7 @@ import { SelectorComponent, SelectorOption } from '../../../../../../../shared/c
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Nueva Liquidacion"
@@ -100,9 +100,9 @@ import { SelectorComponent, SelectorOption } from '../../../../../../../shared/c
   `,
 })
 export class SettlementCreateComponent implements OnInit, OnDestroy {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() created = new EventEmitter<void>();
+  isOpen = input(false);
+  isOpenChange = output<boolean>();
+  created = output<void>();
 
   private fb = inject(FormBuilder);
   private payrollService = inject(PayrollService);
@@ -114,11 +114,12 @@ export class SettlementCreateComponent implements OnInit, OnDestroy {
 
   reasonOptions: SelectorOption[] = [
     { label: 'Renuncia Voluntaria', value: 'voluntary_resignation' },
-    { label: 'Despido con Justa Causa', value: 'just_cause_dismissal' },
-    { label: 'Despido sin Justa Causa', value: 'unjust_cause_dismissal' },
+    { label: 'Despido con Justa Causa', value: 'just_cause' },
+    { label: 'Despido sin Justa Causa', value: 'without_just_cause' },
     { label: 'Mutuo Acuerdo', value: 'mutual_agreement' },
-    { label: 'Vencimiento Contrato', value: 'contract_expiration' },
+    { label: 'Vencimiento Contrato', value: 'contract_expiry' },
     { label: 'Jubilacion', value: 'retirement' },
+    { label: 'Muerte del Trabajador', value: 'death' },
   ];
 
   form: FormGroup = this.fb.group({

@@ -164,6 +164,14 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PAYROLL_BULK_003: 'Documento duplicado en el archivo.',
   PAYROLL_BULK_004: 'El email es obligatorio cuando se marca como usuario.',
   PAYROLL_BULK_005: 'El usuario ya esta vinculado a otro empleado.',
+  PAYROLL_BULK_006: 'Ya existe un usuario con ese nombre de usuario en la organizacion.',
+  PAYROLL_BULK_007: 'Ya existe un usuario con ese correo electronico en la organizacion.',
+  PAYROLL_BULK_008: 'Error inesperado al procesar el empleado. Verifique los datos e intente de nuevo.',
+  PAYROLL_VALIDATE_002: 'Los usuarios con rol Cliente no pueden ser vinculados como empleados.',
+
+  // Employee Advances - Installments
+  ADV_INSTALLMENT_001: 'Cuota no encontrada',
+  ADV_INSTALLMENT_002: 'Esta cuota ya fue pagada',
 
   // AI Engine
   AI_CONFIG_001: 'Configuracion de IA no encontrada.',

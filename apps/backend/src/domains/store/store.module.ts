@@ -25,6 +25,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { InvoicingModule } from './invoicing/invoicing.module';
 import { AccountingModule } from './accounting/accounting.module';
 import { PayrollModule } from './payroll/payroll.module';
+import { ReportsModule } from './reports/reports.module';
 import { StoreRolesModule } from './roles/store-roles.module';
 import { PromotionsModule } from './promotions/promotions.module';
 import { CouponsModule } from './coupons/coupons.module';
@@ -44,6 +45,8 @@ import { WalletModule } from './wallet/wallet.module';
 import { AccountsPayableModule } from './accounts-payable/accounts-payable.module';
 import { CommissionsModule } from './commissions/commissions.module';
 import { PaymentLinksModule } from './payment-links/payment-links.module';
+import { CustomerQueueModule } from './customer-queue/customer-queue.module';
+import { InvoiceDataRequestsModule } from './invoicing/invoice-data-requests/invoice-data-requests.module';
 
 @Module({
   imports: [
@@ -71,6 +74,7 @@ import { PaymentLinksModule } from './payment-links/payment-links.module';
     InvoicingModule,
     AccountingModule,
     PayrollModule,
+    ReportsModule,
     StoreRolesModule,
     PromotionsModule,
     CouponsModule,
@@ -90,6 +94,8 @@ import { PaymentLinksModule } from './payment-links/payment-links.module';
     AccountsPayableModule,
     CommissionsModule,
     PaymentLinksModule,
+    CustomerQueueModule,
+    InvoiceDataRequestsModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],

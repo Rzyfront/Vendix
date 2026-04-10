@@ -30,8 +30,8 @@
             />
             <app-button
               variant="outline"
-              size="sm"
-              customClasses="w-9 h-9 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
+              size="md"
+              customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
               (clicked)="startAddProvider()"
               title="Agregar Proveedor"
             >
@@ -59,33 +59,45 @@
         />
       </div>
 
-      <!-- Add Provider Form (inline collapse) -->
-      @if (showAddForm()) {
-        <div class="px-4 pb-4 md:px-6 md:pb-6 border-t border-border pt-4">
-          <div class="flex items-center gap-2 mb-3">
-            <div class="w-8 h-8 rounded-lg bg-[var(--color-primary)] bg-opacity-10 flex items-center justify-center">
-              <app-icon name="user-plus" [size]="16" class="text-[var(--color-primary)]"/>
-            </div>
-            <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">Agregar Nuevo Proveedor</h3>
-          </div>
-          <app-selector
-            label="Empleado"
-            placeholder="Seleccionar empleado..."
-            [options]="employeeOptions()"
-            (valueChange)="selectedEmployeeId.set($event)"
-            size="sm"
-          />
-          <div class="flex justify-end gap-2 mt-3">
-            <app-button variant="ghost" size="sm" (clicked)="showAddForm.set(false)">Cancelar</app-button>
-            <app-button variant="primary" size="sm" [disabled]="!selectedEmployeeId() || addingProvider()" [loading]="addingProvider()" (clicked)="addProvider()">
-              <app-icon name="plus" [size]="14" slot="icon"/>
-              Agregar
-            </app-button>
-          </div>
-        </div>
-      }
     </app-card>
   </div>
+
+  <!-- ═══════════════════════════════════════ -->
+  <!-- Add Provider MODAL                      -->
+  <!-- ═══════════════════════════════════════ -->
+  <app-modal
+    [isOpen]="showAddForm()"
+    (closed)="cancelAddProvider()"
+    title="Agregar Proveedor"
+    size="sm"
+  >
+    <div class="space-y-4">
+      <app-selector
+        label="Empleado"
+        placeholder="Seleccionar empleado..."
+        [options]="employeeOptions()"
+        (valueChange)="selectedEmployeeId.set($event)"
+        size="sm"
+      />
+    </div>
+
+    <div slot="footer">
+      <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+        <app-button variant="outline" (clicked)="cancelAddProvider()">
+          Cancelar
+        </app-button>
+        <app-button
+          variant="primary"
+          [disabled]="!selectedEmployeeId() || addingProvider()"
+          [loading]="addingProvider()"
+          (clicked)="addProvider()"
+        >
+          <app-icon name="plus" [size]="14" slot="icon"/>
+          Agregar
+        </app-button>
+      </div>
+    </div>
+  </app-modal>
 
   <!-- ═══════════════════════════════════════ -->
   <!-- Provider Detail MODAL                   -->

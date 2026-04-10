@@ -1,0 +1,108 @@
+:host {
+  display: block;
+}
+
+.table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  background: var(--color-surface);
+}
+
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+
+  th {
+    padding: 0.75rem 1rem;
+    font-weight: var(--fw-semibold);
+    font-size: var(--fs-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-secondary);
+    background: var(--color-surface-hover);
+    border-bottom: 1px solid var(--color-border);
+    white-space: nowrap;
+  }
+}
+
+tbody {
+  tr {
+    transition: background 0.15s ease;
+
+    &:hover {
+      background: color-mix(in srgb, var(--color-primary) 4%, transparent);
+    }
+
+    &:not(:last-child) td {
+      border-bottom: 1px solid var(--color-border-light, var(--color-border));
+    }
+  }
+
+  td {
+    padding: 0.625rem 1rem;
+    color: var(--color-text-primary);
+    white-space: nowrap;
+  }
+}
+
+tfoot {
+  tr {
+    background: var(--color-surface-hover);
+    border-top: 2px solid var(--color-border);
+  }
+
+  .footer-cell {
+    padding: 0.75rem 1rem;
+    color: var(--color-text-primary);
+    white-space: nowrap;
+  }
+}
+
+// Skeleton loading
+.skeleton-row td {
+  padding: 0.75rem 1rem;
+}
+
+.skeleton {
+  height: 14px;
+  background: linear-gradient(90deg, var(--color-surface-hover) 25%, var(--color-border) 50%, var(--color-surface-hover) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 0.25rem;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+// Empty state
+.empty-cell {
+  padding: 3rem 1rem !important;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--color-text-tertiary);
+
+  p {
+    font-weight: var(--fw-medium);
+    color: var(--color-text-secondary);
+    margin: 0;
+  }
+
+  span {
+    font-size: var(--fs-xs);
+  }
+}

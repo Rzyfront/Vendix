@@ -334,6 +334,14 @@ export const storeAdminRoutes: Routes = [
             (m) => m.analyticsRoutes,
           ),
       },
+      // Reports Routes
+      {
+        path: 'reports',
+        loadChildren: () =>
+          import('../../private/modules/store/reports/reports.routes').then(
+            (m) => m.reportsRoutes,
+          ),
+      },
       // E-commerce Routes
       {
         path: 'ecommerce',

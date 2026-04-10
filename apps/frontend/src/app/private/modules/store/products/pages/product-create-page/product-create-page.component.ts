@@ -451,11 +451,13 @@ export class ProductCreatePageComponent implements OnInit {
       {
         id: 'cancel',
         label: 'Cancelar',
+        icon: 'x',
         variant: 'outline',
       },
       {
         id: 'save',
-        label: this.isEditMode() ? 'Guardar Cambios' : 'Crear Producto',
+        label: this.isEditMode() ? 'Guardar' : 'Crear',
+        icon: this.isEditMode() ? 'save' : 'plus',
         variant: 'primary',
         loading: this.isSubmitting(),
         disabled: this.isSubmitting() || this.productForm.invalid,

@@ -99,14 +99,14 @@ export class CardComponent {
         'md:bg-[var(--color-surface)]',
         'md:border',
         'md:border-[var(--color-border)]',
-        'md:rounded-xl',
+        'md:rounded-[var(--radius-lg)]',
       );
     } else {
       classes.push(
         'bg-[var(--color-surface)]',
         'border',
         'border-[var(--color-border)]',
-        'rounded-xl',
+        'rounded-[var(--radius-lg)]',
       );
     }
 

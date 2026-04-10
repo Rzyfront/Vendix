@@ -287,6 +287,7 @@ export interface EmployeeAdvance {
   notes: string | null;
   employee?: any;
   advance_payments?: AdvancePayment[];
+  advance_installments?: AdvanceInstallment[];
   approved_by_user?: any;
   approved_at: string | null;
   completed_at: string | null;
@@ -301,6 +302,18 @@ export interface AdvancePayment {
   payment_date: string;
   payment_type: 'payroll_deduction' | 'manual';
   notes: string | null;
+}
+
+export interface AdvanceInstallment {
+  id: number;
+  advance_id: number;
+  installment_number: number;
+  amount: number;
+  due_date: string;
+  status: 'pending' | 'paid' | 'overdue' | 'cancelled';
+  paid_at: string | null;
+  payment_id: number | null;
+  payroll_item_id: number | null;
 }
 
 export interface AdvanceStats {
@@ -329,6 +342,7 @@ export interface AdvanceManualPaymentDto {
   amount: number;
   payment_date: string;
   notes?: string;
+  installment_id?: number;
 }
 
 export interface EmployeeAdvanceSummary {

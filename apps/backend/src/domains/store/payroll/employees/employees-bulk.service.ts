@@ -1,6 +1,5 @@
 import {
   Injectable,
-  BadRequestException,
 } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import * as XLSX from 'xlsx';
@@ -416,7 +415,8 @@ export class EmployeesBulkService {
       const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
       if (jsonData.length < 2) {
-        throw new BadRequestException(
+        throw new VendixHttpException(
+          ErrorCodes.PAYROLL_BULK_002,
           'El archivo debe contener al menos una fila de encabezados y una fila de datos',
         );
       }
@@ -477,8 +477,9 @@ export class EmployeesBulkService {
 
       return employees;
     } catch (error) {
-      if (error instanceof BadRequestException) throw error;
-      throw new BadRequestException(
+      if (error instanceof VendixHttpException) throw error;
+      throw new VendixHttpException(
+        ErrorCodes.PAYROLL_BULK_002,
         'Error al procesar el archivo: ' + error.message,
       );
     }
@@ -638,7 +639,31 @@ export class EmployeesBulkService {
           } else {
             // Create new user
             const hashedPassword = await bcrypt.hash('Vendix2024!', 10);
-            const username = `${empData.first_name.toLowerCase().replace(/\s+/g, '')}.${empData.last_name.toLowerCase().replace(/\s+/g, '')}`;
+            let username = `${empData.first_name.toLowerCase().replace(/\s+/g, '')}.${empData.last_name.toLowerCase().replace(/\s+/g, '')}`;
+
+            // Check if username already exists in the organization
+            const existingUsername = await this.prisma.users.findFirst({
+              where: {
+                username,
+                organization_id: organizationId,
+              },
+              select: { id: true },
+            });
+
+            if (existingUsername) {
+              let suffix = 2;
+              let candidateUsername = `${username}${suffix}`;
+              while (
+                await this.prisma.users.findFirst({
+                  where: { username: candidateUsername, organization_id: organizationId },
+                  select: { id: true },
+                })
+              ) {
+                suffix++;
+                candidateUsername = `${username}${suffix}`;
+              }
+              username = candidateUsername;
+            }
 
             const newUser = await this.prisma.users.create({
               data: {
@@ -728,10 +753,27 @@ export class EmployeesBulkService {
         });
       } catch (error) {
         failed++;
+
+        let safeMessage = 'Error al procesar el empleado. Verifique los datos e intente de nuevo.';
+
+        if (error?.code === 'P2002') {
+          const target = error.meta?.target as string[] | undefined;
+          const field = target?.[0] ?? '';
+          if (field.includes('username')) {
+            safeMessage = 'Ya existe un usuario con ese nombre de usuario en la organizacion.';
+          } else if (field.includes('email')) {
+            safeMessage = 'Ya existe un usuario con ese correo electronico en la organizacion.';
+          } else {
+            safeMessage = `Ya existe un registro con el campo duplicado: ${field}`;
+          }
+        } else if (error instanceof VendixHttpException) {
+          safeMessage = error.message;
+        }
+
         results.push({
           employee: null,
           status: 'error',
-          message: error.message,
+          message: safeMessage,
           error: error.constructor.name,
         });
       }

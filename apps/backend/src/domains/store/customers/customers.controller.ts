@@ -12,6 +12,7 @@ import {
     Query,
 } from '@nestjs/common';
 import { CustomersService } from './customers.service';
+import { CustomerLookupService } from './customer-lookup.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { RolesGuard } from '../../auth/guards/roles.guard';
@@ -25,6 +26,7 @@ import { ResponseService } from '@common/responses/response.service';
 export class CustomersController {
     constructor(
         private readonly customersService: CustomersService,
+        private readonly customerLookupService: CustomerLookupService,
         private readonly responseService: ResponseService,
     ) { }
 
@@ -47,6 +49,24 @@ export class CustomersController {
         const pageNum = page ? parseInt(page, 10) : 1;
         const limitNum = limit ? parseInt(limit, 10) : 20;
         return this.customersService.findAll(req.user.store_id, { search, page: pageNum, limit: limitNum });
+    }
+
+    @Get('lookup')
+    @Permissions('store:customers:read')
+    async lookupByDocument(
+        @Req() req: AuthenticatedRequest,
+        @Query('document_number') documentNumber: string,
+        @Query('document_type') documentType?: string,
+    ) {
+        if (!req.user.store_id) throw new Error('Store context required');
+        if (!req.user.organization_id) throw new Error('Organization context required');
+        const result = await this.customerLookupService.lookupByDocument(
+            req.user.store_id,
+            req.user.organization_id,
+            documentNumber,
+            documentType,
+        );
+        return this.responseService.success(result);
     }
 
     @Get(':id')

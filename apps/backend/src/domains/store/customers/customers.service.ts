@@ -256,6 +256,58 @@ export class CustomersService {
     });
   }
 
+  async findByDocumentInOrganization(
+    organizationId: number,
+    documentNumber: string,
+    documentType?: string,
+  ): Promise<any | null> {
+    const where: any = {
+      organization_id: organizationId,
+      document_number: { equals: documentNumber, mode: 'insensitive' },
+      user_roles: {
+        some: {
+          roles: {
+            name: 'customer',
+          },
+        },
+      },
+    };
+
+    if (documentType) {
+      where.document_type = documentType;
+    }
+
+    return this.prisma.users.findFirst({
+      where,
+      include: {
+        user_roles: true,
+        store_users: true,
+        addresses: {
+          where: { type: 'shipping' },
+          orderBy: { is_primary: 'desc' },
+        },
+      },
+    });
+  }
+
+  async linkCustomerToStore(userId: number, storeId: number): Promise<void> {
+    const existing = await this.prisma.store_users.findFirst({
+      where: {
+        user_id: userId,
+        store_id: storeId,
+      },
+    });
+
+    if (!existing) {
+      await this.prisma.store_users.create({
+        data: {
+          user_id: userId,
+          store_id: storeId,
+        },
+      });
+    }
+  }
+
   async getStats(storeId: number) {
     try {
       // Get current month start date

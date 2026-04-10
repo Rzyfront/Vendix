@@ -531,9 +531,9 @@
 
   // Variant: muted
   &.action-muted {
-    color: var(--color-muted, #94a3b8);
-    background: linear-gradient(135deg, color-mix(in srgb, var(--color-muted, #94a3b8) 8%, var(--color-surface)), color-mix(in srgb, var(--color-muted, #94a3b8) 14%, var(--color-surface)));
-    &:hover:not(:disabled) { background: linear-gradient(135deg, color-mix(in srgb, var(--color-muted, #94a3b8) 14%, var(--color-surface)), color-mix(in srgb, var(--color-muted, #94a3b8) 22%, var(--color-surface))); }
+    color: var(--color-neutral, #94a3b8);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--color-neutral, #94a3b8) 8%, var(--color-surface)), color-mix(in srgb, var(--color-neutral, #94a3b8) 14%, var(--color-surface)));
+    &:hover:not(:disabled) { background: linear-gradient(135deg, color-mix(in srgb, var(--color-neutral, #94a3b8) 14%, var(--color-surface)), color-mix(in srgb, var(--color-neutral, #94a3b8) 22%, var(--color-surface))); }
   }
 
   &.action-disabled {

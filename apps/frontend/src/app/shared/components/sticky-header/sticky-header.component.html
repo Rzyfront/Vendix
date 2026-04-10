@@ -51,13 +51,14 @@
             </div>
 
             <!-- Actions Section - Always visible, compact on mobile -->
-            <div class="flex items-center gap-1 md:gap-2">
+            <div class="flex items-center gap-1.5 md:gap-2 pr-1 md:pr-0">
                 <ng-container *ngFor="let action of actions()">
                     <app-button *ngIf="action.visible !== false" [variant]="action.variant" [loading]="!!action.loading"
                         [disabled]="!!action.disabled" (clicked)="onActionClick(action.id)" size="xsm"
-                        customClasses="!rounded-lg font-bold shadow-sm shadow-primary-200 active:scale-95 transition-all md:!h-9 md:!px-3">
-                        <app-icon *ngIf="action.icon" [name]="action.icon" size="12" slot="icon"
-                            class="md:!w-[14px] md:!h-[14px] mr-0.5 md:mr-1.5"></app-icon>
+                        [iconOnlyMobile]="!!action.icon"
+                        customClasses="!rounded-[10px] !h-9 !w-9 !px-0 font-bold shadow-sm shadow-primary-200 active:scale-95 transition-all md:!rounded-lg md:!h-9 md:!px-3 md:!w-auto">
+                        <app-icon *ngIf="action.icon" [name]="action.icon" size="14" slot="icon"
+                            class="md:!w-[16px] md:!h-[16px]"></app-icon>
                         <span class="text-[10px] md:text-sm">{{ action.label }}</span>
                     </app-button>
                 </ng-container>

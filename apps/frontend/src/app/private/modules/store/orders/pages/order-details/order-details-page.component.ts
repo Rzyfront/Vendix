@@ -1129,13 +1129,13 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     }
   }
 
-  printOrder(): void {
+  async printOrder(): Promise<void> {
     const orderData = this.order();
     if (!orderData) return;
 
     try {
       const ticketData = this.buildTicketData(orderData);
-      const html = this.ticketService.generateTicketHTML(ticketData);
+      const html = await this.ticketService.generateTicketHTML(ticketData);
 
       // Use iframe-based printing to avoid popup blockers
       const iframe = document.createElement('iframe');

@@ -24,6 +24,8 @@ export interface PosCustomer {
   addresses?: PosCustomerAddress[];
   created_at: Date;
   updated_at: Date;
+  queueEntryId?: number;
+  fromQueue?: boolean;
 }
 
 export interface CreatePosCustomerRequest {

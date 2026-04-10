@@ -5,7 +5,7 @@ import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
 import { PayrollService } from '../../../services/payroll.service';
-import { EmployeeAdvance, AdvanceApproveDto, AdvanceManualPaymentDto } from '../../../interfaces/payroll.interface';
+import { EmployeeAdvance, AdvanceApproveDto, AdvanceManualPaymentDto, AdvanceInstallment } from '../../../interfaces/payroll.interface';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
@@ -96,6 +96,102 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
           <div>
             <span class="text-xs text-text-secondary block">Frecuencia</span>
             <span class="text-sm font-medium">{{ getFrequencyLabel(advance.frequency) }}</span>
+          </div>
+        </div>
+
+        <!-- Repayment Progress -->
+        <div *ngIf="advance.status !== 'pending' && advance.status !== 'rejected'" class="mb-4">
+          <div class="flex justify-between text-xs text-text-secondary mb-1">
+            <span>Progreso de Pago</span>
+            <span>{{ getProgressPercent() }}%</span>
+          </div>
+          <div class="w-full bg-gray-200 rounded-full h-2.5">
+            <div class="bg-green-500 h-2.5 rounded-full transition-all duration-300"
+              [style.width.%]="getProgressPercent()">
+            </div>
+          </div>
+          <div class="flex justify-between text-[10px] text-text-secondary mt-0.5">
+            <span>{{ getPaidInstallments() }} de {{ advance.installments }} cuotas</span>
+            <span>{{ formatNumber(advance.amount_paid) }} / {{ formatNumber(advance.amount_approved) }}</span>
+          </div>
+        </div>
+
+        <!-- Installment Schedule -->
+        <div *ngIf="advance.advance_installments && advance.advance_installments.length > 0" class="mb-4">
+          <h3 class="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Cronograma de Cuotas</h3>
+
+          <!-- Desktop Table -->
+          <div class="hidden md:block overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-border bg-gray-50">
+                  <th class="text-left py-2 px-3 font-medium text-text-secondary">#</th>
+                  <th class="text-left py-2 px-3 font-medium text-text-secondary">Vencimiento</th>
+                  <th class="text-right py-2 px-3 font-medium text-text-secondary">Monto</th>
+                  <th class="text-center py-2 px-3 font-medium text-text-secondary">Estado</th>
+                  <th class="text-left py-2 px-3 font-medium text-text-secondary">Fecha Pago</th>
+                  <th class="text-center py-2 px-3 font-medium text-text-secondary"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr *ngFor="let inst of advance.advance_installments"
+                  class="border-b border-border"
+                  [class.bg-green-50]="inst.status === 'paid'"
+                  [class.bg-red-50]="inst.status === 'overdue'">
+                  <td class="py-2 px-3 text-text-secondary">{{ inst.installment_number }}</td>
+                  <td class="py-2 px-3">{{ inst.due_date | date:'dd/MM/yyyy' }}</td>
+                  <td class="py-2 px-3 text-right font-medium">{{ formatNumber(inst.amount) }}</td>
+                  <td class="py-2 px-3 text-center">
+                    <span [class]="getInstallmentBadge(inst.status)">
+                      {{ getInstallmentLabel(inst.status) }}
+                    </span>
+                  </td>
+                  <td class="py-2 px-3 text-text-secondary">{{ inst.paid_at ? (inst.paid_at | date:'dd/MM/yyyy') : '-' }}</td>
+                  <td class="py-2 px-3 text-center">
+                    <button *ngIf="inst.status === 'pending' || inst.status === 'overdue'"
+                      type="button"
+                      (click)="onMarkInstallmentPaid(inst)"
+                      [disabled]="paymentLoading"
+                      class="text-xs text-primary hover:text-primary-dark font-medium px-2 py-1 rounded hover:bg-primary/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                      Pagar
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Mobile Cards -->
+          <div class="md:hidden space-y-2">
+            <div *ngFor="let inst of advance.advance_installments"
+              class="p-3 rounded-lg border"
+              [class.bg-green-50]="inst.status === 'paid'"
+              [class.border-green-200]="inst.status === 'paid'"
+              [class.bg-red-50]="inst.status === 'overdue'"
+              [class.border-red-200]="inst.status === 'overdue'"
+              [class.bg-surface]="inst.status === 'pending' || inst.status === 'cancelled'"
+              [class.border-border]="inst.status === 'pending' || inst.status === 'cancelled'">
+              <div class="flex justify-between items-center mb-1">
+                <span class="text-sm font-medium">Cuota #{{ inst.installment_number }}</span>
+                <span [class]="getInstallmentBadge(inst.status)">
+                  {{ getInstallmentLabel(inst.status) }}
+                </span>
+              </div>
+              <div class="flex justify-between items-center text-xs">
+                <span class="text-text-secondary">Vence: {{ inst.due_date | date:'dd/MM/yyyy' }}</span>
+                <span class="font-medium text-text-primary">{{ formatNumber(inst.amount) }}</span>
+              </div>
+              <div *ngIf="inst.paid_at" class="text-[10px] text-text-secondary mt-1">
+                Pagada: {{ inst.paid_at | date:'dd/MM/yyyy' }}
+              </div>
+              <button *ngIf="inst.status === 'pending' || inst.status === 'overdue'"
+                type="button"
+                (click)="onMarkInstallmentPaid(inst)"
+                [disabled]="paymentLoading"
+                class="mt-2 w-full text-xs text-primary font-medium py-1.5 rounded border border-primary/20 hover:bg-primary/10 transition-colors text-center disabled:opacity-50 disabled:cursor-not-allowed">
+                Pagar Cuota
+              </button>
+            </div>
           </div>
         </div>
 
@@ -421,5 +517,62 @@ export class AdvanceDetailComponent implements OnDestroy {
       weekly: 'Semanal',
     };
     return labels[frequency] || frequency || '-';
+  }
+
+  // ─── Installment Methods ───────────────────────
+
+  getProgressPercent(): number {
+    if (!this.advance || !Number(this.advance.amount_approved)) return 0;
+    return Math.min(100, Math.round((Number(this.advance.amount_paid) / Number(this.advance.amount_approved)) * 100));
+  }
+
+  getPaidInstallments(): number {
+    return this.advance?.advance_installments?.filter(i => i.status === 'paid').length || 0;
+  }
+
+  getInstallmentLabel(status: string): string {
+    const labels: Record<string, string> = {
+      pending: 'Pendiente',
+      paid: 'Pagada',
+      overdue: 'Vencida',
+      cancelled: 'Cancelada',
+    };
+    return labels[status] || status;
+  }
+
+  getInstallmentBadge(status: string): string {
+    const base = 'px-2 py-0.5 rounded-full text-xs font-medium';
+    const colors: Record<string, string> = {
+      pending: 'bg-gray-100 text-gray-700',
+      paid: 'bg-green-100 text-green-800',
+      overdue: 'bg-red-100 text-red-800',
+      cancelled: 'bg-gray-100 text-gray-500',
+    };
+    return `${base} ${colors[status] || 'bg-gray-100 text-gray-700'}`;
+  }
+
+  onMarkInstallmentPaid(installment: AdvanceInstallment): void {
+    if (!this.advance) return;
+    this.paymentLoading = true;
+
+    const dto: AdvanceManualPaymentDto = {
+      amount: installment.amount,
+      payment_date: new Date().toISOString().split('T')[0],
+    };
+
+    this.payrollService.markInstallmentPaid(this.advance.id, installment.id, dto)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (res) => {
+          this.advance = res.data;
+          this.paymentLoading = false;
+          this.toastService.show({ variant: 'success', description: `Cuota #${installment.installment_number} pagada` });
+          this.updated.emit();
+        },
+        error: () => {
+          this.paymentLoading = false;
+          this.toastService.show({ variant: 'error', description: 'Error al pagar cuota' });
+        },
+      });
   }
 }

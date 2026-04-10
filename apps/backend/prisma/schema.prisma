@@ -553,6 +553,12 @@ model stores {
   // Payment Links
   payment_links payment_links[]
 
+  // Customer Queue
+  customer_queue customer_queue[]
+
+  // Invoice Data Requests
+  invoice_data_requests invoice_data_requests[]
+
   @@unique([organization_id, slug])
   @@index([onboarding])
 }
@@ -775,7 +781,10 @@ model orders {
   bookings                                        bookings[]
 
   // Payment Links
-  payment_links                                   payment_links[]
+  payment_links payment_links[]
+
+  // Invoice Data Requests
+  invoice_data_requests invoice_data_requests[]
 
   @@unique([store_id, order_number])
   @@index([store_id, order_number])
@@ -1998,6 +2007,11 @@ enum notification_type_enum {
   new_review
   review_moderated
   payroll_rules_update
+  customer_queue_new
+  customer_queue_selected
+  customer_queue_consumed
+  customer_queue_cancelled
+  customer_queue_released
 }
 
 model notifications {
@@ -2651,6 +2665,13 @@ enum employee_advance_status_enum {
   repaying
   paid
   rejected
+  cancelled
+}
+
+enum advance_installment_status_enum {
+  pending
+  paid
+  overdue
   cancelled
 }
 
@@ -3459,8 +3480,8 @@ model employee_stores {
   assigned_at DateTime                   @default(now()) @db.Timestamp(6)
   created_at  DateTime?                  @default(now()) @db.Timestamp(6)
 
-  employee    employees @relation(fields: [employee_id], references: [id], onDelete: Cascade)
-  store       stores    @relation(fields: [store_id], references: [id], onDelete: Restrict)
+  employee employees @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+  store    stores    @relation(fields: [store_id], references: [id], onDelete: Restrict)
 
   @@unique([employee_id, store_id])
   @@index([store_id])
@@ -3523,9 +3544,10 @@ model payroll_items {
   paystub_url          String?   @db.Text
   created_at           DateTime? @default(now()) @db.Timestamp(6)
 
-  payroll_run      payroll_runs                @relation(fields: [payroll_run_id], references: [id], onDelete: Cascade)
-  employee         employees                   @relation(fields: [employee_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  advance_payments employee_advance_payments[]
+  payroll_run          payroll_runs                    @relation(fields: [payroll_run_id], references: [id], onDelete: Cascade)
+  employee             employees                       @relation(fields: [employee_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  advance_payments     employee_advance_payments[]
+  advance_installments employee_advance_installments[]
 
   @@index([payroll_run_id])
   @@index([employee_id])
@@ -4431,10 +4453,11 @@ model employee_advances {
   created_at          DateTime?                    @default(now()) @db.Timestamp(6)
   updated_at          DateTime?                    @default(now()) @db.Timestamp(6)
 
-  organization     organizations               @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  employee         employees                   @relation(fields: [employee_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  approved_by_user users?                      @relation("advance_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  advance_payments employee_advance_payments[]
+  organization         organizations                   @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  employee             employees                       @relation(fields: [employee_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  approved_by_user     users?                          @relation("advance_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  advance_payments     employee_advance_payments[]
+  advance_installments employee_advance_installments[]
 
   @@unique([organization_id, advance_number])
   @@index([organization_id, status])
@@ -4451,11 +4474,34 @@ model employee_advance_payments {
   notes           String?   @db.VarChar(255)
   created_at      DateTime? @default(now()) @db.Timestamp(6)
 
-  advance      employee_advances @relation(fields: [advance_id], references: [id], onDelete: Cascade)
-  payroll_item payroll_items?    @relation(fields: [payroll_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  advance              employee_advances               @relation(fields: [advance_id], references: [id], onDelete: Cascade)
+  payroll_item         payroll_items?                  @relation(fields: [payroll_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  advance_installments employee_advance_installments[]
 
   @@index([advance_id])
   @@index([payroll_item_id])
+}
+
+model employee_advance_installments {
+  id                 Int                             @id @default(autoincrement())
+  advance_id         Int
+  installment_number Int
+  amount             Decimal                         @db.Decimal(12, 2)
+  due_date           DateTime                        @db.Timestamp(6)
+  status             advance_installment_status_enum @default(pending)
+  paid_at            DateTime?                       @db.Timestamp(6)
+  payment_id         Int?
+  payroll_item_id    Int?
+  created_at         DateTime?                       @default(now()) @db.Timestamp(6)
+  updated_at         DateTime?                       @default(now()) @db.Timestamp(6)
+
+  advance      employee_advances          @relation(fields: [advance_id], references: [id], onDelete: Cascade)
+  payment      employee_advance_payments? @relation(fields: [payment_id], references: [id], onDelete: SetNull)
+  payroll_item payroll_items?             @relation(fields: [payroll_item_id], references: [id], onDelete: SetNull)
+
+  @@unique([advance_id, installment_number])
+  @@index([advance_id])
+  @@index([due_date, status])
 }
 
 // ══════════════════════════════════════════════════════════
@@ -4962,6 +5008,23 @@ enum wallet_transaction_state_enum {
   reversed
 }
 
+enum customer_queue_status_enum {
+  waiting
+  selected
+  consumed
+  expired
+  cancelled
+}
+
+enum invoice_data_request_status_enum {
+  pending
+  submitted
+  processing
+  completed
+  expired
+  failed
+}
+
 model wallets {
   id              Int      @id @default(autoincrement())
   store_id        Int
@@ -5086,7 +5149,7 @@ model commission_rules {
   created_at      DateTime  @default(now()) @db.Timestamp(6)
   updated_at      DateTime  @default(now()) @db.Timestamp(6)
 
-  stores                  stores                   @relation("store_commission_rules", fields: [store_id], references: [id])
+  stores                  stores                    @relation("store_commission_rules", fields: [store_id], references: [id])
   commission_calculations commission_calculations[]
 
   @@index([store_id, is_active])
@@ -5111,33 +5174,90 @@ model commission_calculations {
 }
 
 model payment_links {
-  id                Int                      @id @default(autoincrement())
-  store_id          Int
-  wompi_link_id     String                   @unique @db.VarChar(20)
-  name              String                   @db.VarChar(255)
-  description       String                   @db.Text
-  amount_in_cents   Int?
-  currency          String                   @default("COP") @db.VarChar(10)
-  single_use        Boolean                  @default(true)
-  collect_shipping  Boolean                  @default(false)
-  checkout_url      String                   @db.Text
-  status            payment_link_status_enum @default(active)
-  expires_at        DateTime?                @db.Timestamp(6)
-  redirect_url      String?                  @db.Text
-  image_url         String?                  @db.Text
-  sku               String?                  @db.VarChar(36)
-  order_id          Int?
-  wompi_response    Json?
-  transaction_id    String?                  @db.VarChar(255)
-  paid_at           DateTime?                @db.Timestamp(6)
-  created_by        Int?
-  created_at        DateTime                 @default(now()) @db.Timestamp(6)
-  updated_at        DateTime                 @default(now()) @db.Timestamp(6)
+  id               Int                      @id @default(autoincrement())
+  store_id         Int
+  wompi_link_id    String                   @unique @db.VarChar(20)
+  name             String                   @db.VarChar(255)
+  description      String                   @db.Text
+  amount_in_cents  Int?
+  currency         String                   @default("COP") @db.VarChar(10)
+  single_use       Boolean                  @default(true)
+  collect_shipping Boolean                  @default(false)
+  checkout_url     String                   @db.Text
+  status           payment_link_status_enum @default(active)
+  expires_at       DateTime?                @db.Timestamp(6)
+  redirect_url     String?                  @db.Text
+  image_url        String?                  @db.Text
+  sku              String?                  @db.VarChar(36)
+  order_id         Int?
+  wompi_response   Json?
+  transaction_id   String?                  @db.VarChar(255)
+  paid_at          DateTime?                @db.Timestamp(6)
+  created_by       Int?
+  created_at       DateTime                 @default(now()) @db.Timestamp(6)
+  updated_at       DateTime                 @default(now()) @db.Timestamp(6)
 
-  stores  stores  @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  orders  orders? @relation(fields: [order_id], references: [id], onDelete: SetNull)
+  stores stores  @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  orders orders? @relation(fields: [order_id], references: [id], onDelete: SetNull)
 
   @@index([store_id, status])
   @@index([store_id, created_at])
   @@index([wompi_link_id])
+}
+
+// ──── Customer Queue ───────────────────────────
+
+model customer_queue {
+  id              Int                        @id @default(autoincrement())
+  store_id        Int
+  token           String                     @unique @db.VarChar(64)
+  first_name      String                     @db.VarChar(100)
+  last_name       String                     @db.VarChar(100)
+  document_type   String                     @db.VarChar(50)
+  document_number String                     @db.VarChar(50)
+  email           String?                    @db.VarChar(255)
+  phone           String?                    @db.VarChar(50)
+  status          customer_queue_status_enum @default(waiting)
+  position        Int
+  selected_by     Int?
+  consumed_at     DateTime?                  @db.Timestamp(6)
+  order_id        Int?
+  customer_id     Int?
+  expires_at      DateTime                   @db.Timestamp(6)
+  created_at      DateTime                   @default(now()) @db.Timestamp(6)
+  updated_at      DateTime                   @default(now()) @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id])
+
+  @@index([store_id, status])
+  @@index([store_id, document_number])
+  @@index([expires_at])
+}
+
+model invoice_data_requests {
+  id              Int                              @id @default(autoincrement())
+  store_id        Int
+  order_id        Int
+  invoice_id      Int?
+  token           String                           @unique @db.VarChar(64)
+  first_name      String?                          @db.VarChar(100)
+  last_name       String?                          @db.VarChar(100)
+  document_type   String?                          @db.VarChar(50)
+  document_number String?                          @db.VarChar(50)
+  email           String?                          @db.VarChar(255)
+  phone           String?                          @db.VarChar(50)
+  status          invoice_data_request_status_enum @default(pending)
+  submitted_at    DateTime?                        @db.Timestamp(6)
+  processed_at    DateTime?                        @db.Timestamp(6)
+  new_invoice_id  Int?
+  expires_at      DateTime                         @db.Timestamp(6)
+  created_at      DateTime                         @default(now()) @db.Timestamp(6)
+  updated_at      DateTime                         @default(now()) @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id])
+  order orders @relation(fields: [order_id], references: [id])
+
+  @@index([store_id, status])
+  @@index([order_id])
+  @@index([expires_at])
 }

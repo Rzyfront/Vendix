@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
-import { Observable, of } from 'rxjs';
-import { delay, map } from 'rxjs/operators';
+import { Observable, from, of } from 'rxjs';
+import { delay, map, switchMap } from 'rxjs/operators';
 import {
   TicketData,
   PrinterConfig,
@@ -43,9 +43,9 @@ export class PosTicketService {
 
     return of(ticketData).pipe(
       delay(1500),
-      map(() => {
+      switchMap(async () => {
         if (printOptions.printReceipt) {
-          const html = this.generateTicketHTML(ticketData);
+          const html = await this.generateTicketHTML(ticketData);
           this.printHTML(html);
         }
 
@@ -66,7 +66,7 @@ export class PosTicketService {
     );
   }
 
-  generateTicketHTML(ticketData: TicketData): string {
+  async generateTicketHTML(ticketData: TicketData): Promise<string> {
     let store = ticketData.store || this.storeConfig;
     let organization = ticketData.organization;
 
@@ -240,6 +240,34 @@ export class PosTicketService {
       </div>
     `;
 
+    // QR Code for retroactive invoicing (Consumidor Final sales)
+    if (ticketData.invoiceDataToken && ticketData.invoiceDataQrUrl) {
+      const qrUrl = ticketData.invoiceDataQrUrl;
+      try {
+        const QRCode = await import('qrcode');
+        const qrDataUrl = await QRCode.toDataURL(qrUrl, { width: 200, margin: 1 });
+        html += `
+          <hr style="border: 1px dashed #000; margin: 10px 0;">
+          <div style="text-align: center; margin: 10px 0;">
+            <p style="margin: 2px 0; font-size: 11px; font-weight: bold;">Solicite su factura electrónica</p>
+            <img src="${qrDataUrl}" style="width: 160px; height: 160px; margin: 8px auto;" />
+            <p style="margin: 2px 0; font-size: 10px;">Escanee el código QR o visite:</p>
+            <p style="margin: 4px 0; font-size: 9px; word-break: break-all;">${qrUrl}</p>
+          </div>
+        `;
+      } catch (err) {
+        // Fallback: just show URL without QR image
+        html += `
+          <hr style="border: 1px dashed #000; margin: 10px 0;">
+          <div style="text-align: center; margin: 10px 0;">
+            <p style="margin: 2px 0; font-size: 11px; font-weight: bold;">Solicite su factura electrónica</p>
+            <p style="margin: 2px 0; font-size: 10px;">Visite:</p>
+            <p style="margin: 4px 0; font-size: 9px; word-break: break-all;">${qrUrl}</p>
+          </div>
+        `;
+      }
+    }
+
     if (this.defaultPrinterConfig.printFooter) {
       html += `
         <hr style="border: 1px dashed #000; margin: 10px 0;">
@@ -261,8 +289,8 @@ export class PosTicketService {
   generateTicketPDF(ticketData: TicketData): Observable<Blob> {
     return of(ticketData).pipe(
       delay(1000),
-      map(() => {
-        const html = this.generateTicketHTML(ticketData);
+      switchMap(async () => {
+        const html = await this.generateTicketHTML(ticketData);
         return new Blob([html], { type: 'text/html' });
       }),
     );
@@ -365,7 +393,7 @@ export class PosTicketService {
   }
 
   previewTicket(ticketData: TicketData): Observable<string> {
-    return of(this.generateTicketHTML(ticketData)).pipe(delay(500));
+    return from(this.generateTicketHTML(ticketData)).pipe(delay(500));
   }
 
   saveTicketTemplate(template: string): Observable<boolean> {

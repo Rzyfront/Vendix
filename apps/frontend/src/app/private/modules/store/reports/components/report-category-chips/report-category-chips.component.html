@@ -1,0 +1,25 @@
+<div class="chips-container">
+  <!-- All chip -->
+  <button
+    class="chip"
+    [class.active]="isActive(null)"
+    (click)="selectCategory(null)"
+  >
+    <span class="chip-label">Todos</span>
+    <span class="chip-count">{{ totalReports }}</span>
+  </button>
+
+  <!-- Category chips -->
+  @for (category of categories; track category.id) {
+    <button
+      class="chip"
+      [class.active]="isActive(category.id)"
+      [style.--chip-color]="category.color"
+      (click)="selectCategory(category.id)"
+    >
+      <app-icon [name]="category.icon" [size]="14" />
+      <span class="chip-label">{{ category.label }}</span>
+      <span class="chip-count">{{ getReportCount(category.id) }}</span>
+    </button>
+  }
+</div>

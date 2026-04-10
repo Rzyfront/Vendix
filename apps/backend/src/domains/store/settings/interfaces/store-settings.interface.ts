@@ -287,6 +287,14 @@ export interface NotificationsSettings {
   new_order_alerts_phone: string | null;
 }
 
+export interface CustomerQueueSettings {
+  enabled: boolean;
+  queue_expiry_hours: number;
+  max_queue_size: number;
+  require_email: boolean;
+  require_phone: boolean;
+}
+
 export interface CashRegisterSettings {
   enabled: boolean;
   require_session_for_sales: boolean;
@@ -312,6 +320,7 @@ export interface PosSettings {
   cash_register?: CashRegisterSettings;
   default_payment_form?: 'contado' | 'credito';
   show_onscreen_keypad: boolean;
+  customer_queue?: CustomerQueueSettings;
 }
 
 export interface ScaleSettings {

@@ -19,7 +19,7 @@ import {
   BadgeComponent,
   DialogService,
 } from '../../../../shared/components';
-import { selectStoreSettings } from '../../../../core/store/auth/auth.selectors';
+import { selectStoreSettings, selectUserDomainHostname } from '../../../../core/store/auth/auth.selectors';
 import {
   PosCartService,
   CartState,
@@ -48,13 +48,13 @@ import { LayawayApiService } from '../layaway/services/layaway.service';
 import { LayawayConfigModalComponent } from './components/layaway-config-modal/layaway-config-modal.component';
 import { CreateLayawayRequest } from '../layaway/interfaces/layaway.interface';
 import { PosCashRegisterService, CashRegisterSession } from './services/pos-cash-register.service';
+import { PosQueueService } from './services/pos-queue.service';
 import { PosSessionStatusBarComponent } from './components/pos-session-status-bar.component';
 import { PosSessionOpenModalComponent } from './components/pos-session-open-modal.component';
 import { PosSessionCloseModalComponent } from './components/pos-session-close-modal.component';
 import { PosCashMovementModalComponent } from './components/pos-cash-movement-modal.component';
 import { PosSessionDetailModalComponent } from './components/pos-session-detail-modal.component';
-import { PosReservationsPanelComponent } from './components/pos-reservations-panel/pos-reservations-panel.component';
-import { PosQuickBookComponent } from './components/pos-quick-book/pos-quick-book.component';
+import { ReservationFormModalComponent } from '../reservations/components/reservation-form-modal/reservation-form-modal.component';
 
 @Component({
   selector: 'app-pos',
@@ -81,8 +81,7 @@ import { PosQuickBookComponent } from './components/pos-quick-book/pos-quick-boo
     PosCashMovementModalComponent,
     PosSessionDetailModalComponent,
     LayawayConfigModalComponent,
-    PosReservationsPanelComponent,
-    PosQuickBookComponent,
+    ReservationFormModalComponent,
   ],
   template: `
     <div class="flex flex-col overflow-hidden pos-container">
@@ -119,36 +118,24 @@ import { PosQuickBookComponent } from './components/pos-quick-book/pos-quick-boo
                 >
                   @if (isQuotationMode()) {
                     <span>Modo Cotización</span>
-                    <app-badge variant="primary" class="hidden sm:inline-flex"
-                      >Cotización</app-badge
-                    >
                   } @else if (isLayawayMode()) {
                     <span>Modo Plan Separé</span>
-                    <app-badge variant="warning" class="hidden sm:inline-flex">Separé</app-badge>
                   } @else if (isEditMode()) {
                     <span>Editando Orden #{{ editingOrderNumber() }}</span>
-                    <app-badge variant="warning" class="hidden sm:inline-flex"
-                      >Edición</app-badge
-                    >
                   } @else {
                     <span class="hidden sm:inline">Vendix</span> POS
-                    <app-badge variant="success" class="hidden sm:inline-flex"
-                      >Vende</app-badge
-                    >
                   }
                 </h1>
-                <span
-                  class="text-[10px] lg:text-xs text-text-secondary font-medium hidden sm:inline"
-                >
-                  {{
-                    isQuotationMode()
-                      ? 'Crear cotización'
-                      : isLayawayMode()
-                        ? 'Crear plan separé'
-                        : isEditMode()
-                          ? 'Modificar items de la orden'
-                          : 'Punto de venta'
-                  }}
+                <span class="hidden sm:inline">
+                  @if (isQuotationMode()) {
+                    <app-badge variant="primary" size="xs">Crear cotización</app-badge>
+                  } @else if (isLayawayMode()) {
+                    <app-badge variant="warning" size="xs">Crear plan separé</app-badge>
+                  } @else if (isEditMode()) {
+                    <app-badge variant="warning" size="xs">Modificar items de la orden</app-badge>
+                  } @else {
+                    <app-badge variant="success" size="xs">Punto de venta</app-badge>
+                  }
                 </span>
               </div>
             </div>
@@ -158,7 +145,7 @@ import { PosQuickBookComponent } from './components/pos-quick-book/pos-quick-boo
               <!-- Customer Badge (desktop only) -->
               <div
                 *ngIf="selectedCustomer && !isMobile()"
-                class="group flex items-center gap-2.5 bg-gradient-to-r from-primary-light/50 to-primary-light/30 px-3 py-2 rounded-lg cursor-pointer hover:from-primary-light/70 hover:to-primary-light/50 transition-all border border-primary/30 shadow-sm"
+                class="group flex items-center gap-2.5 self-stretch bg-gradient-to-r from-primary-light/50 to-primary-light/30 px-3 rounded-lg cursor-pointer hover:from-primary-light/70 hover:to-primary-light/50 transition-all border border-primary/30 shadow-sm"
                 (click)="onOpenCustomerModal()"
               >
                 <div
@@ -190,33 +177,22 @@ import { PosQuickBookComponent } from './components/pos-quick-book/pos-quick-boo
                 </div>
               </div>
 
-              <!-- Add Customer Button (desktop only) -->
-              <app-button
-                *ngIf="!selectedCustomer && !isMobile()"
-                variant="outline"
-                size="sm"
-                (clicked)="onOpenCustomerModal()"
-                class="rounded-lg h-9"
-              >
-                <app-icon
-                  name="user-plus"
-                  [size]="16"
-                  slot="icon"
-                  class="text-primary"
-                ></app-icon>
-                <span class="hidden sm:inline">Cliente</span>
-              </app-button>
 
-              <!-- Reservations Toggle Button -->
-              <button
-                class="flex items-center gap-1.5 px-3 py-2 rounded-lg border transition-all text-sm font-medium"
-                [class]="showReservationsPanel ? 'bg-primary/10 border-primary/30 text-primary' : 'bg-surface border-border text-text-secondary hover:border-primary/30 hover:text-primary'"
-                (click)="showReservationsPanel = !showReservationsPanel"
-                title="Reservas de hoy"
-              >
-                <app-icon name="calendar" [size]="16"></app-icon>
-                <span class="hidden xl:inline">Reservas</span>
-              </button>
+              <!-- Queue Badge -->
+              @if (queueEnabled && queueCount > 0) {
+                <button
+                  class="relative flex items-center justify-center w-10 h-10 rounded-xl bg-accent/10 hover:bg-accent/20 transition-colors border border-accent/30"
+                  (click)="onOpenCustomerModal()"
+                  title="Cola de clientes"
+                >
+                  <app-icon name="users" [size]="20" class="text-accent"></app-icon>
+                  <span
+                    class="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 flex items-center justify-center rounded-full bg-accent text-white text-xs font-bold px-1"
+                  >
+                    {{ queueCount }}
+                  </span>
+                </button>
+              }
 
               <!-- Cash Register Session Status Bar -->
               @if (cashRegisterEnabled) {
@@ -317,8 +293,11 @@ import { PosQuickBookComponent } from './components/pos-quick-book/pos-quick-boo
               <app-pos-product-selection
                 class="h-full block"
                 [refreshTrigger]="productRefreshCounter"
+                [selectedCustomer]="selectedCustomer"
                 (productSelected)="onProductSelected($event)"
                 (productAddedToCart)="onProductAddedToCart($event)"
+                (bookingRequired)="onBookingRequired($event)"
+                (openCustomerModal)="onOpenCustomerModal()"
               ></app-pos-product-selection>
             </div>
 
@@ -337,16 +316,6 @@ import { PosQuickBookComponent } from './components/pos-quick-book/pos-quick-boo
               ></app-pos-cart>
             </div>
 
-            <!-- Reservations Side Panel (slides in from right) -->
-            @if (showReservationsPanel) {
-              <div class="reservations-panel-wrapper">
-                <app-pos-reservations-panel
-                  (close)="showReservationsPanel = false"
-                  (quickBook)="showQuickBookModal = true"
-                  (walkIn)="onWalkIn()"
-                ></app-pos-reservations-panel>
-              </div>
-            }
           </div>
 
           <!-- Mobile: Full width products only -->
@@ -354,24 +323,15 @@ import { PosQuickBookComponent } from './components/pos-quick-book/pos-quick-boo
             <app-pos-product-selection
               class="h-full block"
               [refreshTrigger]="productRefreshCounter"
+              [selectedCustomer]="selectedCustomer"
               (productSelected)="onProductSelected($event)"
               (productAddedToCart)="onProductAddedToCart($event)"
+              (bookingRequired)="onBookingRequired($event)"
+              (openCustomerModal)="onOpenCustomerModal()"
             ></app-pos-product-selection>
           </div>
         </div>
       </div>
-
-      <!-- Mobile Reservations Bottom Sheet -->
-      @if (showReservationsPanel && isMobile()) {
-        <div class="reservations-overlay" (click)="showReservationsPanel = false"></div>
-        <div class="reservations-panel-mobile">
-          <app-pos-reservations-panel
-            (close)="showReservationsPanel = false"
-            (quickBook)="showQuickBookModal = true"
-            (walkIn)="onWalkIn()"
-          ></app-pos-reservations-panel>
-        </div>
-      }
 
       <!-- Mobile Footer (visible on mobile and tablet for sidebar sync) -->
       <app-pos-mobile-footer
@@ -391,7 +351,7 @@ import { PosQuickBookComponent } from './components/pos-quick-book/pos-quick-boo
 
       <!-- Mobile Cart Modal -->
       <app-pos-cart-modal
-        [isOpen]="showCartModal && isMobile()"
+        [isOpen]="showCartModal && (isMobile() || isTablet())"
         [cartState]="cartState"
         (closed)="onCloseCartModal()"
         (itemQuantityChanged)="onCartItemQuantityChanged($event)"
@@ -421,6 +381,7 @@ import { PosQuickBookComponent } from './components/pos-quick-book/pos-quick-boo
       <app-pos-customer-modal
         [isOpen]="showCustomerModal"
         [customer]="editingCustomer"
+        [queueEnabled]="queueEnabled"
         (closed)="onCustomerModalClosed()"
         (customerCreated)="onCustomerCreated($event)"
         (customerUpdated)="onCustomerUpdated($event)"
@@ -481,13 +442,14 @@ import { PosQuickBookComponent } from './components/pos-quick-book/pos-quick-boo
         ></app-pos-session-detail-modal>
       }
 
-      <!-- Quick Book Modal -->
-      @if (showQuickBookModal) {
-        <app-pos-quick-book
-          (close)="showQuickBookModal = false"
-          (created)="onReservationCreated()"
-        ></app-pos-quick-book>
-      }
+      <!-- Reservation Modal from POS Cart -->
+      <app-reservation-form-modal
+        [isOpen]="showReservationModal"
+        [initialProduct]="pendingBookingProduct"
+        [initialCustomer]="selectedCustomer"
+        (closed)="onBookingModalClosed()"
+        (created)="onBookingCreated($event)"
+      ></app-reservation-form-modal>
 
       <!-- Layaway Config Modal -->
       @if (showLayawayConfigModal()) {
@@ -644,9 +606,13 @@ export class PosComponent implements OnInit, OnDestroy {
   showCashMovementModal = false;
   showSessionDetailModal = false;
 
-  // Reservations
-  showReservationsPanel = false;
-  showQuickBookModal = false;
+  // Customer Queue
+  queueEnabled = false;
+  queueCount = 0;
+
+  // Booking desde POS
+  showReservationModal = false;
+  pendingBookingProduct: any = null;
 
   // Quotation mode
   isQuotationMode = signal(false);
@@ -679,6 +645,9 @@ export class PosComponent implements OnInit, OnDestroy {
   scheduleHandledByBackend = false;
   storeTimezone = 'America/Bogota';
 
+  // Store domain for QR URL construction
+  private storeDomainHostname: string | null = null;
+
   private destroy$ = new Subject<void>();
 
   constructor(
@@ -696,6 +665,7 @@ export class PosComponent implements OnInit, OnDestroy {
     private quotationsService: QuotationsService,
     private layawayService: LayawayApiService,
     private cashRegisterService: PosCashRegisterService,
+    private queueService: PosQueueService,
   ) {}
 
   @HostListener('window:resize')
@@ -718,6 +688,14 @@ export class PosComponent implements OnInit, OnDestroy {
     this.checkQuotationMode();
     this.checkLayawayMode();
     this.validateScheduleOnInit();
+
+    // Resolve store domain for invoice QR URL construction
+    this.store
+      .select(selectUserDomainHostname)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((hostname) => {
+        this.storeDomainHostname = hostname;
+      });
 
     // Listen for lazy session validation from payment service
     this.paymentService.sessionRequired$
@@ -1124,6 +1102,10 @@ export class PosComponent implements OnInit, OnDestroy {
             '',
         customer: paymentData.order?.customer || this.selectedCustomer,
         payment: paymentData.order?.payment || paymentData.payment,
+        invoiceDataToken: paymentData.order?.invoice_data_token,
+        invoiceDataQrUrl: paymentData.order?.invoice_data_token && this.storeDomainHostname
+          ? `${window.location.protocol}//${this.storeDomainHostname}/factura/${paymentData.order.invoice_data_token}`
+          : undefined,
       };
 
       this.showOrderConfirmation = true;
@@ -1134,6 +1116,15 @@ export class PosComponent implements OnInit, OnDestroy {
       this.toastService.success(successMessage);
       this.onClearCart();
       this.productRefreshCounter++;
+
+      // Consume queue entry if customer came from virtual queue
+      if (this.selectedCustomer?.fromQueue && this.selectedCustomer?.queueEntryId && paymentData.order?.id) {
+        this.queueService.consumeEntry(this.selectedCustomer.queueEntryId, paymentData.order.id)
+          .pipe(takeUntil(this.destroy$))
+          .subscribe({
+            error: (err: any) => console.error('Error consuming queue entry:', err),
+          });
+      }
     }
   }
 
@@ -1149,16 +1140,49 @@ export class PosComponent implements OnInit, OnDestroy {
     this.onClearCart();
   }
 
-  onReservationCreated(): void {
-    this.showQuickBookModal = false;
-    this.toastService.success('Reserva creada correctamente');
-    // Refresh the panel if it's open
-    this.showReservationsPanel = true;
+  onBookingRequired(product: any): void {
+    this.pendingBookingProduct = product;
+    this.showReservationModal = true;
   }
 
-  onWalkIn(): void {
-    // Open the quick book modal with "now" as the pre-selected time
-    this.showQuickBookModal = true;
+  onBookingCreated(reservationCustomer?: any): void {
+    this.showReservationModal = false;
+
+    // Si el modal retornó un cliente y no había uno en la orden, sincronizarlo al POS
+    if (reservationCustomer && !this.selectedCustomer) {
+      const posCustomer: PosCustomer = {
+        id: reservationCustomer.id,
+        email: reservationCustomer.email || '',
+        first_name: reservationCustomer.first_name || '',
+        last_name: reservationCustomer.last_name || '',
+        name: `${reservationCustomer.first_name || ''} ${reservationCustomer.last_name || ''}`.trim(),
+        phone: reservationCustomer.phone || '',
+        created_at: reservationCustomer.created_at || new Date(),
+        updated_at: reservationCustomer.updated_at || new Date(),
+      };
+      this.customerService.selectCustomer(posCustomer);
+      this.cartService.setCustomer(posCustomer).pipe(takeUntil(this.destroy$)).subscribe();
+    }
+
+    if (this.pendingBookingProduct) {
+      this.cartService.addToCart({ product: this.pendingBookingProduct, quantity: 1 })
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: () => {
+            this.toastService.success('Reserva creada y servicio agregado al carrito');
+            this.pendingBookingProduct = null;
+          },
+          error: () => {
+            this.toastService.error('Reserva creada, pero no se pudo agregar al carrito');
+            this.pendingBookingProduct = null;
+          },
+        });
+    }
+  }
+
+  onBookingModalClosed(): void {
+    this.showReservationModal = false;
+    this.pendingBookingProduct = null;
   }
 
   onViewOrderDetail(orderId: string): void {
@@ -1301,6 +1325,15 @@ export class PosComponent implements OnInit, OnDestroy {
       this.toastService.success('Orden con envío creada correctamente');
       this.onClearCart();
       this.productRefreshCounter++;
+
+      // Consume queue entry if customer came from virtual queue
+      if (this.selectedCustomer?.fromQueue && this.selectedCustomer?.queueEntryId && shippingData.order?.id) {
+        this.queueService.consumeEntry(this.selectedCustomer.queueEntryId, shippingData.order.id)
+          .pipe(takeUntil(this.destroy$))
+          .subscribe({
+            error: (err: any) => console.error('Error consuming queue entry:', err),
+          });
+      }
     }
   }
 
@@ -1508,6 +1541,13 @@ export class PosComponent implements OnInit, OnDestroy {
             this.initCashRegisterSession();
           }
 
+          // Initialize customer queue feature from NgRx (may be stale)
+          const cqEnabled = settings.pos.customer_queue?.enabled || false;
+          this.queueEnabled = cqEnabled;
+          if (cqEnabled) {
+            this.initQueueSubscription();
+          }
+
           // Fallback: si NgRx no tiene cash_register (localStorage desactualizado),
           // consultar directamente al backend
           if (!settings.pos.cash_register) {
@@ -1532,6 +1572,20 @@ export class PosComponent implements OnInit, OnDestroy {
               });
           }
 
+          // Always fetch fresh settings for customer_queue (may not be in NgRx state)
+          if (!cqEnabled) {
+            this.settingsService
+              .getSettings()
+              .pipe(takeUntil(this.destroy$))
+              .subscribe((response) => {
+                const freshSettings = response?.data;
+                if (freshSettings?.pos?.customer_queue?.enabled) {
+                  this.queueEnabled = true;
+                  this.initQueueSubscription();
+                }
+              });
+          }
+
           // Only apply local fallback if backend hasn't handled schedule validation
           if (
             !this.scheduleHandledByBackend &&
@@ -1547,6 +1601,25 @@ export class PosComponent implements OnInit, OnDestroy {
           }
         }
       });
+  }
+
+  private initQueueSubscription(): void {
+    // Load initial queue count
+    this.queueService.loadQueue().pipe(takeUntil(this.destroy$)).subscribe();
+
+    // Subscribe to count changes
+    this.queueService.waitingCount
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((count) => {
+        this.queueCount = count;
+      });
+  }
+
+  onOpenQueueModal(): void {
+    this.editingCustomer = null;
+    this.showCustomerModal = true;
+    // The modal checks a flag to open in queue mode - we'll set it via a simple approach
+    // The pos-customer-modal already reads queueEnabled and has switchToQueueMode()
   }
 
   /**

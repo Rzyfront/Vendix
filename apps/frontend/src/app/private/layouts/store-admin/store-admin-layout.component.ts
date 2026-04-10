@@ -322,6 +322,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy, AfterViewIn
       ],
     },
     {
+      label: 'Reportes',
+      icon: 'file-bar-chart',
+      route: '/admin/reports',
+    },
+    {
       label: 'Gastos',
       icon: 'wallet',
       route: '/admin/expenses',
@@ -353,7 +358,8 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy, AfterViewIn
         {
           label: 'Reportes',
           icon: 'circle',
-          route: '/admin/accounting/reports',
+          route: '/admin/reports',
+          queryParams: { category: 'accounting' },
         },
         {
           label: 'Retenciones',

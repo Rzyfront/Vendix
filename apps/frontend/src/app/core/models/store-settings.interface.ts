@@ -166,6 +166,15 @@ export interface PosSettings {
   allow_refund_without_approval: boolean;
   scale?: ScaleSettings;
   cash_register?: CashRegisterSettings;
+  customer_queue?: CustomerQueueSettings;
+}
+
+export interface CustomerQueueSettings {
+  enabled: boolean;
+  queue_expiry_hours: number;
+  max_queue_size: number;
+  require_email: boolean;
+  require_phone: boolean;
 }
 
 export interface ScaleSettings {

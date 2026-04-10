@@ -104,6 +104,13 @@ export function getDefaultStoreSettings(): StoreSettings {
         require_closing_count: true,
         track_non_cash_payments: true,
       },
+      customer_queue: {
+        enabled: false,
+        queue_expiry_hours: 12,
+        max_queue_size: 0,
+        require_email: false,
+        require_phone: false,
+      },
       default_payment_form: 'contado',
       show_onscreen_keypad: true,
     },
@@ -157,6 +164,9 @@ export function getDefaultStoreSettings(): StoreSettings {
         analytics_traffic: true,
         analytics_performance: true,
         analytics_overview: true,
+
+        // Reportes
+        reports: true,
 
         // Gastos
         expenses: true,

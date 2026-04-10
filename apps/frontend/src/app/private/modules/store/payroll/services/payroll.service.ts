@@ -279,6 +279,13 @@ export class PayrollService {
     return this.http.post<ApiResponse<EmployeeAdvance>>(this.getApiUrl(`advances/${id}/pay`), dto);
   }
 
+  markInstallmentPaid(advanceId: number, installmentId: number, dto: AdvanceManualPaymentDto): Observable<ApiResponse<EmployeeAdvance>> {
+    return this.http.patch<ApiResponse<EmployeeAdvance>>(
+      this.getApiUrl(`advances/${advanceId}/installments/${installmentId}/pay`),
+      dto,
+    );
+  }
+
   getEmployeeAdvanceSummary(employeeId: number): Observable<ApiResponse<EmployeeAdvanceSummary>> {
     return this.http.get<ApiResponse<EmployeeAdvanceSummary>>(this.getApiUrl(`advances/employee/${employeeId}/summary`));
   }

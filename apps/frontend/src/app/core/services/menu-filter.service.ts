@@ -86,6 +86,9 @@ export class MenuFilterService {
     Tráfico: 'analytics_traffic',
     Rendimiento: 'analytics_performance',
 
+    // STORE_ADMIN - Reportes
+    Reportes: ['reports', 'accounting_reports'],
+
     // Caja Registradora (submodule of Configuración)
     'Caja Registradora': 'settings_cash_registers',
 
@@ -104,7 +107,6 @@ export class MenuFilterService {
     'Cuentas por Cobrar': 'cartera_receivables',
     'Cuentas por Pagar': 'cartera_payables',
     'Cartera por Vencimiento': 'cartera_aging',
-    Reportes: 'accounting_reports',
     Nómina: 'payroll',
     Empleados: 'payroll_employees',
     'Períodos de Nómina': 'payroll_runs',

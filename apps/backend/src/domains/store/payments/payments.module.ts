@@ -41,6 +41,7 @@ import { WompiProcessor } from './processors/wompi/wompi.processor';
 import { WalletModule } from '../wallet/wallet.module';
 import { WalletPaymentProcessor } from '../wallet/services/wallet-payment.processor';
 import { PaymentLinksModule } from '../payment-links/payment-links.module';
+import { InvoiceDataRequestsModule } from '../invoicing/invoice-data-requests/invoice-data-requests.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { PaymentLinksModule } from '../payment-links/payment-links.module';
     SettingsModule,
     PromotionsModule,
     CashRegistersModule,
+    InvoiceDataRequestsModule,
   ],
   controllers: [
     PaymentsController,

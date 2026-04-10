@@ -1,6 +1,7 @@
 import { Component, EventEmitter, Input, Output, inject, OnChanges, SimpleChanges, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { PayrollService } from '../../../services/payroll.service';
+import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import {
   ModalComponent,
   ButtonComponent,
@@ -770,7 +771,7 @@ export class EmployeeBulkUploadModalComponent implements OnChanges, OnDestroy {
       error: (error) => {
         this.isAnalyzing = false;
         this.currentStep = 0;
-        this.uploadError = typeof error === 'string' ? error : error?.error?.message || error?.message || 'Error al analizar el archivo';
+        this.uploadError = typeof error === 'string' ? error : parseApiError(error).userMessage;
         this.toastService.error('Error al analizar el archivo');
       },
     });
@@ -796,7 +797,7 @@ export class EmployeeBulkUploadModalComponent implements OnChanges, OnDestroy {
       },
       error: (error) => {
         this.isUploading = false;
-        this.uploadError = typeof error === 'string' ? error : error?.error?.message || error?.message || 'Error en la carga';
+        this.uploadError = typeof error === 'string' ? error : parseApiError(error).userMessage;
         this.toastService.error('Error en la carga masiva de empleados');
       },
     });

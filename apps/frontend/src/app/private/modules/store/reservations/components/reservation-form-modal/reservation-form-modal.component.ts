@@ -47,7 +47,9 @@ export class ReservationFormModalComponent {
   // Inputs / Outputs
   readonly isOpen = input<boolean>(false);
   readonly closed = output<void>();
-  readonly created = output<void>();
+  readonly created = output<any>();
+  readonly initialProduct = input<any>(null);
+  readonly initialCustomer = input<any>(null);
 
   // Wizard
   currentStep = signal(0);
@@ -83,6 +85,9 @@ export class ReservationFormModalComponent {
   customers = signal<any[]>([]);
   selectedCustomer = signal<any>(null);
   searchingCustomers = signal(false);
+
+  // Agenda directa (sin proveedor ni horario específico)
+  directBooking = signal(false);
 
   // Notes & Submit
   notes = signal('');
@@ -189,7 +194,26 @@ export class ReservationFormModalComponent {
     this.selectedCustomer.set(null);
     this.notes.set('');
     this.submitting.set(false);
-    this.loadServices();
+    this.directBooking.set(false);
+    if (this.initialProduct()) {
+      const product = this.initialProduct();
+      this.selectedService.set(product);
+      this.isFreeBooking.set(product.booking_mode === 'free_booking');
+      // Auto-set today's date para el flujo desde POS
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      this.selectedDate.set(`${yyyy}-${mm}-${dd}`);
+      // No cargar lista de servicios — el producto ya viene pre-seleccionado
+    } else {
+      this.loadServices();
+    }
+
+    // Auto-set cliente si viene pre-seleccionado desde la orden del POS
+    if (this.initialCustomer()) {
+      this.selectedCustomer.set(this.initialCustomer());
+    }
   }
 
   onClose(): void {
@@ -340,7 +364,7 @@ export class ReservationFormModalComponent {
       next: () => {
         this.toastService.success('Reserva creada exitosamente');
         this.submitting.set(false);
-        this.created.emit();
+        this.created.emit(this.selectedCustomer());
       },
       error: (err) => {
         const msg = err?.error?.message?.message || err?.error?.message || 'Error al crear la reserva';
@@ -348,6 +372,31 @@ export class ReservationFormModalComponent {
         this.submitting.set(false);
       },
     });
+  }
+
+  goDirectBooking(): void {
+    const now = new Date();
+
+    // Auto-set today's date si no está configurada
+    if (!this.selectedDate()) {
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      this.selectedDate.set(`${yyyy}-${mm}-${dd}`);
+    }
+
+    // Hora actual como inicio
+    const hours = now.getHours().toString().padStart(2, '0');
+    const minutes = now.getMinutes().toString().padStart(2, '0');
+    this.startTime.set(`${hours}:${minutes}`);
+
+    // Hora fin calculada con duración del servicio
+    const computedEnd = this.getEndTime();
+    this.endTime.set(computedEnd || `${hours}:${minutes}`);
+
+    this.skipAvailabilityCheck.set(true);
+    this.directBooking.set(true);
+    this.currentStep.set(this.customerStep());
   }
 
   // Helpers

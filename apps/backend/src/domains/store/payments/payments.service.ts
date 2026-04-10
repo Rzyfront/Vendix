@@ -29,6 +29,7 @@ import { PromotionEngineService } from '../promotions/promotion-engine/promotion
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
 import { PaymentEncryptionService } from './services/payment-encryption.service';
+import { InvoiceDataRequestsService } from '../invoicing/invoice-data-requests/invoice-data-requests.service';
 
 @Injectable()
 export class PaymentsService {
@@ -45,6 +46,7 @@ export class PaymentsService {
     private readonly sessionsService: SessionsService,
     private readonly movementsService: MovementsService,
     private readonly paymentEncryption: PaymentEncryptionService,
+    private readonly invoiceDataRequestsService: InvoiceDataRequestsService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -746,6 +748,19 @@ export class PaymentsService {
               );
             },
           );
+        }
+
+        // Create invoice data request for anonymous/CF sales
+        if (!createPosPaymentDto.customer_id && result.order?.id) {
+          try {
+            const invoiceDataRequest = await this.invoiceDataRequestsService.createRequest(
+              createPosPaymentDto.store_id,
+              Number(result.order.id),
+            );
+            result.order.invoice_data_token = invoiceDataRequest.token;
+          } catch (err) {
+            this.logger.error(`Failed to create invoice data request: ${err.message}`, err.stack);
+          }
         }
       }
 

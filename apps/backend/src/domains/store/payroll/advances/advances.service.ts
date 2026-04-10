@@ -16,6 +16,9 @@ const ADVANCE_INCLUDE = {
   advance_payments: {
     orderBy: { created_at: 'desc' as const },
   },
+  advance_installments: {
+    orderBy: { installment_number: 'asc' as const },
+  },
 };
 
 @Injectable()
@@ -34,6 +37,67 @@ export class AdvancesService {
 
   private round(value: number): number {
     return Math.round(value * 100) / 100;
+  }
+
+  private calculateDueDate(start: Date, frequency: string, period: number): Date {
+    const date = new Date(start);
+    switch (frequency) {
+      case 'weekly':
+        date.setDate(date.getDate() + 7 * period);
+        break;
+      case 'biweekly':
+        date.setDate(date.getDate() + 15 * period);
+        break;
+      case 'monthly':
+      default:
+        date.setMonth(date.getMonth() + period);
+        break;
+    }
+    return date;
+  }
+
+  private async generateInstallmentSchedule(
+    tx: any,
+    advance_id: number,
+    amount_approved: number,
+    installments: number,
+    frequency: string,
+    start_date: Date,
+  ): Promise<void> {
+    const installment_value = this.round(amount_approved / installments);
+
+    const data = [];
+    for (let i = 0; i < installments; i++) {
+      const due_date = this.calculateDueDate(start_date, frequency, i + 1);
+      const amount = i === installments - 1
+        ? this.round(amount_approved - installment_value * (installments - 1))
+        : installment_value;
+
+      data.push({
+        advance_id,
+        installment_number: i + 1,
+        amount: new Prisma.Decimal(amount),
+        due_date,
+        status: 'pending' as any,
+      });
+    }
+
+    await tx.employee_advance_installments.createMany({ data });
+  }
+
+  private async markOverdueInstallments(): Promise<void> {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    await this.prisma.employee_advance_installments.updateMany({
+      where: {
+        due_date: { lt: today },
+        status: 'pending',
+      },
+      data: {
+        status: 'overdue',
+        updated_at: new Date(),
+      },
+    });
   }
 
   // ─── CRUD ────────────────────────────────────────────
@@ -80,6 +144,8 @@ export class AdvancesService {
   }
 
   async findAll(query: QueryAdvanceDto) {
+    await this.markOverdueInstallments();
+
     const {
       page = 1,
       limit = 10,
@@ -127,6 +193,8 @@ export class AdvancesService {
   }
 
   async findOne(id: number) {
+    await this.markOverdueInstallments();
+
     const advance = await this.prisma.employee_advances.findFirst({
       where: { id },
       include: ADVANCE_INCLUDE,
@@ -153,23 +221,33 @@ export class AdvancesService {
     const installments = dto.installments || advance.installments;
     const installment_value = this.round(amount_approved / installments);
 
-    const updated = await this.prisma.employee_advances.update({
-      where: { id },
-      data: {
-        status: 'approved',
-        amount_approved: new Prisma.Decimal(amount_approved),
-        amount_pending: new Prisma.Decimal(amount_approved),
+    await this.prisma.$transaction(async (tx: any) => {
+      await tx.employee_advances.update({
+        where: { id },
+        data: {
+          status: 'approved',
+          amount_approved: new Prisma.Decimal(amount_approved),
+          amount_pending: new Prisma.Decimal(amount_approved),
+          installments,
+          installment_value: new Prisma.Decimal(installment_value),
+          approved_by_user_id: context.user_id || null,
+          approved_at: new Date(),
+          notes: dto.notes || advance.notes,
+        },
+      });
+
+      await this.generateInstallmentSchedule(
+        tx,
+        id,
+        amount_approved,
         installments,
-        installment_value: new Prisma.Decimal(installment_value),
-        approved_by_user_id: context.user_id || null,
-        approved_at: new Date(),
-        notes: dto.notes || advance.notes,
-      },
-      include: ADVANCE_INCLUDE,
+        advance.frequency,
+        new Date(advance.advance_date),
+      );
     });
 
-    this.logger.log(`Advance #${id} approved for ${amount_approved}`);
-    return updated;
+    this.logger.log(`Advance #${id} approved for ${amount_approved} with ${installments} installments`);
+    return this.findOne(id);
   }
 
   async reject(id: number) {
@@ -196,14 +274,26 @@ export class AdvancesService {
       throw new VendixHttpException(ErrorCodes.ADV_STATUS_001);
     }
 
-    const updated = await this.prisma.employee_advances.update({
-      where: { id },
-      data: { status: 'cancelled' },
-      include: ADVANCE_INCLUDE,
+    await this.prisma.$transaction(async (tx: any) => {
+      await tx.employee_advances.update({
+        where: { id },
+        data: { status: 'cancelled' },
+      });
+
+      await tx.employee_advance_installments.updateMany({
+        where: {
+          advance_id: id,
+          status: { in: ['pending', 'overdue'] },
+        },
+        data: {
+          status: 'cancelled',
+          updated_at: new Date(),
+        },
+      });
     });
 
     this.logger.log(`Advance #${id} cancelled`);
-    return updated;
+    return this.findOne(id);
   }
 
   // ─── PAYMENTS ────────────────────────────────────────
@@ -226,9 +316,9 @@ export class AdvancesService {
     const new_amount_pending = this.round(current_pending - dto.amount);
     const new_status = new_amount_pending <= 0 ? 'paid' : 'repaying';
 
-    const updated = await this.prisma.$transaction(async (tx: any) => {
+    await this.prisma.$transaction(async (tx: any) => {
       // Create payment record
-      await tx.employee_advance_payments.create({
+      const payment = await tx.employee_advance_payments.create({
         data: {
           advance_id: id,
           amount: new Prisma.Decimal(dto.amount),
@@ -239,7 +329,7 @@ export class AdvancesService {
       });
 
       // Update advance balances
-      return tx.employee_advances.update({
+      await tx.employee_advances.update({
         where: { id },
         data: {
           amount_paid: new Prisma.Decimal(new_amount_paid),
@@ -247,12 +337,37 @@ export class AdvancesService {
           status: new_status as any,
           ...(new_status === 'paid' && { completed_at: new Date() }),
         },
-        include: ADVANCE_INCLUDE,
       });
+
+      // Mark next pending installment as paid
+      const installment_where: any = {
+        advance_id: id,
+        status: { in: ['pending', 'overdue'] },
+      };
+      if (dto.installment_id) {
+        installment_where.id = dto.installment_id;
+      }
+
+      const target_installment = await tx.employee_advance_installments.findFirst({
+        where: installment_where,
+        orderBy: { installment_number: 'asc' },
+      });
+
+      if (target_installment) {
+        await tx.employee_advance_installments.update({
+          where: { id: target_installment.id },
+          data: {
+            status: 'paid',
+            paid_at: new Date(),
+            payment_id: payment.id,
+            updated_at: new Date(),
+          },
+        });
+      }
     });
 
     this.logger.log(`Manual payment of ${dto.amount} registered for advance #${id}. Status: ${new_status}`);
-    return updated;
+    return this.findOne(id);
   }
 
   // ─── PAYROLL INTEGRATION ─────────────────────────────
@@ -267,16 +382,26 @@ export class AdvancesService {
         employee_id,
         status: { in: ['approved', 'repaying'] },
       },
-      select: { installment_value: true, amount_pending: true },
+      select: {
+        id: true,
+        installment_value: true,
+        amount_pending: true,
+        advance_installments: {
+          where: { status: { in: ['pending', 'overdue'] } },
+          orderBy: { installment_number: 'asc' },
+          take: 1,
+          select: { amount: true },
+        },
+      },
     });
 
     let total = 0;
     for (const advance of advances) {
-      // Deduct installment_value or remaining amount_pending, whichever is less
-      const deduction = Math.min(
-        Number(advance.installment_value),
-        Number(advance.amount_pending),
-      );
+      const next_installment = advance.advance_installments[0];
+      const installment_amount = next_installment
+        ? Number(next_installment.amount)
+        : Number(advance.installment_value);
+      const deduction = Math.min(installment_amount, Number(advance.amount_pending));
       total += deduction;
     }
 
@@ -299,7 +424,7 @@ export class AdvancesService {
         employee_id,
         status: { in: ['approved', 'repaying'] },
       },
-      orderBy: { advance_date: 'asc' }, // FIFO
+      orderBy: { advance_date: 'asc' },
     });
 
     let remaining = amount;
@@ -316,8 +441,7 @@ export class AdvancesService {
         const new_amount_pending = this.round(pending - payment_amount);
         const new_status = new_amount_pending <= 0 ? 'paid' : 'repaying';
 
-        // Create payment record linked to payroll item
-        await tx.employee_advance_payments.create({
+        const payment_record = await tx.employee_advance_payments.create({
           data: {
             advance_id: advance.id,
             payroll_item_id,
@@ -328,7 +452,6 @@ export class AdvancesService {
           },
         });
 
-        // Update advance balances
         await tx.employee_advances.update({
           where: { id: advance.id },
           data: {
@@ -339,12 +462,105 @@ export class AdvancesService {
           },
         });
 
+        // Mark installment(s) as paid
+        let deduction_remaining = payment_amount;
+        while (deduction_remaining > 0) {
+          const next_installment = await tx.employee_advance_installments.findFirst({
+            where: {
+              advance_id: advance.id,
+              status: { in: ['pending', 'overdue'] },
+            },
+            orderBy: { installment_number: 'asc' },
+          });
+
+          if (!next_installment) break;
+
+          await tx.employee_advance_installments.update({
+            where: { id: next_installment.id },
+            data: {
+              status: 'paid',
+              paid_at: new Date(),
+              payment_id: payment_record.id,
+              payroll_item_id,
+              updated_at: new Date(),
+            },
+          });
+
+          deduction_remaining = this.round(deduction_remaining - Number(next_installment.amount));
+        }
+
         this.logger.log(
           `Payroll deduction of ${payment_amount} applied to advance #${advance.id}. ` +
             `New pending: ${new_amount_pending}. Status: ${new_status}`,
         );
       }
     });
+  }
+
+  async payInstallment(advance_id: number, installment_id: number, dto: RegisterAdvancePaymentDto) {
+    const advance = await this.findOne(advance_id);
+
+    if (!['approved', 'repaying'].includes(advance.status)) {
+      throw new VendixHttpException(ErrorCodes.ADV_STATUS_001);
+    }
+
+    const installment = await this.prisma.employee_advance_installments.findFirst({
+      where: { id: installment_id, advance_id },
+    });
+
+    if (!installment) {
+      throw new VendixHttpException(ErrorCodes.ADV_INSTALLMENT_001);
+    }
+
+    if (installment.status === 'paid') {
+      throw new VendixHttpException(ErrorCodes.ADV_INSTALLMENT_002);
+    }
+
+    const payment_amount = dto.amount || Number(installment.amount);
+    const current_pending = Number(advance.amount_pending);
+
+    if (payment_amount > current_pending) {
+      throw new VendixHttpException(ErrorCodes.ADV_PAYMENT_001);
+    }
+
+    const new_amount_paid = this.round(Number(advance.amount_paid) + payment_amount);
+    const new_amount_pending = this.round(current_pending - payment_amount);
+    const new_status = new_amount_pending <= 0 ? 'paid' : 'repaying';
+
+    await this.prisma.$transaction(async (tx: any) => {
+      const payment = await tx.employee_advance_payments.create({
+        data: {
+          advance_id,
+          amount: new Prisma.Decimal(payment_amount),
+          payment_date: new Date(dto.payment_date),
+          payment_type: 'manual',
+          notes: dto.notes || null,
+        },
+      });
+
+      await tx.employee_advances.update({
+        where: { id: advance_id },
+        data: {
+          amount_paid: new Prisma.Decimal(new_amount_paid),
+          amount_pending: new Prisma.Decimal(new_amount_pending),
+          status: new_status as any,
+          ...(new_status === 'paid' && { completed_at: new Date() }),
+        },
+      });
+
+      await tx.employee_advance_installments.update({
+        where: { id: installment_id },
+        data: {
+          status: 'paid',
+          paid_at: new Date(),
+          payment_id: payment.id,
+          updated_at: new Date(),
+        },
+      });
+    });
+
+    this.logger.log(`Installment #${installment_id} paid for advance #${advance_id}`);
+    return this.findOne(advance_id);
   }
 
   // ─── STATS ───────────────────────────────────────────

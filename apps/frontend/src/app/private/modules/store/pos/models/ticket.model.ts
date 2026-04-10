@@ -41,6 +41,8 @@ export interface TicketData {
   };
   cashier?: string;
   transactionId?: string;
+  invoiceDataToken?: string;
+  invoiceDataQrUrl?: string;
 }
 
 export interface PrinterConfig {
