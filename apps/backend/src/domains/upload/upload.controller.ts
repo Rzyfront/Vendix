@@ -203,7 +203,7 @@ export class UploadController {
             throw new ForbiddenException('You do not have permission to access this file');
         }
 
-        const url = await this.s3Service.getPresignedUrl(key);
+        const url = await this.s3Service.getPresignedUrl(normalizedKey);
         return { url };
     }
 

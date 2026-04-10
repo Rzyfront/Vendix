@@ -11,7 +11,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Upload } from '@aws-sdk/lib-storage';
 import * as sharp from 'sharp';
 import { ImageContext, IMAGE_PRESETS } from '../config/image-presets';
-import { extractS3KeyFromUrl, isS3Key } from '../helpers/s3-url.helper';
+import { extractS3KeyFromUrl, isS3Key, isSafeS3Key } from '../helpers/s3-url.helper';
 
 @Injectable()
 export class S3Service {
@@ -173,8 +173,8 @@ export class S3Service {
      * @param expiresIn Expiration time in seconds (default 1 hour)
      */
     async getPresignedUrl(key: string, expiresIn = 3600): Promise<string> {
-        this.validateS3Key(key);
         try {
+            this.validateS3Key(key);
             const command = new GetObjectCommand({
                 Bucket: this.bucketName,
                 Key: key,
@@ -192,8 +192,8 @@ export class S3Service {
      * @param key Path of the file in S3
      */
     async deleteFile(key: string): Promise<void> {
-        this.validateS3Key(key);
         try {
+            this.validateS3Key(key);
             const command = new DeleteObjectCommand({
                 Bucket: this.bucketName,
                 Key: key,
@@ -408,26 +408,7 @@ export class S3Service {
      * @throws BadRequestException if the key contains path traversal patterns
      */
     private validateS3Key(key: string): void {
-        if (typeof key !== 'string' || !key) {
-            throw new BadRequestException('Invalid S3 key');
-        }
-
-        let decoded: string;
-        try {
-            decoded = decodeURIComponent(key);
-        } catch {
-            throw new BadRequestException('Invalid S3 key: malformed encoding');
-        }
-
-        if (decoded.includes('\0') || key.includes('%00')) {
-            throw new BadRequestException('Invalid S3 key: null byte detected');
-        }
-
-        if (decoded.includes('..\\') || decoded.includes('../') || key.includes('../')) {
-            throw new BadRequestException('Invalid S3 key: path traversal detected');
-        }
-
-        if (decoded.split('/').some((s) => s === '..')) {
+        if (!isSafeS3Key(key)) {
             throw new BadRequestException('Invalid S3 key: path traversal detected');
         }
     }

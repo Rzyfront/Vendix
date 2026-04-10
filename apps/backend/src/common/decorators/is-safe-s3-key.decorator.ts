@@ -1,4 +1,5 @@
 import { registerDecorator, ValidationOptions } from 'class-validator';
+import { isSafeS3Key } from '@common/helpers/s3-url.helper';
 
 /**
  * Validates that an S3 key does not contain path traversal sequences.
@@ -16,28 +17,7 @@ export function IsSafeS3Key(validationOptions?: ValidationOptions) {
       options: validationOptions,
       validator: {
         validate(value: any): boolean {
-          if (typeof value !== 'string') return false;
-
-          let decoded: string;
-          try {
-            decoded = decodeURIComponent(value);
-          } catch {
-            return false;
-          }
-
-          // Null bytes
-          if (decoded.includes('\0') || value.includes('%00')) return false;
-
-          // Backslash traversal
-          if (decoded.includes('..\\')) return false;
-
-          // Slash traversal (raw and decoded)
-          if (decoded.includes('../') || value.includes('../')) return false;
-
-          // Standalone '..' segments
-          if (decoded.split('/').some((s) => s === '..')) return false;
-
-          return true;
+          return typeof value === 'string' && isSafeS3Key(value);
         },
         defaultMessage(): string {
           return `key contains invalid path characters`;
