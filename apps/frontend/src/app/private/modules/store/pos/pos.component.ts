@@ -178,22 +178,6 @@ import { ReservationFormModalComponent } from '../reservations/components/reserv
               </div>
 
 
-              <!-- Queue Badge -->
-              @if (queueEnabled && queueCount > 0) {
-                <button
-                  class="relative flex items-center justify-center w-10 h-10 rounded-xl bg-accent/10 hover:bg-accent/20 transition-colors border border-accent/30"
-                  (click)="onOpenCustomerModal()"
-                  title="Cola de clientes"
-                >
-                  <app-icon name="users" [size]="20" class="text-accent"></app-icon>
-                  <span
-                    class="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 flex items-center justify-center rounded-full bg-accent text-white text-xs font-bold px-1"
-                  >
-                    {{ queueCount }}
-                  </span>
-                </button>
-              }
-
               <!-- Cash Register Session Status Bar -->
               @if (cashRegisterEnabled) {
                 <app-pos-session-status-bar
@@ -294,10 +278,13 @@ import { ReservationFormModalComponent } from '../reservations/components/reserv
                 class="h-full block"
                 [refreshTrigger]="productRefreshCounter"
                 [selectedCustomer]="selectedCustomer"
+                [queueEnabled]="queueEnabled"
+                [queueCount]="queueCount"
                 (productSelected)="onProductSelected($event)"
                 (productAddedToCart)="onProductAddedToCart($event)"
                 (bookingRequired)="onBookingRequired($event)"
                 (openCustomerModal)="onOpenCustomerModal()"
+                (openQueueModal)="onOpenQueueModal()"
               ></app-pos-product-selection>
             </div>
 
@@ -382,6 +369,7 @@ import { ReservationFormModalComponent } from '../reservations/components/reserv
         [isOpen]="showCustomerModal"
         [customer]="editingCustomer"
         [queueEnabled]="queueEnabled"
+        [openInQueueMode]="openInQueueMode"
         (closed)="onCustomerModalClosed()"
         (customerCreated)="onCustomerCreated($event)"
         (customerUpdated)="onCustomerUpdated($event)"
@@ -609,6 +597,7 @@ export class PosComponent implements OnInit, OnDestroy {
   // Customer Queue
   queueEnabled = false;
   queueCount = 0;
+  openInQueueMode = false;
 
   // Booking desde POS
   showReservationModal = false;
@@ -818,6 +807,7 @@ export class PosComponent implements OnInit, OnDestroy {
   onCustomerModalClosed(): void {
     this.showCustomerModal = false;
     this.editingCustomer = null;
+    this.openInQueueMode = false;
   }
 
   onCustomerCreated(customer: PosCustomer): void {
@@ -1617,9 +1607,8 @@ export class PosComponent implements OnInit, OnDestroy {
 
   onOpenQueueModal(): void {
     this.editingCustomer = null;
+    this.openInQueueMode = true;
     this.showCustomerModal = true;
-    // The modal checks a flag to open in queue mode - we'll set it via a simple approach
-    // The pos-customer-modal already reads queueEnabled and has switchToQueueMode()
   }
 
   /**

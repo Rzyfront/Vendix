@@ -66,7 +66,7 @@ export class AdvancesService {
   ): Promise<void> {
     const installment_value = this.round(amount_approved / installments);
 
-    const data = [];
+    const data: { advance_id: number; installment_number: number; amount: Prisma.Decimal; due_date: Date; status: string }[] = [];
     for (let i = 0; i < installments; i++) {
       const due_date = this.calculateDueDate(start_date, frequency, i + 1);
       const amount = i === installments - 1

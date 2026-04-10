@@ -245,8 +245,8 @@ export class InvoiceDataRequestsService {
           data: {
             email: request.email || `invoice_${request.token}@placeholder.vendix.com`,
             password: hashedPassword,
-            first_name: request.first_name,
-            last_name: request.last_name,
+            first_name: request.first_name || '',
+            last_name: request.last_name || '',
             phone: request.phone,
             document_type: request.document_type,
             document_number: request.document_number,
@@ -273,7 +273,8 @@ export class InvoiceDataRequestsService {
       });
 
       // 3. Create credit note for original CF invoice (if one exists)
-      let originalInvoice = null;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let originalInvoice: any = null;
       if (request.invoice_id) {
         originalInvoice = await this.prisma.invoices.findFirst({
           where: { id: request.invoice_id },
@@ -321,7 +322,6 @@ export class InvoiceDataRequestsService {
         data: {
           status: 'completed',
           processed_at: new Date(),
-          customer_id: customer.id,
           new_invoice_id: newInvoiceId,
           updated_at: new Date(),
         },

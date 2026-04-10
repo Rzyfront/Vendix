@@ -4,6 +4,7 @@ import {
   Input,
   Output,
   OnInit,
+  OnChanges,
   OnDestroy,
 } from '@angular/core';
 import {
@@ -413,7 +414,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               <img [src]="queueQrData.qr_data_url" alt="QR Cola" class="mx-auto w-40 h-40">
               <p class="text-xs text-[var(--color-text-muted)] mt-2">{{ queueQrData.url }}</p>
               <app-button variant="outline" size="sm" (clicked)="printQueueQr()" class="mt-3">
-                <app-icon name="printer" [size]="14"></app-icon>
+                <app-icon name="printer" [size]="14" slot="icon"></app-icon>
                 Imprimir QR
               </app-button>
             </div>
@@ -472,7 +473,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               <img [src]="queueQrData.qr_data_url" alt="QR Cola" class="mx-auto w-32 h-32 mt-2">
               <p class="text-xs text-[var(--color-text-muted)] mt-1">{{ queueQrData.url }}</p>
               <app-button variant="outline" size="sm" (clicked)="printQueueQr()" class="mt-2">
-                <app-icon name="printer" [size]="14"></app-icon>
+                <app-icon name="printer" [size]="14" slot="icon"></app-icon>
                 Imprimir QR
               </app-button>
             </details>
@@ -503,9 +504,10 @@ import { StoreContextService } from '../../../../../core/services/store-context.
     </app-modal>
   `,
 })
-export class PosCustomerModalComponent implements OnInit, OnDestroy {
+export class PosCustomerModalComponent implements OnInit, OnDestroy, OnChanges {
   @Input() isOpen = false;
   @Input() customer: PosCustomer | null = null;
+  @Input() openInQueueMode = false;
   @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() closed = new EventEmitter<void>();
   @Output() customerSelected = new EventEmitter<PosCustomer>();
@@ -559,6 +561,12 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy {
     if (this.customer) {
       this.populateFormForEdit();
       this.currentStep = 'create';
+    }
+  }
+
+  ngOnChanges(): void {
+    if (this.openInQueueMode && this.queueEnabled && this.isOpen) {
+      this.switchToQueueMode();
     }
   }
 
