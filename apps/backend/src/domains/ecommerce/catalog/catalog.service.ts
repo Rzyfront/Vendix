@@ -1,4 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { CatalogQueryDto, ProductSortBy } from './dto/catalog-query.dto';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -6,14 +8,10 @@ import { S3Service } from '@common/services/s3.service';
 
 @Injectable()
 export class CatalogService {
-  private bestSellingCache: {
-    [storeId: number]: { ids: number[]; timestamp: number };
-  } = {};
-  private readonly CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
-
   constructor(
     private readonly prisma: EcommercePrismaService,
     private readonly s3Service: S3Service,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) { }
 
   async getProducts(query: CatalogQueryDto) {
@@ -83,10 +81,10 @@ export class CatalogService {
 
     if (sort_by === ProductSortBy.BEST_SELLING && store_id) {
       // 1. Intentar obtener IDs de caché o base de datos
-      explicitIds = this.getBestSellingFromCache(store_id);
+      explicitIds = await this.getBestSellingFromCache(store_id);
       if (!explicitIds) {
         explicitIds = await this.fetchBestSellingIds(store_id, Number(limit));
-        this.setBestSellingCache(store_id, explicitIds);
+        await this.setBestSellingCache(store_id, explicitIds);
       }
 
       // Si no hay ventas suficientes, rellenar con productos nuevos
@@ -403,19 +401,12 @@ export class CatalogService {
     return store?.store_settings?.settings || {};
   }
 
-  private getBestSellingFromCache(storeId: number): number[] | null {
-    const cached = this.bestSellingCache[storeId];
-    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
-      return cached.ids;
-    }
-    return null;
+  private async getBestSellingFromCache(storeId: number): Promise<number[] | null> {
+    return (await this.cache.get<number[]>(`catalog:bestselling:${storeId}`)) ?? null;
   }
 
-  private setBestSellingCache(storeId: number, ids: number[]): void {
-    this.bestSellingCache[storeId] = {
-      ids,
-      timestamp: Date.now(),
-    };
+  private async setBestSellingCache(storeId: number, ids: number[]): Promise<void> {
+    await this.cache.set(`catalog:bestselling:${storeId}`, ids, 86_400_000);
   }
 
   private async fetchBestSellingIds(

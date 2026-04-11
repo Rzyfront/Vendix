@@ -1,4 +1,4 @@
-import { ReportCategory, ReportCategoryId, ReportDefinition } from '../interfaces/report.interface';
+import { ReportCategory, ReportCategoryId, ReportDefinition, ReportType } from '../interfaces/report.interface';
 
 export const REPORT_CATEGORIES: ReportCategory[] = [
   { id: 'sales', label: 'Ventas', icon: 'shopping-cart', color: 'var(--color-primary)' },
@@ -23,6 +23,18 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'bar-chart-3',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'summary' as ReportType,
+    summaryLayout: {
+      fields: [
+        { key: 'total_revenue', label: 'Ventas Totales', type: 'currency' },
+        { key: 'total_orders', label: 'Total Pedidos', type: 'number' },
+        { key: 'average_order_value', label: 'Ticket Promedio', type: 'currency' },
+        { key: 'total_returns', label: 'Devoluciones', type: 'currency' },
+        { key: 'net_revenue', label: 'Ingresos Netos', type: 'currency' },
+        { key: 'unique_customers', label: 'Clientes Unicos', type: 'number' },
+        { key: 'items_sold', label: 'Productos Vendidos', type: 'number' },
+      ],
+    },
     columns: [
       { key: 'period', header: 'Periodo', type: 'text' },
       { key: 'total_sales', header: 'Total Ventas', type: 'currency', footer: 'sum' },
@@ -45,6 +57,9 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'package-search',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    keyMapping: { product_name: 'product', sku: 'sku', quantity_sold: 'units_sold', unit_price: 'unit_price', total_revenue: 'total_sales' },
+    trackKey: 'product_id',
     columns: [
       { key: 'product_name', header: 'Producto', type: 'text' },
       { key: 'quantity_sold', header: 'Cantidad Vendida', type: 'number', footer: 'sum' },
@@ -66,6 +81,9 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'tags',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    keyMapping: { category_name: 'category', total_revenue: 'total_sales', percentage_of_total: 'percentage' },
+    trackKey: 'category_id',
     columns: [
       { key: 'category_name', header: 'Categoria', type: 'text' },
       { key: 'total_sales', header: 'Total Ventas', type: 'currency', footer: 'sum' },
@@ -86,6 +104,9 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'user-check',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    keyMapping: { customer_name: 'customer', total_spent: 'total_purchases', total_orders: 'order_count', average_order_value: 'avg_ticket', last_order_date: 'last_purchase' },
+    trackKey: 'customer_id',
     columns: [
       { key: 'customer_name', header: 'Cliente', type: 'text' },
       { key: 'total_purchases', header: 'Total Compras', type: 'currency', footer: 'sum' },
@@ -107,6 +128,9 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'credit-card',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    keyMapping: { payment_method: 'payment_method', transaction_count: 'transaction_count', total_amount: 'amount', percentage: 'percentage' },
+    trackKey: 'payment_method_id',
     columns: [
       { key: 'payment_method', header: 'Metodo de Pago', type: 'text' },
       { key: 'total_amount', header: 'Monto Total', type: 'currency', footer: 'sum' },
@@ -127,6 +151,9 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'store',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    keyMapping: { channel_name: 'channel', total_revenue: 'total_sales' },
+    trackKey: 'channel_id',
     columns: [
       { key: 'channel', header: 'Canal', type: 'text' },
       { key: 'total_sales', header: 'Total Ventas', type: 'currency', footer: 'sum' },
@@ -148,6 +175,9 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'trending-up',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    keyMapping: { period: 'date', revenue: 'total_sales', orders: 'order_count', average_order_value: 'avg_ticket' },
+    trackKey: 'period',
     columns: [
       { key: 'date', header: 'Fecha', type: 'date' },
       { key: 'total_sales', header: 'Total Ventas', type: 'currency', footer: 'sum' },
@@ -170,6 +200,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'calculator',
     requiresDateRange: false,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'product_id',
     columns: [
       { key: 'product_name', header: 'Producto', type: 'text' },
       { key: 'quantity_on_hand', header: 'Cantidad Disponible', type: 'number', footer: 'sum' },
@@ -192,6 +224,9 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'layers',
     requiresDateRange: false,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    keyMapping: { product_name: 'product', sku: 'sku', quantity_on_hand: 'current_stock', reorder_point: 'min_stock', category_name: 'category', unit_cost: 'unit_cost', total_value: 'total_value' },
+    trackKey: 'product_id',
     columns: [
       { key: 'product_name', header: 'Producto', type: 'text' },
       { key: 'location', header: 'Ubicacion', type: 'text' },
@@ -201,7 +236,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'reorder_point', header: 'Punto de Reorden', type: 'number' },
     ],
     exportFilename: 'inventory_stock_levels',
-    dataEndpoint: 'store/analytics/inventory/overview',
+    dataEndpoint: 'store/analytics/inventory/stock-levels',
   },
 
   {
@@ -214,6 +249,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'alert-triangle',
     requiresDateRange: false,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'product_id',
     columns: [
       { key: 'product_name', header: 'Producto', type: 'text' },
       { key: 'current_stock', header: 'Stock Actual', type: 'number' },
@@ -235,6 +272,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'arrow-left-right',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'movement_id',
     columns: [
       { key: 'date', header: 'Fecha', type: 'date' },
       { key: 'product_name', header: 'Producto', type: 'text' },
@@ -256,6 +295,9 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'activity',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    keyMapping: { count: 'transaction_count' },
+    trackKey: 'movement_type',
     columns: [
       { key: 'movement_type', header: 'Tipo de Movimiento', type: 'text' },
       { key: 'total_quantity', header: 'Cantidad Total', type: 'number', footer: 'sum' },
@@ -278,6 +320,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'gauge',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'product_id',
     columns: [
       { key: 'product_name', header: 'Producto', type: 'text' },
       { key: 'units_sold', header: 'Unidades Vendidas', type: 'number', footer: 'sum' },
@@ -300,6 +344,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'trophy',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'product_id',
     columns: [
       { key: 'rank', header: '#', type: 'number', align: 'center' },
       { key: 'product_name', header: 'Producto', type: 'text' },
@@ -321,6 +367,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'percent',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'product_id',
     columns: [
       { key: 'product_name', header: 'Producto', type: 'text' },
       { key: 'cost_price', header: 'Precio de Costo', type: 'currency' },
@@ -344,6 +392,17 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'users',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'summary' as ReportType,
+    summaryLayout: {
+      fields: [
+        { key: 'total_customers', label: 'Total Clientes', type: 'number' },
+        { key: 'new_customers', label: 'Clientes Nuevos', type: 'number' },
+        { key: 'active_customers', label: 'Clientes Activos', type: 'number' },
+        { key: 'total_revenue', label: 'Ingresos Totales', type: 'currency' },
+        { key: 'average_order_value', label: 'Ticket Promedio', type: 'currency' },
+        { key: 'retention_rate', label: 'Tasa de Retencion', type: 'percentage' },
+      ],
+    },
     columns: [
       { key: 'metric', header: 'Metrica', type: 'text' },
       { key: 'value', header: 'Valor', type: 'number' },
@@ -363,6 +422,9 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'crown',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    keyMapping: { customer_name: 'customer', total_orders: 'order_count', average_order_value: 'avg_order', last_order_date: 'last_order', total_spent: 'total_spent' },
+    trackKey: 'customer_id',
     columns: [
       { key: 'customer_name', header: 'Cliente', type: 'text' },
       { key: 'total_spent', header: 'Total Gastado', type: 'currency', footer: 'sum' },
@@ -384,6 +446,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'receipt',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'customer_id',
     columns: [
       { key: 'customer_name', header: 'Cliente', type: 'text' },
       { key: 'original_amount', header: 'Monto Original', type: 'currency', footer: 'sum' },
@@ -406,6 +470,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'clock',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'nested' as ReportType,
+    trackKey: 'customer_id',
     columns: [
       { key: 'customer_name', header: 'Cliente', type: 'text' },
       { key: 'current', header: 'Corriente', type: 'currency', footer: 'sum' },
@@ -431,6 +497,15 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'scale',
     requiresDateRange: false,
     requiresFiscalPeriod: true,
+    type: 'summary' as ReportType,
+    summaryLayout: {
+      fields: [
+        { key: 'total_debits', label: 'Total Debitos', type: 'currency' },
+        { key: 'total_credits', label: 'Total Creditos', type: 'currency' },
+        { key: 'difference', label: 'Diferencia', type: 'currency' },
+        { key: 'account_count', label: 'Total Cuentas', type: 'number' },
+      ],
+    },
     columns: [
       { key: 'account_code', header: 'Codigo', type: 'text' },
       { key: 'account_name', header: 'Cuenta', type: 'text' },
@@ -453,6 +528,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'landmark',
     requiresDateRange: false,
     requiresFiscalPeriod: true,
+    type: 'nested' as ReportType,
+    trackKey: 'account_code',
     columns: [
       { key: 'account_code', header: 'Codigo', type: 'text' },
       { key: 'account_name', header: 'Cuenta', type: 'text' },
@@ -473,6 +550,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'file-bar-chart',
     requiresDateRange: false,
     requiresFiscalPeriod: true,
+    type: 'nested' as ReportType,
+    trackKey: 'account_code',
     columns: [
       { key: 'account_code', header: 'Codigo', type: 'text' },
       { key: 'account_name', header: 'Cuenta', type: 'text' },
@@ -493,6 +572,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'book-open',
     requiresDateRange: false,
     requiresFiscalPeriod: true,
+    type: 'list' as ReportType,
+    trackKey: 'entry_number',
     columns: [
       { key: 'date', header: 'Fecha', type: 'date' },
       { key: 'entry_number', header: 'No. Asiento', type: 'text' },
@@ -516,6 +597,15 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'file-stack',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'summary' as ReportType,
+    summaryLayout: {
+      fields: [
+        { key: 'total_tax_collected', label: 'Total Impuestos Recaudados', type: 'currency' },
+        { key: 'total_vat', label: 'Total IVA', type: 'currency' },
+        { key: 'total_retentions', label: 'Total Retenciones', type: 'currency' },
+        { key: 'net_tax_payable', label: 'Impuesto Neto por Pagar', type: 'currency' },
+      ],
+    },
     columns: [
       { key: 'tax_type', header: 'Tipo de Impuesto', type: 'text' },
       { key: 'base_amount', header: 'Base', type: 'currency', footer: 'sum' },
@@ -538,6 +628,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'banknote',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'period',
     columns: [
       { key: 'period', header: 'Periodo', type: 'text' },
       { key: 'total_earnings', header: 'Total Devengado', type: 'currency', footer: 'sum' },
@@ -560,6 +652,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'user-cog',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'employee_id',
     columns: [
       { key: 'employee_name', header: 'Empleado', type: 'text' },
       { key: 'base_salary', header: 'Salario Base', type: 'currency' },
@@ -581,6 +675,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'piggy-bank',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'employee_id',
     columns: [
       { key: 'employee_name', header: 'Empleado', type: 'text' },
       { key: 'severance', header: 'Cesantias', type: 'currency', footer: 'sum' },
@@ -605,11 +701,17 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'receipt',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'summary' as ReportType,
+    summaryLayout: {
+      fields: [
+        { key: 'total_amount', label: 'Total Gastos', type: 'currency' },
+        { key: 'total_count', label: 'Total Transacciones', type: 'number' },
+      ],
+    },
     columns: [
-      { key: 'category', header: 'Categoria', type: 'text' },
+      { key: 'category_name', header: 'Categoria', type: 'text' },
       { key: 'total_amount', header: 'Monto Total', type: 'currency', footer: 'sum' },
-      { key: 'transaction_count', header: 'Transacciones', type: 'number', footer: 'sum' },
-      { key: 'percentage', header: 'Participacion', type: 'percentage' },
+      { key: 'count', header: 'Transacciones', type: 'number', footer: 'sum' },
     ],
     exportFilename: 'expense_summary',
     dataEndpoint: 'store/expenses/summary',
@@ -625,6 +727,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'trending-up',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'nested' as ReportType,
+    trackKey: 'account_code',
     columns: [
       { key: 'concept', header: 'Concepto', type: 'text' },
       { key: 'amount', header: 'Monto', type: 'currency', footer: 'sum' },
@@ -644,6 +748,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'monitor-check',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'session_id',
     columns: [
       { key: 'session_date', header: 'Fecha', type: 'date' },
       { key: 'cashier', header: 'Cajero', type: 'text' },
@@ -667,6 +773,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     icon: 'calendar-clock',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
+    type: 'nested' as ReportType,
+    trackKey: 'supplier_id',
     columns: [
       { key: 'supplier_name', header: 'Proveedor', type: 'text' },
       { key: 'current', header: 'Corriente', type: 'currency', footer: 'sum' },

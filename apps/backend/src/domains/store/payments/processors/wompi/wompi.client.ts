@@ -16,8 +16,6 @@ import {
 export class WompiClient {
   private readonly logger = new Logger(WompiClient.name);
   private config: WompiConfig;
-  private readonly tokenCache = new Map<string, { tokens: { acceptance_token: string; personal_auth_token: string }; expiresAt: number }>();
-  private readonly TOKEN_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   // ── Configuración ───────────────────────────
 

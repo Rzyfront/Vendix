@@ -16,6 +16,8 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
 import { MarkdownEditorComponent } from '../../../../../../shared/components/markdown-editor/markdown-editor.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { StickyHeaderComponent } from '../../../../../../shared/components/sticky-header/sticky-header.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 
 @Component({
   selector: 'app-article-form',
@@ -31,6 +33,8 @@ import { StickyHeaderComponent } from '../../../../../../shared/components/stick
     MarkdownEditorComponent,
     IconComponent,
     StickyHeaderComponent,
+    ButtonComponent,
+    ModalComponent,
   ],
   template: `
     <div class="flex flex-col gap-4 md:gap-6">
@@ -91,12 +95,19 @@ import { StickyHeaderComponent } from '../../../../../../shared/components/stick
               [formControl]="$any(form.get('type'))"
             ></app-selector>
 
-            <app-selector
-              label="Categoría"
-              placeholder="Selecciona una categoría"
-              [options]="categoryOptions()"
-              [formControl]="$any(form.get('category_id'))"
-            ></app-selector>
+            <div class="flex gap-2 items-end">
+              <app-selector
+                class="flex-1"
+                label="Categoría"
+                placeholder="Selecciona una categoría"
+                [options]="categoryOptions()"
+                [formControl]="$any(form.get('category_id'))"
+              ></app-selector>
+              <app-button variant="outline" (clicked)="isCategoryCreateOpen = true"
+                customClasses="!w-[42px] !h-[42px] !p-0 flex items-center justify-center mb-0.5">
+                <app-icon name="plus" size="20"></app-icon>
+              </app-button>
+            </div>
 
             <app-selector
               label="Estado"
@@ -175,6 +186,43 @@ import { StickyHeaderComponent } from '../../../../../../shared/components/stick
           </div>
         </section>
       </form>
+
+      <!-- Quick Create Category Modal -->
+      <app-modal
+        [(isOpen)]="isCategoryCreateOpen"
+        title="Nueva Categoría"
+        size="sm"
+      >
+        <form [formGroup]="categoryForm" (ngSubmit)="onCategoryCreated()" class="flex flex-col gap-4">
+          <app-input
+            label="Nombre"
+            placeholder="Nombre de la categoría"
+            [formControl]="$any(categoryForm.get('name'))"
+            [required]="true"
+          ></app-input>
+
+          <app-textarea
+            label="Descripción"
+            placeholder="Breve descripción (opcional)"
+            [formControl]="$any(categoryForm.get('description'))"
+            [rows]="2"
+          ></app-textarea>
+
+          <div class="flex justify-end gap-3 mt-2">
+            <app-button variant="outline" size="sm" (clicked)="isCategoryCreateOpen = false">
+              Cancelar
+            </app-button>
+            <app-button
+              variant="primary"
+              size="sm"
+              type="submit"
+              [disabled]="categorySubmitting() || categoryForm.invalid"
+            >
+              {{ categorySubmitting() ? 'Guardando...' : 'Crear' }}
+            </app-button>
+          </div>
+        </form>
+      </app-modal>
     </div>
   `,
 })
@@ -193,6 +241,14 @@ export class ArticleFormComponent implements OnInit {
   coverFile = signal<File | null>(null);
   categoryOptions = signal<SelectorOption[]>([]);
   formValid = signal(false);
+
+  // Quick create category
+  isCategoryCreateOpen = false;
+  categorySubmitting = signal(false);
+  categoryForm: FormGroup = this.fb.group({
+    name: ['', [Validators.required, Validators.maxLength(100)]],
+    description: [''],
+  });
 
   headerActions = computed(() => [
     {
@@ -381,5 +437,25 @@ export class ArticleFormComponent implements OnInit {
 
   goBack() {
     this.router.navigate(['/super-admin/help-center']);
+  }
+
+  onCategoryCreated() {
+    if (this.categoryForm.invalid) return;
+
+    this.categorySubmitting.set(true);
+    this.service.createCategory(this.categoryForm.value).subscribe({
+      next: () => {
+        this.toast.success('Categoría creada');
+        this.isCategoryCreateOpen = false;
+        this.categoryForm.reset({ name: '', description: '' });
+        this.categorySubmitting.set(false);
+        this.loadCategories();
+      },
+      error: (err) => {
+        console.error('Error creating category', err);
+        this.toast.error('Error al crear la categoría');
+        this.categorySubmitting.set(false);
+      },
+    });
   }
 }

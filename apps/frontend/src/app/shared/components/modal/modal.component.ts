@@ -68,6 +68,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
                   {{ subtitle }}
                 </p>
               </div>
+              <ng-content select="[slot=header-end]"></ng-content>
             </div>
 
             <!-- Close button mejorado -->

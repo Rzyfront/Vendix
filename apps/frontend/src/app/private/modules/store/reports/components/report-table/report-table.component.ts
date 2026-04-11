@@ -14,6 +14,7 @@ export class ReportTableComponent {
   columns = input.required<ReportColumn[]>();
   data = input.required<any[]>();
   loading = input(false);
+  trackKey = input<string>('id');
 
   private currencyPipe = new CurrencyPipe('es-CO');
   private datePipe = new DatePipe('es-CO');

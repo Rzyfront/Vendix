@@ -69,19 +69,20 @@ export class InventoryAnalyticsService {
   }
 
   async getStockLevels(query: InventoryAnalyticsQueryDto) {
-    // track_inventory is Boolean @default(false), not nullable
-    const products = await this.prisma.products.findMany({
-      where: {
-        state: 'active',
-        track_inventory: true,
-        ...(query.category_id && {
-          product_categories: {
-            some: {
-              category_id: query.category_id,
-            },
+    const productWhere: any = {
+      state: 'active',
+      track_inventory: true,
+      ...(query.category_id && {
+        product_categories: {
+          some: {
+            category_id: query.category_id,
           },
-        }),
-      },
+        },
+      }),
+    };
+
+    const products = await this.prisma.products.findMany({
+      where: productWhere,
       select: {
         id: true,
         name: true,
@@ -96,13 +97,12 @@ export class InventoryAnalyticsService {
         max_stock_level: true,
         reorder_point: true,
       },
-      take: query.limit || 100,
       orderBy: {
         stock_quantity: 'asc',
       },
     });
 
-    const results = products.map((product) => {
+    let results = products.map((product) => {
       const qty = Number(product.stock_quantity || 0);
       const cost = Number(product.cost_price || 0);
       const reorderPoint = Number(
@@ -138,10 +138,31 @@ export class InventoryAnalyticsService {
 
     // Filter by status if specified
     if (query.status) {
-      return results.filter((r) => r.status === query.status);
+      results = results.filter((r) => r.status === query.status);
     }
 
-    return results;
+    const isPaginated = query.page !== undefined && query.limit !== undefined;
+    if (isPaginated) {
+      const page = query.page!;
+      const limit = query.limit!;
+      const totalCount = results.length;
+      const paginatedData = results.slice((page - 1) * limit, page * limit);
+
+      return {
+        data: paginatedData,
+        meta: {
+          pagination: {
+            total: totalCount,
+            page,
+            limit,
+            total_pages: Math.ceil(totalCount / limit),
+          },
+        },
+      };
+    }
+
+    // Non-paginated: respect original limit behavior
+    return results.slice(0, query.limit || 100);
   }
 
   async getLowStockAlerts(query: InventoryAnalyticsQueryDto) {
@@ -167,10 +188,9 @@ export class InventoryAnalyticsService {
       orderBy: {
         stock_quantity: 'asc',
       },
-      take: query.limit || 100,
     });
 
-    return products
+    const results = products
       .filter((p) => {
         const qty = Number(p.stock_quantity || 0);
         const reorderPoint = Number(p.reorder_point || p.min_stock_level || 5);
@@ -193,22 +213,114 @@ export class InventoryAnalyticsService {
           status: qty === 0 ? 'out_of_stock' : 'low_stock',
         };
       });
+
+    const isPaginated = query.page !== undefined && query.limit !== undefined;
+    if (isPaginated) {
+      const page = query.page!;
+      const limit = query.limit!;
+      const totalCount = results.length;
+      const paginatedData = results.slice((page - 1) * limit, page * limit);
+
+      return {
+        data: paginatedData,
+        meta: {
+          pagination: {
+            total: totalCount,
+            page,
+            limit,
+            total_pages: Math.ceil(totalCount / limit),
+          },
+        },
+      };
+    }
+
+    // Non-paginated: respect original limit behavior
+    return results.slice(0, query.limit || 100);
   }
 
   async getStockMovements(query: InventoryAnalyticsQueryDto) {
     const { startDate, endDate } = this.parseDateRange(query);
 
-    // inventory_movements is scoped by products relation
-    const movements = await this.prisma.inventory_movements.findMany({
-      where: {
-        created_at: {
-          gte: startDate,
-          lte: endDate,
-        },
-        ...(query.movement_type && {
-          movement_type: query.movement_type as any,
-        }),
+    const where: any = {
+      created_at: {
+        gte: startDate,
+        lte: endDate,
       },
+      ...(query.movement_type && {
+        movement_type: query.movement_type as any,
+      }),
+    };
+
+    const isPaginated = query.page !== undefined && query.limit !== undefined;
+
+    if (isPaginated) {
+      const page = query.page!;
+      const limit = query.limit!;
+      const totalCount = await this.prisma.inventory_movements.count({ where });
+
+      const movements = await this.prisma.inventory_movements.findMany({
+        where,
+        include: {
+          products: {
+            select: {
+              name: true,
+              sku: true,
+            },
+          },
+          from_location: {
+            select: {
+              name: true,
+            },
+          },
+          to_location: {
+            select: {
+              name: true,
+            },
+          },
+          users: {
+            select: {
+              username: true,
+            },
+          },
+        },
+        orderBy: {
+          created_at: 'desc',
+        },
+        skip: (page - 1) * limit,
+        take: limit,
+      });
+
+      const data = movements.map((m) => ({
+        id: m.id,
+        date: m.created_at.toISOString(),
+        product_id: m.product_id,
+        product_name: m.products?.name || 'Unknown',
+        sku: m.products?.sku || '',
+        movement_type: m.movement_type,
+        quantity: Number(m.quantity || 0),
+        from_location: m.from_location?.name || null,
+        to_location: m.to_location?.name || null,
+        reason: m.reason,
+        user_name: m.users?.username || null,
+        reference_id: m.source_order_id?.toString() || null,
+      }));
+
+      return {
+        data,
+        meta: {
+          pagination: {
+            total: totalCount,
+            page,
+            limit,
+            total_pages: Math.ceil(totalCount / limit),
+          },
+        },
+      };
+    }
+
+    // Non-paginated (retrocompatible)
+    const movements = await this.prisma.inventory_movements.findMany({
+      where,
       include: {
         products: {
           select: {

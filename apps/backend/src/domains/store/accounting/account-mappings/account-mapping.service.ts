@@ -1,9 +1,14 @@
 import {
+  Inject,
   Injectable,
   BadRequestException,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
+import Redis from 'ioredis';
+import { REDIS_CLIENT } from '../../../../common/redis/redis.module';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 
@@ -137,19 +142,15 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<string, { code: string; descriptio
   'cash_register.movement.other': { code: '2805', description: 'Otros (movimiento manual caja)' },
 };
 
-interface CacheEntry {
-  data: Map<string, { account_code: string; account_id?: number; source: 'store' | 'organization' | 'default' }>;
-  expires_at: number;
-}
-
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-
 @Injectable()
 export class AccountMappingService {
   private readonly logger = new Logger(AccountMappingService.name);
-  private cache = new Map<string, CacheEntry>();
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+  ) {}
 
   private getContext() {
     const context = RequestContextService.getContext();
@@ -159,16 +160,17 @@ export class AccountMappingService {
     return context;
   }
 
-  private getCacheKey(org_id: number, store_id?: number): string {
-    return `${org_id}:${store_id || 'org'}`;
-  }
-
-  private invalidateCache(org_id: number, store_id?: number): void {
-    const key = this.getCacheKey(org_id, store_id);
-    this.cache.delete(key);
-    // Also invalidate the combined key if invalidating store-level
+  private async invalidateCache(org_id: number, store_id?: number): Promise<void> {
+    const pattern = `acctmap:${org_id}:${store_id || 'org'}:*`;
+    const keys = await this.redis.keys(pattern);
+    if (keys.length > 0) {
+      await this.redis.del(...keys);
+    }
     if (store_id) {
-      this.cache.delete(this.getCacheKey(org_id));
+      const orgKeys = await this.redis.keys(`acctmap:${org_id}:org:*`);
+      if (orgKeys.length > 0) {
+        await this.redis.del(...orgKeys);
+      }
     }
   }
 
@@ -183,7 +185,13 @@ export class AccountMappingService {
     mapping_key: string,
     store_id?: number,
   ): Promise<{ account_code: string; account_id?: number; source: 'store' | 'organization' | 'default' } | null> {
+    const cacheKey = `acctmap:${org_id}:${store_id || 'org'}:${mapping_key}`;
+    const cached = await this.cache.get<{ account_code: string; account_id?: number; source: 'store' | 'organization' | 'default' }>(cacheKey);
+    if (cached) return cached;
+
     const base_client = this.prisma.withoutScope();
+
+    let result: { account_code: string; account_id?: number; source: 'store' | 'organization' | 'default' } | null = null;
 
     // 1. Check store override
     if (store_id) {
@@ -198,7 +206,7 @@ export class AccountMappingService {
       });
 
       if (store_mapping) {
-        return {
+        result = {
           account_code: store_mapping.account.code,
           account_id: store_mapping.account.id,
           source: 'store',
@@ -207,35 +215,45 @@ export class AccountMappingService {
     }
 
     // 2. Check org base (store_id = null)
-    const org_mapping = await base_client.accounting_account_mappings.findFirst({
-      where: {
-        organization_id: org_id,
-        store_id: null,
-        mapping_key: mapping_key,
-        is_active: true,
-      },
-      include: { account: { select: { id: true, code: true } } },
-    });
+    if (!result) {
+      const org_mapping = await base_client.accounting_account_mappings.findFirst({
+        where: {
+          organization_id: org_id,
+          store_id: null,
+          mapping_key: mapping_key,
+          is_active: true,
+        },
+        include: { account: { select: { id: true, code: true } } },
+      });
 
-    if (org_mapping) {
-      return {
-        account_code: org_mapping.account.code,
-        account_id: org_mapping.account.id,
-        source: 'organization',
-      };
+      if (org_mapping) {
+        result = {
+          account_code: org_mapping.account.code,
+          account_id: org_mapping.account.id,
+          source: 'organization',
+        };
+      }
     }
 
     // 3. Fallback to defaults
-    const default_mapping = DEFAULT_ACCOUNT_MAPPINGS[mapping_key];
-    if (!default_mapping) {
-      this.logger.debug(`Mapping key '${mapping_key}' not found, skipping`);
-      return null;
+    if (!result) {
+      const default_mapping = DEFAULT_ACCOUNT_MAPPINGS[mapping_key];
+      if (!default_mapping) {
+        this.logger.debug(`Mapping key '${mapping_key}' not found, skipping`);
+        return null;
+      }
+
+      result = {
+        account_code: default_mapping.code,
+        source: 'default',
+      };
     }
 
-    return {
-      account_code: default_mapping.code,
-      source: 'default',
-    };
+    if (result) {
+      await this.cache.set(cacheKey, result, 300_000);
+    }
+
+    return result;
   }
 
   /**
@@ -405,7 +423,7 @@ export class AccountMappingService {
       });
     }
 
-    this.invalidateCache(org_id, store_id);
+    await this.invalidateCache(org_id, store_id);
 
     return result;
   }
@@ -480,7 +498,7 @@ export class AccountMappingService {
 
     const results = await base_client.$transaction(operations);
 
-    this.invalidateCache(org_id, store_id);
+    await this.invalidateCache(org_id, store_id);
 
     return results;
   }
@@ -508,6 +526,6 @@ export class AccountMappingService {
       });
     }
 
-    this.invalidateCache(org_id, store_id);
+    await this.invalidateCache(org_id, store_id);
   }
 }

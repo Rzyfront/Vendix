@@ -1,18 +1,49 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 import { statfsSync } from 'fs';
 import * as os from 'os';
 import { VendixHttpException } from '../../../../common/errors/vendix-http.exception';
 import { ErrorCodes } from '../../../../common/errors/error-codes';
+import { CACHE_TTL_SERVER } from '../constants/cloudwatch.constants';
+
+export interface ServerInfoResult {
+  hostname: string;
+  platform: string;
+  arch: string;
+  uptime: number;
+  processUptime: number;
+  loadAverage: number[];
+  totalMemory: number;
+  freeMemory: number;
+  cpuCount: number;
+  cpuModel: string;
+  nodeVersion: string;
+  pid: number;
+  disk: any | null;
+  memory: {
+    total: number;
+    free: number;
+    used: number;
+    usedPercent: number;
+  };
+}
 
 @Injectable()
 export class ServerMetricsService {
   private readonly logger = new Logger(ServerMetricsService.name);
 
-  getServerInfo() {
+  constructor(@Inject(CACHE_MANAGER) private readonly cache: Cache) {}
+
+  async getServerInfo(): Promise<ServerInfoResult> {
+    const cacheKey = 'monitoring:server';
+    const cached = await this.cache.get<ServerInfoResult>(cacheKey);
+    if (cached) return cached;
+
     try {
       const cpus = os.cpus();
 
-      return {
+      const result = {
         hostname: os.hostname(),
         platform: os.platform(),
         arch: os.arch(),
@@ -33,6 +64,9 @@ export class ServerMetricsService {
           usedPercent: ((os.totalmem() - os.freemem()) / os.totalmem()) * 100,
         },
       };
+
+      await this.cache.set(cacheKey, result, CACHE_TTL_SERVER);
+      return result;
     } catch (error) {
       this.logger.error(
         `Failed to collect server metrics: ${error.message}`,

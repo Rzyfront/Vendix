@@ -185,14 +185,79 @@ export class CustomersAnalyticsService {
 
   async getTopCustomers(query: AnalyticsQueryDto) {
     const { startDate, endDate } = this.parseDateRange(query);
+    const isPaginated = query.page !== undefined && query.limit !== undefined;
 
+    const where = {
+      state: { in: this.COMPLETED_STATES },
+      customer_id: { not: null },
+      created_at: { gte: startDate, lte: endDate },
+    };
+
+    if (isPaginated) {
+      const page = query.page!;
+      const limit = query.limit!;
+
+      const countGroups = await this.prisma.orders.groupBy({
+        by: ['customer_id'],
+        where,
+      });
+      const totalCount = countGroups.length;
+
+      const results = await this.prisma.orders.groupBy({
+        by: ['customer_id'],
+        where,
+        _sum: { grand_total: true },
+        _count: { id: true },
+        _max: { created_at: true },
+        orderBy: { _sum: { grand_total: 'desc' } },
+        skip: (page - 1) * limit,
+        take: limit,
+      });
+
+      const customerIds = results
+        .map((r) => r.customer_id)
+        .filter(Boolean) as number[];
+      const customers = await this.prisma.users.findMany({
+        where: { id: { in: customerIds } },
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          email: true,
+        },
+      });
+      const customerMap = new Map(customers.map((c) => [c.id, c]));
+
+      const data = results.map((r) => {
+        const customer = customerMap.get(r.customer_id as number);
+        return {
+          id: r.customer_id,
+          first_name: customer?.first_name || '',
+          last_name: customer?.last_name || '',
+          email: customer?.email || '',
+          total_orders: r._count.id || 0,
+          total_spent: Number(r._sum.grand_total || 0),
+          last_order_date: r._max.created_at?.toISOString() || null,
+        };
+      });
+
+      return {
+        data,
+        meta: {
+          pagination: {
+            total: totalCount,
+            page,
+            limit,
+            total_pages: Math.ceil(totalCount / limit),
+          },
+        },
+      };
+    }
+
+    // Non-paginated (retrocompatible)
     const results = await this.prisma.orders.groupBy({
       by: ['customer_id'],
-      where: {
-        state: { in: this.COMPLETED_STATES },
-        customer_id: { not: null },
-        created_at: { gte: startDate, lte: endDate },
-      },
+      where,
       _sum: { grand_total: true },
       _count: { id: true },
       _max: { created_at: true },
@@ -212,7 +277,6 @@ export class CustomersAnalyticsService {
         email: true,
       },
     });
-
     const customerMap = new Map(customers.map((c) => [c.id, c]));
 
     return results.map((r) => {

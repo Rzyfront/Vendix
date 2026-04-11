@@ -1,14 +1,17 @@
-import { Injectable, NestMiddleware, Logger } from '@nestjs/common';
+import { Inject, Injectable, NestMiddleware, Logger } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { Request, Response, NextFunction } from 'express';
 import { PublicDomainsService } from '../../domains/public/domains/public-domains.service';
 
 @Injectable()
 export class DomainResolverMiddleware implements NestMiddleware {
   private readonly logger = new Logger(DomainResolverMiddleware.name);
-  private cache = new Map<string, { context: any; timestamp: number }>();
-  private readonly CACHE_TTL = 300000; // 5 minutos
 
-  constructor(private readonly publicDomains: PublicDomainsService) { }
+  constructor(
+    private readonly publicDomains: PublicDomainsService,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
+  ) { }
 
   async use(req: Request, res: Response, next: NextFunction) {
     // Usar originalUrl para asegurar que detectamos /ecommerce/ incluso con prefijos
@@ -39,11 +42,10 @@ export class DomainResolverMiddleware implements NestMiddleware {
       }
 
       // Prioridad 2: Resolución por hostname
-      const cached = this.cache.get(hostname);
-      const now = Date.now();
-
-      if (cached && now - cached.timestamp < this.CACHE_TTL) {
-        req['domain_context'] = cached.context;
+      const cacheKey = `domain:${hostname}`;
+      const cached = await this.cache.get<{ store_id: number; organization_id?: number }>(cacheKey);
+      if (cached) {
+        req['domain_context'] = cached;
         return next();
       }
 
@@ -53,7 +55,7 @@ export class DomainResolverMiddleware implements NestMiddleware {
         organization_id: domain.organization_id,
       };
 
-      this.cache.set(hostname, { context: domain_context, timestamp: now });
+      await this.cache.set(`domain:${hostname}`, domain_context, 300_000);
       req['domain_context'] = domain_context;
 
       next();

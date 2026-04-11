@@ -1,25 +1,33 @@
-import { Component, Input } from '@angular/core';
+import { Component, Input, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { SlowEndpoint } from '../../interfaces';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 
 @Component({
   selector: 'app-slow-endpoints',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, IconComponent, CardComponent],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="rounded-xl overflow-hidden" style="background: var(--color-background); border: 1px solid var(--color-border);">
-      <div class="px-4 py-3 flex items-center gap-2" style="border-bottom: 1px solid var(--color-border); background: linear-gradient(135deg, rgba(168,85,247,0.05) 0%, transparent 100%);">
-        <span class="w-5 h-5 rounded flex items-center justify-center bg-purple-500/10">
-          <svg class="w-3 h-3 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-          </svg>
+    <app-card [padding]="false" overflow="hidden" customClasses="!overflow-hidden">
+      <div class="px-4 py-3 flex items-center justify-between" style="border-bottom: 1px solid var(--color-border); background: linear-gradient(135deg, rgba(168,85,247,0.05) 0%, transparent 100%);">
+        <div class="flex items-center gap-2">
+          <span class="w-5 h-5 rounded flex items-center justify-center bg-purple-500/10">
+            <svg class="w-3 h-3 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+          </span>
+          <h4 class="text-sm font-semibold" style="color: var(--color-text-primary);">Endpoints Más Lentos</h4>
+        </div>
+        <span *ngIf="endpoints && endpoints.length > 0" class="text-xs font-mono px-2 py-0.5 rounded-full" style="background: var(--color-surface); color: var(--color-text-muted);">
+          Mostrando {{ displayedCount > endpoints.length ? endpoints.length : displayedCount }} de {{ endpoints.length }}
         </span>
-        <h4 class="text-sm font-semibold" style="color: var(--color-text-primary);">Top 10 Endpoints Más Lentos</h4>
       </div>
 
       <div *ngIf="loading" class="p-4 animate-pulse">
         <div class="space-y-2">
-          <div *ngFor="let i of [1,2,3]" class="h-10 rounded-lg" style="background: var(--color-border); opacity: 0.3;"></div>
+          <div *ngFor="let i of [1,2,3]; trackBy: trackByIndex" class="h-10 rounded-lg" style="background: var(--color-border); opacity: 0.3;"></div>
         </div>
       </div>
 
@@ -28,40 +36,81 @@ import { SlowEndpoint } from '../../interfaces';
           <p class="text-sm" style="color: var(--color-text-muted);">Sin datos de endpoints aún</p>
         </div>
 
-        <div *ngIf="endpoints && endpoints.length > 0" class="divide-y" style="border-color: var(--color-border);">
-          <div *ngFor="let ep of endpoints; let i = index"
-            class="flex items-center gap-3 px-4 py-2.5 hover:opacity-80 transition-opacity"
-            style="border-bottom: 1px solid var(--color-border);">
-            <span class="text-xs font-mono w-5 text-center" style="color: var(--color-text-muted);">{{ i + 1 }}</span>
-            <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded"
-              [style.background]="getMethodBg(ep.method)"
-              [style.color]="getMethodColor(ep.method)">
-              {{ ep.method }}
-            </span>
-            <span class="flex-1 font-mono text-xs truncate" style="color: var(--color-text-primary);">{{ ep.path }}</span>
-            <div class="flex items-center gap-4 shrink-0 text-xs font-mono">
-              <span class="flex flex-col items-end">
-                <span class="text-[9px] uppercase" style="color: var(--color-text-muted);">avg</span>
-                <span [style.color]="getDurationColor(ep.avgDuration)" class="font-bold">{{ ep.avgDuration.toFixed(0) }}ms</span>
+        <div *ngIf="endpoints && endpoints.length > 0">
+          <div class="divide-y" style="border-color: var(--color-border);">
+            <div *ngFor="let ep of visibleEndpoints; let i = index; trackBy: trackByEndpoint"
+              class="flex items-center gap-3 px-4 py-2.5 hover:opacity-80 transition-opacity"
+              style="border-bottom: 1px solid var(--color-border);">
+              <span class="text-xs font-mono w-5 text-center" style="color: var(--color-text-muted);">{{ i + 1 }}</span>
+              <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded"
+                [style.background]="getMethodBg(ep.method)"
+                [style.color]="getMethodColor(ep.method)">
+                {{ ep.method }}
               </span>
-              <span class="flex flex-col items-end">
-                <span class="text-[9px] uppercase" style="color: var(--color-text-muted);">p95</span>
-                <span [style.color]="getDurationColor(ep.p95Duration)" class="font-bold">{{ ep.p95Duration.toFixed(0) }}ms</span>
-              </span>
-              <span class="flex flex-col items-end">
-                <span class="text-[9px] uppercase" style="color: var(--color-text-muted);">calls</span>
-                <span style="color: var(--color-text-secondary);">{{ ep.count }}</span>
-              </span>
+              <span class="flex-1 font-mono text-xs truncate" style="color: var(--color-text-primary);">{{ ep.path }}</span>
+              <div class="flex items-center gap-4 shrink-0 text-xs font-mono">
+                <span class="flex flex-col items-end">
+                  <span class="text-[9px] uppercase" style="color: var(--color-text-muted);">avg</span>
+                  <span [style.color]="getDurationColor(ep.avgDuration)" class="font-bold">{{ ep.avgDuration.toFixed(0) }}ms</span>
+                </span>
+                <span class="flex flex-col items-end">
+                  <span class="text-[9px] uppercase" style="color: var(--color-text-muted);">p95</span>
+                  <span [style.color]="getDurationColor(ep.p95Duration)" class="font-bold">{{ ep.p95Duration.toFixed(0) }}ms</span>
+                </span>
+                <span class="flex flex-col items-end">
+                  <span class="text-[9px] uppercase" style="color: var(--color-text-muted);">calls</span>
+                  <span style="color: var(--color-text-secondary);">{{ ep.count }}</span>
+                </span>
+              </div>
             </div>
+          </div>
+
+          <!-- Pagination footer -->
+          <div *ngIf="endpoints.length > pageSize" class="px-4 py-3 flex justify-center" style="border-top: 1px solid var(--color-border);">
+            <button
+              (click)="toggleShowMore()"
+              class="flex items-center gap-1.5 text-xs font-medium transition-colors px-3 py-1.5 rounded-lg"
+              style="color: var(--color-primary); background: var(--color-surface);"
+            >
+              <app-icon [name]="isExpanded ? 'chevron-up' : 'chevron-down'" [size]="14"></app-icon>
+              {{ isExpanded ? 'Ver menos' : 'Ver más (' + (endpoints.length - pageSize) + ' restantes)' }}
+            </button>
           </div>
         </div>
       </div>
-    </div>
+    </app-card>
   `,
 })
 export class SlowEndpointsComponent {
   @Input() endpoints: SlowEndpoint[] | null = null;
   @Input() loading: boolean = false;
+  @Input() pageSize: number = 10;
+
+  displayedCount = 10;
+  isExpanded = false;
+
+  get visibleEndpoints(): SlowEndpoint[] {
+    if (!this.endpoints) return [];
+    return this.endpoints.slice(0, this.displayedCount);
+  }
+
+  toggleShowMore(): void {
+    if (this.isExpanded) {
+      this.displayedCount = this.pageSize;
+      this.isExpanded = false;
+    } else {
+      this.displayedCount = this.endpoints?.length ?? this.pageSize;
+      this.isExpanded = true;
+    }
+  }
+
+  trackByEndpoint(index: number, ep: SlowEndpoint): string {
+    return `${ep.method}:${ep.path}`;
+  }
+
+  trackByIndex(index: number): number {
+    return index;
+  }
 
   getMethodBg(method: string): string {
     switch (method) {

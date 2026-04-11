@@ -47,6 +47,7 @@ services:
     environment:
       DATABASE_URL: postgres://username:password@db:5432/vendix_db?schema=public
       NODE_ENV: development
+      NODE_OPTIONS: "--max-old-space-size=1536"
       CHOKIDAR_USEPOLLING: "true"
       REDIS_HOST: redis
       REDIS_PORT: 6379

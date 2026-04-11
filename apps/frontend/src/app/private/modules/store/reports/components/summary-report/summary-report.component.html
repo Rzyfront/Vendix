@@ -1,0 +1,47 @@
+<div class="summary-report">
+  @if (loading()) {
+    <div class="metrics-grid">
+      @for (i of skeletonRows; track i) {
+        <div class="skeleton-card">
+          <div class="skeleton skeleton-label"></div>
+          <div class="skeleton skeleton-value"></div>
+        </div>
+      }
+    </div>
+  } @else if (!hasData()) {
+    <div class="empty-state">
+      <p>No hay datos para el resumen</p>
+    </div>
+  } @else {
+    @if (hasSections()) {
+      <div class="sections-container">
+        @for (section of sections(); track section.title) {
+          <div class="section">
+            <h3 class="section-title">{{ section.title }}</h3>
+            <div class="metrics-grid">
+              @for (field of section.fields; track field.key) {
+                <div class="metric-card">
+                  <div class="metric-label">{{ field.label }}</div>
+                  <div class="metric-value" [class]="getValueClass(field)">
+                    {{ formatValue(summaryData()[field.key], field) }}
+                  </div>
+                </div>
+              }
+            </div>
+          </div>
+        }
+      </div>
+    } @else {
+      <div class="metrics-grid">
+        @for (field of flatFields(); track field.key) {
+          <div class="metric-card">
+            <div class="metric-label">{{ field.label }}</div>
+            <div class="metric-value" [class]="getValueClass(field)">
+              {{ formatValue(summaryData()[field.key], field) }}
+            </div>
+          </div>
+        }
+      </div>
+    }
+  }
+</div>

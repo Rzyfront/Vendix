@@ -89,26 +89,30 @@ import { CardComponent } from '../../../../shared/components';
       <!-- Main Content Card -->
       <app-card [padding]="false" overflow="hidden">
         <!-- Tabs -->
-        <div class="flex border-b border-border">
+        <div class="flex items-center gap-1 border-b border-border">
           <button
-            class="px-6 py-3 text-sm font-medium transition-colors"
-            [class.text-primary-600]="activeTab() === 'articles'"
-            [class.border-b-2]="activeTab() === 'articles'"
-            [class.border-primary-600]="activeTab() === 'articles'"
+            class="px-4 py-2.5 text-sm font-medium transition-colors relative"
+            [class.text-primary]="activeTab() === 'articles'"
             [class.text-text-secondary]="activeTab() !== 'articles'"
             (click)="activeTab.set('articles')"
           >
             Artículos
+            <span
+              *ngIf="activeTab() === 'articles'"
+              class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-full"
+            ></span>
           </button>
           <button
-            class="px-6 py-3 text-sm font-medium transition-colors"
-            [class.text-primary-600]="activeTab() === 'categories'"
-            [class.border-b-2]="activeTab() === 'categories'"
-            [class.border-primary-600]="activeTab() === 'categories'"
+            class="px-4 py-2.5 text-sm font-medium transition-colors relative"
+            [class.text-primary]="activeTab() === 'categories'"
             [class.text-text-secondary]="activeTab() !== 'categories'"
             (click)="activeTab.set('categories')"
           >
             Categorías
+            <span
+              *ngIf="activeTab() === 'categories'"
+              class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-full"
+            ></span>
           </button>
         </div>
 

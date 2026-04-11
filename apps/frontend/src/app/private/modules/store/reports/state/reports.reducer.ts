@@ -24,6 +24,9 @@ export const reportsReducer = createReducer(
     reportData: null,
     reportMeta: null,
     error: null,
+    currentPage: 1,
+    totalPages: 1,
+    totalItems: 0,
   })),
 
   on(ReportsActions.setDateRange, (state, { dateRange }) => ({
@@ -42,17 +45,33 @@ export const reportsReducer = createReducer(
     error: null,
   })),
 
-  on(ReportsActions.loadReportDataSuccess, (state, { data, meta }) => ({
+  on(ReportsActions.loadReportDataSuccess, (state, { data, meta, isSummary, summaryData }) => ({
     ...state,
     reportData: data,
     reportMeta: meta || null,
+    isSummary: isSummary ?? false,
+    summaryData: summaryData ?? null,
     loading: false,
+    currentPage: meta?.['pagination']?.page ?? state.currentPage,
+    totalPages: meta?.['pagination']?.total_pages ?? state.totalPages,
+    totalItems: meta?.['pagination']?.total ?? state.totalItems,
   })),
 
   on(ReportsActions.loadReportDataFailure, (state, { error }) => ({
     ...state,
     loading: false,
     error,
+  })),
+
+  on(ReportsActions.setPage, (state, { page }) => ({
+    ...state,
+    currentPage: page,
+  })),
+
+  on(ReportsActions.setItemsPerPage, (state, { itemsPerPage }) => ({
+    ...state,
+    itemsPerPage,
+    currentPage: 1,
   })),
 
   on(ReportsActions.exportReport, (state) => ({

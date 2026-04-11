@@ -498,7 +498,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   // ── Chart Builders ───────────────────────────────────────
 
   private updateTrendChart(trends: SalesTrend[]): void {
-    if (!trends.length) return;
+    if (!trends?.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const primaryColor = style.getPropertyValue('--color-primary').trim() || '#2ecc71';
@@ -586,7 +586,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   private updateChannelChart(channels: SalesByChannel[]): void {
-    if (!channels.length) return;
+    if (!channels?.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const mutedColor = style.getPropertyValue('--color-muted-foreground').trim() || '#6b7280';

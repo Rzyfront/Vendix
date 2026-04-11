@@ -8,9 +8,15 @@ export interface ReportsState {
   fiscalPeriodId: number | null;
   reportData: any[] | null;
   reportMeta: Record<string, any> | null;
+  isSummary: boolean;
+  summaryData: Record<string, any> | null;
   loading: boolean;
   exporting: boolean;
   error: string | null;
+  currentPage: number;
+  totalPages: number;
+  totalItems: number;
+  itemsPerPage: number;
 }
 
 function getDefaultDateRange(): DateRangeFilter {
@@ -30,7 +36,13 @@ export const initialReportsState: ReportsState = {
   fiscalPeriodId: null,
   reportData: null,
   reportMeta: null,
+  isSummary: false,
+  summaryData: null,
   loading: false,
   exporting: false,
   error: null,
+  currentPage: 1,
+  totalPages: 1,
+  totalItems: 0,
+  itemsPerPage: 25,
 };

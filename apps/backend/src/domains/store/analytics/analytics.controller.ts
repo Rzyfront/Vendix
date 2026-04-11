@@ -14,6 +14,7 @@ import { InventoryAnalyticsService } from './services/inventory-analytics.servic
 import { ProductsAnalyticsService } from './services/products-analytics.service';
 import { OverviewAnalyticsService } from './services/overview-analytics.service';
 import { CustomersAnalyticsService } from './services/customers-analytics.service';
+import { FinancialAnalyticsService } from './services/financial-analytics.service';
 import { AnalyticsQueryDto, SalesAnalyticsQueryDto, InventoryAnalyticsQueryDto, ProductsAnalyticsQueryDto } from './dto/analytics-query.dto';
 import { ResponseService } from '../../../common/responses/response.service';
 
@@ -26,6 +27,7 @@ export class AnalyticsController {
     private readonly products_analytics_service: ProductsAnalyticsService,
     private readonly overview_analytics_service: OverviewAnalyticsService,
     private readonly customers_analytics_service: CustomersAnalyticsService,
+    private readonly financial_analytics_service: FinancialAnalyticsService,
     private readonly response_service: ResponseService,
   ) {}
 
@@ -58,21 +60,21 @@ export class AnalyticsController {
   @Permissions('store:analytics:read')
   async getSalesByProduct(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesByProduct(query);
-    return this.response_service.success(result);
+    return result;
   }
 
   @Get('sales/by-category')
   @Permissions('store:analytics:read')
   async getSalesByCategory(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesByCategory(query);
-    return this.response_service.success(result);
+    return result;
   }
 
   @Get('sales/by-payment-method')
   @Permissions('store:analytics:read')
   async getSalesByPaymentMethod(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesByPaymentMethod(query);
-    return this.response_service.success(result);
+    return result;
   }
 
   @Get('sales/trends')
@@ -86,14 +88,14 @@ export class AnalyticsController {
   @Permissions('store:analytics:read')
   async getSalesByCustomer(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesByCustomer(query);
-    return this.response_service.success(result);
+    return result;
   }
 
   @Get('sales/by-channel')
   @Permissions('store:analytics:read')
   async getSalesByChannel(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesByChannel(query);
-    return this.response_service.success(result);
+    return result;
   }
 
   @Get('sales/export')
@@ -203,6 +205,66 @@ export class AnalyticsController {
     return new StreamableFile(buffer);
   }
 
+  @Get('products/performance')
+  @Permissions('store:analytics:read')
+  async getProductPerformance(@Query() query: ProductsAnalyticsQueryDto) {
+    const result = await this.products_analytics_service.getProductPerformance(query);
+    return result;
+  }
+
+  @Get('products/profitability')
+  @Permissions('store:analytics:read')
+  async getProductProfitability(@Query() query: ProductsAnalyticsQueryDto) {
+    const result = await this.products_analytics_service.getProductProfitability(query);
+    return result;
+  }
+
+  @Get('products/performance/export')
+  @Permissions('store:analytics:read')
+  async exportProductPerformance(
+    @Query() query: ProductsAnalyticsQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const data = await this.products_analytics_service.getProductPerformanceForExport(query);
+
+    const XLSX = await import('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, 'Rendimiento');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const filename = `rendimiento_productos_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+
+    return new StreamableFile(buffer);
+  }
+
+  @Get('products/profitability/export')
+  @Permissions('store:analytics:read')
+  async exportProductProfitability(
+    @Query() query: ProductsAnalyticsQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const data = await this.products_analytics_service.getProductProfitabilityForExport(query);
+
+    const XLSX = await import('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, 'Rentabilidad');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const filename = `rentabilidad_productos_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+
+    return new StreamableFile(buffer);
+  }
+
   // ==================== INVENTORY ANALYTICS ====================
 
   @Get('inventory/summary')
@@ -216,21 +278,21 @@ export class AnalyticsController {
   @Permissions('store:analytics:read')
   async getStockLevels(@Query() query: InventoryAnalyticsQueryDto) {
     const result = await this.inventory_analytics_service.getStockLevels(query);
-    return this.response_service.success(result);
+    return result;
   }
 
   @Get('inventory/low-stock')
   @Permissions('store:analytics:read')
   async getLowStockAlerts(@Query() query: InventoryAnalyticsQueryDto) {
     const result = await this.inventory_analytics_service.getLowStockAlerts(query);
-    return this.response_service.success(result);
+    return result;
   }
 
   @Get('inventory/movements')
   @Permissions('store:analytics:read')
   async getStockMovements(@Query() query: InventoryAnalyticsQueryDto) {
     const result = await this.inventory_analytics_service.getStockMovements(query);
-    return this.response_service.success(result);
+    return result;
   }
 
   @Get('inventory/valuation')
@@ -326,7 +388,7 @@ export class AnalyticsController {
   @Permissions('store:analytics:read')
   async getTopCustomers(@Query() query: AnalyticsQueryDto) {
     const result = await this.customers_analytics_service.getTopCustomers(query);
-    return this.response_service.success(result);
+    return result;
   }
 
   @Get('customers/export')
@@ -355,6 +417,75 @@ export class AnalyticsController {
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
     const filename = `clientes_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+
+    return new StreamableFile(buffer);
+  }
+
+  // ==================== FINANCIAL ANALYTICS ====================
+
+  @Get('financial/tax-summary')
+  @Permissions('store:analytics:read')
+  async getTaxSummary(@Query() query: AnalyticsQueryDto) {
+    const result = await this.financial_analytics_service.getTaxSummary(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('financial/cash-sessions')
+  @Permissions('store:analytics:read')
+  async getCashSessionsReport(@Query() query: AnalyticsQueryDto) {
+    const result = await this.financial_analytics_service.getCashSessionsReport(query);
+    return result;
+  }
+
+  @Get('financial/profit-loss')
+  @Permissions('store:analytics:read')
+  async getProfitLossSummary(@Query() query: AnalyticsQueryDto) {
+    const result = await this.financial_analytics_service.getProfitLossSummary(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('financial/tax-summary/export')
+  @Permissions('store:analytics:read')
+  async exportTaxSummary(
+    @Query() query: AnalyticsQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const data = await this.financial_analytics_service.getTaxSummaryForExport(query);
+
+    const XLSX = await import('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, 'Impuestos');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const filename = `impuestos_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+
+    return new StreamableFile(buffer);
+  }
+
+  @Get('financial/cash-sessions/export')
+  @Permissions('store:analytics:read')
+  async exportCashSessions(
+    @Query() query: AnalyticsQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const data = await this.financial_analytics_service.getCashSessionsForExport(query);
+
+    const XLSX = await import('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, 'Sesiones de Caja');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const filename = `sesiones_caja_${new Date().toISOString().split('T')[0]}.xlsx`;
     res.set({
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${filename}"`,

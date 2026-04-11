@@ -2,10 +2,13 @@ import {
   CanActivate,
   ExecutionContext,
   ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   SetMetadata,
 } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { Reflector } from '@nestjs/core';
 import { StorePrismaService } from '../../prisma/services/store-prisma.service';
 
@@ -16,11 +19,11 @@ export const RequireModuleFlow = (module: 'accounting' | 'payroll' | 'invoicing'
 @Injectable()
 export class ModuleFlowGuard implements CanActivate {
   private readonly logger = new Logger(ModuleFlowGuard.name);
-  private cache = new Map<string, { enabled: boolean; expires: number }>();
 
   constructor(
     private reflector: Reflector,
     private prisma: StorePrismaService,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -34,10 +37,10 @@ export class ModuleFlowGuard implements CanActivate {
     const store_id = request.store_id ?? request.context?.store_id;
     if (!store_id) return true;
 
-    const cache_key = `${store_id}_${module}`;
-    const cached = this.cache.get(cache_key);
-    if (cached && cached.expires > Date.now()) {
-      if (!cached.enabled) {
+    const cacheKey = `mflow:${store_id}:${module}`;
+    const cached = await this.cache.get<boolean>(cacheKey);
+    if (cached !== undefined && cached !== null) {
+      if (!cached) {
         throw new ForbiddenException(`Module "${module}" is disabled for this store`);
       }
       return true;
@@ -64,7 +67,7 @@ export class ModuleFlowGuard implements CanActivate {
         enabled = false;
       }
 
-      this.cache.set(cache_key, { enabled, expires: Date.now() + 5 * 60 * 1000 });
+      await this.cache.set(cacheKey, enabled, 300_000);
 
       if (!enabled) {
         throw new ForbiddenException(`Module "${module}" is disabled for this store`);
@@ -72,18 +75,6 @@ export class ModuleFlowGuard implements CanActivate {
       return true;
     } catch (error) {
       if (error instanceof ForbiddenException) throw error;
-
-      // Fail-closed: usar cache expirado como fallback, sino denegar
-      const stale = this.cache.get(cache_key);
-      if (stale) {
-        this.logger.warn(
-          `DB error for module "${module}" store ${store_id}, using expired cache (enabled=${stale.enabled})`,
-        );
-        if (!stale.enabled) {
-          throw new ForbiddenException(`Module "${module}" is disabled for this store`);
-        }
-        return true;
-      }
 
       this.logger.warn(
         `DB error for module "${module}" store ${store_id}, no cache available — denying access`,

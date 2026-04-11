@@ -1390,14 +1390,37 @@ export class ProductsService {
             // Eliminar variantes que NO están en la lista enviada (por ID)
             for (const ev of allExistingVariants) {
               if (!keptVariantIds.has(ev.id)) {
-                // Limpiar FK Restrict antes de borrar (order_items, inventory_adjustments)
+                // Limpiar FK Restrict antes de borrar
                 await prisma.order_items.updateMany({
+                  where: { product_variant_id: ev.id },
+                  data: { product_variant_id: null },
+                });
+                await prisma.invoice_items.updateMany({
+                  where: { product_variant_id: ev.id },
+                  data: { product_variant_id: null },
+                });
+                await prisma.quotation_items.updateMany({
+                  where: { product_variant_id: ev.id },
+                  data: { product_variant_id: null },
+                });
+                await prisma.layaway_items.updateMany({
+                  where: { product_variant_id: ev.id },
+                  data: { product_variant_id: null },
+                });
+                await prisma.dispatch_note_items.updateMany({
                   where: { product_variant_id: ev.id },
                   data: { product_variant_id: null },
                 });
                 await prisma.inventory_adjustments.updateMany({
                   where: { product_variant_id: ev.id },
                   data: { product_variant_id: null },
+                });
+                await prisma.inventory_transactions.updateMany({
+                  where: { product_variant_id: ev.id },
+                  data: { product_variant_id: null },
+                });
+                await prisma.stock_levels.deleteMany({
+                  where: { product_variant_id: ev.id },
                 });
 
                 // Limpiar imagen de variante de S3
@@ -1426,6 +1449,9 @@ export class ProductsService {
                 });
               }
             }
+
+            // Sync product stock from remaining variants
+            await this.stockLevelManager.syncProductStock(prisma, id);
           }
 
           // Guard: skip base stock updates when product has variants
