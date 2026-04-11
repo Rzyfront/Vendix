@@ -18,6 +18,17 @@ export class ReportDataAdapterService {
    * using the report definition to determine the correct strategy.
    */
   adapt(rawData: any, report: ReportDefinition): ReportAdaptedData {
+    // Custom transformers for reports with non-standard response shapes
+    if (report.id === 'profit-loss') {
+      return this.adaptProfitLoss(rawData);
+    }
+    if (report.id === 'accounts-payable-aging') {
+      return this.adaptAccountsPayableAging(rawData);
+    }
+    if (report.id === 'customer-receivables') {
+      return this.adaptCustomerReceivables(rawData);
+    }
+
     const normalized = this.normalizeResponse(rawData);
     const reportType = this.resolveType(report, normalized);
 
@@ -193,5 +204,82 @@ export class ReportDataAdapterService {
       }
       return row;
     });
+  }
+
+  // ── Custom report transformers ────────────────────────────────────────────
+
+  /**
+   * Transforms the profit-loss nested object into flat rows with sections
+   * for the nested-report component.
+   */
+  private adaptProfitLoss(raw: any): ReportAdaptedData {
+    const d = raw?.data ?? raw;
+    const rows: any[] = [];
+
+    // Revenue section
+    if (d.revenue) {
+      rows.push({ section: 'Ingresos', concept: 'Ingresos Brutos', amount: Number(d.revenue.gross_revenue || 0) });
+      if (d.revenue.discounts) rows.push({ section: 'Ingresos', concept: 'Descuentos', amount: -Number(d.revenue.discounts || 0) });
+      if (d.revenue.shipping_revenue) rows.push({ section: 'Ingresos', concept: 'Envios', amount: Number(d.revenue.shipping_revenue || 0) });
+      rows.push({ section: 'Ingresos', concept: 'Ingresos Netos', amount: Number(d.revenue.net_revenue || 0), is_total: true });
+    }
+
+    // Costs section
+    if (d.costs) {
+      rows.push({ section: 'Costos', concept: 'Costo de Mercancia Vendida', amount: Number(d.costs.cost_of_goods_sold || 0) });
+      rows.push({ section: 'Costos', concept: 'Utilidad Bruta', amount: Number(d.costs.gross_profit || 0), is_total: true, percentage: d.costs.gross_margin });
+    }
+
+    // Refunds section
+    if (d.refunds && Number(d.refunds.total_refunds || 0) > 0) {
+      rows.push({ section: 'Devoluciones', concept: 'Total Devoluciones', amount: -Number(d.refunds.total_refunds || 0) });
+    }
+
+    // Operating expenses
+    if (d.operating_expenses != null) {
+      rows.push({ section: 'Gastos Operativos', concept: 'Gastos Operativos', amount: Number(d.operating_expenses || 0) });
+    }
+
+    // Bottom line
+    if (d.bottom_line) {
+      rows.push({ section: 'Resultado Final', concept: 'Utilidad Neta', amount: Number(d.bottom_line.net_profit || 0), is_total: true, percentage: d.bottom_line.net_margin });
+    }
+
+    return { data: rows, meta: undefined };
+  }
+
+  /**
+   * Transforms the accounts-payable-aging buckets response into a summary.
+   */
+  private adaptAccountsPayableAging(raw: any): ReportAdaptedData {
+    const d = raw?.data ?? raw;
+    const summaryData: Record<string, any> = {
+      current: Number(d.buckets?.current || 0),
+      days_1_30: Number(d.buckets?.days_1_30 || 0),
+      days_31_60: Number(d.buckets?.days_31_60 || 0),
+      days_61_90: Number(d.buckets?.days_61_90 || 0),
+      days_91_120: Number(d.buckets?.days_91_120 || 0),
+      days_120_plus: Number(d.buckets?.days_120_plus || 0),
+      total: Number(d.total || 0),
+      record_count: Number(d.record_count || 0),
+    };
+    return { data: d.top_suppliers || [], isSummary: true, summaryData, meta: undefined };
+  }
+
+  /**
+   * Transforms the customer-receivables dashboard response into a summary.
+   */
+  private adaptCustomerReceivables(raw: any): ReportAdaptedData {
+    const d = raw?.data ?? raw;
+    const summaryData: Record<string, any> = {
+      pending_amount: Number(d.total_pending?.amount || 0),
+      pending_count: Number(d.total_pending?.count || 0),
+      overdue_amount: Number(d.total_overdue?.amount || 0),
+      overdue_count: Number(d.total_overdue?.count || 0),
+      due_soon_amount: Number(d.due_soon?.amount || 0),
+      due_soon_count: Number(d.due_soon?.count || 0),
+      collected_this_month: Number(d.collected_this_month || 0),
+    };
+    return { data: [], isSummary: true, summaryData, meta: undefined };
   }
 }

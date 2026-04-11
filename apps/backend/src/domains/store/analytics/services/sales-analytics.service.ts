@@ -438,9 +438,9 @@ export class SalesAnalyticsService {
         state: 'succeeded',
       },
       include: {
-        store_payment_methods: {
+        store_payment_method: {
           include: {
-            system_payment_methods: true,
+            system_payment_method: true,
           },
         },
       },
@@ -457,11 +457,11 @@ export class SalesAnalyticsService {
       totalAmount += amount;
 
       const methodName =
-        payment.store_payment_methods?.system_payment_methods?.name ||
+        payment.store_payment_method?.system_payment_method?.name ||
         'unknown';
       const displayName =
-        payment.store_payment_methods?.display_name ||
-        payment.store_payment_methods?.system_payment_methods?.display_name ||
+        payment.store_payment_method?.display_name ||
+        payment.store_payment_method?.system_payment_method?.display_name ||
         'Desconocido';
 
       const existing = methodMap.get(methodName) || {

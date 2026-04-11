@@ -24,8 +24,8 @@ type DatePreset =
     SelectorComponent,
   ],
   template: `
-    <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-      <!-- Preset Selector -->
+    <div class="flex flex-col gap-2">
+      <!-- Row 1: Preset Selector -->
       <div class="w-full sm:w-44">
         <app-selector
           [options]="presetOptions"
@@ -36,31 +36,22 @@ type DatePreset =
         ></app-selector>
       </div>
 
-      <!-- Custom Date Range -->
-      @if (selectedPreset() === 'custom') {
-        <div class="flex items-center gap-2">
-          <input
-            type="date"
-            [ngModel]="customStartDate()"
-            (ngModelChange)="onStartDateChange($event)"
-            class="px-3 py-1.5 text-sm border border-border rounded-lg bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-          />
-          <span class="text-text-secondary">-</span>
-          <input
-            type="date"
-            [ngModel]="customEndDate()"
-            (ngModelChange)="onEndDateChange($event)"
-            class="px-3 py-1.5 text-sm border border-border rounded-lg bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-          />
-        </div>
-      }
-
-      <!-- Display Current Range -->
-      @if (selectedPreset() !== 'custom') {
-        <div class="text-sm text-text-secondary hidden md:block">
-          {{ dateRangeLabel() }}
-        </div>
-      }
+      <!-- Row 2: Date Range Inputs (always visible) -->
+      <div class="flex items-center gap-2">
+        <input
+          type="date"
+          [ngModel]="customStartDate()"
+          (ngModelChange)="onStartDateChange($event)"
+          class="px-3 py-1.5 text-sm border border-border rounded-lg bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+        />
+        <span class="text-text-secondary">-</span>
+        <input
+          type="date"
+          [ngModel]="customEndDate()"
+          (ngModelChange)="onEndDateChange($event)"
+          class="px-3 py-1.5 text-sm border border-border rounded-lg bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+        />
+      </div>
     </div>
   `,
 })
@@ -110,6 +101,15 @@ export class DateRangeFilterComponent {
     if (initialValue?.end_date) {
       this.customEndDate.set(initialValue.end_date);
     }
+
+    // Pre-fill date inputs from the default preset if no custom dates were provided
+    if (!this.customStartDate() || !this.customEndDate()) {
+      const defaultRange = this.getDateRange(this.selectedPreset());
+      if (defaultRange) {
+        this.customStartDate.set(defaultRange.start_date);
+        this.customEndDate.set(defaultRange.end_date);
+      }
+    }
   }
 
   onPresetChange(preset: string): void {
@@ -117,6 +117,8 @@ export class DateRangeFilterComponent {
     if (preset !== 'custom') {
       const range = this.getDateRange(preset as DatePreset);
       if (range) {
+        this.customStartDate.set(range.start_date);
+        this.customEndDate.set(range.end_date);
         this.valueChange.emit(range);
       }
     }
@@ -124,11 +126,13 @@ export class DateRangeFilterComponent {
 
   onStartDateChange(date: string): void {
     this.customStartDate.set(date);
+    this.selectedPreset.set('custom');
     this.emitCustomRange();
   }
 
   onEndDateChange(date: string): void {
     this.customEndDate.set(date);
+    this.selectedPreset.set('custom');
     this.emitCustomRange();
   }
 

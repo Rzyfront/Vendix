@@ -361,7 +361,7 @@ export class FinancialAnalyticsService {
         expected_closing_amount: true,
         actual_closing_amount: true,
         difference: true,
-        registers: { select: { name: true } },
+        register: { select: { name: true } },
         opened_by_user: { select: { first_name: true, last_name: true } },
         closed_by_user: { select: { first_name: true, last_name: true } },
         movements: {
@@ -380,7 +380,7 @@ export class FinancialAnalyticsService {
 
       return {
         'Fecha Apertura': s.opened_at.toISOString().split('T')[0],
-        'Caja': (s.registers as any)?.name || '',
+        'Caja': (s.register as any)?.name || '',
         'Cajero Apertura': s.opened_by_user ? `${s.opened_by_user.first_name} ${s.opened_by_user.last_name}` : '',
         'Cajero Cierre': s.closed_by_user ? `${s.closed_by_user.first_name} ${s.closed_by_user.last_name}` : '',
         'Monto Apertura': Number(s.opening_amount || 0),

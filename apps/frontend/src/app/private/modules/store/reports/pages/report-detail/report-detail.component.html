@@ -31,12 +31,6 @@
             Ver reporte completo
           </app-button>
         }
-        @if (hasGenerated() && (reportData() && reportData()!.length > 0 || isSummary())) {
-          <vendix-export-button
-            [loading]="!!exporting()"
-            (export)="exportReport()"
-          />
-        }
       </div>
     </div>
 
@@ -65,6 +59,14 @@
         <app-icon slot="icon" name="play" [size]="16" />
         Generar Reporte
       </app-button>
+      @if (hasGenerated() && (reportData() && reportData()!.length > 0 || isSummary())) {
+        <div class="ml-auto">
+          <vendix-export-button
+            [loading]="!!exporting()"
+            (export)="exportReport()"
+          />
+        </div>
+      }
     </div>
 
     <!-- Results Area -->
