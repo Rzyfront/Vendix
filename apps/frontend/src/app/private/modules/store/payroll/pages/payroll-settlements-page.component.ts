@@ -43,7 +43,7 @@ import { SettlementDetailComponent } from '../components/settlements/settlement-
         <app-stats
           title="Total"
           [value]="totalSettlements()"
-          [smallText]="'Bruto: ' + currencyService.format(stats()?.totals?.total_gross || 0)"
+          [smallText]="'Bruto: ' + currencyService.format(stats()?.total_gross || 0)"
           iconName="file-text"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
@@ -51,7 +51,7 @@ import { SettlementDetailComponent } from '../components/settlements/settlement-
 
         <app-stats
           title="Calculadas"
-          [value]="stats()?.by_status?.calculated || 0"
+          [value]="stats()?.by_status?.['calculated']?.count || 0"
           smallText="Pendientes de revision"
           iconName="calculator"
           iconBgColor="bg-indigo-100"
@@ -60,7 +60,7 @@ import { SettlementDetailComponent } from '../components/settlements/settlement-
 
         <app-stats
           title="Aprobadas"
-          [value]="stats()?.by_status?.approved || 0"
+          [value]="stats()?.by_status?.['approved']?.count || 0"
           smallText="Listas para pago"
           iconName="check-circle"
           iconBgColor="bg-yellow-100"
@@ -69,8 +69,8 @@ import { SettlementDetailComponent } from '../components/settlements/settlement-
 
         <app-stats
           title="Pagadas"
-          [value]="stats()?.by_status?.paid || 0"
-          [smallText]="'Neto: ' + currencyService.format(stats()?.totals?.total_net || 0)"
+          [value]="stats()?.by_status?.['paid']?.count || 0"
+          [smallText]="'Neto: ' + currencyService.format(stats()?.total_net || 0)"
           iconName="banknote"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
@@ -128,13 +128,7 @@ export class PayrollSettlementsPageComponent implements OnInit, OnDestroy {
   totalSettlements = computed(() => {
     const s = this.stats();
     if (!s?.by_status) return 0;
-    return (
-      Number(s.by_status.draft || 0) +
-      Number(s.by_status.calculated || 0) +
-      Number(s.by_status.approved || 0) +
-      Number(s.by_status.paid || 0) +
-      Number(s.by_status.cancelled || 0)
-    );
+    return Object.values(s.by_status).reduce((sum, entry) => sum + (entry?.count || 0), 0);
   });
 
   ngOnInit(): void {

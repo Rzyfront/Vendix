@@ -31,7 +31,7 @@ import { SelectorComponent, SelectorOption } from '../../../../../../../shared/c
       title="Nuevo Empleado"
       size="lg"
     >
-      <div class="p-4 max-h-[70vh] overflow-y-auto">
+      <div class="p-4">
         <form [formGroup]="employeeForm" (ngSubmit)="onSubmit()" class="space-y-6">
 
           <!-- Link User (optional) -->

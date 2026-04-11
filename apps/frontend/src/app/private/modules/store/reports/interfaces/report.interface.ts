@@ -7,6 +7,20 @@ export type ReportCategoryId =
   | 'payroll'
   | 'financial';
 
+export type ReportType = 'summary' | 'list' | 'nested';
+
+export interface SummaryField {
+  key: string;
+  label: string;
+  type: 'currency' | 'number' | 'text' | 'percentage';
+  format?: string;
+}
+
+export interface SummaryLayoutConfig {
+  sections?: { title: string; fields: SummaryField[] }[];
+  fields: SummaryField[];
+}
+
 export interface ReportDefinition {
   id: string;
   category: ReportCategoryId;
@@ -21,6 +35,17 @@ export interface ReportDefinition {
   dataEndpoint: string;
   exportEndpoint?: string;
   fullViewRoute?: string;
+  type?: ReportType;
+  keyMapping?: Record<string, string>;
+  trackKey?: string;
+  summaryLayout?: SummaryLayoutConfig;
+}
+
+export interface ReportAdaptedData {
+  data: any[];
+  meta?: Record<string, any>;
+  isSummary?: boolean;
+  summaryData?: Record<string, any>;
 }
 
 export interface ReportColumn {

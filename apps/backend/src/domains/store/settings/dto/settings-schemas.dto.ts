@@ -352,6 +352,11 @@ export class PosSettingsDto {
   @IsBoolean()
   show_onscreen_keypad?: boolean;
 
+  @ApiProperty({ enum: ['contado', 'credito'], example: 'contado', required: false })
+  @IsOptional()
+  @IsIn(['contado', 'credito'])
+  default_payment_form?: 'contado' | 'credito';
+
   @ApiProperty({ type: () => CustomerQueueSettingsDto, required: false })
   @IsOptional()
   @ValidateNested()

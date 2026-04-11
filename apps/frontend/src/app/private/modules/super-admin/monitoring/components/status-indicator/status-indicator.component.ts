@@ -1,4 +1,4 @@
-import { Component, Input } from '@angular/core';
+import { Component, Input, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MetricStatus } from '../../interfaces';
 
@@ -6,6 +6,7 @@ import { MetricStatus } from '../../interfaces';
   selector: 'app-status-indicator',
   standalone: true,
   imports: [CommonModule],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <span class="inline-flex items-center gap-1.5">
       <span

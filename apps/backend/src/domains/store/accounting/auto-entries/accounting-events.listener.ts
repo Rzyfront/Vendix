@@ -1,4 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { OnEvent } from '@nestjs/event-emitter';
 import { AutoEntryService } from './auto-entry.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -7,41 +9,34 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 export class AccountingEventsListener {
   private readonly logger = new Logger(AccountingEventsListener.name);
 
-  private flow_cache = new Map<string, { value: any; expires: number }>();
-
   constructor(
     private readonly auto_entry_service: AutoEntryService,
     private readonly prisma: StorePrismaService,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
   private async isFlowEnabled(store_id: number | undefined, flow_key: string): Promise<boolean> {
     if (!store_id) return true;
 
-    const cache_key = `flows_${store_id}`;
-    const cached = this.flow_cache.get(cache_key);
+    const cacheKey = `acctflows:${store_id}`;
+    let accounting_flows: any = await this.cache.get<any>(cacheKey);
 
-    let accounting_flows: any;
-    if (cached && cached.expires > Date.now()) {
-      accounting_flows = cached.value;
-    } else {
+    if (!accounting_flows) {
       try {
         const settings = await this.prisma.withoutScope().store_settings.findUnique({
           where: { store_id },
           select: { settings: true },
         });
         const s = (settings?.settings as any) || {};
-        // Prefer module_flows.accounting, fallback to legacy accounting_flows
         accounting_flows = s.module_flows?.accounting
           || (s.accounting_flows ? { enabled: true, ...s.accounting_flows } : { enabled: true });
-        this.flow_cache.set(cache_key, { value: accounting_flows, expires: Date.now() + 5 * 60 * 1000 });
+        await this.cache.set(cacheKey, accounting_flows, 300_000);
       } catch {
         return true;
       }
     }
 
-    // Master toggle check
     if (accounting_flows.enabled === false) return false;
-    // Individual flow check
     return accounting_flows[flow_key] !== false;
   }
 

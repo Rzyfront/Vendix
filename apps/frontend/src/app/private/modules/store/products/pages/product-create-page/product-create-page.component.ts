@@ -61,6 +61,7 @@ import { AdjustmentCreateModalComponent } from '../../../inventory/operations/co
 import { InventoryService } from '../../../inventory/services/inventory.service';
 import { BatchCreateAdjustmentsRequest, PreselectedProduct } from '../../../inventory/interfaces';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { ProductUtils } from '../../utils/product.utils';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
 
 interface VariantAttribute {
@@ -396,6 +397,17 @@ export class ProductCreatePageComponent implements OnInit {
 
   get isService(): boolean {
     return this.productForm.get('product_type')?.value === 'service';
+  }
+
+  get hasDuplicateSkus(): boolean {
+    const skus = this.generatedVariants
+      .map((v) => v.sku?.trim())
+      .filter((s) => s && s.length > 0);
+    return new Set(skus).size !== skus.length;
+  }
+
+  get hasVariantEdits(): boolean {
+    return this.generatedVariants.length > 0;
   }
 
   onProductTypeChange(value: string): void {
@@ -923,7 +935,6 @@ export class ProductCreatePageComponent implements OnInit {
 
   removeAttribute(index: number): void {
     this.variantAttributes.splice(index, 1);
-    this.removedVariantKeys.clear();
     this.generateVariants();
   }
 
@@ -932,7 +943,6 @@ export class ProductCreatePageComponent implements OnInit {
     if (value) {
       if (!this.variantAttributes[attrIndex].values.includes(value)) {
         this.variantAttributes[attrIndex].values.push(value);
-        this.removedVariantKeys.clear();
         this.generateVariants();
       }
       event.target.value = '';
@@ -941,12 +951,29 @@ export class ProductCreatePageComponent implements OnInit {
 
   removeAttributeValue(attrIndex: number, valueIndex: number): void {
     this.variantAttributes[attrIndex].values.splice(valueIndex, 1);
-    this.removedVariantKeys.clear();
     this.generateVariants();
   }
 
   generateVariants(showToast = false): void {
-    // Filter incomplete attributes
+    // Validate: warn if any attribute has a name but no values
+    const incomplete = this.variantAttributes.filter(a => a.name && a.values.length === 0);
+    if (incomplete.length > 0 && showToast) {
+      this.toastService.warning(`El atributo "${incomplete[0].name}" no tiene valores`);
+      return;
+    }
+
+    this.reconcileVariants();
+
+    if (showToast && this.generatedVariants.length > 0) {
+      this.toastService.success(`Se generaron ${this.generatedVariants.length} variantes`);
+    }
+  }
+
+  /**
+   * Non-destructive variant reconciliation.
+   * Matches existing variants by sorted attribute key, preserving custom edits.
+   */
+  private reconcileVariants(): void {
     const validAttributes = this.variantAttributes.filter(
       (attr) => attr.name && attr.values.length > 0,
     );
@@ -956,63 +983,69 @@ export class ProductCreatePageComponent implements OnInit {
       return;
     }
 
-    // Validate: warn if any attribute has a name but no values
-    const incomplete = this.variantAttributes.filter(a => a.name && a.values.length === 0);
-    if (incomplete.length > 0 && showToast) {
-      this.toastService.warning(`El atributo "${incomplete[0].name}" no tiene valores`);
-      return;
-    }
-
-    // Generate Cartesian product
     const combinations = this.cartesian(validAttributes.map((a) => a.values));
-
     const basePrice = this.productForm.get('base_price')?.value || 0;
     const baseCost = this.productForm.get('cost_price')?.value || 0;
     const baseMargin = this.productForm.get('profit_margin')?.value || 0;
     const baseSku = this.productForm.get('sku')?.value || '';
 
-    this.generatedVariants = combinations
-      .map((combo) => {
-        const attributes: Record<string, string> = {};
-        let nameSuffix = '';
-        let skuSuffix = '';
+    // Build a lookup of existing variants by stable key
+    const existingMap = new Map<string, GeneratedVariant>();
+    for (const v of this.generatedVariants) {
+      const key = ProductUtils.getVariantKey(v.attributes);
+      existingMap.set(key, v);
+    }
 
-        validAttributes.forEach((attr, index) => {
-          const value = combo[index];
-          attributes[attr.name] = value;
-          nameSuffix += ` ${value}`; // e.g. " Red L"
-          skuSuffix += `-${value.toUpperCase().substring(0, 3)}`; // e.g. "-RED-L"
-        });
+    const newVariants: GeneratedVariant[] = [];
 
-        // Skip variants that were manually removed by the user
-        const key = JSON.stringify(attributes);
-        if (this.removedVariantKeys.has(key)) {
-          return null;
-        }
+    for (const combo of combinations) {
+      const attributes: Record<string, string> = {};
+      let nameSuffix = '';
+      let skuSuffix = '';
 
-        // Check if this variant already exists to preserve custom values
-        const existing = this.generatedVariants.find(
-          (v) => JSON.stringify(v.attributes) === JSON.stringify(attributes),
-        );
+      validAttributes.forEach((attr, index) => {
+        const value = combo[index];
+        attributes[attr.name] = value;
+        nameSuffix += ` ${value}`;
+        skuSuffix += `-${value.toUpperCase().substring(0, 3)}`;
+      });
 
-        if (existing) return existing;
+      const key = ProductUtils.getVariantKey(attributes);
 
-        return {
-          name: `${this.productForm.get('name')?.value || 'Product'}${nameSuffix}`,
-          sku: baseSku ? `${baseSku}${skuSuffix}` : '',
-          price: basePrice,
-          cost_price: baseCost,
-          profit_margin: baseMargin,
-          is_on_sale: false,
-          sale_price: 0,
-          stock: 0,
-          attributes,
-        };
-      })
-      .filter(Boolean) as GeneratedVariant[];
+      // Skip manually removed variants
+      if (this.removedVariantKeys.has(key)) continue;
 
-    if (showToast && this.generatedVariants.length > 0) {
-      this.toastService.success(`Se generaron ${this.generatedVariants.length} variantes`);
+      // Reuse existing variant if attributes match
+      const existing = existingMap.get(key);
+      if (existing) {
+        newVariants.push(existing);
+        continue;
+      }
+
+      // New variant
+      newVariants.push({
+        name: `${this.productForm.get('name')?.value || 'Product'}${nameSuffix}`,
+        sku: baseSku ? `${baseSku}${skuSuffix}` : '',
+        price: basePrice,
+        cost_price: baseCost,
+        profit_margin: baseMargin,
+        is_on_sale: false,
+        sale_price: 0,
+        stock: 0,
+        attributes,
+      });
+    }
+
+    this.generatedVariants = newVariants;
+  }
+
+  onAttributeNameBlur(attrIndex: number): void {
+    const attr = this.variantAttributes[attrIndex];
+    if (!attr || !attr.name.trim()) return;
+
+    // Only reconcile if there are values to generate variants with
+    if (attr.values.length > 0) {
+      this.reconcileVariants();
     }
   }
 
@@ -1164,7 +1197,7 @@ export class ProductCreatePageComponent implements OnInit {
 
     // Track removed key so generateVariants() won't recreate it on blur
     if (variant.attributes && Object.keys(variant.attributes).length > 0) {
-      this.removedVariantKeys.add(JSON.stringify(variant.attributes));
+      this.removedVariantKeys.add(ProductUtils.getVariantKey(variant.attributes));
     }
     this.generatedVariants.splice(idx, 1);
 
@@ -1581,6 +1614,7 @@ export class ProductCreatePageComponent implements OnInit {
         sale_price: Number(v.sale_price),
         stock_quantity: formValue.track_inventory ? Number(v.stock) : undefined,
         attributes: v.attributes,
+        image_id: v.image_id ?? undefined,
         variant_image_url: v.image_url?.startsWith('data:')
           ? v.image_url
           : undefined,

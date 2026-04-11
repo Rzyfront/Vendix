@@ -837,7 +837,14 @@
             <div class="flex items-center gap-2">
                 <app-icon name="layers" size="18" class="text-primary-600"></app-icon>
                 <div>
-                    <h2 class="text-base font-bold text-gray-900">Variantes</h2>
+                    <h2 class="text-base font-bold text-gray-900">
+                      Variantes
+                      @if (generatedVariants.length > 0) {
+                        <span class="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-[11px] font-bold leading-none text-white bg-primary rounded-full">
+                          {{ generatedVariants.length }}
+                        </span>
+                      }
+                    </h2>
                     <p class="text-xs text-gray-500">Configura las combinaciones de tu producto</p>
                 </div>
             </div>
@@ -872,7 +879,7 @@
                             <div class="w-full md:w-1/3">
                                 <app-input label="Nombre del Atributo" size="sm" [(ngModel)]="attr.name"
                                     [ngModelOptions]="{standalone: true}" placeholder="Ej. Talla, Color"
-                                    (inputBlur)="generateVariants()" customWrapperClass="!mt-0"></app-input>
+                                    (inputBlur)="onAttributeNameBlur(i)" customWrapperClass="!mt-0"></app-input>
                             </div>
 
                             <div class="flex-1">

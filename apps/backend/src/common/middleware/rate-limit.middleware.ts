@@ -1,99 +1,82 @@
-import { Injectable, NestMiddleware } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  NestMiddleware,
+  Logger,
+  Type,
+} from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
+import Redis from 'ioredis';
+import { REDIS_CLIENT } from '../redis/redis.module';
 
-interface RateLimitRecord {
-  count: number;
-  resetTime: number;
+interface RateLimitConfig {
+  prefix: string;
+  windowSeconds: number;
+  maxAttempts: number;
+  message: string;
+  errorLabel: string;
 }
 
-@Injectable()
-export class RateLimitMiddleware implements NestMiddleware {
-  private attempts = new Map<string, RateLimitRecord>();
+export function createRateLimitMiddleware(
+  config: RateLimitConfig,
+): Type<NestMiddleware> {
+  @Injectable()
+  class RedisRateLimitMiddleware implements NestMiddleware {
+    private readonly logger = new Logger(`RateLimit:${config.prefix}`);
 
-  use(req: Request, res: Response, next: NextFunction) {
-    const key = req.ip || req.connection.remoteAddress || 'unknown';
-    const now = Date.now();
-    const windowMs = 15 * 60 * 1000; // 15 minutos
-    const maxAttempts = 10;
+    constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
 
-    const record = this.attempts.get(key);
+    async use(req: Request, res: Response, next: NextFunction) {
+      const ip = req.ip || req.socket.remoteAddress || 'unknown';
+      const key = `${config.prefix}:${ip}`;
 
-    if (!record || now > record.resetTime) {
-      // Primera request o ventana expirada
-      this.attempts.set(key, { count: 1, resetTime: now + windowMs });
-      next();
-    } else if (record.count < maxAttempts) {
-      // Incrementar contador
-      record.count++;
-      next();
-    } else {
-      // Rate limit excedido
-      res.status(429).json({
-        statusCode: 429,
-        message: 'Too many requests from this IP, please try again later.',
-        error: 'Too Many Requests',
-        retryAfter: Math.ceil((record.resetTime - now) / 1000),
-      });
+      try {
+        const current = await this.redis.incr(key);
+        if (current === 1) {
+          await this.redis.expire(key, config.windowSeconds);
+        }
+
+        if (current > config.maxAttempts) {
+          const ttl = await this.redis.ttl(key);
+          return res.status(429).json({
+            statusCode: 429,
+            message: config.message,
+            error: config.errorLabel,
+            retryAfter: ttl > 0 ? ttl : config.windowSeconds,
+          });
+        }
+
+        next();
+      } catch (error) {
+        this.logger.warn(`Redis rate limit error: ${error.message}`);
+        next();
+      }
     }
   }
+  return RedisRateLimitMiddleware;
 }
 
-@Injectable()
-export class LoginRateLimitMiddleware implements NestMiddleware {
-  private attempts = new Map<string, RateLimitRecord>();
+export const RateLimitMiddleware = createRateLimitMiddleware({
+  prefix: 'rl:general',
+  windowSeconds: 15 * 60, // 15 minutes
+  maxAttempts: 10,
+  message: 'Too many requests from this IP, please try again later.',
+  errorLabel: 'Too Many Requests',
+});
 
-  use(req: Request, res: Response, next: NextFunction) {
-    const key = req.ip || req.connection.remoteAddress || 'unknown';
-    const now = Date.now();
-    const windowMs = 15 * 60 * 1000; // 15 minutos
-    const maxAttempts = 10;
+export const LoginRateLimitMiddleware = createRateLimitMiddleware({
+  prefix: 'rl:login',
+  windowSeconds: 15 * 60, // 15 minutes
+  maxAttempts: 10,
+  message: 'Too many login attempts from this IP, please try again later.',
+  errorLabel: 'Too Many Login Attempts',
+});
 
-    const record = this.attempts.get(key);
-
-    if (!record || now > record.resetTime) {
-      this.attempts.set(key, { count: 1, resetTime: now + windowMs });
-      next();
-    } else if (record.count < maxAttempts) {
-      record.count++;
-      next();
-    } else {
-      res.status(429).json({
-        statusCode: 429,
-        message:
-          'Too many login attempts from this IP, please try again later.',
-        error: 'Too Many Login Attempts',
-        retryAfter: Math.ceil((record.resetTime - now) / 1000),
-      });
-    }
-  }
-}
-
-@Injectable()
-export class RefreshRateLimitMiddleware implements NestMiddleware {
-  private attempts = new Map<string, RateLimitRecord>();
-
-  use(req: Request, res: Response, next: NextFunction) {
-    const key = req.ip || req.connection.remoteAddress || 'unknown';
-    const now = Date.now();
-    const windowMs = 5 * 60 * 1000; // 5 minutos
-    const maxAttempts = 10;
-
-    const record = this.attempts.get(key);
-
-    if (!record || now > record.resetTime) {
-      this.attempts.set(key, { count: 1, resetTime: now + windowMs });
-      next();
-    } else if (record.count < maxAttempts) {
-      record.count++;
-      next();
-    } else {
-      res.status(429).json({
-        statusCode: 429,
-        message:
-          'Demasiados intentos de actualización de sesión desde tu dirección. Por favor, espera unos minutos antes de intentar nuevamente.',
-        error: 'Demasiados Intentos de Actualización',
-        retryAfter: Math.ceil((record.resetTime - now) / 1000),
-      });
-    }
-  }
-}
+export const RefreshRateLimitMiddleware = createRateLimitMiddleware({
+  prefix: 'rl:refresh',
+  windowSeconds: 5 * 60, // 5 minutes
+  maxAttempts: 10,
+  message:
+    'Demasiados intentos de actualización de sesión desde tu dirección. Por favor, espera unos minutos antes de intentar nuevamente.',
+  errorLabel: 'Demasiados Intentos de Actualización',
+});

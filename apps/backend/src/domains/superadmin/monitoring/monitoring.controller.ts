@@ -37,7 +37,10 @@ export class MonitoringController {
 
   @Get('ec2')
   @ApiOperation({ summary: 'Get detailed EC2 instance metrics' })
-  @ApiResponse({ status: 200, description: 'EC2 metrics retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'EC2 metrics retrieved successfully',
+  })
   async getEc2Metrics(@Query() query: MetricsQueryDto) {
     const data = await this.ec2MetricsService.getDetailedMetrics(query);
     return this.responseService.success(data, 'EC2 metrics retrieved');
@@ -45,15 +48,23 @@ export class MonitoringController {
 
   @Get('rds')
   @ApiOperation({ summary: 'Get detailed RDS database metrics' })
-  @ApiResponse({ status: 200, description: 'RDS metrics retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'RDS metrics retrieved successfully',
+  })
   async getRdsMetrics(@Query() query: MetricsQueryDto) {
     const data = await this.rdsMetricsService.getDetailedMetrics(query);
     return this.responseService.success(data, 'RDS metrics retrieved');
   }
 
   @Get('app')
-  @ApiOperation({ summary: 'Get application metrics (heap, queues, docker, redis)' })
-  @ApiResponse({ status: 200, description: 'App metrics retrieved successfully' })
+  @ApiOperation({
+    summary: 'Get application metrics (heap, queues, docker, redis)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'App metrics retrieved successfully',
+  })
   async getAppMetrics() {
     const data = await this.appMetricsService.getAppMetrics();
     return this.responseService.success(data, 'Application metrics retrieved');
@@ -61,9 +72,12 @@ export class MonitoringController {
 
   @Get('server')
   @ApiOperation({ summary: 'Get server system information' })
-  @ApiResponse({ status: 200, description: 'Server info retrieved successfully' })
-  async getServerInfo() {
-    const data = this.serverMetricsService.getServerInfo();
+  @ApiResponse({
+    status: 200,
+    description: 'Server info retrieved successfully',
+  })
+  async getServerInfo(): Promise<any> {
+    const data = await this.serverMetricsService.getServerInfo();
     return this.responseService.success(data, 'Server info retrieved');
   }
 
@@ -71,7 +85,7 @@ export class MonitoringController {
   @ApiOperation({ summary: 'Get application performance metrics snapshot' })
   @ApiResponse({ status: 200, description: 'Performance metrics retrieved' })
   async getPerformance() {
-    const data = this.performanceMetricsService.getPerformanceSnapshot();
+    const data = await this.performanceMetricsService.getPerformanceSnapshot();
     return this.responseService.success(data, 'Performance metrics retrieved');
   }
 
@@ -79,7 +93,9 @@ export class MonitoringController {
   @ApiOperation({ summary: 'Get performance time-series history' })
   @ApiResponse({ status: 200, description: 'Performance history retrieved' })
   async getPerformanceHistory(@Query() query: MetricsQueryDto) {
-    const data = this.performanceMetricsService.getPerformanceHistory(query.period || '1h');
+    const data = await this.performanceMetricsService.getPerformanceHistory(
+      query.period || '1h',
+    );
     return this.responseService.success(data, 'Performance history retrieved');
   }
 }

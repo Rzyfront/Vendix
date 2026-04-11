@@ -5,7 +5,7 @@ import { CloudWatchService, type MetricQuery } from './cloudwatch.service';
 import { MetricsQueryDto } from '../dto/metrics-query.dto';
 import {
   autoGranularity,
-  MONITORING_CACHE_TTL,
+  CACHE_TTL_INFRASTRUCTURE,
   periodToSeconds,
   periodToStartTime,
 } from '../constants/cloudwatch.constants';
@@ -51,10 +51,10 @@ export class Ec2MetricsService {
       { id: 'cpu_credit_usage', metricName: 'CPUCreditUsage', namespace, dimensions },
       { id: 'network_in', metricName: 'NetworkIn', namespace, dimensions },
       { id: 'network_out', metricName: 'NetworkOut', namespace, dimensions },
-      { id: 'disk_read_ops', metricName: 'DiskReadOps', namespace, dimensions },
-      { id: 'disk_write_ops', metricName: 'DiskWriteOps', namespace, dimensions },
-      { id: 'disk_read_bytes', metricName: 'DiskReadBytes', namespace, dimensions },
-      { id: 'disk_write_bytes', metricName: 'DiskWriteBytes', namespace, dimensions },
+      { id: 'disk_read_ops', metricName: 'EBSReadOps', namespace, dimensions },
+      { id: 'disk_write_ops', metricName: 'EBSWriteOps', namespace, dimensions },
+      { id: 'disk_read_bytes', metricName: 'EBSReadBytes', namespace, dimensions },
+      { id: 'disk_write_bytes', metricName: 'EBSWriteBytes', namespace, dimensions },
       { id: 'status_check_failed', metricName: 'StatusCheckFailed', namespace, dimensions },
     ];
 
@@ -103,7 +103,7 @@ export class Ec2MetricsService {
       },
     };
 
-    await this.cache.set(cacheKey, result, MONITORING_CACHE_TTL);
+    await this.cache.set(cacheKey, result, CACHE_TTL_INFRASTRUCTURE);
 
     return result;
   }

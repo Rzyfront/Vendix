@@ -31,7 +31,7 @@
             Ver reporte completo
           </app-button>
         }
-        @if (hasGenerated() && reportData() && reportData()!.length > 0) {
+        @if (hasGenerated() && (reportData() && reportData()!.length > 0 || isSummary())) {
           <vendix-export-button
             [loading]="!!exporting()"
             (export)="exportReport()"
@@ -77,12 +77,81 @@
           <p>Selecciona el rango de fechas y haz clic en "Generar Reporte"</p>
         </div>
       } @else {
-        <!-- Report Table -->
-        <vendix-report-table
-          [columns]="report.columns"
-          [data]="reportData() || []"
-          [loading]="!!loading()"
-        />
+        <!-- Report Content -->
+        @switch (getReportType()) {
+          @case ('summary') {
+            <app-summary-report
+              [summaryData]="summaryData() || {}"
+              [layout]="getSummaryLayout()"
+              [loading]="!!loading()"
+            />
+          }
+          @case ('nested') {
+            <app-nested-report
+              [data]="reportData() || []"
+              [columns]="report.columns"
+              [loading]="!!loading()"
+            />
+          }
+          @case ('aging') {
+            <app-aging-report
+              [data]="reportData() || []"
+              [columns]="report.columns"
+              [loading]="!!loading()"
+            />
+          }
+          @default {
+            <vendix-report-table
+              [columns]="report.columns"
+              [data]="reportData() || []"
+              [loading]="!!loading()"
+            />
+          }
+        }
+
+        <!-- Pagination -->
+        @if (showPagination()) {
+          <div class="pagination-bar">
+            <div class="pagination-info">
+              Mostrando {{ paginationStart() }}-{{ paginationEnd() }} de {{ totalItems() }} resultados
+            </div>
+            <div class="pagination-controls">
+              <select class="page-size-select" [value]="itemsPerPage()" (change)="onItemsPerPageChange($event)">
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+              <button
+                class="page-btn"
+                [disabled]="currentPage() === 1"
+                (click)="onPageChange(currentPage() - 1)"
+              >
+                <app-icon name="chevron-left" [size]="16" />
+              </button>
+              @for (page of getPageNumbers(); track page) {
+                @if (page === -1) {
+                  <span class="page-ellipsis">&hellip;</span>
+                } @else {
+                  <button
+                    class="page-btn"
+                    [class.active]="page === currentPage()"
+                    (click)="onPageChange(page)"
+                  >
+                    {{ page }}
+                  </button>
+                }
+              }
+              <button
+                class="page-btn"
+                [disabled]="currentPage() === totalPages()"
+                (click)="onPageChange(currentPage() + 1)"
+              >
+                <app-icon name="chevron-right" [size]="16" />
+              </button>
+            </div>
+          </div>
+        }
       }
     </div>
   </div>

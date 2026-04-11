@@ -121,12 +121,13 @@ export class SettlementListComponent {
       badge: true,
       badgeConfig: {
         type: 'custom',
+        size: 'sm',
         colorMap: {
-          draft: 'gray',
-          calculated: 'blue',
-          approved: 'yellow',
-          paid: 'green',
-          cancelled: 'gray',
+          draft: '#9ca3af',
+          calculated: '#3b82f6',
+          approved: '#eab308',
+          paid: '#22c55e',
+          cancelled: '#9ca3af',
         },
       },
       transform: (val: string) => this.getStatusLabel(val),

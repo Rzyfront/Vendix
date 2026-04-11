@@ -129,10 +129,10 @@ export const superAdminRoutes: Routes = [
       },
       {
         path: 'monitoring',
-        loadComponent: () =>
+        loadChildren: () =>
           import(
-            '../../private/modules/super-admin/monitoring/monitoring.component'
-          ).then((c) => c.MonitoringComponent),
+            '../../private/modules/super-admin/monitoring/monitoring.routes'
+          ).then((m) => m.MONITORING_ROUTES),
       },
       // Placeholder routes - modules under construction
       {

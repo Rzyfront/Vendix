@@ -34,7 +34,7 @@ import { SelectorComponent, SelectorOption } from '../../../../../../../shared/c
       title="Detalle de Empleado"
       size="lg"
     >
-      <div class="p-4 max-h-[70vh] overflow-y-auto">
+      <div class="p-4">
         <!-- Status Badge -->
         <div *ngIf="employee" class="mb-4 flex items-center gap-2">
           <span class="text-sm text-text-secondary">Estado:</span>

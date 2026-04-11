@@ -5,7 +5,7 @@ import { CloudWatchService, type MetricQuery } from './cloudwatch.service';
 import { MetricsQueryDto } from '../dto/metrics-query.dto';
 import {
   autoGranularity,
-  MONITORING_CACHE_TTL,
+  CACHE_TTL_INFRASTRUCTURE,
   periodToSeconds,
   periodToStartTime,
 } from '../constants/cloudwatch.constants';
@@ -94,16 +94,16 @@ export class RdsMetricsService {
         freeableMemory: toSeries('freeable_memory', 'Bytes'),
       },
       iops: {
-        readIOPS: toSeries('read_iops', 'Count/Second'),
-        writeIOPS: toSeries('write_iops', 'Count/Second'),
+        read: toSeries('read_iops', 'Count/Second'),
+        write: toSeries('write_iops', 'Count/Second'),
       },
       latency: {
-        readLatency: toSeries('read_latency', 'Seconds'),
-        writeLatency: toSeries('write_latency', 'Seconds'),
+        read: toSeries('read_latency', 'Seconds'),
+        write: toSeries('write_latency', 'Seconds'),
       },
     };
 
-    await this.cache.set(cacheKey, result, MONITORING_CACHE_TTL);
+    await this.cache.set(cacheKey, result, CACHE_TTL_INFRASTRUCTURE);
 
     return result;
   }

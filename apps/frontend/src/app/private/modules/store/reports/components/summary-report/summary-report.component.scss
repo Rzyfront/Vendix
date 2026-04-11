@@ -1,0 +1,108 @@
+:host {
+  display: block;
+}
+
+.summary-report {
+  .sections-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .section {
+    margin-bottom: 0;
+
+    .section-title {
+      font-weight: var(--fw-semibold, 600);
+      font-size: var(--fs-base, 1rem);
+      margin: 0 0 0.75rem;
+      color: var(--color-text-primary);
+    }
+  }
+
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+  }
+
+  .metric-card {
+    background: var(--color-card, var(--color-surface));
+    border-radius: 8px;
+    padding: 1.25rem;
+    border: 1px solid var(--color-border);
+
+    .metric-label {
+      font-size: 0.8rem;
+      color: var(--color-muted, var(--color-text-tertiary));
+      margin-bottom: 0.5rem;
+    }
+
+    .metric-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--color-text-primary);
+
+      &.currency {
+        color: var(--color-primary);
+      }
+
+      &.percentage {
+        color: var(--color-success, #22c55e);
+      }
+    }
+  }
+
+  .skeleton-card {
+    background: var(--color-card, var(--color-surface));
+    border-radius: 8px;
+    padding: 1.25rem;
+    border: 1px solid var(--color-border);
+
+    .skeleton-label,
+    .skeleton-value {
+      background: linear-gradient(
+        90deg,
+        var(--color-surface-hover) 25%,
+        var(--color-border) 50%,
+        var(--color-surface-hover) 75%
+      );
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 0.25rem;
+    }
+
+    .skeleton-label {
+      height: 12px;
+      width: 60%;
+      margin-bottom: 0.75rem;
+    }
+
+    .skeleton-value {
+      height: 24px;
+      width: 40%;
+    }
+  }
+
+  .empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 1rem;
+
+    p {
+      font-size: var(--fs-sm, 0.875rem);
+      color: var(--color-text-secondary);
+      margin: 0;
+    }
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
