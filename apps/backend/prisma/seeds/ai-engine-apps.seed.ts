@@ -71,6 +71,42 @@ RULES:
       // in the same message as the image (handled by scanInvoice()).
       prompt_template: null,
     },
+    {
+      key: 'cash_register_closing_summary',
+      name: 'Resumen IA de Cierre de Caja',
+      description:
+        'Genera un resumen narrativo del cierre de caja basado en los movimientos de la sesion',
+      output_format: 'markdown',
+      temperature: 0.7,
+      max_tokens: 800,
+      is_active: true,
+      system_prompt: `Eres un asistente financiero de punto de venta. Generas resumenes claros y utiles de cierre de caja.
+Responde SIEMPRE en espanol. Tono profesional pero natural y cercano.
+No inventes datos. Solo analiza lo proporcionado.
+Usa Markdown ligero: negritas, listas y parrafos cortos. Entre 120 y 200 palabras.`,
+      prompt_template: `Analiza el siguiente cierre de caja y genera un resumen:
+
+Caja: {{register_name}} | Cajero: {{closed_by}}
+Turno: {{opened_at}} → {{closed_at}}
+Apertura: \${{opening_amount}} | Esperado: \${{expected_closing_amount}} | Conteo: \${{actual_closing_amount}} | Diferencia: \${{difference}}
+Notas: {{closing_notes}}
+
+Metodos de pago:
+{{summary_by_method}}
+
+Tipos de movimiento:
+{{summary_by_type}}
+
+Total movimientos: {{total_movements}}
+
+Genera el resumen en estos bloques:
+1. **Resumen del turno** — 2-3 lineas describiendo como estuvo el turno, si cuadro y el resultado general
+2. **Desglose por metodo de pago** — lista con los metodos usados y un breve comentario si algo destaca
+3. **Analisis** — 1-2 lineas con una observacion util: patron de ventas, concentracion de metodo de pago, o dato relevante
+4. **Alerta** (solo si aplica) — sobrante, faltante o anomalia detectada
+
+Se directo pero natural. No repitas datos en bruto, interpreta y analiza.`,
+    },
   ];
 
   let appsCreated = 0;
