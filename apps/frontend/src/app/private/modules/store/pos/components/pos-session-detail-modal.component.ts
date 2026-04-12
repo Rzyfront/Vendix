@@ -12,6 +12,8 @@ import {
   ModalComponent,
   IconComponent,
 } from '../../../../../shared/components';
+import { CurrencyPipe } from '../../../../../shared/pipes/currency';
+import { markdownToHtml } from '../../../../../shared/utils/markdown.util';
 import {
   PosCashRegisterService,
   CashRegisterSession,
@@ -21,7 +23,7 @@ import {
 @Component({
   selector: 'app-pos-session-detail-modal',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, ModalComponent, IconComponent],
+  imports: [CommonModule, ButtonComponent, ModalComponent, IconComponent, CurrencyPipe],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -65,7 +67,7 @@ import {
               Apertura
             </p>
             <p class="text-lg font-bold text-text-primary">
-              {{ '$' }}{{ session?.opening_amount | number : '1.0-0' }}
+              {{ session?.opening_amount | currency:0 }}
             </p>
           </div>
           <div
@@ -77,7 +79,7 @@ import {
               Ventas
             </p>
             <p class="text-lg font-bold text-green-700">
-              {{ '$' }}{{ totalSales | number : '1.0-0' }}
+              {{ totalSales | currency:0 }}
             </p>
           </div>
           <div
@@ -89,7 +91,7 @@ import {
               Reembolsos
             </p>
             <p class="text-lg font-bold text-red-700">
-              {{ '$' }}{{ totalRefunds | number : '1.0-0' }}
+              {{ totalRefunds | currency:0 }}
             </p>
           </div>
           <div
@@ -105,6 +107,17 @@ import {
             </p>
           </div>
         </div>
+
+        <!-- AI Summary (if saved) -->
+        @if (session?.ai_summary) {
+          <div class="ai-saved-summary">
+            <div class="ai-saved-summary-header">
+              <app-icon name="sparkles" [size]="16"></app-icon>
+              <span class="text-sm font-medium">Resumen IA</span>
+            </div>
+            <div class="ai-saved-summary-content" [innerHTML]="renderedAiSummary"></div>
+          </div>
+        }
 
         <!-- Movements List -->
         @if (loading) {
@@ -165,9 +178,7 @@ import {
                     class="text-sm font-bold shrink-0"
                     [class]="isPositiveMovement(mov.type) ? 'text-green-600' : 'text-red-600'"
                   >
-                    {{ isPositiveMovement(mov.type) ? '+' : '-' }}{{ '$' }}{{
-                      mov.amount | number : '1.0-0'
-                    }}
+                    {{ isPositiveMovement(mov.type) ? '+' : '-' }}{{ mov.amount | currency:0 }}
                   </p>
                 </div>
               }
@@ -184,6 +195,33 @@ import {
       </div>
     </app-modal>
   `,
+  styles: [`
+    .ai-saved-summary {
+      background: linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.04) 0%, rgba(var(--color-primary-rgb), 0.01) 100%);
+      border: 1px solid rgba(var(--color-primary-rgb), 0.08);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .ai-saved-summary-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      background: rgba(var(--color-primary-rgb), 0.06);
+      color: rgb(var(--color-primary-rgb));
+      font-size: 13px;
+    }
+    .ai-saved-summary-content {
+      padding: 12px 16px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--color-text-primary);
+    }
+    .ai-saved-summary-content ::ng-deep p { margin: 4px 0; }
+    .ai-saved-summary-content ::ng-deep ul { margin: 4px 0; padding-left: 20px; }
+    .ai-saved-summary-content ::ng-deep li { margin: 2px 0; }
+    .ai-saved-summary-content ::ng-deep strong { font-weight: 600; }
+  `],
 })
 export class PosSessionDetailModalComponent implements OnChanges {
   @Input() isOpen = false;
@@ -192,6 +230,7 @@ export class PosSessionDetailModalComponent implements OnChanges {
 
   movements: CashRegisterMovement[] = [];
   loading = false;
+  renderedAiSummary = '';
 
   totalSales = 0;
   totalRefunds = 0;
@@ -200,6 +239,7 @@ export class PosSessionDetailModalComponent implements OnChanges {
 
   ngOnChanges(changes: SimpleChanges) {
     if (changes['isOpen'] && this.isOpen && this.session) {
+      this.renderedAiSummary = markdownToHtml(this.session?.ai_summary || '');
       this.loadMovements();
     }
   }
@@ -234,6 +274,7 @@ export class PosSessionDetailModalComponent implements OnChanges {
   getMovementIcon(type: string): string {
     const icons: Record<string, string> = {
       opening_balance: 'unlock',
+      closing_balance: 'lock',
       sale: 'shopping-cart',
       refund: 'rotate-ccw',
       cash_in: 'trending-up',
@@ -245,6 +286,7 @@ export class PosSessionDetailModalComponent implements OnChanges {
   getMovementIconClass(type: string): string {
     const classes: Record<string, string> = {
       opening_balance: 'bg-primary/10 text-primary',
+      closing_balance: 'bg-primary/10 text-primary',
       sale: 'bg-green-100 text-green-600',
       refund: 'bg-red-100 text-red-600',
       cash_in: 'bg-blue-100 text-blue-600',
@@ -256,6 +298,7 @@ export class PosSessionDetailModalComponent implements OnChanges {
   getMovementLabel(type: string): string {
     const labels: Record<string, string> = {
       opening_balance: 'Apertura de caja',
+      closing_balance: 'Cierre de caja',
       sale: 'Venta',
       refund: 'Reembolso',
       cash_in: 'Entrada de efectivo',
@@ -265,7 +308,7 @@ export class PosSessionDetailModalComponent implements OnChanges {
   }
 
   isPositiveMovement(type: string): boolean {
-    return ['opening_balance', 'sale', 'cash_in'].includes(type);
+    return ['opening_balance', 'closing_balance', 'sale', 'cash_in'].includes(type);
   }
 
   onClose(): void {

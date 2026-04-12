@@ -64,6 +64,7 @@ import { PosScheduleIndicatorComponent } from './components/pos-schedule-indicat
 import { PosScheduleModalComponent } from './components/pos-schedule-modal.component';
 import { PosHeaderDropdownComponent } from './components/pos-header-dropdown.component';
 import { ReservationFormModalComponent } from '../reservations/components/reservation-form-modal/reservation-form-modal.component';
+import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.component';
 
 @Component({
   selector: 'app-pos',
@@ -94,6 +95,7 @@ import { ReservationFormModalComponent } from '../reservations/components/reserv
     PosHeaderDropdownComponent,
     LayawayConfigModalComponent,
     ReservationFormModalComponent,
+    PosAISummaryModalComponent,
   ],
   template: `
     <div class="flex flex-col overflow-hidden pos-container">
@@ -110,7 +112,7 @@ import { ReservationFormModalComponent } from '../reservations/components/reserv
       >
         <!-- Header -->
         <div
-          class="flex-none px-4 lg:px-6 py-3 lg:py-4 border-b border-border pos-header relative z-[60]"
+          class="flex-none px-4 lg:px-6 py-3 lg:py-4 border-b border-border pos-header relative z-30"
         >
           <div class="flex justify-between items-center gap-3">
             <!-- Left: Logo + Title -->
@@ -467,6 +469,12 @@ import { ReservationFormModalComponent } from '../reservations/components/reserv
           (sessionClosed)="onSessionClosed($event)"
         ></app-pos-session-close-modal>
 
+        <app-pos-ai-summary-modal
+          [isOpen]="showAISummaryModal"
+          [sessionId]="closedSessionIdForSummary"
+          (isOpenChange)="showAISummaryModal = $event"
+        ></app-pos-ai-summary-modal>
+
         <app-pos-cash-movement-modal
           [isOpen]="showCashMovementModal"
           [sessionId]="activeSession?.id || null"
@@ -660,6 +668,8 @@ export class PosComponent implements OnInit, OnDestroy {
   showSessionCloseModal = false;
   showCashMovementModal = false;
   showSessionDetailModal = false;
+  showAISummaryModal = false;
+  closedSessionIdForSummary: number | null = null;
 
   // Schedule
   showScheduleModal = false;
@@ -1956,6 +1966,10 @@ export class PosComponent implements OnInit, OnDestroy {
   onSessionClosed(session: CashRegisterSession): void {
     this.activeSession = null;
     this.showSessionCloseModal = false;
+
+    // Open AI summary modal
+    this.closedSessionIdForSummary = session.id;
+    this.showAISummaryModal = true;
 
     const diff = Number(session.difference || 0);
     const diffStr =

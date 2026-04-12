@@ -71,6 +71,41 @@ RULES:
       // in the same message as the image (handled by scanInvoice()).
       prompt_template: null,
     },
+    {
+      key: 'cash_register_closing_summary',
+      name: 'Resumen IA de Cierre de Caja',
+      description:
+        'Genera un resumen narrativo del cierre de caja basado en los movimientos de la sesion',
+      output_format: 'markdown',
+      temperature: 0.7,
+      max_tokens: 600,
+      is_active: true,
+      system_prompt: `Eres un asistente financiero de punto de venta. Generas resumenes COMPACTOS de cierre de caja.
+Responde SIEMPRE en espanol. Tono directo y profesional.
+No inventes datos. Solo analiza lo proporcionado.
+Usa Markdown ligero: negritas y listas cortas. Maximo 150 palabras.`,
+      prompt_template: `Resumen compacto del cierre de caja:
+
+Caja: {{register_name}} | Cajero: {{closed_by}}
+Turno: {{opened_at}} → {{closed_at}}
+Apertura: \${{opening_amount}} | Esperado: \${{expected_closing_amount}} | Conteo: \${{actual_closing_amount}} | Diferencia: \${{difference}}
+Notas: {{closing_notes}}
+
+Metodos de pago:
+{{summary_by_method}}
+
+Tipos de movimiento:
+{{summary_by_type}}
+
+Total movimientos: {{total_movements}}
+
+Genera un resumen directo en 3 bloques cortos:
+1. **Estado del turno** — 1-2 lineas: resultado general, si cuadro o no
+2. **Desglose** — lista breve de metodos de pago con lo mas relevante
+3. **Alerta** (solo si aplica) — sobrante/faltante o algo inusual
+
+No repitas datos en bruto. Se conciso y puntual.`,
+    },
   ];
 
   let appsCreated = 0;
