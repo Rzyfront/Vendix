@@ -51,7 +51,11 @@ export class AutoEntryService {
     credit_amount: number,
     store_id?: number,
   ): Promise<AutoEntryLine | null> {
-    const mapping = await this.account_mapping_service.getMapping(org_id, mapping_key, store_id);
+    const mapping = await this.account_mapping_service.getMapping(
+      org_id,
+      mapping_key,
+      store_id,
+    );
     if (!mapping) return null;
     return {
       account_code: mapping.account_code,
@@ -90,13 +94,19 @@ export class AutoEntryService {
     }
 
     // Validate lines balance
-    const total_debit = valid_lines.reduce((sum, l) => sum + Number(l.debit_amount), 0);
-    const total_credit = valid_lines.reduce((sum, l) => sum + Number(l.credit_amount), 0);
+    const total_debit = valid_lines.reduce(
+      (sum, l) => sum + Number(l.debit_amount),
+      0,
+    );
+    const total_credit = valid_lines.reduce(
+      (sum, l) => sum + Number(l.credit_amount),
+      0,
+    );
 
     if (Math.abs(total_debit - total_credit) > 0.001) {
       this.logger.error(
         `Auto-entry balance error for ${source_type}#${source_id}: ` +
-        `debit=${total_debit}, credit=${total_credit}`,
+          `debit=${total_debit}, credit=${total_credit}`,
       );
       throw new Error(
         `Auto-entry lines do not balance: debit=${total_debit}, credit=${total_credit}`,
@@ -116,7 +126,7 @@ export class AutoEntryService {
     if (!fiscal_period) {
       this.logger.error(
         `No open fiscal period found for date ${entry_date.toISOString()} ` +
-        `in organization #${organization_id}`,
+          `in organization #${organization_id}`,
       );
       throw new Error(
         `No open fiscal period found for date ${entry_date.toISOString()}`,
@@ -140,7 +150,9 @@ export class AutoEntryService {
         this.logger.error(
           `Account code '${code}' not found for auto-entry ${source_type}#${source_id}`,
         );
-        throw new Error(`Account code '${code}' not found in chart of accounts`);
+        throw new Error(
+          `Account code '${code}' not found in chart of accounts`,
+        );
       }
     }
 
@@ -158,22 +170,24 @@ export class AutoEntryService {
       'purchase_order.payment': 'auto_purchase',
       'inventory.adjusted': 'auto_inventory',
       'credit_sale.created': 'auto_invoice', // Uses auto_invoice type (revenue recognition without payment)
-      'installment_payment': 'auto_installment_payment',
+      installment_payment: 'auto_installment_payment',
       'layaway.payment': 'auto_payment',
       'layaway.completed': 'auto_payment',
       'depreciation.monthly': 'auto_depreciation',
       'disposal.fixed_asset': 'auto_depreciation',
       'withholding.applied': 'auto_expense',
-      'payroll_item': 'auto_payroll',
+      payroll_item: 'auto_payroll',
       'settlement.paid': 'auto_payroll',
-      'ar_write_off': 'adjustment',
-      'ap_payment': 'auto_purchase',
-      'ap_write_off': 'adjustment',
-      'commission': 'auto_expense',
-      'stock_transfer': 'auto_inventory',
-      'cash_register_opened': 'adjustment',
-      'cash_register_closed': 'adjustment',
-      'cash_register_movement': 'adjustment',
+      ar_write_off: 'adjustment',
+      ap_payment: 'auto_purchase',
+      ap_write_off: 'adjustment',
+      commission: 'auto_expense',
+      stock_transfer: 'auto_inventory',
+      cash_register_opened: 'adjustment',
+      cash_register_closed: 'adjustment',
+      cash_register_movement: 'adjustment',
+      'expense.refunded': 'auto_expense',
+      'expense.cancelled': 'auto_expense',
     };
     const entry_type = entry_type_map[source_type] || 'manual';
 
@@ -237,7 +251,7 @@ export class AutoEntryService {
 
     this.logger.log(
       `Auto journal entry created: ${entry_number} for ${source_type}#${source_id} ` +
-      `(debit=${total_debit}, credit=${total_credit})`,
+        `(debit=${total_debit}, credit=${total_credit})`,
     );
 
     return entry;
@@ -260,20 +274,32 @@ export class AutoEntryService {
   }) {
     const lines: (AutoEntryLine | null)[] = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, 'invoice.validated.accounts_receivable',
-        'Accounts Receivable', data.total, 0, data.store_id,
+        data.organization_id,
+        'invoice.validated.accounts_receivable',
+        'Accounts Receivable',
+        data.total,
+        0,
+        data.store_id,
       ),
       this.resolveAccountLine(
-        data.organization_id, 'invoice.validated.revenue',
-        'Revenue', 0, data.subtotal, data.store_id,
+        data.organization_id,
+        'invoice.validated.revenue',
+        'Revenue',
+        0,
+        data.subtotal,
+        data.store_id,
       ),
     ]);
 
     if (data.tax_amount > 0) {
       lines.push(
         await this.resolveAccountLine(
-          data.organization_id, 'invoice.validated.vat_payable',
-          'VAT Payable', 0, data.tax_amount, data.store_id,
+          data.organization_id,
+          'invoice.validated.vat_payable',
+          'VAT Payable',
+          0,
+          data.tax_amount,
+          data.store_id,
         ),
       );
     }
@@ -336,9 +362,7 @@ export class AutoEntryService {
     const payment_desc = data.payment_method
       ? `Pago ${data.payment_method}`
       : 'Pago recibido';
-    const order_ref = data.order_number
-      ? ` - Orden ${data.order_number}`
-      : '';
+    const order_ref = data.order_number ? ` - Orden ${data.order_number}` : '';
 
     const cash_bank_key = this.resolveCashBankKey(data.payment_method);
     let lines: (AutoEntryLine | null)[];
@@ -347,26 +371,39 @@ export class AutoEntryService {
       // Invoice exists: Debit Cash/Bank, Credit AR (invoice.validated already recognized revenue+IVA)
       lines = await Promise.all([
         this.resolveAccountLine(
-          data.organization_id, cash_bank_key,
-          `${payment_desc}${order_ref}`, data.amount, 0, data.store_id,
+          data.organization_id,
+          cash_bank_key,
+          `${payment_desc}${order_ref}`,
+          data.amount,
+          0,
+          data.store_id,
         ),
         this.resolveAccountLine(
-          data.organization_id, 'payment.received.accounts_receivable',
-          `Recaudo CxC${order_ref}`, 0, data.amount, data.store_id,
+          data.organization_id,
+          'payment.received.accounts_receivable',
+          `Recaudo CxC${order_ref}`,
+          0,
+          data.amount,
+          data.store_id,
         ),
       ]);
     } else {
       // No invoice (POS direct sale): Debit Cash/Bank + Discount, Credit Revenue + VAT
       const tax = Number(data.tax_amount || 0);
       const discount = Number(data.discount_amount || 0);
-      const subtotal = data.subtotal_amount != null
-        ? Number(data.subtotal_amount)
-        : data.amount + discount - tax; // fallback: derive subtotal from amount + discount - tax
+      const subtotal =
+        data.subtotal_amount != null
+          ? Number(data.subtotal_amount)
+          : data.amount + discount - tax; // fallback: derive subtotal from amount + discount - tax
 
       lines = [
         await this.resolveAccountLine(
-          data.organization_id, cash_bank_key,
-          `${payment_desc}${order_ref}`, data.amount, 0, data.store_id,
+          data.organization_id,
+          cash_bank_key,
+          `${payment_desc}${order_ref}`,
+          data.amount,
+          0,
+          data.store_id,
         ),
       ];
 
@@ -374,16 +411,24 @@ export class AutoEntryService {
       if (discount > 0) {
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payment.received.sales_discount',
-            `Descuento en venta${order_ref}`, discount, 0, data.store_id,
+            data.organization_id,
+            'payment.received.sales_discount',
+            `Descuento en venta${order_ref}`,
+            discount,
+            0,
+            data.store_id,
           ),
         );
       }
 
       lines.push(
         await this.resolveAccountLine(
-          data.organization_id, 'payment.received.revenue',
-          `Venta directa${order_ref}`, 0, subtotal, data.store_id,
+          data.organization_id,
+          'payment.received.revenue',
+          `Venta directa${order_ref}`,
+          0,
+          subtotal,
+          data.store_id,
         ),
       );
 
@@ -391,8 +436,12 @@ export class AutoEntryService {
       if (tax > 0) {
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payment.received.vat_payable',
-            `IVA venta directa${order_ref}`, 0, tax, data.store_id,
+            data.organization_id,
+            'payment.received.vat_payable',
+            `IVA venta directa${order_ref}`,
+            0,
+            tax,
+            data.store_id,
           ),
         );
       }
@@ -434,8 +483,12 @@ export class AutoEntryService {
 
     const lines: (AutoEntryLine | null)[] = [
       await this.resolveAccountLine(
-        data.organization_id, 'credit_sale.created.accounts_receivable',
-        `CxC venta a crédito${order_ref}`, data.total_amount, 0, data.store_id,
+        data.organization_id,
+        'credit_sale.created.accounts_receivable',
+        `CxC venta a crédito${order_ref}`,
+        data.total_amount,
+        0,
+        data.store_id,
       ),
     ];
 
@@ -443,24 +496,36 @@ export class AutoEntryService {
     if (discount > 0) {
       lines.push(
         await this.resolveAccountLine(
-          data.organization_id, 'credit_sale.created.sales_discount',
-          `Descuento venta a crédito${order_ref}`, discount, 0, data.store_id,
+          data.organization_id,
+          'credit_sale.created.sales_discount',
+          `Descuento venta a crédito${order_ref}`,
+          discount,
+          0,
+          data.store_id,
         ),
       );
     }
 
     lines.push(
       await this.resolveAccountLine(
-        data.organization_id, 'credit_sale.created.revenue',
-        `Ingreso venta a crédito${order_ref}`, 0, data.subtotal_amount, data.store_id,
+        data.organization_id,
+        'credit_sale.created.revenue',
+        `Ingreso venta a crédito${order_ref}`,
+        0,
+        data.subtotal_amount,
+        data.store_id,
       ),
     );
 
     if (data.tax_amount > 0) {
       lines.push(
         await this.resolveAccountLine(
-          data.organization_id, 'credit_sale.created.vat_payable',
-          `IVA venta a crédito${order_ref}`, 0, data.tax_amount, data.store_id,
+          data.organization_id,
+          'credit_sale.created.vat_payable',
+          `IVA venta a crédito${order_ref}`,
+          0,
+          data.tax_amount,
+          data.store_id,
         ),
       );
     }
@@ -489,12 +554,20 @@ export class AutoEntryService {
   }) {
     const lines = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, 'expense.approved.expense',
-        'Expense', data.amount, 0, data.store_id,
+        data.organization_id,
+        'expense.approved.expense',
+        'Expense',
+        data.amount,
+        0,
+        data.store_id,
       ),
       this.resolveAccountLine(
-        data.organization_id, 'expense.approved.accounts_payable',
-        'Accounts Payable', 0, data.amount, data.store_id,
+        data.organization_id,
+        'expense.approved.accounts_payable',
+        'Accounts Payable',
+        0,
+        data.amount,
+        data.store_id,
       ),
     ]);
 
@@ -522,12 +595,20 @@ export class AutoEntryService {
   }) {
     const lines = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, 'expense.paid.accounts_payable',
-        'Accounts Payable', data.amount, 0, data.store_id,
+        data.organization_id,
+        'expense.paid.accounts_payable',
+        'Accounts Payable',
+        data.amount,
+        0,
+        data.store_id,
       ),
       this.resolveAccountLine(
-        data.organization_id, 'expense.paid.cash',
-        'Cash/Bank', 0, data.amount, data.store_id,
+        data.organization_id,
+        'expense.paid.cash',
+        'Cash/Bank',
+        0,
+        data.amount,
+        data.store_id,
       ),
     ]);
 
@@ -564,19 +645,28 @@ export class AutoEntryService {
     health_deduction: number;
     pension_deduction: number;
     user_id?: number;
-    cost_center_breakdown?: Record<string, { earnings: number; employer_costs: number }>;
+    cost_center_breakdown?: Record<
+      string,
+      { earnings: number; employer_costs: number }
+    >;
   }) {
     const lines: (AutoEntryLine | null)[] = [];
 
     // === DEBIT LINES ===
-    if (data.cost_center_breakdown && Object.keys(data.cost_center_breakdown).length > 0) {
+    if (
+      data.cost_center_breakdown &&
+      Object.keys(data.cost_center_breakdown).length > 0
+    ) {
       for (const [cc, amounts] of Object.entries(data.cost_center_breakdown)) {
         if (amounts.earnings > 0) {
           lines.push(
             await this.resolveAccountLine(
               data.organization_id,
               `payroll.approved.payroll_expense.${cc}`,
-              `Gasto nómina (${cc})`, amounts.earnings, 0, data.store_id,
+              `Gasto nómina (${cc})`,
+              amounts.earnings,
+              0,
+              data.store_id,
             ),
           );
         }
@@ -585,7 +675,10 @@ export class AutoEntryService {
             await this.resolveAccountLine(
               data.organization_id,
               `payroll.approved.social_security.${cc}`,
-              `Seguridad social (${cc})`, amounts.employer_costs, 0, data.store_id,
+              `Seguridad social (${cc})`,
+              amounts.employer_costs,
+              0,
+              data.store_id,
             ),
           );
         }
@@ -594,16 +687,24 @@ export class AutoEntryService {
       if (data.total_earnings > 0) {
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payroll.approved.payroll_expense',
-            'Gasto nómina', data.total_earnings, 0, data.store_id,
+            data.organization_id,
+            'payroll.approved.payroll_expense',
+            'Gasto nómina',
+            data.total_earnings,
+            0,
+            data.store_id,
           ),
         );
       }
       if (data.total_employer_costs > 0) {
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payroll.approved.social_security',
-            'Seguridad social', data.total_employer_costs, 0, data.store_id,
+            data.organization_id,
+            'payroll.approved.social_security',
+            'Seguridad social',
+            data.total_employer_costs,
+            0,
+            data.store_id,
           ),
         );
       }
@@ -613,8 +714,12 @@ export class AutoEntryService {
     if (data.total_net_pay > 0) {
       lines.push(
         await this.resolveAccountLine(
-          data.organization_id, 'payroll.approved.salaries_payable',
-          'Salarios por pagar', 0, data.total_net_pay, data.store_id,
+          data.organization_id,
+          'payroll.approved.salaries_payable',
+          'Salarios por pagar',
+          0,
+          data.total_net_pay,
+          data.store_id,
         ),
       );
     }
@@ -622,8 +727,12 @@ export class AutoEntryService {
     if (data.health_deduction > 0) {
       lines.push(
         await this.resolveAccountLine(
-          data.organization_id, 'payroll.approved.health_payable',
-          'EPS por pagar', 0, data.health_deduction, data.store_id,
+          data.organization_id,
+          'payroll.approved.health_payable',
+          'EPS por pagar',
+          0,
+          data.health_deduction,
+          data.store_id,
         ),
       );
     }
@@ -631,20 +740,30 @@ export class AutoEntryService {
     if (data.pension_deduction > 0) {
       lines.push(
         await this.resolveAccountLine(
-          data.organization_id, 'payroll.approved.pension_payable',
-          'Pensión por pagar', 0, data.pension_deduction, data.store_id,
+          data.organization_id,
+          'payroll.approved.pension_payable',
+          'Pensión por pagar',
+          0,
+          data.pension_deduction,
+          data.store_id,
         ),
       );
     }
 
     // Withholdings = total debits - (net_pay + health + pension)
     const total_debits = data.total_earnings + data.total_employer_costs;
-    const remaining = total_debits - (data.total_net_pay + data.health_deduction + data.pension_deduction);
+    const remaining =
+      total_debits -
+      (data.total_net_pay + data.health_deduction + data.pension_deduction);
     if (remaining > 0.001) {
       lines.push(
         await this.resolveAccountLine(
-          data.organization_id, 'payroll.approved.withholdings',
-          'Retenciones y deducciones', 0, remaining, data.store_id,
+          data.organization_id,
+          'payroll.approved.withholdings',
+          'Retenciones y deducciones',
+          0,
+          remaining,
+          data.store_id,
         ),
       );
     }
@@ -674,10 +793,34 @@ export class AutoEntryService {
       payroll_item_id: number;
       employee_id: number;
       cost_center: string;
-      earnings: { base_salary: number; transport_subsidy: number; total: number } | null;
-      deductions: { health: number; pension: number; retention: number; advance_deduction: number; total: number } | null;
-      employer_costs: { health: number; pension: number; arl: number; sena: number; icbf: number; compensation_fund: number; total: number } | null;
-      provisions: { severance: number; severance_interest: number; vacation: number; bonus: number; total: number } | null;
+      earnings: {
+        base_salary: number;
+        transport_subsidy: number;
+        total: number;
+      } | null;
+      deductions: {
+        health: number;
+        pension: number;
+        retention: number;
+        advance_deduction: number;
+        total: number;
+      } | null;
+      employer_costs: {
+        health: number;
+        pension: number;
+        arl: number;
+        sena: number;
+        icbf: number;
+        compensation_fund: number;
+        total: number;
+      } | null;
+      provisions: {
+        severance: number;
+        severance_interest: number;
+        vacation: number;
+        bonus: number;
+        total: number;
+      } | null;
       net_pay: number;
     }>;
   }): Promise<{ created: number; failed: number; errors: string[] }> {
@@ -685,10 +828,34 @@ export class AutoEntryService {
 
     for (const item of data.payroll_items) {
       try {
-        const e = item.earnings ?? { base_salary: 0, transport_subsidy: 0, total: 0 };
-        const d = item.deductions ?? { health: 0, pension: 0, retention: 0, advance_deduction: 0, total: 0 };
-        const ec = item.employer_costs ?? { health: 0, pension: 0, arl: 0, sena: 0, icbf: 0, compensation_fund: 0, total: 0 };
-        const p = item.provisions ?? { severance: 0, severance_interest: 0, vacation: 0, bonus: 0, total: 0 };
+        const e = item.earnings ?? {
+          base_salary: 0,
+          transport_subsidy: 0,
+          total: 0,
+        };
+        const d = item.deductions ?? {
+          health: 0,
+          pension: 0,
+          retention: 0,
+          advance_deduction: 0,
+          total: 0,
+        };
+        const ec = item.employer_costs ?? {
+          health: 0,
+          pension: 0,
+          arl: 0,
+          sena: 0,
+          icbf: 0,
+          compensation_fund: 0,
+          total: 0,
+        };
+        const p = item.provisions ?? {
+          severance: 0,
+          severance_interest: 0,
+          vacation: 0,
+          bonus: 0,
+          total: 0,
+        };
         const cost_center = item.cost_center || 'administrative';
 
         const lines: (AutoEntryLine | null)[] = [];
@@ -698,15 +865,22 @@ export class AutoEntryService {
           await this.resolveAccountLine(
             data.organization_id,
             `payroll.approved.payroll_expense.${cost_center}`,
-            'Sueldo básico', e.base_salary, 0, data.store_id,
+            'Sueldo básico',
+            e.base_salary,
+            0,
+            data.store_id,
           ),
         );
 
         if (e.transport_subsidy > 0) {
           lines.push(
             await this.resolveAccountLine(
-              data.organization_id, 'payroll.approved.transport_subsidy',
-              'Aux. transporte', e.transport_subsidy, 0, data.store_id,
+              data.organization_id,
+              'payroll.approved.transport_subsidy',
+              'Aux. transporte',
+              e.transport_subsidy,
+              0,
+              data.store_id,
             ),
           );
         }
@@ -715,32 +889,48 @@ export class AutoEntryService {
         if (p.severance > 0) {
           lines.push(
             await this.resolveAccountLine(
-              data.organization_id, 'payroll.approved.provision_severance',
-              'Gasto cesantías', p.severance, 0, data.store_id,
+              data.organization_id,
+              'payroll.approved.provision_severance',
+              'Gasto cesantías',
+              p.severance,
+              0,
+              data.store_id,
             ),
           );
         }
         if (p.severance_interest > 0) {
           lines.push(
             await this.resolveAccountLine(
-              data.organization_id, 'payroll.approved.provision_severance_interest',
-              'Gasto int. cesantías', p.severance_interest, 0, data.store_id,
+              data.organization_id,
+              'payroll.approved.provision_severance_interest',
+              'Gasto int. cesantías',
+              p.severance_interest,
+              0,
+              data.store_id,
             ),
           );
         }
         if (p.vacation > 0) {
           lines.push(
             await this.resolveAccountLine(
-              data.organization_id, 'payroll.approved.provision_vacation',
-              'Gasto vacaciones', p.vacation, 0, data.store_id,
+              data.organization_id,
+              'payroll.approved.provision_vacation',
+              'Gasto vacaciones',
+              p.vacation,
+              0,
+              data.store_id,
             ),
           );
         }
         if (p.bonus > 0) {
           lines.push(
             await this.resolveAccountLine(
-              data.organization_id, 'payroll.approved.provision_bonus',
-              'Gasto prima', p.bonus, 0, data.store_id,
+              data.organization_id,
+              'payroll.approved.provision_bonus',
+              'Gasto prima',
+              p.bonus,
+              0,
+              data.store_id,
             ),
           );
         }
@@ -748,60 +938,96 @@ export class AutoEntryService {
         // === DEBIT LINES: aportes patronales (gasto) ===
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payroll.approved.health_employer',
-            'EPS empleador', ec.health, 0, data.store_id,
+            data.organization_id,
+            'payroll.approved.health_employer',
+            'EPS empleador',
+            ec.health,
+            0,
+            data.store_id,
           ),
         );
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payroll.approved.pension_employer',
-            'AFP empleador', ec.pension, 0, data.store_id,
+            data.organization_id,
+            'payroll.approved.pension_employer',
+            'AFP empleador',
+            ec.pension,
+            0,
+            data.store_id,
           ),
         );
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payroll.approved.arl_expense',
-            'ARL', ec.arl, 0, data.store_id,
+            data.organization_id,
+            'payroll.approved.arl_expense',
+            'ARL',
+            ec.arl,
+            0,
+            data.store_id,
           ),
         );
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payroll.approved.sena_expense',
-            'SENA', ec.sena, 0, data.store_id,
+            data.organization_id,
+            'payroll.approved.sena_expense',
+            'SENA',
+            ec.sena,
+            0,
+            data.store_id,
           ),
         );
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payroll.approved.icbf_expense',
-            'ICBF', ec.icbf, 0, data.store_id,
+            data.organization_id,
+            'payroll.approved.icbf_expense',
+            'ICBF',
+            ec.icbf,
+            0,
+            data.store_id,
           ),
         );
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payroll.approved.compensation_fund_expense',
-            'Caja compensación', ec.compensation_fund, 0, data.store_id,
+            data.organization_id,
+            'payroll.approved.compensation_fund_expense',
+            'Caja compensación',
+            ec.compensation_fund,
+            0,
+            data.store_id,
           ),
         );
 
         // === CREDIT LINES: deducciones empleado ===
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payroll.approved.health_payable',
-            'EPS empleado', 0, d.health, data.store_id,
+            data.organization_id,
+            'payroll.approved.health_payable',
+            'EPS empleado',
+            0,
+            d.health,
+            data.store_id,
           ),
         );
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payroll.approved.pension_payable',
-            'AFP empleado', 0, d.pension, data.store_id,
+            data.organization_id,
+            'payroll.approved.pension_payable',
+            'AFP empleado',
+            0,
+            d.pension,
+            data.store_id,
           ),
         );
 
         if (d.retention > 0) {
           lines.push(
             await this.resolveAccountLine(
-              data.organization_id, 'payroll.approved.withholdings',
-              'Retención', 0, d.retention, data.store_id,
+              data.organization_id,
+              'payroll.approved.withholdings',
+              'Retención',
+              0,
+              d.retention,
+              data.store_id,
             ),
           );
         }
@@ -809,8 +1035,12 @@ export class AutoEntryService {
         if (d.advance_deduction > 0) {
           lines.push(
             await this.resolveAccountLine(
-              data.organization_id, 'payroll.approved.advance_deduction',
-              'Anticipo descuento', 0, d.advance_deduction, data.store_id,
+              data.organization_id,
+              'payroll.approved.advance_deduction',
+              'Anticipo descuento',
+              0,
+              d.advance_deduction,
+              data.store_id,
             ),
           );
         }
@@ -818,8 +1048,12 @@ export class AutoEntryService {
         // === CREDIT LINES: nómina por pagar ===
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payroll.approved.salaries_payable',
-            'Nómina por pagar', 0, item.net_pay, data.store_id,
+            data.organization_id,
+            'payroll.approved.salaries_payable',
+            'Nómina por pagar',
+            0,
+            item.net_pay,
+            data.store_id,
           ),
         );
 
@@ -827,32 +1061,48 @@ export class AutoEntryService {
         if (p.severance > 0) {
           lines.push(
             await this.resolveAccountLine(
-              data.organization_id, 'payroll.approved.liability_severance',
-              'Cesantías por pagar', 0, p.severance, data.store_id,
+              data.organization_id,
+              'payroll.approved.liability_severance',
+              'Cesantías por pagar',
+              0,
+              p.severance,
+              data.store_id,
             ),
           );
         }
         if (p.severance_interest > 0) {
           lines.push(
             await this.resolveAccountLine(
-              data.organization_id, 'payroll.approved.liability_severance_interest',
-              'Intereses cesantías por pagar', 0, p.severance_interest, data.store_id,
+              data.organization_id,
+              'payroll.approved.liability_severance_interest',
+              'Intereses cesantías por pagar',
+              0,
+              p.severance_interest,
+              data.store_id,
             ),
           );
         }
         if (p.vacation > 0) {
           lines.push(
             await this.resolveAccountLine(
-              data.organization_id, 'payroll.approved.liability_vacation',
-              'Vacaciones por pagar', 0, p.vacation, data.store_id,
+              data.organization_id,
+              'payroll.approved.liability_vacation',
+              'Vacaciones por pagar',
+              0,
+              p.vacation,
+              data.store_id,
             ),
           );
         }
         if (p.bonus > 0) {
           lines.push(
             await this.resolveAccountLine(
-              data.organization_id, 'payroll.approved.liability_bonus',
-              'Prima por pagar', 0, p.bonus, data.store_id,
+              data.organization_id,
+              'payroll.approved.liability_bonus',
+              'Prima por pagar',
+              0,
+              p.bonus,
+              data.store_id,
             ),
           );
         }
@@ -860,38 +1110,62 @@ export class AutoEntryService {
         // === CREDIT LINES: aportes patronales por pagar ===
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payroll.approved.health_employer_payable',
-            'EPS empleador por pagar', 0, ec.health, data.store_id,
+            data.organization_id,
+            'payroll.approved.health_employer_payable',
+            'EPS empleador por pagar',
+            0,
+            ec.health,
+            data.store_id,
           ),
         );
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payroll.approved.pension_employer_payable',
-            'AFP empleador por pagar', 0, ec.pension, data.store_id,
+            data.organization_id,
+            'payroll.approved.pension_employer_payable',
+            'AFP empleador por pagar',
+            0,
+            ec.pension,
+            data.store_id,
           ),
         );
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payroll.approved.arl_payable',
-            'ARL por pagar', 0, ec.arl, data.store_id,
+            data.organization_id,
+            'payroll.approved.arl_payable',
+            'ARL por pagar',
+            0,
+            ec.arl,
+            data.store_id,
           ),
         );
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payroll.approved.sena_payable',
-            'SENA por pagar', 0, ec.sena, data.store_id,
+            data.organization_id,
+            'payroll.approved.sena_payable',
+            'SENA por pagar',
+            0,
+            ec.sena,
+            data.store_id,
           ),
         );
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payroll.approved.icbf_payable',
-            'ICBF por pagar', 0, ec.icbf, data.store_id,
+            data.organization_id,
+            'payroll.approved.icbf_payable',
+            'ICBF por pagar',
+            0,
+            ec.icbf,
+            data.store_id,
           ),
         );
         lines.push(
           await this.resolveAccountLine(
-            data.organization_id, 'payroll.approved.compensation_fund_payable',
-            'Caja comp. por pagar', 0, ec.compensation_fund, data.store_id,
+            data.organization_id,
+            'payroll.approved.compensation_fund_payable',
+            'Caja comp. por pagar',
+            0,
+            ec.compensation_fund,
+            data.store_id,
           ),
         );
 
@@ -931,12 +1205,20 @@ export class AutoEntryService {
   }) {
     const lines = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, 'order.completed.cogs',
-        'Cost of Goods Sold', data.total_cost, 0, data.store_id,
+        data.organization_id,
+        'order.completed.cogs',
+        'Cost of Goods Sold',
+        data.total_cost,
+        0,
+        data.store_id,
       ),
       this.resolveAccountLine(
-        data.organization_id, 'order.completed.inventory',
-        'Inventory', 0, data.total_cost, data.store_id,
+        data.organization_id,
+        'order.completed.inventory',
+        'Inventory',
+        0,
+        data.total_cost,
+        data.store_id,
       ),
     ]);
 
@@ -969,7 +1251,9 @@ export class AutoEntryService {
   }) {
     // Replacements only move inventory — no financial entry needed
     if (data.return_type === 'replacement') {
-      this.logger.log(`Skipping accounting entry for replacement return #${data.refund_id}`);
+      this.logger.log(
+        `Skipping accounting entry for replacement return #${data.refund_id}`,
+      );
       return null;
     }
 
@@ -978,8 +1262,12 @@ export class AutoEntryService {
 
     const lines: (AutoEntryLine | null)[] = [
       await this.resolveAccountLine(
-        data.organization_id, 'refund.completed.revenue',
-        'Ingresos (reversa)', revenue_amount, 0, data.store_id,
+        data.organization_id,
+        'refund.completed.revenue',
+        'Ingresos (reversa)',
+        revenue_amount,
+        0,
+        data.store_id,
       ),
     ];
 
@@ -987,8 +1275,12 @@ export class AutoEntryService {
     if (tax > 0) {
       lines.push(
         await this.resolveAccountLine(
-          data.organization_id, 'refund.completed.vat_payable',
-          'IVA (reversa devolución)', tax, 0, data.store_id,
+          data.organization_id,
+          'refund.completed.vat_payable',
+          'IVA (reversa devolución)',
+          tax,
+          0,
+          data.store_id,
         ),
       );
     }
@@ -996,8 +1288,12 @@ export class AutoEntryService {
     // Credit: Cash/Bank for the total refund amount
     lines.push(
       await this.resolveAccountLine(
-        data.organization_id, 'refund.completed.cash',
-        'Reembolso al cliente', 0, data.amount, data.store_id,
+        data.organization_id,
+        'refund.completed.cash',
+        'Reembolso al cliente',
+        0,
+        data.amount,
+        data.store_id,
       ),
     );
 
@@ -1025,12 +1321,20 @@ export class AutoEntryService {
   }) {
     const lines = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, 'purchase_order.received.inventory',
-        'Inventory', data.total_amount, 0, data.store_id,
+        data.organization_id,
+        'purchase_order.received.inventory',
+        'Inventory',
+        data.total_amount,
+        0,
+        data.store_id,
       ),
       this.resolveAccountLine(
-        data.organization_id, 'purchase_order.received.accounts_payable',
-        'Accounts Payable', 0, data.total_amount, data.store_id,
+        data.organization_id,
+        'purchase_order.received.accounts_payable',
+        'Accounts Payable',
+        0,
+        data.total_amount,
+        data.store_id,
       ),
     ]);
 
@@ -1065,12 +1369,18 @@ export class AutoEntryService {
 
     const lines = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, 'purchase_order.payment.accounts_payable',
-        'Proveedores - Pago OC', data.amount, 0,
+        data.organization_id,
+        'purchase_order.payment.accounts_payable',
+        'Proveedores - Pago OC',
+        data.amount,
+        0,
       ),
       this.resolveAccountLine(
-        data.organization_id, cash_bank_key,
-        `Pago OC #${data.purchase_order_id}`, 0, data.amount,
+        data.organization_id,
+        cash_bank_key,
+        `Pago OC #${data.purchase_order_id}`,
+        0,
+        data.amount,
       ),
     ]);
 
@@ -1102,24 +1412,40 @@ export class AutoEntryService {
       // Shrinkage: DR Shrinkage, CR Inventory
       lines = await Promise.all([
         this.resolveAccountLine(
-          data.organization_id, 'inventory.adjusted.shrinkage',
-          'Inventory Shrinkage', data.cost_amount, 0, data.store_id,
+          data.organization_id,
+          'inventory.adjusted.shrinkage',
+          'Inventory Shrinkage',
+          data.cost_amount,
+          0,
+          data.store_id,
         ),
         this.resolveAccountLine(
-          data.organization_id, 'inventory.adjusted.inventory',
-          'Inventory', 0, data.cost_amount, data.store_id,
+          data.organization_id,
+          'inventory.adjusted.inventory',
+          'Inventory',
+          0,
+          data.cost_amount,
+          data.store_id,
         ),
       ]);
     } else {
       // Surplus: DR Inventory, CR Shrinkage
       lines = await Promise.all([
         this.resolveAccountLine(
-          data.organization_id, 'inventory.adjusted.inventory',
-          'Inventory', data.cost_amount, 0, data.store_id,
+          data.organization_id,
+          'inventory.adjusted.inventory',
+          'Inventory',
+          data.cost_amount,
+          0,
+          data.store_id,
         ),
         this.resolveAccountLine(
-          data.organization_id, 'inventory.adjusted.shrinkage',
-          'Inventory Surplus', 0, data.cost_amount, data.store_id,
+          data.organization_id,
+          'inventory.adjusted.shrinkage',
+          'Inventory Surplus',
+          0,
+          data.cost_amount,
+          data.store_id,
         ),
       ]);
     }
@@ -1171,12 +1497,20 @@ export class AutoEntryService {
 
     const lines = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, cash_bank_key,
-        `Abono ${cuota_ref}`, data.amount, 0, data.store_id,
+        data.organization_id,
+        cash_bank_key,
+        `Abono ${cuota_ref}`,
+        data.amount,
+        0,
+        data.store_id,
       ),
       this.resolveAccountLine(
-        data.organization_id, 'installment_payment.received.accounts_receivable',
-        `Recaudo CxC ${cuota_ref}`, 0, data.amount, data.store_id,
+        data.organization_id,
+        'installment_payment.received.accounts_receivable',
+        `Recaudo CxC ${cuota_ref}`,
+        0,
+        data.amount,
+        data.store_id,
       ),
     ]);
 
@@ -1207,19 +1541,30 @@ export class AutoEntryService {
     payment_method?: string;
     user_id?: number;
   }) {
-    const is_cash = !data.payment_method ||
+    const is_cash =
+      !data.payment_method ||
       data.payment_method.toLowerCase().includes('cash') ||
       data.payment_method.toLowerCase().includes('efectivo');
-    const cash_bank_key = is_cash ? 'layaway.payment.cash' : 'layaway.payment.bank';
+    const cash_bank_key = is_cash
+      ? 'layaway.payment.cash'
+      : 'layaway.payment.bank';
 
     const lines = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, cash_bank_key,
-        `Pago separé ${data.plan_number}`, data.amount, 0, data.store_id,
+        data.organization_id,
+        cash_bank_key,
+        `Pago separé ${data.plan_number}`,
+        data.amount,
+        0,
+        data.store_id,
       ),
       this.resolveAccountLine(
-        data.organization_id, 'layaway.payment.customer_advance',
-        `Anticipo separé ${data.plan_number}`, 0, data.amount, data.store_id,
+        data.organization_id,
+        'layaway.payment.customer_advance',
+        `Anticipo separé ${data.plan_number}`,
+        0,
+        data.amount,
+        data.store_id,
       ),
     ]);
 
@@ -1249,12 +1594,20 @@ export class AutoEntryService {
   }) {
     const lines = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, 'layaway.completed.customer_advance',
-        `Anticipo liquidado - separé ${data.plan_number}`, data.total_amount, 0, data.store_id,
+        data.organization_id,
+        'layaway.completed.customer_advance',
+        `Anticipo liquidado - separé ${data.plan_number}`,
+        data.total_amount,
+        0,
+        data.store_id,
       ),
       this.resolveAccountLine(
-        data.organization_id, 'layaway.completed.revenue',
-        `Ingreso por venta - separé ${data.plan_number}`, 0, data.total_amount, data.store_id,
+        data.organization_id,
+        'layaway.completed.revenue',
+        `Ingreso por venta - separé ${data.plan_number}`,
+        0,
+        data.total_amount,
+        data.store_id,
       ),
     ]);
 
@@ -1286,12 +1639,20 @@ export class AutoEntryService {
   }) {
     const lines = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, 'depreciation.monthly.depreciation_expense',
-        `Gasto depreciación ${data.asset_number}`, data.amount, 0, data.store_id,
+        data.organization_id,
+        'depreciation.monthly.depreciation_expense',
+        `Gasto depreciación ${data.asset_number}`,
+        data.amount,
+        0,
+        data.store_id,
       ),
       this.resolveAccountLine(
-        data.organization_id, 'depreciation.monthly.accumulated_depreciation',
-        `Depreciación acumulada ${data.asset_number}`, 0, data.amount, data.store_id,
+        data.organization_id,
+        'depreciation.monthly.accumulated_depreciation',
+        `Depreciación acumulada ${data.asset_number}`,
+        0,
+        data.amount,
+        data.store_id,
       ),
     ]);
 
@@ -1334,9 +1695,12 @@ export class AutoEntryService {
     if (data.accumulated_depreciation > 0) {
       lines.push(
         await this.resolveAccountLine(
-          data.organization_id, 'disposal.fixed_asset.accumulated_depreciation',
+          data.organization_id,
+          'disposal.fixed_asset.accumulated_depreciation',
           `Dep. acumulada baja ${data.asset_number}`,
-          data.accumulated_depreciation, 0, data.store_id,
+          data.accumulated_depreciation,
+          0,
+          data.store_id,
         ),
       );
     }
@@ -1345,9 +1709,12 @@ export class AutoEntryService {
     if (data.disposal_amount > 0) {
       lines.push(
         await this.resolveAccountLine(
-          data.organization_id, 'disposal.fixed_asset.cash',
+          data.organization_id,
+          'disposal.fixed_asset.cash',
           `Venta activo ${data.asset_number}`,
-          data.disposal_amount, 0, data.store_id,
+          data.disposal_amount,
+          0,
+          data.store_id,
         ),
       );
     }
@@ -1356,9 +1723,12 @@ export class AutoEntryService {
     if (data.gain_loss < 0) {
       lines.push(
         await this.resolveAccountLine(
-          data.organization_id, 'disposal.fixed_asset.loss',
+          data.organization_id,
+          'disposal.fixed_asset.loss',
           `Pérdida baja ${data.asset_number}`,
-          Math.abs(data.gain_loss), 0, data.store_id,
+          Math.abs(data.gain_loss),
+          0,
+          data.store_id,
         ),
       );
     }
@@ -1366,9 +1736,12 @@ export class AutoEntryService {
     // CR: Remove asset cost
     lines.push(
       await this.resolveAccountLine(
-        data.organization_id, 'disposal.fixed_asset.asset_cost',
+        data.organization_id,
+        'disposal.fixed_asset.asset_cost',
         `Baja activo ${data.asset_number}`,
-        0, data.acquisition_cost, data.store_id,
+        0,
+        data.acquisition_cost,
+        data.store_id,
       ),
     );
 
@@ -1376,9 +1749,12 @@ export class AutoEntryService {
     if (data.gain_loss > 0) {
       lines.push(
         await this.resolveAccountLine(
-          data.organization_id, 'disposal.fixed_asset.gain',
+          data.organization_id,
+          'disposal.fixed_asset.gain',
           `Utilidad venta ${data.asset_number}`,
-          0, data.gain_loss, data.store_id,
+          0,
+          data.gain_loss,
+          data.store_id,
         ),
       );
     }
@@ -1413,21 +1789,30 @@ export class AutoEntryService {
     const lines: (AutoEntryLine | null)[] = [
       // DR: Expense / Purchase (base amount)
       await this.resolveAccountLine(
-        data.organization_id, 'withholding.applied.expense',
+        data.organization_id,
+        'withholding.applied.expense',
         `Compra/Gasto - ${data.supplier_name}`,
-        data.base_amount, 0, data.store_id,
+        data.base_amount,
+        0,
+        data.store_id,
       ),
       // CR: Withholding payable (retention amount)
       await this.resolveAccountLine(
-        data.organization_id, 'withholding.applied.withholding_payable',
+        data.organization_id,
+        'withholding.applied.withholding_payable',
         `Retención ${data.concept_name} - ${data.supplier_name}`,
-        0, data.withholding_amount, data.store_id,
+        0,
+        data.withholding_amount,
+        data.store_id,
       ),
       // CR: Accounts Payable (net amount after retention)
       await this.resolveAccountLine(
-        data.organization_id, 'withholding.applied.accounts_payable',
+        data.organization_id,
+        'withholding.applied.accounts_payable',
         `Proveedor neto ${data.supplier_name}`,
-        0, data.net_amount, data.store_id,
+        0,
+        data.net_amount,
+        data.store_id,
       ),
     ];
 
@@ -1474,59 +1859,109 @@ export class AutoEntryService {
     user_id?: number;
   }) {
     const lines: (AutoEntryLine | null)[] = [];
-    const desc = (concept: string) => `${concept} - ${data.employee_name} (${data.settlement_number})`;
+    const desc = (concept: string) =>
+      `${concept} - ${data.employee_name} (${data.settlement_number})`;
 
     // DEBIT lines (provisions and expenses)
     if (data.severance > 0) {
-      lines.push(await this.resolveAccountLine(
-        data.organization_id, 'settlement.paid.severance',
-        desc('Cesantías'), data.severance, 0, data.store_id,
-      ));
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'settlement.paid.severance',
+          desc('Cesantías'),
+          data.severance,
+          0,
+          data.store_id,
+        ),
+      );
     }
     if (data.severance_interest > 0) {
-      lines.push(await this.resolveAccountLine(
-        data.organization_id, 'settlement.paid.severance_interest',
-        desc('Intereses Cesantías'), data.severance_interest, 0, data.store_id,
-      ));
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'settlement.paid.severance_interest',
+          desc('Intereses Cesantías'),
+          data.severance_interest,
+          0,
+          data.store_id,
+        ),
+      );
     }
     if (data.bonus > 0) {
-      lines.push(await this.resolveAccountLine(
-        data.organization_id, 'settlement.paid.bonus',
-        desc('Prima Proporcional'), data.bonus, 0, data.store_id,
-      ));
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'settlement.paid.bonus',
+          desc('Prima Proporcional'),
+          data.bonus,
+          0,
+          data.store_id,
+        ),
+      );
     }
     if (data.vacation > 0) {
-      lines.push(await this.resolveAccountLine(
-        data.organization_id, 'settlement.paid.vacation',
-        desc('Vacaciones Proporcionales'), data.vacation, 0, data.store_id,
-      ));
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'settlement.paid.vacation',
+          desc('Vacaciones Proporcionales'),
+          data.vacation,
+          0,
+          data.store_id,
+        ),
+      );
     }
     if (data.pending_salary > 0) {
-      lines.push(await this.resolveAccountLine(
-        data.organization_id, 'settlement.paid.pending_salary',
-        desc('Salario Pendiente'), data.pending_salary, 0, data.store_id,
-      ));
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'settlement.paid.pending_salary',
+          desc('Salario Pendiente'),
+          data.pending_salary,
+          0,
+          data.store_id,
+        ),
+      );
     }
     if (data.indemnification > 0) {
-      lines.push(await this.resolveAccountLine(
-        data.organization_id, 'settlement.paid.indemnification',
-        desc('Indemnización'), data.indemnification, 0, data.store_id,
-      ));
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'settlement.paid.indemnification',
+          desc('Indemnización'),
+          data.indemnification,
+          0,
+          data.store_id,
+        ),
+      );
     }
 
     // CREDIT lines (deductions + bank)
-    const total_social_deductions = data.health_deduction + data.pension_deduction;
+    const total_social_deductions =
+      data.health_deduction + data.pension_deduction;
     if (total_social_deductions > 0) {
-      lines.push(await this.resolveAccountLine(
-        data.organization_id, 'settlement.paid.social_deductions',
-        desc('Retenciones Salud y Pensión'), 0, total_social_deductions, data.store_id,
-      ));
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'settlement.paid.social_deductions',
+          desc('Retenciones Salud y Pensión'),
+          0,
+          total_social_deductions,
+          data.store_id,
+        ),
+      );
     }
     if (data.net_settlement > 0) {
-      lines.push(await this.resolveAccountLine(
-        data.organization_id, 'settlement.paid.bank',
-        desc('Pago Liquidación'), 0, data.net_settlement, data.store_id,
-      ));
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'settlement.paid.bank',
+          desc('Pago Liquidación'),
+          0,
+          data.net_settlement,
+          data.store_id,
+        ),
+      );
     }
 
     return this.createAutoEntry({
@@ -1556,12 +1991,20 @@ export class AutoEntryService {
   }) {
     const lines = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, 'cash_register.opened.cash',
-        'Caja (apertura)', data.opening_amount, 0, data.store_id,
+        data.organization_id,
+        'cash_register.opened.cash',
+        'Caja (apertura)',
+        data.opening_amount,
+        0,
+        data.store_id,
       ),
       this.resolveAccountLine(
-        data.organization_id, 'cash_register.opened.cash_base',
-        'Fondo base (apertura)', 0, data.opening_amount, data.store_id,
+        data.organization_id,
+        'cash_register.opened.cash_base',
+        'Fondo base (apertura)',
+        0,
+        data.opening_amount,
+        data.store_id,
       ),
     ]);
 
@@ -1595,16 +2038,24 @@ export class AutoEntryService {
     // DR Banco (consignación del cierre)
     lines.push(
       await this.resolveAccountLine(
-        data.organization_id, 'cash_register.closed.bank',
-        'Banco (cierre caja)', data.actual_amount, 0, data.store_id,
+        data.organization_id,
+        'cash_register.closed.bank',
+        'Banco (cierre caja)',
+        data.actual_amount,
+        0,
+        data.store_id,
       ),
     );
 
     // CR Caja (sale dinero de caja)
     lines.push(
       await this.resolveAccountLine(
-        data.organization_id, 'cash_register.closed.cash',
-        'Caja (cierre)', 0, data.expected_amount, data.store_id,
+        data.organization_id,
+        'cash_register.closed.cash',
+        'Caja (cierre)',
+        0,
+        data.expected_amount,
+        data.store_id,
       ),
     );
 
@@ -1613,16 +2064,24 @@ export class AutoEntryService {
       // Surplus: CR Otros Ingresos
       lines.push(
         await this.resolveAccountLine(
-          data.organization_id, 'cash_register.closed.surplus',
-          'Sobrante de caja', 0, data.difference, data.store_id,
+          data.organization_id,
+          'cash_register.closed.surplus',
+          'Sobrante de caja',
+          0,
+          data.difference,
+          data.store_id,
         ),
       );
     } else if (data.difference < -0.01) {
       // Shortage: DR Faltantes
       lines.push(
         await this.resolveAccountLine(
-          data.organization_id, 'cash_register.closed.shortage',
-          'Faltante de caja', Math.abs(data.difference), 0, data.store_id,
+          data.organization_id,
+          'cash_register.closed.shortage',
+          'Faltante de caja',
+          Math.abs(data.difference),
+          0,
+          data.store_id,
         ),
       );
     }
@@ -1658,14 +2117,16 @@ export class AutoEntryService {
 
     const lines = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, 'cash_register.movement.cash',
+        data.organization_id,
+        'cash_register.movement.cash',
         `Caja (${desc.toLowerCase()})`,
         is_cash_in ? data.amount : 0,
         is_cash_in ? 0 : data.amount,
         data.store_id,
       ),
       this.resolveAccountLine(
-        data.organization_id, 'cash_register.movement.other',
+        data.organization_id,
+        'cash_register.movement.other',
         `${desc}${data.reference ? ` - ${data.reference}` : ''}`,
         is_cash_in ? 0 : data.amount,
         is_cash_in ? data.amount : 0,
@@ -1701,12 +2162,20 @@ export class AutoEntryService {
   }) {
     const lines = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, 'ar.write_off.bad_debt',
-        'Deudas Incobrables', data.amount, 0, data.store_id,
+        data.organization_id,
+        'ar.write_off.bad_debt',
+        'Deudas Incobrables',
+        data.amount,
+        0,
+        data.store_id,
       ),
       this.resolveAccountLine(
-        data.organization_id, 'ar.write_off.accounts_receivable',
-        'Cuentas por Cobrar (castigo)', 0, data.amount, data.store_id,
+        data.organization_id,
+        'ar.write_off.accounts_receivable',
+        'Cuentas por Cobrar (castigo)',
+        0,
+        data.amount,
+        data.store_id,
       ),
     ]);
 
@@ -1739,12 +2208,20 @@ export class AutoEntryService {
   }) {
     const lines = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, 'ap.payment.accounts_payable',
-        'Cuentas por Pagar (pago)', data.amount, 0, data.store_id,
+        data.organization_id,
+        'ap.payment.accounts_payable',
+        'Cuentas por Pagar (pago)',
+        data.amount,
+        0,
+        data.store_id,
       ),
       this.resolveAccountLine(
-        data.organization_id, 'ap.payment.cash_bank',
-        'Banco (pago CxP)', 0, data.amount, data.store_id,
+        data.organization_id,
+        'ap.payment.cash_bank',
+        'Banco (pago CxP)',
+        0,
+        data.amount,
+        data.store_id,
       ),
     ]);
 
@@ -1774,12 +2251,20 @@ export class AutoEntryService {
   }) {
     const lines = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, 'ap.write_off.accounts_payable',
-        'Cuentas por Pagar (castigo)', data.amount, 0, data.store_id,
+        data.organization_id,
+        'ap.write_off.accounts_payable',
+        'Cuentas por Pagar (castigo)',
+        data.amount,
+        0,
+        data.store_id,
       ),
       this.resolveAccountLine(
-        data.organization_id, 'ap.write_off.other_income',
-        'Otros Ingresos (castigo CxP)', 0, data.amount, data.store_id,
+        data.organization_id,
+        'ap.write_off.other_income',
+        'Otros Ingresos (castigo CxP)',
+        0,
+        data.amount,
+        data.store_id,
       ),
     ]);
 
@@ -1811,12 +2296,20 @@ export class AutoEntryService {
   }) {
     const lines = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, 'commission.calculated.expense',
-        'Gasto por Comisiones', data.commission_amount, 0, data.store_id,
+        data.organization_id,
+        'commission.calculated.expense',
+        'Gasto por Comisiones',
+        data.commission_amount,
+        0,
+        data.store_id,
       ),
       this.resolveAccountLine(
-        data.organization_id, 'commission.calculated.payable',
-        'Comisiones por Pagar', 0, data.commission_amount, data.store_id,
+        data.organization_id,
+        'commission.calculated.payable',
+        'Comisiones por Pagar',
+        0,
+        data.commission_amount,
+        data.store_id,
       ),
     ]);
 
@@ -1844,12 +2337,20 @@ export class AutoEntryService {
   }) {
     const lines = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, 'wallet.topup.cash_bank',
-        'Caja/Banco (recarga wallet)', data.amount, 0, data.store_id,
+        data.organization_id,
+        'wallet.topup.cash_bank',
+        'Caja/Banco (recarga wallet)',
+        data.amount,
+        0,
+        data.store_id,
       ),
       this.resolveAccountLine(
-        data.organization_id, 'wallet.topup.customer_advance',
-        'Anticipos de Clientes (wallet)', 0, data.amount, data.store_id,
+        data.organization_id,
+        'wallet.topup.customer_advance',
+        'Anticipos de Clientes (wallet)',
+        0,
+        data.amount,
+        data.store_id,
       ),
     ]);
 
@@ -1876,12 +2377,20 @@ export class AutoEntryService {
   }) {
     const lines = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, 'wallet.debit.customer_advance',
-        'Anticipos de Clientes (uso wallet)', data.amount, 0, data.store_id,
+        data.organization_id,
+        'wallet.debit.customer_advance',
+        'Anticipos de Clientes (uso wallet)',
+        data.amount,
+        0,
+        data.store_id,
       ),
       this.resolveAccountLine(
-        data.organization_id, 'wallet.debit.revenue',
-        'Ingresos (pago con wallet)', 0, data.amount, data.store_id,
+        data.organization_id,
+        'wallet.debit.revenue',
+        'Ingresos (pago con wallet)',
+        0,
+        data.amount,
+        data.store_id,
       ),
     ]);
 
@@ -1916,12 +2425,18 @@ export class AutoEntryService {
 
     const lines = await Promise.all([
       this.resolveAccountLine(
-        data.organization_id, 'stock_transfer.completed.inventory_destination',
-        `Inventario destino (transferencia ${data.transfer_number})`, data.total_cost, 0,
+        data.organization_id,
+        'stock_transfer.completed.inventory_destination',
+        `Inventario destino (transferencia ${data.transfer_number})`,
+        data.total_cost,
+        0,
       ),
       this.resolveAccountLine(
-        data.organization_id, 'stock_transfer.completed.inventory_origin',
-        `Inventario origen (transferencia ${data.transfer_number})`, 0, data.total_cost,
+        data.organization_id,
+        'stock_transfer.completed.inventory_origin',
+        `Inventario origen (transferencia ${data.transfer_number})`,
+        0,
+        data.total_cost,
       ),
     ]);
 
@@ -1931,6 +2446,112 @@ export class AutoEntryService {
       organization_id: data.organization_id,
       entry_date: new Date(),
       description: `Transferencia de inventario ${data.transfer_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  async onExpenseRefunded(data: {
+    expense_id: number;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    user_id?: number;
+  }) {
+    const reversalPaymentLines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'expense.refunded.cash',
+        'Caja/Banco (Reembolso)',
+        0,
+        data.amount,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'expense.refunded.accounts_payable',
+        'Proveedores (Reversión pago)',
+        data.amount,
+        0,
+        data.store_id,
+      ),
+    ]);
+
+    await this.createAutoEntry({
+      source_type: 'expense.refunded',
+      source_id: data.expense_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Reversión pago gasto #${data.expense_id}`,
+      lines: reversalPaymentLines,
+      user_id: data.user_id,
+    });
+
+    const reversalApprovalLines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'expense.refunded.accounts_payable',
+        'Proveedores (Reversión aprobación)',
+        0,
+        data.amount,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'expense.refunded.expense',
+        'Gastos Diversos (Reversión)',
+        data.amount,
+        0,
+        data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'expense.refunded',
+      source_id: data.expense_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Reversión aprobación gasto #${data.expense_id}`,
+      lines: reversalApprovalLines,
+      user_id: data.user_id,
+    });
+  }
+
+  async onExpenseCancelled(data: {
+    expense_id: number;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    user_id?: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'expense.cancelled.accounts_payable',
+        'Proveedores (Cancelación)',
+        data.amount,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'expense.cancelled.expense',
+        'Gastos Diversos (Cancelación)',
+        0,
+        data.amount,
+        data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'expense.cancelled',
+      source_id: data.expense_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Cancelación gasto #${data.expense_id}`,
       lines,
       user_id: data.user_id,
     });

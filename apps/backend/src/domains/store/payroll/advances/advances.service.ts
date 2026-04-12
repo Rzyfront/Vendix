@@ -87,7 +87,7 @@ export class AdvancesService {
 
   private async markOverdueInstallments(): Promise<void> {
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    today.setUTCHours(0, 0, 0, 0);
     await this.prisma.employee_advance_installments.updateMany({
       where: {
         due_date: { lt: today },

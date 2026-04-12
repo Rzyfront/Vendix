@@ -6,6 +6,7 @@ import { ReportCardComponent } from '../../components/report-card/report-card.co
 import { ReportSearchComponent } from '../../components/report-search/report-search.component';
 import { ReportCategoryChipsComponent } from '../../components/report-category-chips/report-category-chips.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { StickyHeaderComponent } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { ReportCategoryId, ReportDefinition } from '../../interfaces/report.interface';
 import { REPORT_CATEGORIES, REPORT_DEFINITIONS, getCategoryById } from '../../config/report-registry';
 
@@ -18,6 +19,7 @@ import { REPORT_CATEGORIES, REPORT_DEFINITIONS, getCategoryById } from '../../co
     ReportSearchComponent,
     ReportCategoryChipsComponent,
     IconComponent,
+    StickyHeaderComponent,
   ],
   templateUrl: './report-list.component.html',
   styleUrls: ['./report-list.component.scss'],

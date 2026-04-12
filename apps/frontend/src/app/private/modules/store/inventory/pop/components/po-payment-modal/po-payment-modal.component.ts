@@ -15,6 +15,7 @@ import { ButtonComponent } from '../../../../../../../shared/components/button/b
 import { PurchaseOrdersService } from '../../../services';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-po-payment-modal',
@@ -150,7 +151,7 @@ export class PoPaymentModalComponent {
   });
 
   amount = 0;
-  paymentDate = new Date().toISOString().split('T')[0];
+  paymentDate = toLocalDateString();
   paymentMethod = 'bank_transfer';
   reference = '';
   notes = '';
@@ -166,7 +167,7 @@ export class PoPaymentModalComponent {
 
   private resetForm(): void {
     this.amount = this.remaining() || Number(this.totalAmount()) || 0;
-    this.paymentDate = new Date().toISOString().split('T')[0];
+    this.paymentDate = toLocalDateString();
     this.paymentMethod = 'bank_transfer';
     this.reference = '';
     this.notes = '';

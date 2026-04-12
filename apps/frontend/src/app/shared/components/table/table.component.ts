@@ -357,6 +357,10 @@ export class TableComponent implements AfterContentInit {
         cancelled: 'error',
         error: 'error',
         warning: 'warning',
+        approved: 'completed',
+        rejected: 'suspended',
+        paid: 'active',
+        refunded: 'warning',
       };
 
       const colorClass = `status-${statusMap[statusValue] || 'default'}`;

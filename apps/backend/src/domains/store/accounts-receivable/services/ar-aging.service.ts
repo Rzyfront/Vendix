@@ -18,7 +18,7 @@ export class ArAgingService {
         balance: true,
         due_date: true,
         customer_id: true,
-        customer: { select: { id: true, name: true } },
+        customer: { select: { id: true, first_name: true, last_name: true } },
       },
     });
 
@@ -61,7 +61,7 @@ export class ArAgingService {
       if (!customer_breakdown[ar.customer_id]) {
         customer_breakdown[ar.customer_id] = {
           customer_id: ar.customer_id,
-          customer_name: ar.customer?.name || 'N/A',
+          customer_name: `${ar.customer?.first_name || ''} ${ar.customer?.last_name || ''}`.trim() || 'N/A',
           total: 0,
         };
       }

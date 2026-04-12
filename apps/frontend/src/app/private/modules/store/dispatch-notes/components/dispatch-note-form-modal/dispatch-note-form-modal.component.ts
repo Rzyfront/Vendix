@@ -21,6 +21,7 @@ import {
   CreateDispatchNoteDto,
   CreateDispatchNoteItemDto,
 } from '../../interfaces/dispatch-note.interface';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-dispatch-note-form-modal',
@@ -67,7 +68,7 @@ export class DispatchNoteFormModalComponent implements OnInit, OnChanges {
     this.form = this.fb.group({
       customer_id: [null, Validators.required],
       dispatch_location_id: [null],
-      emission_date: [new Date().toISOString().split('T')[0]],
+      emission_date: [toLocalDateString()],
       agreed_delivery_date: [null],
       notes: [''],
       internal_notes: [''],

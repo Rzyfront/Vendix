@@ -50,6 +50,7 @@ export class ReservationFormModalComponent {
   readonly created = output<any>();
   readonly initialProduct = input<any>(null);
   readonly initialCustomer = input<any>(null);
+  readonly posMode = input(false);
 
   // Wizard
   currentStep = signal(0);
@@ -358,13 +359,14 @@ export class ReservationFormModalComponent {
       notes: this.notes() || undefined,
       provider_id: this.selectedProvider()?.id || undefined,
       skip_availability_check: this.skipAvailabilityCheck() || undefined,
+      ...(this.posMode() && { skip_order_creation: true }),
     };
 
     this.reservationsService.createReservation(dto).subscribe({
-      next: () => {
+      next: (booking) => {
         this.toastService.success('Reserva creada exitosamente');
         this.submitting.set(false);
-        this.created.emit(this.selectedCustomer());
+        this.created.emit(this.posMode() ? { booking, customer: this.selectedCustomer() } : this.selectedCustomer());
       },
       error: (err) => {
         const msg = err?.error?.message?.message || err?.error?.message || 'Error al crear la reserva';

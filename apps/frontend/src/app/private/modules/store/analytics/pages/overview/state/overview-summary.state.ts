@@ -1,5 +1,6 @@
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
 import { OverviewSummary, OverviewTrend } from '../../../interfaces/overview-analytics.interface';
+import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../../shared/utils/date.util';
 
 export interface OverviewSummaryState {
   summary: OverviewSummary | null;
@@ -24,13 +25,3 @@ export const initialOverviewSummaryState: OverviewSummaryState = {
   loadingTrends: false,
   error: null,
 };
-
-function getDefaultStartDate(): string {
-  const date = new Date();
-  date.setDate(1);
-  return date.toISOString().split('T')[0];
-}
-
-function getDefaultEndDate(): string {
-  return new Date().toISOString().split('T')[0];
-}

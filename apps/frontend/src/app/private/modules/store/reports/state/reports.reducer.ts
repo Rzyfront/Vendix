@@ -52,9 +52,9 @@ export const reportsReducer = createReducer(
     isSummary: isSummary ?? false,
     summaryData: summaryData ?? null,
     loading: false,
-    currentPage: meta?.['pagination']?.page ?? state.currentPage,
-    totalPages: meta?.['pagination']?.total_pages ?? state.totalPages,
-    totalItems: meta?.['pagination']?.total ?? state.totalItems,
+    currentPage: meta?.['page'] ?? meta?.['pagination']?.page ?? state.currentPage,
+    totalPages: meta?.['totalPages'] ?? meta?.['pagination']?.total_pages ?? state.totalPages,
+    totalItems: meta?.['total'] ?? meta?.['pagination']?.total ?? state.totalItems,
   })),
 
   on(ReportsActions.loadReportDataFailure, (state, { error }) => ({

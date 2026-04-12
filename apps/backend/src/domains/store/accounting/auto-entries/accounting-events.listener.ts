@@ -15,7 +15,10 @@ export class AccountingEventsListener {
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
-  private async isFlowEnabled(store_id: number | undefined, flow_key: string): Promise<boolean> {
+  private async isFlowEnabled(
+    store_id: number | undefined,
+    flow_key: string,
+  ): Promise<boolean> {
     if (!store_id) return true;
 
     const cacheKey = `acctflows:${store_id}`;
@@ -23,13 +26,18 @@ export class AccountingEventsListener {
 
     if (!accounting_flows) {
       try {
-        const settings = await this.prisma.withoutScope().store_settings.findUnique({
-          where: { store_id },
-          select: { settings: true },
-        });
+        const settings = await this.prisma
+          .withoutScope()
+          .store_settings.findUnique({
+            where: { store_id },
+            select: { settings: true },
+          });
         const s = (settings?.settings as any) || {};
-        accounting_flows = s.module_flows?.accounting
-          || (s.accounting_flows ? { enabled: true, ...s.accounting_flows } : { enabled: true });
+        accounting_flows =
+          s.module_flows?.accounting ||
+          (s.accounting_flows
+            ? { enabled: true, ...s.accounting_flows }
+            : { enabled: true });
         await this.cache.set(cacheKey, accounting_flows, 300_000);
       } catch {
         return true;
@@ -52,7 +60,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'invoicing')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'invoicing'))) return;
       await this.auto_entry_service.onInvoiceValidated({
         invoice_id: event.invoice_id,
         organization_id: event.organization_id,
@@ -62,7 +70,9 @@ export class AccountingEventsListener {
         total: event.total_amount,
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for invoice.validated #${event.invoice_id}`);
+      this.logger.log(
+        `Auto-entry created for invoice.validated #${event.invoice_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for invoice.validated #${event.invoice_id}: ${error.message}`,
@@ -87,7 +97,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'payments')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'payments'))) return;
       await this.auto_entry_service.onPaymentReceived({
         payment_id: event.payment_id,
         organization_id: event.organization_id,
@@ -96,12 +106,21 @@ export class AccountingEventsListener {
         order_number: event.order_number,
         payment_method: event.payment_method,
         amount: Number(event.amount),
-        subtotal_amount: event.subtotal_amount != null ? Number(event.subtotal_amount) : undefined,
-        tax_amount: event.tax_amount != null ? Number(event.tax_amount) : undefined,
-        discount_amount: event.discount_amount != null ? Number(event.discount_amount) : undefined,
+        subtotal_amount:
+          event.subtotal_amount != null
+            ? Number(event.subtotal_amount)
+            : undefined,
+        tax_amount:
+          event.tax_amount != null ? Number(event.tax_amount) : undefined,
+        discount_amount:
+          event.discount_amount != null
+            ? Number(event.discount_amount)
+            : undefined,
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for payment.received #${event.payment_id}`);
+      this.logger.log(
+        `Auto-entry created for payment.received #${event.payment_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for payment.received: ${error.message}`,
@@ -123,7 +142,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'credit_sales')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'credit_sales'))) return;
       await this.auto_entry_service.onCreditSaleCreated({
         order_id: event.order_id,
         organization_id: event.organization_id,
@@ -131,11 +150,16 @@ export class AccountingEventsListener {
         order_number: event.order_number,
         subtotal_amount: Number(event.subtotal_amount),
         tax_amount: Number(event.tax_amount),
-        discount_amount: event.discount_amount != null ? Number(event.discount_amount) : undefined,
+        discount_amount:
+          event.discount_amount != null
+            ? Number(event.discount_amount)
+            : undefined,
         total_amount: Number(event.total_amount),
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for credit_sale.created order #${event.order_id}`);
+      this.logger.log(
+        `Auto-entry created for credit_sale.created order #${event.order_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for credit_sale.created order #${event.order_id}: ${error.message}`,
@@ -153,7 +177,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'expenses')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'expenses'))) return;
       await this.auto_entry_service.onExpenseApproved({
         expense_id: event.expense_id,
         organization_id: event.organization_id,
@@ -161,7 +185,9 @@ export class AccountingEventsListener {
         amount: Number(event.amount),
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for expense.approved #${event.expense_id}`);
+      this.logger.log(
+        `Auto-entry created for expense.approved #${event.expense_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for expense.approved #${event.expense_id}: ${error.message}`,
@@ -179,7 +205,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'expenses')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'expenses'))) return;
       await this.auto_entry_service.onExpensePaid({
         expense_id: event.expense_id,
         organization_id: event.organization_id,
@@ -187,7 +213,9 @@ export class AccountingEventsListener {
         amount: Number(event.amount),
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for expense.paid #${event.expense_id}`);
+      this.logger.log(
+        `Auto-entry created for expense.paid #${event.expense_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for expense.paid #${event.expense_id}: ${error.message}`,
@@ -208,10 +236,13 @@ export class AccountingEventsListener {
     health_deduction: number;
     pension_deduction: number;
     approved_by: number;
-    cost_center_breakdown?: Record<string, { earnings: number; employer_costs: number }>;
+    cost_center_breakdown?: Record<
+      string,
+      { earnings: number; employer_costs: number }
+    >;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'payroll')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'payroll'))) return;
       await this.auto_entry_service.onPayrollApproved({
         payroll_run_id: event.payroll_run_id,
         organization_id: event.organization_id,
@@ -225,7 +256,9 @@ export class AccountingEventsListener {
         user_id: event.approved_by,
         cost_center_breakdown: event.cost_center_breakdown,
       });
-      this.logger.log(`Auto-entry created for payroll.approved #${event.payroll_run_id} (consolidated)`);
+      this.logger.log(
+        `Auto-entry created for payroll.approved #${event.payroll_run_id} (consolidated)`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for payroll.approved #${event.payroll_run_id}: ${error.message}`,
@@ -252,7 +285,7 @@ export class AccountingEventsListener {
     }>;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'payroll')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'payroll'))) return;
       await this.auto_entry_service.onPayrollPaid({
         payroll_run_id: event.payroll_run_id,
         organization_id: event.organization_id,
@@ -260,7 +293,9 @@ export class AccountingEventsListener {
         user_id: event.user_id,
         payroll_items: event.payroll_items ?? [],
       });
-      this.logger.log(`Auto-entries created for payroll.paid #${event.payroll_run_id} (${event.payroll_items?.length ?? 0} employees)`);
+      this.logger.log(
+        `Auto-entries created for payroll.paid #${event.payroll_run_id} (${event.payroll_items?.length ?? 0} employees)`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entries for payroll.paid #${event.payroll_run_id}: ${error.message}`,
@@ -279,7 +314,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'inventory')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'inventory'))) return;
       await this.auto_entry_service.onOrderCompleted({
         order_id: event.order_id,
         organization_id: event.organization_id,
@@ -287,7 +322,9 @@ export class AccountingEventsListener {
         total_cost: Number(event.total_cost),
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for order.completed #${event.order_id}`);
+      this.logger.log(
+        `Auto-entry created for order.completed #${event.order_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for order.completed #${event.order_id}: ${error.message}`,
@@ -307,17 +344,20 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'returns')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'returns'))) return;
       await this.auto_entry_service.onRefundCompleted({
         refund_id: event.refund_id,
         organization_id: event.organization_id,
         store_id: event.store_id,
         amount: Number(event.amount),
-        tax_amount: event.tax_amount != null ? Number(event.tax_amount) : undefined,
+        tax_amount:
+          event.tax_amount != null ? Number(event.tax_amount) : undefined,
         return_type: event.return_type,
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for refund.completed #${event.refund_id}`);
+      this.logger.log(
+        `Auto-entry created for refund.completed #${event.refund_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for refund.completed #${event.refund_id}: ${error.message}`,
@@ -335,7 +375,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'purchases')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'purchases'))) return;
       await this.auto_entry_service.onPurchaseOrderReceived({
         purchase_order_id: event.purchase_order_id,
         organization_id: event.organization_id,
@@ -343,7 +383,9 @@ export class AccountingEventsListener {
         total_amount: Number(event.total_amount),
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for purchase_order.received #${event.purchase_order_id}`);
+      this.logger.log(
+        `Auto-entry created for purchase_order.received #${event.purchase_order_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for purchase_order.received #${event.purchase_order_id}: ${error.message}`,
@@ -361,7 +403,8 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled((event as any).store_id, 'purchases')) return;
+      if (!(await this.isFlowEnabled((event as any).store_id, 'purchases')))
+        return;
       await this.auto_entry_service.onPurchaseOrderPayment({
         purchase_order_id: event.purchase_order_id,
         organization_id: event.organization_id,
@@ -369,7 +412,9 @@ export class AccountingEventsListener {
         payment_method: event.payment_method,
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for purchase_order.payment PO #${event.purchase_order_id}`);
+      this.logger.log(
+        `Auto-entry created for purchase_order.payment PO #${event.purchase_order_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for purchase_order.payment PO #${event.purchase_order_id}: ${error.message}`,
@@ -388,7 +433,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'inventory')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'inventory'))) return;
       await this.auto_entry_service.onInventoryAdjusted({
         adjustment_id: event.adjustment_id,
         organization_id: event.organization_id,
@@ -397,7 +442,9 @@ export class AccountingEventsListener {
         quantity_change: Number(event.quantity_change),
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for inventory.adjusted #${event.adjustment_id}`);
+      this.logger.log(
+        `Auto-entry created for inventory.adjusted #${event.adjustment_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for inventory.adjusted #${event.adjustment_id}: ${error.message}`,
@@ -420,8 +467,9 @@ export class AccountingEventsListener {
     organization_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'layaway')) return;
-      const organization_id = event.organization_id || await this.resolveOrgId(event.store_id);
+      if (!(await this.isFlowEnabled(event.store_id, 'layaway'))) return;
+      const organization_id =
+        event.organization_id || (await this.resolveOrgId(event.store_id));
       await this.auto_entry_service.onLayawayPaymentReceived({
         payment_id: event.payment_id,
         plan_number: event.plan_number,
@@ -430,7 +478,9 @@ export class AccountingEventsListener {
         amount: Number(event.amount),
         payment_method: event.payment_method,
       });
-      this.logger.log(`Auto-entry created for layaway.payment_received - plan ${event.plan_number}`);
+      this.logger.log(
+        `Auto-entry created for layaway.payment_received - plan ${event.plan_number}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for layaway.payment_received - plan ${event.plan_number}: ${error.message}`,
@@ -449,8 +499,9 @@ export class AccountingEventsListener {
     organization_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'layaway')) return;
-      const organization_id = event.organization_id || await this.resolveOrgId(event.store_id);
+      if (!(await this.isFlowEnabled(event.store_id, 'layaway'))) return;
+      const organization_id =
+        event.organization_id || (await this.resolveOrgId(event.store_id));
       await this.auto_entry_service.onLayawayCompleted({
         plan_id: event.plan_id,
         plan_number: event.plan_number,
@@ -458,7 +509,9 @@ export class AccountingEventsListener {
         store_id: event.store_id,
         total_amount: Number(event.total_amount),
       });
-      this.logger.log(`Auto-entry created for layaway.completed - plan ${event.plan_number}`);
+      this.logger.log(
+        `Auto-entry created for layaway.completed - plan ${event.plan_number}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for layaway.completed - plan ${event.plan_number}: ${error.message}`,
@@ -484,8 +537,9 @@ export class AccountingEventsListener {
     organization_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'installments')) return;
-      const organization_id = event.organization_id || await this.resolveOrgId(event.store_id);
+      if (!(await this.isFlowEnabled(event.store_id, 'installments'))) return;
+      const organization_id =
+        event.organization_id || (await this.resolveOrgId(event.store_id));
       await this.auto_entry_service.onInstallmentPaymentReceived({
         credit_id: event.credit_id,
         installment_id: event.installment_id,
@@ -499,7 +553,9 @@ export class AccountingEventsListener {
         customer_id: event.customer_id,
         order_id: event.order_id,
       });
-      this.logger.log(`Auto-entry created for installment_payment.received - Credit ${event.credit_number} cuota #${event.installment_number}`);
+      this.logger.log(
+        `Auto-entry created for installment_payment.received - Credit ${event.credit_number} cuota #${event.installment_number}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for installment_payment.received - Credit ${event.credit_number}: ${error.message}`,
@@ -529,7 +585,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'settlements')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'settlements'))) return;
       await this.auto_entry_service.onSettlementPaid({
         settlement_id: event.settlement_id,
         settlement_number: event.settlement_number,
@@ -547,7 +603,9 @@ export class AccountingEventsListener {
         net_settlement: Number(event.net_settlement),
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for settlement.paid ${event.settlement_number}`);
+      this.logger.log(
+        `Auto-entry created for settlement.paid ${event.settlement_number}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for settlement.paid ${event.settlement_number}: ${error.message}`,
@@ -569,7 +627,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'fixed_assets')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'fixed_assets'))) return;
       await this.auto_entry_service.onDepreciationPosted({
         asset_id: event.asset_id,
         asset_number: event.asset_number,
@@ -579,7 +637,9 @@ export class AccountingEventsListener {
         period_date: new Date(event.period_date),
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for depreciation.posted - asset ${event.asset_number}`);
+      this.logger.log(
+        `Auto-entry created for depreciation.posted - asset ${event.asset_number}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for depreciation.posted - asset ${event.asset_number}: ${error.message}`,
@@ -602,7 +662,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'fixed_assets')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'fixed_assets'))) return;
       await this.auto_entry_service.onFixedAssetDisposed({
         asset_id: event.asset_id,
         asset_number: event.asset_number,
@@ -615,7 +675,9 @@ export class AccountingEventsListener {
         gain_loss: Number(event.gain_loss),
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for disposal.fixed_asset - asset ${event.asset_number}`);
+      this.logger.log(
+        `Auto-entry created for disposal.fixed_asset - asset ${event.asset_number}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for disposal.fixed_asset - asset ${event.asset_number}: ${error.message}`,
@@ -639,7 +701,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'withholding')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'withholding'))) return;
       await this.auto_entry_service.onWithholdingApplied({
         organization_id: event.organization_id,
         store_id: event.store_id,
@@ -651,7 +713,9 @@ export class AccountingEventsListener {
         supplier_name: event.supplier_name,
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for withholding.applied - invoice #${event.invoice_id}`);
+      this.logger.log(
+        `Auto-entry created for withholding.applied - invoice #${event.invoice_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create withholding auto-entry: ${error.message}`,
@@ -673,7 +737,10 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled((event as any).store_id, 'stock_transfers')) return;
+      if (
+        !(await this.isFlowEnabled((event as any).store_id, 'stock_transfers'))
+      )
+        return;
       await this.auto_entry_service.onStockTransferCompleted({
         transfer_id: event.transfer_id,
         transfer_number: event.transfer_number,
@@ -683,7 +750,9 @@ export class AccountingEventsListener {
         total_cost: Number(event.total_cost),
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for stock_transfer.completed #${event.transfer_id}`);
+      this.logger.log(
+        `Auto-entry created for stock_transfer.completed #${event.transfer_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for stock_transfer.completed #${event.transfer_id}: ${error.message}`,
@@ -703,7 +772,7 @@ export class AccountingEventsListener {
     user_id: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'cash_register')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'cash_register'))) return;
       await this.auto_entry_service.onCashRegisterOpened({
         session_id: event.session_id,
         organization_id: event.organization_id,
@@ -711,7 +780,9 @@ export class AccountingEventsListener {
         opening_amount: Number(event.opening_amount),
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for cash_register.opened session #${event.session_id}`);
+      this.logger.log(
+        `Auto-entry created for cash_register.opened session #${event.session_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for cash_register.opened session #${event.session_id}: ${error.message}`,
@@ -731,7 +802,7 @@ export class AccountingEventsListener {
     user_id: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'cash_register')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'cash_register'))) return;
       await this.auto_entry_service.onCashRegisterClosed({
         session_id: event.session_id,
         organization_id: event.organization_id,
@@ -741,7 +812,9 @@ export class AccountingEventsListener {
         difference: Number(event.difference),
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for cash_register.closed session #${event.session_id}`);
+      this.logger.log(
+        `Auto-entry created for cash_register.closed session #${event.session_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for cash_register.closed session #${event.session_id}: ${error.message}`,
@@ -763,7 +836,7 @@ export class AccountingEventsListener {
     user_id: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'cash_register')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'cash_register'))) return;
       await this.auto_entry_service.onCashRegisterMovement({
         movement_id: event.movement_id,
         organization_id: event.organization_id,
@@ -773,7 +846,9 @@ export class AccountingEventsListener {
         reference: event.reference,
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for cash_register.movement #${event.movement_id}`);
+      this.logger.log(
+        `Auto-entry created for cash_register.movement #${event.movement_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for cash_register.movement #${event.movement_id}: ${error.message}`,
@@ -795,7 +870,7 @@ export class AccountingEventsListener {
     user_id: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'ar_ap')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'ar_ap'))) return;
       await this.auto_entry_service.onArWrittenOff({
         ar_id: event.ar_id,
         organization_id: event.organization_id,
@@ -804,7 +879,9 @@ export class AccountingEventsListener {
         document_number: event.document_number,
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for ar.written_off AR #${event.ar_id}`);
+      this.logger.log(
+        `Auto-entry created for ar.written_off AR #${event.ar_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for ar.written_off AR #${event.ar_id}: ${error.message}`,
@@ -827,7 +904,7 @@ export class AccountingEventsListener {
     user_id: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'ar_ap')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'ar_ap'))) return;
       await this.auto_entry_service.onApPaymentRegistered({
         ap_id: event.ap_id,
         organization_id: event.organization_id,
@@ -837,7 +914,9 @@ export class AccountingEventsListener {
         document_number: event.document_number,
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for ap.payment_registered AP #${event.ap_id}`);
+      this.logger.log(
+        `Auto-entry created for ap.payment_registered AP #${event.ap_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for ap.payment_registered AP #${event.ap_id}: ${error.message}`,
@@ -857,7 +936,7 @@ export class AccountingEventsListener {
     user_id: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'ar_ap')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'ar_ap'))) return;
       await this.auto_entry_service.onApWrittenOff({
         ap_id: event.ap_id,
         organization_id: event.organization_id,
@@ -866,7 +945,9 @@ export class AccountingEventsListener {
         document_number: event.document_number,
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for ap.written_off AP #${event.ap_id}`);
+      this.logger.log(
+        `Auto-entry created for ap.written_off AP #${event.ap_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for ap.written_off AP #${event.ap_id}: ${error.message}`,
@@ -886,7 +967,7 @@ export class AccountingEventsListener {
     rule_id: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'commissions')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'commissions'))) return;
       await this.auto_entry_service.onCommissionCalculated({
         payment_id: event.payment_id,
         organization_id: event.organization_id,
@@ -894,7 +975,9 @@ export class AccountingEventsListener {
         commission_amount: Number(event.commission_amount),
         rule_id: event.rule_id,
       });
-      this.logger.log(`Auto-entry created for commission.calculated payment #${event.payment_id}`);
+      this.logger.log(
+        `Auto-entry created for commission.calculated payment #${event.payment_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for commission.calculated payment #${event.payment_id}: ${error.message}`,
@@ -915,7 +998,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'wallet')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'wallet'))) return;
       await this.auto_entry_service.onWalletCredited({
         wallet_id: event.wallet_id,
         organization_id: event.organization_id,
@@ -924,7 +1007,9 @@ export class AccountingEventsListener {
         reference_type: event.reference_type,
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for wallet.credited wallet #${event.wallet_id}`);
+      this.logger.log(
+        `Auto-entry created for wallet.credited wallet #${event.wallet_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for wallet.credited wallet #${event.wallet_id}: ${error.message}`,
@@ -944,7 +1029,7 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!await this.isFlowEnabled(event.store_id, 'wallet')) return;
+      if (!(await this.isFlowEnabled(event.store_id, 'wallet'))) return;
       await this.auto_entry_service.onWalletDebited({
         wallet_id: event.wallet_id,
         organization_id: event.organization_id,
@@ -954,10 +1039,68 @@ export class AccountingEventsListener {
         order_id: event.order_id,
         user_id: event.user_id,
       });
-      this.logger.log(`Auto-entry created for wallet.debited wallet #${event.wallet_id}`);
+      this.logger.log(
+        `Auto-entry created for wallet.debited wallet #${event.wallet_id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for wallet.debited wallet #${event.wallet_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  @OnEvent('expense.refunded')
+  async handleExpenseRefunded(event: {
+    expense_id: number;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    user_id?: number;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'expenses'))) return;
+      await this.auto_entry_service.onExpenseRefunded({
+        expense_id: event.expense_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        user_id: event.user_id,
+      });
+      this.logger.log(
+        `Auto-entry created for expense.refunded #${event.expense_id}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for expense.refunded #${event.expense_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  @OnEvent('expense.cancelled')
+  async handleExpenseCancelled(event: {
+    expense_id: number;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    user_id?: number;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'expenses'))) return;
+      await this.auto_entry_service.onExpenseCancelled({
+        expense_id: event.expense_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        user_id: event.user_id,
+      });
+      this.logger.log(
+        `Auto-entry created for expense.cancelled #${event.expense_id}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for expense.cancelled #${event.expense_id}: ${error.message}`,
         error.stack,
       );
     }

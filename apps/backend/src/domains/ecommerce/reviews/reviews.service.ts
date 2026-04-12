@@ -130,7 +130,7 @@ export class EcommerceReviewsService {
 
     // Rate limit: max 3 reviews per day
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    today.setUTCHours(0, 0, 0, 0);
     const daily_count = await this.prisma.reviews.count({
       where: { user_id, created_at: { gte: today } },
     });

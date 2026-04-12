@@ -14,6 +14,7 @@ import { ModalComponent } from '../../../../../../../shared/components/modal/mod
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
+import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'vendix-employee-detail',
@@ -360,7 +361,7 @@ export class EmployeeDetailComponent implements OnChanges {
     let hireDateStr = '';
     if (employee.hire_date) {
       const d = new Date(employee.hire_date);
-      hireDateStr = d.toISOString().split('T')[0];
+      hireDateStr = toUTCDateString(d);
     }
 
     this.employeeForm.patchValue({

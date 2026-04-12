@@ -12,6 +12,7 @@ import { ButtonComponent } from '../../../../../../../shared/components/button/b
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-advance-detail',
@@ -382,7 +383,7 @@ export class AdvanceDetailComponent implements OnDestroy {
 
   paymentForm: FormGroup = this.fb.group({
     amount: [null, [Validators.required, Validators.min(1)]],
-    payment_date: [new Date().toISOString().split('T')[0], [Validators.required]],
+    payment_date: [toLocalDateString(), [Validators.required]],
     notes: [''],
   });
 
@@ -470,7 +471,7 @@ export class AdvanceDetailComponent implements OnDestroy {
           this.advance = res.data;
           this.paymentLoading = false;
           this.paymentForm.reset({
-            payment_date: new Date().toISOString().split('T')[0],
+            payment_date: toLocalDateString(),
           });
           this.toastService.show({ variant: 'success', description: 'Pago registrado' });
           this.updated.emit();
@@ -557,7 +558,7 @@ export class AdvanceDetailComponent implements OnDestroy {
 
     const dto: AdvanceManualPaymentDto = {
       amount: installment.amount,
-      payment_date: new Date().toISOString().split('T')[0],
+      payment_date: toLocalDateString(),
     };
 
     this.payrollService.markInstallmentPaid(this.advance.id, installment.id, dto)

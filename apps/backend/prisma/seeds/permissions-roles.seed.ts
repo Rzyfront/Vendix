@@ -1579,6 +1579,12 @@ export async function seedPermissionsAndRoles(
       method: 'PATCH',
     },
     {
+      name: 'store:expenses:refund',
+      description: 'Refund expenses',
+      path: '/api/store/expenses/:id/refund',
+      method: 'POST',
+    },
+    {
       name: 'store:inventory:inventory:create',
       description: 'Create inventory inventory',
       path: '/api/store/inventory/inventory',
@@ -1991,7 +1997,8 @@ export async function seedPermissionsAndRoles(
     },
     {
       name: 'store:payroll:settlements:manage',
-      description: 'Gestionar liquidaciones (recalcular, aprobar, pagar, cancelar)',
+      description:
+        'Gestionar liquidaciones (recalcular, aprobar, pagar, cancelar)',
       path: '/api/store/payroll/settlements',
       method: 'PATCH',
     },
@@ -2224,7 +2231,8 @@ export async function seedPermissionsAndRoles(
     },
     {
       name: 'store:accounting:bank_reconciliation:create',
-      description: 'Crear cuentas bancarias, importar transacciones y conciliaciones',
+      description:
+        'Crear cuentas bancarias, importar transacciones y conciliaciones',
       path: '/api/store/accounting/bank-reconciliation/accounts',
       method: 'POST',
     },

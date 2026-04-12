@@ -84,15 +84,22 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PROD_DUP_001: 'Ya existe un producto con estas caracteristicas.',
   PROD_IMAGE_001: 'Imagen no encontrada.',
   PROD_CAT_001: 'Categoria o marca invalida.',
-  PROD_SVC_001: 'Los servicios no pueden tener peso, dimensiones ni inventario fisico.',
+  PROD_SVC_001:
+    'Los servicios no pueden tener peso, dimensiones ni inventario fisico.',
   PROD_SVC_002: 'No se puede cambiar el tipo de un producto existente.',
+  PROD_VALIDATE_002:
+    'Debes configurar un SKU para el producto antes de activar las variantes.',
+  PROD_VALIDATE_003: 'El SKU de la variante no puede estar vacío.',
 
   // Bulk Products
   BULK_PROD_FILE_INVALID: 'El archivo subido no es valido o esta corrupto.',
   BULK_PROD_EMPTY_FILE: 'El archivo no contiene filas de datos.',
-  BULK_PROD_LIMIT_EXCEEDED: 'Se excedio el limite maximo de productos por carga.',
-  BULK_PROD_SESSION_EXPIRED: 'La sesion de analisis expiro. Suba el archivo nuevamente.',
-  BULK_PROD_VALIDATE_001: 'Uno de los valores tiene un formato invalido. Verifique campos como marca o categoria.',
+  BULK_PROD_LIMIT_EXCEEDED:
+    'Se excedio el limite maximo de productos por carga.',
+  BULK_PROD_SESSION_EXPIRED:
+    'La sesion de analisis expiro. Suba el archivo nuevamente.',
+  BULK_PROD_VALIDATE_001:
+    'Uno de los valores tiene un formato invalido. Verifique campos como marca o categoria.',
 
   // Orders
   ORD_FIND_001: 'Orden no encontrada.',
@@ -164,10 +171,14 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PAYROLL_BULK_003: 'Documento duplicado en el archivo.',
   PAYROLL_BULK_004: 'El email es obligatorio cuando se marca como usuario.',
   PAYROLL_BULK_005: 'El usuario ya esta vinculado a otro empleado.',
-  PAYROLL_BULK_006: 'Ya existe un usuario con ese nombre de usuario en la organizacion.',
-  PAYROLL_BULK_007: 'Ya existe un usuario con ese correo electronico en la organizacion.',
-  PAYROLL_BULK_008: 'Error inesperado al procesar el empleado. Verifique los datos e intente de nuevo.',
-  PAYROLL_VALIDATE_002: 'Los usuarios con rol Cliente no pueden ser vinculados como empleados.',
+  PAYROLL_BULK_006:
+    'Ya existe un usuario con ese nombre de usuario en la organizacion.',
+  PAYROLL_BULK_007:
+    'Ya existe un usuario con ese correo electronico en la organizacion.',
+  PAYROLL_BULK_008:
+    'Error inesperado al procesar el empleado. Verifique los datos e intente de nuevo.',
+  PAYROLL_VALIDATE_002:
+    'Los usuarios con rol Cliente no pueden ser vinculados como empleados.',
 
   // Employee Advances - Installments
   ADV_INSTALLMENT_001: 'Cuota no encontrada',
@@ -195,7 +206,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   AI_CHAT_004: 'Please enter a message.',
 
   // AI Agent
-  AI_AGENT_001: 'The AI assistant reached its processing limit. Please try a simpler request.',
+  AI_AGENT_001:
+    'The AI assistant reached its processing limit. Please try a simpler request.',
   AI_AGENT_002: 'The AI assistant took too long to respond. Please try again.',
   AI_AGENT_003: 'An error occurred while processing your request.',
   AI_AGENT_004: 'You do not have permission to perform this action.',
@@ -208,9 +220,11 @@ export const ERROR_MESSAGES: Record<string, string> = {
 
   // Layaway (Plan Separe)
   LAY_FIND_001: 'El plan separe no fue encontrado.',
-  LAY_STATE_001: 'No se puede realizar esta accion en el estado actual del plan.',
+  LAY_STATE_001:
+    'No se puede realizar esta accion en el estado actual del plan.',
   LAY_PAYMENT_001: 'El monto del pago excede el saldo pendiente.',
-  LAY_INSTALLMENT_001: 'La suma de las cuotas no coincide con el saldo pendiente.',
+  LAY_INSTALLMENT_001:
+    'La suma de las cuotas no coincide con el saldo pendiente.',
   LAY_INSTALLMENT_002: 'La cuota seleccionada ya fue pagada.',
 
   // Withholding Tax (Retención en la Fuente)
@@ -226,17 +240,20 @@ export const ERROR_MESSAGES: Record<string, string> = {
   EXO_VALIDATION_ERRORS: 'Se encontraron errores de completitud en los datos.',
 
   // Habeas Data (Proteccion de Datos)
-  HABEAS_EXPORT_RATE_LIMIT: 'Solo se permite una exportacion de datos cada 24 horas.',
+  HABEAS_EXPORT_RATE_LIMIT:
+    'Solo se permite una exportacion de datos cada 24 horas.',
   HABEAS_ANON_SELF: 'No puede anonimizar su propia cuenta.',
   HABEAS_ANON_ALREADY: 'El usuario ya fue anonimizado.',
   HABEAS_EXPORT_PROCESSING: 'Ya hay una exportacion en proceso.',
-  HABEAS_ANON_REQUEST_NOT_FOUND: 'No se encontro la solicitud de anonimizacion.',
+  HABEAS_ANON_REQUEST_NOT_FOUND:
+    'No se encontro la solicitud de anonimizacion.',
   HABEAS_CONSENT_INVALID: 'Tipo de consentimiento invalido.',
 
   // AI MCP
   AI_MCP_001: 'La autenticacion fallo. Verifique sus credenciales.',
   AI_MCP_002: 'No tiene permisos para realizar esta accion.',
-  AI_MCP_003: 'Limite de solicitudes excedido. Espere antes de intentar de nuevo.',
+  AI_MCP_003:
+    'Limite de solicitudes excedido. Espere antes de intentar de nuevo.',
   AI_MCP_004: 'Formato de solicitud invalido.',
 
   // Dispatch Notes (Remisiones)
@@ -245,7 +262,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DSP_VALIDATE_002: 'Stock insuficiente para confirmar la remisión',
   DSP_VALIDATE_003: 'El cliente no está activo',
   DSP_VALIDATE_004: 'La remisión solo puede modificarse en estado borrador',
-  DSP_VALIDATE_005: 'La cantidad a despachar excede la cantidad pendiente del pedido',
+  DSP_VALIDATE_005:
+    'La cantidad a despachar excede la cantidad pendiente del pedido',
 
   // ICA Municipal Tax
   ICA_RATE_NOT_FOUND: 'No se encontro tarifa ICA para el municipio.',

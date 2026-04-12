@@ -6,6 +6,7 @@ import {
   ButtonComponent,
   IconComponent,
 } from '../../../../../../shared/components';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 
 export interface LayawayConfigResult {
   down_payment_amount: number;
@@ -213,7 +214,7 @@ export class LayawayConfigModalComponent {
       due.setDate(due.getDate() + freq_days[freq] * (i + 1));
       return {
         amount: i === n - 1 ? Math.round((total - amount * (n - 1)) * 100) / 100 : amount,
-        due_date: due.toISOString().split('T')[0],
+        due_date: toLocalDateString(due),
       };
     });
   });

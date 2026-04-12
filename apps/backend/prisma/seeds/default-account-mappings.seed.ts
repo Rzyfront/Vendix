@@ -22,6 +22,11 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'expense.approved.accounts_payable': '2205',
   'expense.paid.accounts_payable': '2205',
   'expense.paid.cash': '1105',
+  'expense.refunded.accounts_payable': '2205',
+  'expense.refunded.cash': '1105',
+  'expense.refunded.expense': '5195',
+  'expense.cancelled.accounts_payable': '2205',
+  'expense.cancelled.expense': '5195',
   'payroll.approved.payroll_expense': '5105',
   'payroll.approved.social_security': '5105',
   // Cost center: Administrative
@@ -162,17 +167,17 @@ export async function seedDefaultAccountMappings(
       select: { id: true, code: true },
     });
 
-    const account_by_code = new Map(
-      accounts.map((a) => [a.code, a.id]),
-    );
+    const account_by_code = new Map(accounts.map((a) => [a.code, a.id]));
 
-    for (const [mapping_key, account_code] of Object.entries(MAPPING_DEFAULTS)) {
+    for (const [mapping_key, account_code] of Object.entries(
+      MAPPING_DEFAULTS,
+    )) {
       const account_id = account_by_code.get(account_code);
 
       if (!account_id) {
         console.warn(
           `  [Account Mappings] Skipping "${mapping_key}" for org "${org.name}" (id=${org.id}): ` +
-          `account code "${account_code}" not found in chart_of_accounts`,
+            `account code "${account_code}" not found in chart_of_accounts`,
         );
         mappings_skipped++;
         continue;
@@ -217,7 +222,7 @@ export async function seedDefaultAccountMappings(
 
   console.log(
     `[Account Mappings] Processed ${organizations_processed} organizations: ` +
-    `${mappings_created} mappings created/updated, ${mappings_skipped} skipped`,
+      `${mappings_created} mappings created/updated, ${mappings_skipped} skipped`,
   );
 
   return { organizations_processed, mappings_created, mappings_skipped };

@@ -51,4 +51,8 @@ export class CreateBookingDto {
   @IsOptional()
   @IsBoolean()
   skip_availability_check?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  skip_order_creation?: boolean;
 }

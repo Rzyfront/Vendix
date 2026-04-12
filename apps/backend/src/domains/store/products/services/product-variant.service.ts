@@ -16,6 +16,7 @@ import { Prisma } from '@prisma/client';
 import { LocationsService } from '../../inventory/locations/locations.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { S3Service } from '@common/services/s3.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class ProductVariantService {
@@ -90,18 +91,21 @@ export class ProductVariantService {
         throw new BadRequestException('Producto no encontrado o inactivo');
       }
 
-      // Verificar que el SKU sea único dentro del producto (skip para SKU vacío)
-      if (createVariantDto.sku && createVariantDto.sku.trim() !== '') {
-        const existingSku = await prisma.product_variants.findFirst({
-          where: {
-            sku: createVariantDto.sku,
-            product_id: product_id,
-          },
-        });
+      // Verificar que el SKU no esté vacío
+      if (!createVariantDto.sku || createVariantDto.sku.trim() === '') {
+        throw new VendixHttpException(ErrorCodes.PROD_VALIDATE_003);
+      }
 
-        if (existingSku) {
-          throw new ConflictException('El SKU de la variante ya está en uso');
-        }
+      // Verificar que el SKU sea único dentro del producto
+      const existingSku = await prisma.product_variants.findFirst({
+        where: {
+          sku: createVariantDto.sku,
+          product_id: product_id,
+        },
+      });
+
+      if (existingSku) {
+        throw new ConflictException('El SKU de la variante ya está en uso');
       }
 
       if (tx) {
@@ -263,7 +267,8 @@ export class ProductVariantService {
       where: { id: variantId },
       data: {
         ...variantData,
-        price_override: variantData.price_override ?? variantData.price ?? undefined,
+        price_override:
+          variantData.price_override ?? variantData.price ?? undefined,
         updated_at: new Date(),
       } as any,
     });
@@ -371,9 +376,11 @@ export class ProductVariantService {
           where: { id: variantId },
           data: { image_id: null },
         });
-        await prisma.product_images.delete({
-          where: { id: existingVariant.image_id },
-        }).catch(() => {});
+        await prisma.product_images
+          .delete({
+            where: { id: existingVariant.image_id },
+          })
+          .catch(() => {});
       }
 
       return await prisma.product_variants.delete({

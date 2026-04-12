@@ -30,6 +30,7 @@ import * as InventoryActions from './state/inventory-overview.actions';
 import * as InventorySelectors from './state/inventory-overview.selectors';
 
 import { EChartsOption } from 'echarts';
+import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'vendix-inventory-overview',
@@ -99,13 +100,13 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
       key: 'date_from',
       label: 'Desde',
       type: 'date',
-      defaultValue: this.getDefaultStartDate(),
+      defaultValue: getDefaultStartDate(),
     },
     {
       key: 'date_to',
       label: 'Hasta',
       type: 'date',
-      defaultValue: this.getDefaultEndDate(),
+      defaultValue: getDefaultEndDate(),
     },
     {
       key: 'granularity',
@@ -195,8 +196,8 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
     this.store.dispatch(
       InventoryActions.setDateRange({
         dateRange: {
-          start_date: this.getDefaultStartDate(),
-          end_date: this.getDefaultEndDate(),
+          start_date: getDefaultStartDate(),
+          end_date: getDefaultEndDate(),
           preset: 'thisMonth',
         },
       }),
@@ -208,16 +209,6 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
 
   exportReport(): void {
     this.store.dispatch(InventoryActions.exportInventoryReport());
-  }
-
-  private getDefaultStartDate(): string {
-    const date = new Date();
-    date.setDate(1);
-    return date.toISOString().split('T')[0];
-  }
-
-  private getDefaultEndDate(): string {
-    return new Date().toISOString().split('T')[0];
   }
 
   private getThemeColors() {
@@ -239,7 +230,7 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
 
     const { border, textSecondary } = this.getThemeColors();
     const labels = trends.map((t) =>
-      this.formatPeriodLabel(t.period, granularity),
+      formatChartPeriod(t.period, granularity),
     );
 
     const colors = {
@@ -431,18 +422,4 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
     };
   }
 
-  private formatPeriodLabel(period: string, granularity: string): string {
-    if (granularity === 'year') return period;
-    if (granularity === 'month') {
-      const [year, month] = period.split('-');
-      const date = new Date(Number(year), Number(month) - 1);
-      return date.toLocaleDateString('es', { month: 'short', year: '2-digit' });
-    }
-    try {
-      const date = new Date(period);
-      return date.toLocaleDateString('es', { day: '2-digit', month: 'short' });
-    } catch {
-      return period;
-    }
-  }
 }

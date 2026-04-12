@@ -40,6 +40,7 @@ import {
   DispatchNoteStatus,
 } from '../../interfaces/dispatch-note.interface';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-dispatch-note-list',
@@ -127,14 +128,14 @@ export class DispatchNoteListComponent implements OnInit, OnDestroy {
       sortable: true,
       priority: 3,
       transform: (value: string) =>
-        value ? new Date(value).toLocaleDateString() : '-',
+        value ? formatDateOnlyUTC(value) : '-',
     },
     {
       key: 'agreed_delivery_date',
       label: 'Entrega Acordada',
       priority: 3,
       transform: (value: string) =>
-        value ? new Date(value).toLocaleDateString() : '-',
+        value ? formatDateOnlyUTC(value) : '-',
     },
     {
       key: 'grand_total',
@@ -230,13 +231,13 @@ export class DispatchNoteListComponent implements OnInit, OnDestroy {
         key: 'emission_date',
         label: 'Fecha',
         transform: (val: any) =>
-          val ? new Date(val).toLocaleDateString() : '-',
+          val ? formatDateOnlyUTC(val) : '-',
       },
       {
         key: 'agreed_delivery_date',
         label: 'Entrega',
         transform: (val: any) =>
-          val ? new Date(val).toLocaleDateString() : '-',
+          val ? formatDateOnlyUTC(val) : '-',
       },
     ],
   };

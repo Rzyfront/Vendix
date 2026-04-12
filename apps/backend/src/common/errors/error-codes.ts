@@ -348,12 +348,24 @@ export const ErrorCodes = {
   PROD_SVC_001: {
     code: 'PROD_SVC_001',
     httpStatus: 400,
-    devMessage: 'Los servicios no pueden tener atributos físicos (peso, dimensiones, inventario)',
+    devMessage:
+      'Los servicios no pueden tener atributos físicos (peso, dimensiones, inventario)',
   },
   PROD_SVC_002: {
     code: 'PROD_SVC_002',
     httpStatus: 400,
     devMessage: 'No se puede cambiar el tipo de un producto existente',
+  },
+  PROD_VALIDATE_002: {
+    code: 'PROD_VALIDATE_002',
+    httpStatus: 400,
+    devMessage:
+      'El producto debe tener un SKU configurado antes de activar variantes',
+  },
+  PROD_VALIDATE_003: {
+    code: 'PROD_VALIDATE_003',
+    httpStatus: 400,
+    devMessage: 'El SKU de la variante no puede estar vacío',
   },
 
   // Orders

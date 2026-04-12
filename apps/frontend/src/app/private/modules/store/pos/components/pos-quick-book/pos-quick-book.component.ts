@@ -12,6 +12,7 @@ import { HttpClient } from '@angular/common/http';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-pos-quick-book',
@@ -23,7 +24,7 @@ import { SpinnerComponent } from '../../../../../../shared/components/spinner/sp
 })
 export class PosQuickBookComponent implements OnInit {
   close = output<void>();
-  created = output<void>();
+  created = output<any>();
 
   private http = inject(HttpClient);
 
@@ -81,7 +82,7 @@ export class PosQuickBookComponent implements OnInit {
     for (let i = 0; i < 14; i++) {
       const d = new Date(today);
       d.setDate(d.getDate() + i);
-      dates.push(d.toISOString().split('T')[0]);
+      dates.push(toLocalDateString(d));
     }
     this.availableDates.set(dates);
     if (dates.length > 0) {
@@ -104,10 +105,10 @@ export class PosQuickBookComponent implements OnInit {
     this.selectedSlot.set(null);
 
     this.http
-      .get<any>(`/api/store/reservations/availability`, {
+      .get<any>(`/api/store/reservations/availability/${service.id}`, {
         params: {
-          product_id: service.id,
-          date: date,
+          date_from: date,
+          date_to: date,
         },
       })
       .subscribe({
@@ -174,7 +175,7 @@ export class PosQuickBookComponent implements OnInit {
     this.submitting.set(true);
 
     this.http
-      .post('/api/store/reservations', {
+      .post<any>('/api/store/reservations', {
         customer_id: customer.id,
         product_id: service.id,
         date: slot.date || this.selectedDate(),
@@ -182,11 +183,13 @@ export class PosQuickBookComponent implements OnInit {
         end_time: slot.end_time,
         channel: 'pos',
         notes: this.notes(),
+        skip_order_creation: true,
       })
       .subscribe({
-        next: () => {
+        next: (response) => {
           this.submitting.set(false);
-          this.created.emit();
+          const booking = response.data || response;
+          this.created.emit(booking);
         },
         error: () => {
           this.submitting.set(false);

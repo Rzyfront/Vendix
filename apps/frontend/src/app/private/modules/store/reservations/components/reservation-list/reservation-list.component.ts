@@ -19,6 +19,7 @@ import {
 } from '../../../../../../shared/components';
 import { Booking, BookingStatus } from '../../interfaces/reservation.interface';
 import { ReservationPrintService } from '../../services/reservation-print.service';
+import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-reservation-list',
@@ -102,7 +103,7 @@ export class ReservationListComponent {
       sortable: true,
       priority: 1,
       transform: (val: any) =>
-        val ? new Date(val + 'T00:00:00').toLocaleDateString('es-CO') : '-',
+        val ? formatDateOnlyUTC(val) : '-',
     },
     {
       key: 'start_time',
@@ -174,7 +175,7 @@ export class ReservationListComponent {
         label: 'Fecha',
         icon: 'calendar',
         transform: (v: any) =>
-          v ? new Date(v + 'T00:00:00').toLocaleDateString('es-CO') : '-',
+          v ? formatDateOnlyUTC(v) : '-',
       },
       {
         key: 'start_time',

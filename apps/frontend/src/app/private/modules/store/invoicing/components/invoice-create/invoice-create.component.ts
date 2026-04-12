@@ -12,6 +12,7 @@ import { InputComponent } from '../../../../../../shared/components/input/input.
 import { SelectorComponent, SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'vendix-invoice-create',
@@ -296,7 +297,7 @@ export class InvoiceCreateComponent {
       }))),
     );
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = toLocalDateString();
 
     this.invoiceForm = this.fb.group({
       invoice_type: ['sales_invoice', [Validators.required]],
@@ -381,7 +382,7 @@ export class InvoiceCreateComponent {
   private resetForm(): void {
     this.invoiceForm.reset({
       invoice_type: 'sales_invoice',
-      issue_date: new Date().toISOString().split('T')[0],
+      issue_date: toLocalDateString(),
     });
     this.itemsArray.clear();
     this.orderIdControl.reset();

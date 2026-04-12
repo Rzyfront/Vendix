@@ -9,7 +9,12 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { booking_status_enum, booking_mode_enum, Prisma } from '@prisma/client';
-import { CreateBookingDto, RescheduleBookingDto, BookingQueryDto, CalendarQueryDto } from './dto';
+import {
+  CreateBookingDto,
+  RescheduleBookingDto,
+  BookingQueryDto,
+  CalendarQueryDto,
+} from './dto';
 import { AvailabilityService } from './availability.service';
 import { OrdersService } from '../orders/orders.service';
 
@@ -136,23 +141,29 @@ export class ReservationsService {
           'El proveedor especificado no ofrece este servicio o no esta activo',
         );
       }
-    } else if (product.booking_mode === booking_mode_enum.provider_required && !dto.skip_availability_check) {
+    } else if (
+      product.booking_mode === booking_mode_enum.provider_required &&
+      !dto.skip_availability_check
+    ) {
       // Check if there are ANY providers for this service
       const serviceProviders = await this.prisma.provider_services.findMany({
         where: { product_id: dto.product_id },
         include: { provider: { select: { id: true, is_active: true } } },
       });
 
-      const activeProviders = serviceProviders.filter(sp => sp.provider.is_active);
+      const activeProviders = serviceProviders.filter(
+        (sp) => sp.provider.is_active,
+      );
 
       if (activeProviders.length > 0) {
         // Auto-asignar el primer provider disponible
-        const availableProviders = await this.availabilityService.getAvailableProvidersForSlot(
-          dto.product_id,
-          dto.date,
-          dto.start_time,
-          dto.end_time,
-        );
+        const availableProviders =
+          await this.availabilityService.getAvailableProvidersForSlot(
+            dto.product_id,
+            dto.date,
+            dto.start_time,
+            dto.end_time,
+          );
 
         if (availableProviders.length > 0) {
           resolvedProviderId = availableProviders[0].id;
@@ -163,9 +174,11 @@ export class ReservationsService {
     }
 
     // 3. Validar disponibilidad del slot (a menos que se indique lo contrario)
-    const isFreeBooking = product.booking_mode === booking_mode_enum.free_booking;
+    const isFreeBooking =
+      product.booking_mode === booking_mode_enum.free_booking;
     const noProvidersConfigured = !resolvedProviderId && !dto.provider_id;
-    const shouldSkipAvailability = dto.skip_availability_check || isFreeBooking || noProvidersConfigured;
+    const shouldSkipAvailability =
+      dto.skip_availability_check || isFreeBooking || noProvidersConfigured;
 
     if (!shouldSkipAvailability) {
       const isAvailable = await this.availabilityService.isSlotAvailable(
@@ -177,9 +190,7 @@ export class ReservationsService {
       );
 
       if (!isAvailable) {
-        throw new ConflictException(
-          'El horario solicitado no esta disponible',
-        );
+        throw new ConflictException('El horario solicitado no esta disponible');
       }
     }
 
@@ -241,7 +252,7 @@ export class ReservationsService {
     );
 
     // 7. Auto-crear orden de venta vinculada
-    if (!dto.order_id) {
+    if (!dto.order_id && !dto.skip_order_creation) {
       try {
         const price = Number(booking.product?.base_price) || 0;
         const order = await this.ordersService.create(
@@ -290,6 +301,107 @@ export class ReservationsService {
     });
 
     return booking;
+  }
+
+  async hold(dto: {
+    customer_id: number;
+    product_id: number;
+    date: string;
+    start_time: string;
+    end_time: string;
+    notes?: string;
+  }) {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    if (!store_id) {
+      throw new BadRequestException('No se encontro contexto de tienda');
+    }
+
+    const product = await this.prisma.products.findFirst({
+      where: { id: dto.product_id },
+      select: {
+        id: true,
+        name: true,
+        requires_booking: true,
+        booking_mode: true,
+      },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Producto/servicio no encontrado');
+    }
+
+    if (!product.requires_booking) {
+      throw new BadRequestException(
+        'Este producto/servicio no requiere reserva',
+      );
+    }
+
+    const isFreeBooking =
+      product.booking_mode === booking_mode_enum.free_booking;
+
+    if (!isFreeBooking) {
+      const isAvailable = await this.availabilityService.isSlotAvailable(
+        dto.product_id,
+        dto.date,
+        dto.start_time,
+        dto.end_time,
+      );
+      if (!isAvailable) {
+        throw new ConflictException('El horario solicitado no esta disponible');
+      }
+    }
+
+    const HOLD_DURATION_MINUTES = 15;
+    const expiresAt = new Date();
+    expiresAt.setMinutes(expiresAt.getMinutes() + HOLD_DURATION_MINUTES);
+
+    const booking_number = await this.generateBookingNumber(store_id, dto.date);
+
+    const booking = await this.prisma.bookings.create({
+      data: {
+        store_id,
+        customer_id: dto.customer_id,
+        product_id: dto.product_id,
+        booking_number,
+        date: new Date(dto.date),
+        start_time: dto.start_time,
+        end_time: dto.end_time,
+        status: booking_status_enum.pending,
+        channel: 'ecommerce',
+        notes: dto.notes,
+        expires_at: expiresAt,
+        created_by_user_id: context?.user_id,
+        updated_at: new Date(),
+      },
+      include: this.BOOKING_INCLUDE,
+    });
+
+    return this.mapBooking(booking);
+  }
+
+  async confirmHold(id: number) {
+    const booking = await this.findOne(id);
+
+    if (booking.expires_at && new Date(booking.expires_at) < new Date()) {
+      await this.prisma.bookings.delete({ where: { id } });
+      throw new BadRequestException(
+        'La reserva temporal ha expirado. Por favor selecciona un horario nuevamente.',
+      );
+    }
+
+    const updated = this.mapBooking(
+      await this.prisma.bookings.update({
+        where: { id },
+        data: {
+          expires_at: null,
+          updated_at: new Date(),
+        },
+        include: this.BOOKING_INCLUDE,
+      }),
+    );
+
+    return updated;
   }
 
   /**
@@ -385,9 +497,14 @@ export class ReservationsService {
       store_id: booking.store_id,
       booking_id: booking.id,
       booking_number: booking.booking_number,
-      customer_name: `${booking.customer?.first_name ?? ''} ${booking.customer?.last_name ?? ''}`.trim() || 'Cliente',
+      customer_name:
+        `${booking.customer?.first_name ?? ''} ${booking.customer?.last_name ?? ''}`.trim() ||
+        'Cliente',
       service_name: booking.product?.name ?? 'Servicio',
-      date: booking.date instanceof Date ? booking.date.toISOString().split('T')[0] : String(booking.date).split('T')[0],
+      date:
+        booking.date instanceof Date
+          ? booking.date.toISOString().split('T')[0]
+          : String(booking.date).split('T')[0],
       start_time: booking.start_time,
     });
     return booking;
@@ -402,9 +519,14 @@ export class ReservationsService {
       store_id: booking.store_id,
       booking_id: booking.id,
       booking_number: booking.booking_number,
-      customer_name: `${booking.customer?.first_name ?? ''} ${booking.customer?.last_name ?? ''}`.trim() || 'Cliente',
+      customer_name:
+        `${booking.customer?.first_name ?? ''} ${booking.customer?.last_name ?? ''}`.trim() ||
+        'Cliente',
       service_name: booking.product?.name ?? 'Servicio',
-      date: booking.date instanceof Date ? booking.date.toISOString().split('T')[0] : String(booking.date).split('T')[0],
+      date:
+        booking.date instanceof Date
+          ? booking.date.toISOString().split('T')[0]
+          : String(booking.date).split('T')[0],
       start_time: booking.start_time,
     });
     return booking;
@@ -419,9 +541,14 @@ export class ReservationsService {
       store_id: booking.store_id,
       booking_id: booking.id,
       booking_number: booking.booking_number,
-      customer_name: `${booking.customer?.first_name ?? ''} ${booking.customer?.last_name ?? ''}`.trim() || 'Cliente',
+      customer_name:
+        `${booking.customer?.first_name ?? ''} ${booking.customer?.last_name ?? ''}`.trim() ||
+        'Cliente',
       service_name: booking.product?.name ?? 'Servicio',
-      date: booking.date instanceof Date ? booking.date.toISOString().split('T')[0] : String(booking.date).split('T')[0],
+      date:
+        booking.date instanceof Date
+          ? booking.date.toISOString().split('T')[0]
+          : String(booking.date).split('T')[0],
       start_time: booking.start_time,
     });
     return booking;
@@ -436,9 +563,14 @@ export class ReservationsService {
       store_id: booking.store_id,
       booking_id: booking.id,
       booking_number: booking.booking_number,
-      customer_name: `${booking.customer?.first_name ?? ''} ${booking.customer?.last_name ?? ''}`.trim() || 'Cliente',
+      customer_name:
+        `${booking.customer?.first_name ?? ''} ${booking.customer?.last_name ?? ''}`.trim() ||
+        'Cliente',
       service_name: booking.product?.name ?? 'Servicio',
-      date: booking.date instanceof Date ? booking.date.toISOString().split('T')[0] : String(booking.date).split('T')[0],
+      date:
+        booking.date instanceof Date
+          ? booking.date.toISOString().split('T')[0]
+          : String(booking.date).split('T')[0],
       start_time: booking.start_time,
     });
     return booking;
@@ -453,9 +585,14 @@ export class ReservationsService {
       store_id: booking.store_id,
       booking_id: booking.id,
       booking_number: booking.booking_number,
-      customer_name: `${booking.customer?.first_name ?? ''} ${booking.customer?.last_name ?? ''}`.trim() || 'Cliente',
+      customer_name:
+        `${booking.customer?.first_name ?? ''} ${booking.customer?.last_name ?? ''}`.trim() ||
+        'Cliente',
       service_name: booking.product?.name ?? 'Servicio',
-      date: booking.date instanceof Date ? booking.date.toISOString().split('T')[0] : String(booking.date).split('T')[0],
+      date:
+        booking.date instanceof Date
+          ? booking.date.toISOString().split('T')[0]
+          : String(booking.date).split('T')[0],
       start_time: booking.start_time,
     });
     return booking;
@@ -502,16 +639,18 @@ export class ReservationsService {
       booking.id,
     );
 
-    const updated = this.mapBooking(await this.prisma.bookings.update({
-      where: { id },
-      data: {
-        date: new Date(dto.date),
-        start_time: dto.start_time,
-        end_time: dto.end_time,
-        updated_at: new Date(),
-      },
-      include: this.BOOKING_INCLUDE,
-    }));
+    const updated = this.mapBooking(
+      await this.prisma.bookings.update({
+        where: { id },
+        data: {
+          date: new Date(dto.date),
+          start_time: dto.start_time,
+          end_time: dto.end_time,
+          updated_at: new Date(),
+        },
+        include: this.BOOKING_INCLUDE,
+      }),
+    );
 
     this.eventEmitter.emit('booking.rescheduled', {
       store_id: updated.store_id,
@@ -530,7 +669,11 @@ export class ReservationsService {
    */
   async getStats() {
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
     const todayEnd = new Date(todayStart);
     todayEnd.setDate(todayEnd.getDate() + 1);
 
@@ -595,7 +738,11 @@ export class ReservationsService {
    */
   async getToday() {
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
     const todayEnd = new Date(todayStart);
     todayEnd.setDate(todayEnd.getDate() + 1);
 
@@ -623,18 +770,21 @@ export class ReservationsService {
     if (query.product_id) where.product_id = query.product_id;
     if (query.status) where.status = query.status;
 
-    const bookings = this.mapBookings(await this.prisma.bookings.findMany({
-      where,
-      include: this.BOOKING_INCLUDE,
-      orderBy: [{ date: 'asc' }, { start_time: 'asc' }],
-    }));
+    const bookings = this.mapBookings(
+      await this.prisma.bookings.findMany({
+        where,
+        include: this.BOOKING_INCLUDE,
+        orderBy: [{ date: 'asc' }, { start_time: 'asc' }],
+      }),
+    );
 
     // Group by date string
     const grouped: Record<string, any[]> = {};
     for (const booking of bookings) {
-      const dateKey = booking.date instanceof Date
-        ? booking.date.toISOString().split('T')[0]
-        : String(booking.date).split('T')[0];
+      const dateKey =
+        booking.date instanceof Date
+          ? booking.date.toISOString().split('T')[0]
+          : String(booking.date).split('T')[0];
       if (!grouped[dateKey]) grouped[dateKey] = [];
       grouped[dateKey].push(booking);
     }
@@ -657,14 +807,16 @@ export class ReservationsService {
       );
     }
 
-    return this.mapBooking(await this.prisma.bookings.update({
-      where: { id },
-      data: {
-        status: targetStatus as booking_status_enum,
-        updated_at: new Date(),
-      },
-      include: this.BOOKING_INCLUDE,
-    }));
+    return this.mapBooking(
+      await this.prisma.bookings.update({
+        where: { id },
+        data: {
+          status: targetStatus as booking_status_enum,
+          updated_at: new Date(),
+        },
+        include: this.BOOKING_INCLUDE,
+      }),
+    );
   }
 
   /**

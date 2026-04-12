@@ -1,5 +1,6 @@
 import { ReportCategoryId } from '../interfaces/report.interface';
 import { DateRangeFilter } from '../../analytics/interfaces/analytics.interface';
+import { toLocalDateString } from '../../../../../shared/utils/date.util';
 
 export interface ReportsState {
   selectedCategory: ReportCategoryId | null;
@@ -23,8 +24,8 @@ function getDefaultDateRange(): DateRangeFilter {
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
   return {
-    start_date: start.toISOString().split('T')[0],
-    end_date: now.toISOString().split('T')[0],
+    start_date: toLocalDateString(start),
+    end_date: toLocalDateString(now),
     preset: 'thisMonth',
   };
 }

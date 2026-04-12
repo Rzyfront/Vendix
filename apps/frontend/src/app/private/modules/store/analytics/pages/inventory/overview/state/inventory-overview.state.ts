@@ -1,4 +1,5 @@
 import { DateRangeFilter } from '../../../../interfaces/analytics.interface';
+import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../../../shared/utils/date.util';
 import {
   InventorySummary,
   MovementTrend,
@@ -39,13 +40,3 @@ export const initialInventoryOverviewState: InventoryOverviewState = {
   exporting: false,
   error: null,
 };
-
-function getDefaultStartDate(): string {
-  const date = new Date();
-  date.setDate(1);
-  return date.toISOString().split('T')[0];
-}
-
-function getDefaultEndDate(): string {
-  return new Date().toISOString().split('T')[0];
-}

@@ -55,7 +55,11 @@ export interface Product {
   product_type?: 'physical' | 'service';
   service_duration_minutes?: number;
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
-  service_pricing_type?: 'per_hour' | 'per_session' | 'package' | 'subscription';
+  service_pricing_type?:
+    | 'per_hour'
+    | 'per_session'
+    | 'package'
+    | 'subscription';
   requires_booking?: boolean;
   booking_mode?: 'provider_required' | 'free_booking';
   buffer_minutes?: number;
@@ -213,7 +217,11 @@ export interface CreateProductDto {
   product_type?: 'physical' | 'service';
   service_duration_minutes?: number;
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
-  service_pricing_type?: 'per_hour' | 'per_session' | 'package' | 'subscription';
+  service_pricing_type?:
+    | 'per_hour'
+    | 'per_session'
+    | 'package'
+    | 'subscription';
   requires_booking?: boolean;
   booking_mode?: 'provider_required' | 'free_booking';
   buffer_minutes?: number;
@@ -225,6 +233,7 @@ export interface CreateProductDto {
   images?: CreateProductImageDto[];
   variants?: CreateProductVariantDto[];
   stock_by_location?: StockByLocationDto[];
+  stock_transfer_mode?: 'first' | 'distribute' | 'reset';
 }
 
 export interface UpdateProductDto {
@@ -251,7 +260,11 @@ export interface UpdateProductDto {
   product_type?: 'physical' | 'service';
   service_duration_minutes?: number;
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
-  service_pricing_type?: 'per_hour' | 'per_session' | 'package' | 'subscription';
+  service_pricing_type?:
+    | 'per_hour'
+    | 'per_session'
+    | 'package'
+    | 'subscription';
   requires_booking?: boolean;
   booking_mode?: 'provider_required' | 'free_booking';
   buffer_minutes?: number;
@@ -263,6 +276,7 @@ export interface UpdateProductDto {
   images?: CreateProductImageDto[];
   variants?: CreateProductVariantDto[];
   stock_by_location?: StockByLocationDto[];
+  stock_transfer_mode?: 'first' | 'distribute' | 'reset';
 }
 
 export interface CreateProductVariantDto {

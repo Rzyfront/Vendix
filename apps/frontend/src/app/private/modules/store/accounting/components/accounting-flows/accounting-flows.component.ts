@@ -7,6 +7,7 @@ import {
   IconComponent,
   ButtonComponent,
 } from '../../../../../../shared/components/index';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 
 interface FlowStatus {
   key: string;
@@ -84,7 +85,7 @@ export class AccountingFlowsComponent implements OnInit {
       next: (res) => {
         const entries = res?.data || [];
         this.recent_entries = entries.filter((e: any) => e.entry_type?.startsWith('auto_')).slice(0, 8);
-        const today = new Date().toISOString().split('T')[0];
+        const today = toLocalDateString();
         this.total_entries_today = entries.filter(
           (e: any) => e.entry_type?.startsWith('auto_') && e.created_at?.startsWith(today),
         ).length;

@@ -1,6 +1,20 @@
-import { Component, OnChanges, SimpleChanges, Output, EventEmitter, Input, inject } from '@angular/core';
+import {
+  Component,
+  OnChanges,
+  SimpleChanges,
+  Output,
+  EventEmitter,
+  Input,
+  inject,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+import {
+  FormBuilder,
+  FormGroup,
+  Validators,
+  ReactiveFormsModule,
+  FormsModule,
+} from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable, map } from 'rxjs';
 import {
@@ -9,15 +23,23 @@ import {
   rejectExpense,
   payExpense,
   cancelExpense,
+  refundExpense,
   deleteExpense,
 } from '../../state/actions/expenses.actions';
 import { ExpensesService } from '../../services/expenses.service';
-import { selectActiveExpenseCategories, selectExpensesLoading } from '../../state/selectors/expenses.selectors';
+import {
+  selectActiveExpenseCategories,
+  selectExpensesLoading,
+} from '../../state/selectors/expenses.selectors';
 import { Expense, ExpenseCategory } from '../../interfaces/expense.interface';
+import { toUTCDateString } from '../../../../../../shared/utils/date.util';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
-import { SelectorComponent, SelectorOption } from '../../../../../../shared/components/selector/selector.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../shared/components/selector/selector.component';
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import { FileUploadDropzoneComponent } from '../../../../../../shared/components/file-upload-dropzone/file-upload-dropzone.component';
 
@@ -27,12 +49,13 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
   imports: [
     CommonModule,
     ReactiveFormsModule,
+    FormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
     SelectorComponent,
     TextareaComponent,
-    FileUploadDropzoneComponent
+    FileUploadDropzoneComponent,
   ],
   template: `
     <app-modal
@@ -42,17 +65,43 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
       title="Editar Gasto"
       size="md"
     >
+      <!-- State Badge in header -->
+      <span
+        *ngIf="expense"
+        slot="header-end"
+        [class]="getStateBadgeClass(expense.state)"
+        class="px-2 py-0.5 rounded-full text-xs font-medium shrink-0"
+      >
+        {{ getStateLabel(expense.state) }}
+      </span>
+
       <div class="p-4">
-        <!-- State Badge -->
-        <div *ngIf="expense" class="mb-4 flex items-center gap-2">
-          <span class="text-sm text-text-secondary">Estado:</span>
-          <span [class]="getStateBadgeClass(expense.state)" class="px-2 py-0.5 rounded-full text-xs font-medium">
-            {{ getStateLabel(expense.state) }}
-          </span>
+        <!-- Refund Info -->
+        <div
+          *ngIf="expense?.state === 'refunded'"
+          class="mb-4 p-3 bg-orange-50 rounded-lg border border-orange-200 w-full"
+        >
+          <p class="text-sm text-orange-800">
+            <strong>Reembolsado:</strong>
+            {{ expense!.refunded_at | date: 'short' }}
+          </p>
+          <p *ngIf="expense!.refunded_by_user" class="text-sm text-orange-700">
+            <strong>Por:</strong> {{ expense!.refunded_by_user.first_name }}
+            {{ expense!.refunded_by_user.last_name }}
+          </p>
+          <p
+            *ngIf="expense!.refund_reason"
+            class="text-sm text-orange-700 mt-1"
+          >
+            <strong>Motivo:</strong> {{ expense!.refund_reason }}
+          </p>
         </div>
 
-        <form [formGroup]="expenseForm" (ngSubmit)="onSubmit()" class="space-y-4">
-
+        <form
+          [formGroup]="expenseForm"
+          (ngSubmit)="onSubmit()"
+          class="space-y-4"
+        >
           <!-- Description -->
           <app-input
             label="Descripción"
@@ -105,7 +154,11 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
           <div class="space-y-2">
             <div *ngIf="expense?.receipt_url" class="flex items-center gap-2">
               <span class="text-sm text-text-secondary">Comprobante:</span>
-              <a [href]="expense!.receipt_url" target="_blank" class="text-sm text-primary hover:underline">
+              <a
+                [href]="expense!.receipt_url"
+                target="_blank"
+                class="text-sm text-primary hover:underline"
+              >
                 Ver comprobante actual
               </a>
             </div>
@@ -119,17 +172,29 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
               (fileRemoved)="onFileRemoved()"
             ></app-file-upload-dropzone>
           </div>
-
         </form>
 
         <!-- Action buttons (state transitions) -->
         <ng-container *ngIf="expense">
-          <div *ngIf="expense.state === 'pending' || expense.state === 'approved' || expense.state === 'rejected'"
-            class="mt-5 pt-4 border-t border-border space-y-2">
-            <span class="text-xs font-medium text-text-secondary uppercase tracking-wide">Acciones</span>
+          <div
+            *ngIf="
+              expense.state === 'pending' ||
+              expense.state === 'approved' ||
+              expense.state === 'rejected' ||
+              expense.state === 'paid'
+            "
+            class="mt-5 pt-4 border-t border-border space-y-2"
+          >
+            <span
+              class="text-xs font-medium text-text-secondary uppercase tracking-wide"
+              >Acciones</span
+            >
 
             <!-- Pending: Approve / Reject -->
-            <div *ngIf="expense.state === 'pending'" class="grid grid-cols-2 gap-2">
+            <div
+              *ngIf="expense.state === 'pending'"
+              class="grid grid-cols-2 gap-2"
+            >
               <app-button
                 variant="success"
                 size="sm"
@@ -151,7 +216,10 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
             </div>
 
             <!-- Pending: Cancel + Delete -->
-            <div *ngIf="expense.state === 'pending'" class="grid grid-cols-2 gap-2">
+            <div
+              *ngIf="expense.state === 'pending'"
+              class="grid grid-cols-2 gap-2"
+            >
               <app-button
                 variant="outline-warning"
                 size="sm"
@@ -173,7 +241,10 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
             </div>
 
             <!-- Approved: Pay + Cancel -->
-            <div *ngIf="expense.state === 'approved'" class="grid grid-cols-2 gap-2">
+            <div
+              *ngIf="expense.state === 'approved'"
+              class="grid grid-cols-2 gap-2"
+            >
               <app-button
                 variant="success"
                 size="sm"
@@ -205,17 +276,63 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
                 Eliminar
               </app-button>
             </div>
+
+            <!-- Paid: Refund -->
+            <div *ngIf="expense.state === 'paid'" class="flex justify-end">
+              <app-button
+                variant="outline-warning"
+                size="sm"
+                (clicked)="showRefundModal = true"
+                [loading]="(loading$ | async) || false"
+              >
+                Reembolsar
+              </app-button>
+            </div>
+
+            <!-- Refund Confirmation Modal -->
+            <div
+              *ngIf="showRefundModal"
+              class="mt-3 p-3 bg-orange-50 rounded-lg border border-orange-200"
+            >
+              <p class="text-sm text-orange-800 mb-2">
+                Confirme el motivo del reembolso:
+              </p>
+              <textarea
+                [(ngModel)]="refundReason"
+                [ngModelOptions]="{ standalone: true }"
+                class="w-full p-2 text-sm border border-orange-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-400"
+                placeholder="Ingrese el motivo del reembolso..."
+                rows="2"
+              ></textarea>
+              <div class="flex justify-end gap-2 mt-2">
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  (clicked)="showRefundModal = false"
+                >
+                  Cancelar
+                </app-button>
+                <app-button
+                  variant="danger"
+                  size="sm"
+                  (clicked)="onRefund()"
+                  [disabled]="!refundReason.trim()"
+                  [loading]="(loading$ | async) || false"
+                >
+                  Confirmar Reembolso
+                </app-button>
+              </div>
+            </div>
           </div>
         </ng-container>
       </div>
 
       <!-- Footer: solo controles del modal -->
       <div slot="footer">
-        <div class="flex items-center justify-end gap-2 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
-          <app-button
-            variant="outline"
-            size="sm"
-            (clicked)="onClose()">
+        <div
+          class="flex items-center justify-end gap-2 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
+        >
+          <app-button variant="outline" size="sm" (clicked)="onClose()">
             Cerrar
           </app-button>
 
@@ -224,14 +341,15 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
             variant="primary"
             size="sm"
             (clicked)="onSubmit()"
-            [disabled]="expenseForm.invalid || ((loading$ | async) || false)"
-            [loading]="(loading$ | async) || false">
+            [disabled]="expenseForm.invalid || (loading$ | async) || false"
+            [loading]="(loading$ | async) || false"
+          >
             Actualizar Gasto
           </app-button>
         </div>
       </div>
     </app-modal>
-  `
+  `,
 })
 export class ExpenseEditComponent implements OnChanges {
   @Input() isOpen = false;
@@ -245,21 +363,25 @@ export class ExpenseEditComponent implements OnChanges {
 
   receiptFile: File | null = null;
   submitting = false;
+  showRefundModal = false;
+  refundReason = '';
 
   private expensesService = inject(ExpensesService);
 
   constructor(
     private fb: FormBuilder,
-    private store: Store
+    private store: Store,
   ) {
     this.categories$ = this.store.select(selectActiveExpenseCategories);
     this.loading$ = this.store.select(selectExpensesLoading);
 
     this.categoryOptions$ = this.categories$.pipe(
-      map(categories => categories.map(cat => ({
-        label: cat.name,
-        value: cat.id
-      })))
+      map((categories) =>
+        categories.map((cat) => ({
+          label: cat.name,
+          value: cat.id,
+        })),
+      ),
     );
 
     this.expenseForm = this.fb.group({
@@ -267,7 +389,7 @@ export class ExpenseEditComponent implements OnChanges {
       amount: [null, [Validators.required, Validators.min(0.01)]],
       category_id: [null],
       expense_date: ['', [Validators.required]],
-      notes: ['']
+      notes: [''],
     });
   }
 
@@ -287,7 +409,7 @@ export class ExpenseEditComponent implements OnChanges {
     let dateStr = '';
     if (expense.expense_date) {
       const d = new Date(expense.expense_date);
-      dateStr = d.toISOString().split('T')[0];
+      dateStr = toUTCDateString(d);
     }
 
     this.expenseForm.patchValue({
@@ -295,7 +417,7 @@ export class ExpenseEditComponent implements OnChanges {
       amount: expense.amount,
       category_id: expense.category_id,
       expense_date: dateStr,
-      notes: expense.notes
+      notes: expense.notes,
     });
   }
 
@@ -308,28 +430,36 @@ export class ExpenseEditComponent implements OnChanges {
   }
 
   onSubmit() {
-    if (this.expenseForm.invalid || !this.expense || this.expense.state !== 'pending') {
+    if (
+      this.expenseForm.invalid ||
+      !this.expense ||
+      this.expense.state !== 'pending'
+    ) {
       this.expenseForm.markAllAsTouched();
       return;
     }
 
     this.submitting = true;
     const formValue = this.expenseForm.value;
-    const categoryId = formValue.category_id ? Number(formValue.category_id) : undefined;
+    const categoryId = formValue.category_id
+      ? Number(formValue.category_id)
+      : undefined;
     const expenseDate = new Date(formValue.expense_date);
 
     const dispatchUpdate = (receiptUrl?: string) => {
-      this.store.dispatch(updateExpense({
-        id: this.expense!.id,
-        expense: {
-          description: formValue.description,
-          amount: Number(formValue.amount),
-          category_id: categoryId,
-          expense_date: expenseDate,
-          notes: formValue.notes,
-          ...(receiptUrl && { receipt_url: receiptUrl }),
-        }
-      }));
+      this.store.dispatch(
+        updateExpense({
+          id: this.expense!.id,
+          expense: {
+            description: formValue.description,
+            amount: Number(formValue.amount),
+            category_id: categoryId,
+            expense_date: expenseDate,
+            notes: formValue.notes,
+            ...(receiptUrl && { receipt_url: receiptUrl }),
+          },
+        }),
+      );
       this.submitting = false;
       this.receiptFile = null;
       this.onClose();
@@ -337,11 +467,12 @@ export class ExpenseEditComponent implements OnChanges {
 
     if (this.receiptFile) {
       this.expensesService.uploadReceipt(this.receiptFile).subscribe({
-        next: (result: { key: string; url: string }) => dispatchUpdate(result.key),
+        next: (result: { key: string; url: string }) =>
+          dispatchUpdate(result.key),
         error: () => {
           this.submitting = false;
           dispatchUpdate();
-        }
+        },
       });
     } else {
       dispatchUpdate();
@@ -383,6 +514,20 @@ export class ExpenseEditComponent implements OnChanges {
     }
   }
 
+  onRefund(): void {
+    if (this.expense && this.refundReason.trim()) {
+      this.store.dispatch(
+        refundExpense({
+          id: this.expense.id,
+          reason: this.refundReason.trim(),
+        }),
+      );
+      this.showRefundModal = false;
+      this.refundReason = '';
+      this.onClose();
+    }
+  }
+
   onClose() {
     this.isOpenChange.emit(false);
   }
@@ -394,6 +539,7 @@ export class ExpenseEditComponent implements OnChanges {
       rejected: 'Rechazado',
       paid: 'Pagado',
       cancelled: 'Cancelado',
+      refunded: 'Reembolsado',
     };
     return labels[state] || state;
   }
@@ -405,6 +551,7 @@ export class ExpenseEditComponent implements OnChanges {
       rejected: 'bg-red-100 text-red-800',
       paid: 'bg-blue-100 text-blue-800',
       cancelled: 'bg-gray-100 text-gray-800',
+      refunded: 'bg-orange-100 text-orange-800',
     };
     return classes[state] || 'bg-gray-100 text-gray-800';
   }
