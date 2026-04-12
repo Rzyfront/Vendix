@@ -1,7 +1,7 @@
 import {
   IsString,
   IsNumber,
-  IsDate,
+  IsDateString,
   IsOptional,
   MaxLength,
   IsDecimal,
@@ -29,9 +29,8 @@ export class CreateExpenseDto {
   @MaxLength(500)
   description?: string;
 
-  @IsDate()
-  @Type(() => Date)
-  expense_date: Date;
+  @IsDateString()
+  expense_date: string;
 
   @IsOptional()
   @IsUrl()

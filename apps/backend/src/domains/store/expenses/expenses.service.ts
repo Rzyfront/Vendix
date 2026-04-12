@@ -10,10 +10,15 @@ import { CreateExpenseDto } from './dto/create-expense.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
 import { QueryExpenseDto } from './dto/query-expense.dto';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { SettingsService } from '../settings/settings.service';
+import { convertInputDateToStoreTimezone, setEndOfDay } from '@common/utils/date-timezone.util';
 
 @Injectable()
 export class ExpensesService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly settingsService: SettingsService,
+  ) {}
 
   private getContext() {
     const context = RequestContextService.getContext();
@@ -21,6 +26,16 @@ export class ExpensesService {
       throw new Error('No request context found');
     }
     return context;
+  }
+
+  private async getStoreTimezone(): Promise<string> {
+    try {
+      const settings = await this.settingsService.getSettings();
+      return settings?.general?.timezone || 'America/Bogota';
+    } catch (error) {
+      console.warn('Error getting store timezone, using default:', error);
+      return 'America/Bogota';
+    }
   }
 
   async findAll(query: QueryExpenseDto) {
@@ -38,6 +53,22 @@ export class ExpensesService {
 
     const skip = (page - 1) * limit;
 
+    // Convert date filters to store timezone
+    let dateFromFilter: Date | undefined;
+    let dateToFilter: Date | undefined;
+
+    if (date_from) {
+      const timezone = await this.getStoreTimezone();
+      dateFromFilter = convertInputDateToStoreTimezone(date_from, timezone);
+    }
+
+    if (date_to) {
+      const timezone = await this.getStoreTimezone();
+      dateToFilter = convertInputDateToStoreTimezone(date_to, timezone);
+      // Set to end of day (23:59:59.999) to include the entire day
+      dateToFilter = setEndOfDay(dateToFilter);
+    }
+
     const where: Prisma.expensesWhereInput = {
       ...(search && {
         OR: [
@@ -47,10 +78,10 @@ export class ExpensesService {
       }),
       ...(state && { state: state as any }),
       ...(category_id && { category_id }),
-      ...(date_from && {
+      ...(dateFromFilter && {
         expense_date: {
-          gte: new Date(date_from),
-          ...(date_to && { lte: new Date(date_to) }),
+          gte: dateFromFilter,
+          ...(dateToFilter && { lte: dateToFilter }),
         },
       }),
     };
@@ -125,6 +156,13 @@ export class ExpensesService {
       }
     }
 
+    // Get store timezone and convert date to store timezone
+    const timezone = await this.getStoreTimezone();
+    const expenseDate = convertInputDateToStoreTimezone(
+      createExpenseDto.expense_date,
+      timezone,
+    );
+
     const expense = await this.prisma.expenses.create({
       data: {
         ...data,
@@ -133,7 +171,7 @@ export class ExpensesService {
         organization_id: context.organization_id,
         category_id,
         created_by_user_id: context.user_id,
-        expense_date: new Date(createExpenseDto.expense_date),
+        expense_date: expenseDate,
       },
       include: {
         expense_categories: true,
@@ -171,13 +209,20 @@ export class ExpensesService {
       }
     }
 
+    // Convert expense_date to store timezone if present
+    let expenseDate: Date | undefined;
+    if (data.expense_date) {
+      const timezone = await this.getStoreTimezone();
+      expenseDate = convertInputDateToStoreTimezone(data.expense_date, timezone);
+    }
+
     const updated = await this.prisma.expenses.update({
       where: { id },
       data: {
         ...data,
         ...(data.amount && { amount: new Prisma.Decimal(data.amount) }),
         ...(category_id && { category_id }),
-        ...(data.expense_date && { expense_date: new Date(data.expense_date) }),
+        ...(expenseDate && { expense_date: expenseDate }),
       },
       include: {
         expense_categories: true,
