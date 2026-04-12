@@ -10,6 +10,7 @@ import {
   UpdateCartItemRequest,
   ApplyDiscountRequest,
   CartValidationError,
+  PendingBooking,
 } from '../models/cart.model';
 
 // Re-export types for component usage
@@ -17,6 +18,7 @@ export type {
   AddToCartRequest,
   CartItem,
   CartState,
+  PendingBooking,
 } from '../models/cart.model';
 import { PosCustomer } from '../models/customer.model';
 import { PosProductService, Product, PosProductVariant } from './pos-product.service';
@@ -236,6 +238,7 @@ export class PosCartService {
           } as PosCustomer : null,
           notes: '',
           appliedDiscounts: [],
+          pendingBookings: [],
           summary: this.calculateSummary(cartItems, []),
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -423,6 +426,35 @@ export class PosCartService {
     return this.cartState$.value.appliedCoupon
       ? { coupon_id: this.cartState$.value.appliedCoupon.id, coupon_code: this.cartState$.value.appliedCoupon.code }
       : null;
+  }
+
+  addPendingBooking(booking: PendingBooking): Observable<CartState> {
+    const current = this.cartState$.getValue();
+    const exists = current.pendingBookings.some(b => b.id === booking.id);
+    if (exists) return of(current);
+
+    const newState: CartState = {
+      ...current,
+      pendingBookings: [...current.pendingBookings, booking],
+      updatedAt: new Date(),
+    };
+    this.cartState$.next(newState);
+    return of(newState);
+  }
+
+  removePendingBooking(bookingId: number): Observable<CartState> {
+    const current = this.cartState$.getValue();
+    const newState: CartState = {
+      ...current,
+      pendingBookings: current.pendingBookings.filter(b => b.id !== bookingId),
+      updatedAt: new Date(),
+    };
+    this.cartState$.next(newState);
+    return of(newState);
+  }
+
+  getPendingBookingIds(): number[] {
+    return this.cartState$.getValue().pendingBookings.map(b => b.id);
   }
 
   /**
@@ -865,6 +897,7 @@ export class PosCartService {
       customer: null,
       notes: '',
       appliedDiscounts: [],
+      pendingBookings: [],
       summary: {
         subtotal: 0,
         taxAmount: 0,

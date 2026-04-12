@@ -2,8 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import {
   AnalyticsQueryDto,
-  DatePreset,
 } from '../dto/analytics-query.dto';
+import { parseDateRange } from '../utils/date.util';
 
 @Injectable()
 export class FinancialAnalyticsService {
@@ -12,7 +12,7 @@ export class FinancialAnalyticsService {
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
 
   async getTaxSummary(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     // Aggregate tax from order_item_taxes via order_items -> orders
     const orderItems = await this.prisma.order_items.findMany({
@@ -103,7 +103,7 @@ export class FinancialAnalyticsService {
   }
 
   async getCashSessionsReport(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
     const page = query.page || 1;
     const limit = query.limit || 20;
 
@@ -218,7 +218,7 @@ export class FinancialAnalyticsService {
   }
 
   async getProfitLossSummary(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     // Revenue from completed orders
     const orderAggregates = await this.prisma.orders.aggregate({
@@ -347,7 +347,7 @@ export class FinancialAnalyticsService {
   }
 
   async getCashSessionsForExport(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     const sessions = await this.prisma.cash_register_sessions.findMany({
       where: {
@@ -394,61 +394,4 @@ export class FinancialAnalyticsService {
     });
   }
 
-  // Helper methods
-  private parseDateRange(query: AnalyticsQueryDto): {
-    startDate: Date;
-    endDate: Date;
-  } {
-    if (query.date_from && query.date_to) {
-      const endDate = new Date(query.date_to);
-      endDate.setUTCHours(23, 59, 59, 999);
-      return {
-        startDate: new Date(query.date_from),
-        endDate,
-      };
-    }
-
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-    switch (query.date_preset) {
-      case DatePreset.TODAY:
-        return { startDate: today, endDate: now };
-      case DatePreset.YESTERDAY:
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        return { startDate: yesterday, endDate: today };
-      case DatePreset.THIS_WEEK:
-        const weekStart = new Date(today);
-        weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-        return { startDate: weekStart, endDate: now };
-      case DatePreset.LAST_WEEK:
-        const lastWeekEnd = new Date(today);
-        lastWeekEnd.setDate(lastWeekEnd.getDate() - lastWeekEnd.getDay());
-        const lastWeekStart = new Date(lastWeekEnd);
-        lastWeekStart.setDate(lastWeekStart.getDate() - 7);
-        return { startDate: lastWeekStart, endDate: lastWeekEnd };
-      case DatePreset.LAST_MONTH:
-        const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
-        const lastMonthStart = new Date(
-          today.getFullYear(),
-          today.getMonth() - 1,
-          1,
-        );
-        return { startDate: lastMonthStart, endDate: lastMonthEnd };
-      case DatePreset.THIS_YEAR:
-        return { startDate: new Date(today.getFullYear(), 0, 1), endDate: now };
-      case DatePreset.LAST_YEAR:
-        return {
-          startDate: new Date(today.getFullYear() - 1, 0, 1),
-          endDate: new Date(today.getFullYear() - 1, 11, 31),
-        };
-      case DatePreset.THIS_MONTH:
-      default:
-        return {
-          startDate: new Date(today.getFullYear(), today.getMonth(), 1),
-          endDate: now,
-        };
-    }
-  }
 }

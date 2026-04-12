@@ -50,6 +50,7 @@ import {
 } from '../../models/shipping.model';
 import { PaymentRequest } from '../../models/payment.model';
 import { CurrencyInputDirective } from '../../../../../../shared/directives/currency-input.directive';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-pos-shipping-modal',
@@ -1355,7 +1356,7 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
       due.setDate(due.getDate() + freqDays[this.creditFrequency] * i);
       return {
         amount: i === n - 1 ? Math.round((this.creditRemainingBalance - baseAmount * (n - 1)) * 100) / 100 : baseAmount,
-        due_date: due.toISOString().split('T')[0],
+        due_date: toLocalDateString(due),
       };
     });
   }
@@ -1363,7 +1364,7 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
   private setDefaultCreditFirstDate(): void {
     const date = new Date();
     date.setDate(date.getDate() + 30);
-    this.creditFirstDate = date.toISOString().split('T')[0];
+    this.creditFirstDate = toLocalDateString(date);
   }
 
   private loadStoreSettings(): void {

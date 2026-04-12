@@ -18,6 +18,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 import { AnalyticsService } from '../../services/analytics.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
+import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../shared/utils/date.util';
 import {
   SalesTrend,
   SalesAnalyticsQueryDto,
@@ -164,8 +165,8 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
   combinedChartOptions = signal<EChartsOption>({});
   aovChartOptions = signal<EChartsOption>({});
   dateRange = signal<DateRangeFilter>({
-    start_date: this.getDefaultStartDate(),
-    end_date: this.getDefaultEndDate(),
+    start_date: getDefaultStartDate(),
+    end_date: getDefaultEndDate(),
     preset: 'thisMonth',
   });
 
@@ -219,7 +220,7 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
   }
 
   private updateCharts(data: SalesTrend[]): void {
-    const labels = data.map((t) => this.formatLabel(t.period));
+    const labels = data.map((t) => formatChartPeriod(t.period, this.granularity()));
     const revenues = data.map((t) => t.revenue);
     const orders = data.map((t) => t.orders);
     const aov = data.map((t) => t.average_order_value);
@@ -361,17 +362,6 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
     });
   }
 
-  private formatLabel(period: string): string {
-    const date = new Date(period);
-    if (this.granularity() === 'month') {
-      return date.toLocaleDateString('es-CO', {
-        month: 'short',
-        year: '2-digit',
-      });
-    }
-    return date.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' });
-  }
-
   exportReport(): void {
     this.exporting.set(true);
     this.analyticsService
@@ -401,13 +391,4 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
     return this.currencyService.format(value, 0);
   }
 
-  private getDefaultStartDate(): string {
-    const date = new Date();
-    date.setDate(1);
-    return date.toISOString().split('T')[0];
-  }
-
-  private getDefaultEndDate(): string {
-    return new Date().toISOString().split('T')[0];
-  }
 }

@@ -305,7 +305,10 @@ export class StockLevelManager {
           reserved_for_id: reserved_for_id,
           status: 'active',
           user_id: user_id,
-          expires_at: expires_at !== undefined ? expires_at : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // null = no expira (layaway), undefined = default 7 días
+          expires_at:
+            expires_at !== undefined
+              ? expires_at
+              : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // null = no expira (layaway), undefined = default 7 días
           created_at: new Date(),
         },
       });
@@ -436,7 +439,12 @@ export class StockLevelManager {
       // 2. Agrupar por (product_id, product_variant_id, location_id) para batch updates
       const groups = new Map<
         string,
-        { product_id: number; product_variant_id: number | null; location_id: number; total_quantity: number }
+        {
+          product_id: number;
+          product_variant_id: number | null;
+          location_id: number;
+          total_quantity: number;
+        }
       >();
 
       for (const r of reservations) {
@@ -479,15 +487,22 @@ export class StockLevelManager {
 
         if (stock_level) {
           const data: any = {
-            quantity_reserved: Math.max(0, stock_level.quantity_reserved - group.total_quantity),
+            quantity_reserved: Math.max(
+              0,
+              stock_level.quantity_reserved - group.total_quantity,
+            ),
             last_updated: new Date(),
             updated_at: new Date(),
           };
 
           if (status === 'consumed') {
-            data.quantity_on_hand = Math.max(0, stock_level.quantity_on_hand - group.total_quantity);
+            data.quantity_on_hand = Math.max(
+              0,
+              stock_level.quantity_on_hand - group.total_quantity,
+            );
           } else {
-            data.quantity_available = stock_level.quantity_available + group.total_quantity;
+            data.quantity_available =
+              stock_level.quantity_available + group.total_quantity;
           }
 
           await prisma.stock_levels.update({
@@ -499,7 +514,11 @@ export class StockLevelManager {
         const productKey = `${group.product_id}-${group.product_variant_id ?? 'null'}`;
         if (!syncedProducts.has(productKey)) {
           syncedProducts.add(productKey);
-          await this.syncProductStock(prisma, group.product_id, group.product_variant_id ?? undefined);
+          await this.syncProductStock(
+            prisma,
+            group.product_id,
+            group.product_variant_id ?? undefined,
+          );
         }
       }
     };
@@ -537,7 +556,11 @@ export class StockLevelManager {
       // Agrupar por location para batch update
       const groups = new Map<
         string,
-        { location_id: number; product_variant_id: number | null; total_quantity: number }
+        {
+          location_id: number;
+          product_variant_id: number | null;
+          total_quantity: number;
+        }
       >();
 
       let total_quantity = 0;
@@ -574,8 +597,12 @@ export class StockLevelManager {
           await prisma.stock_levels.update({
             where: { id: stock_level.id },
             data: {
-              quantity_reserved: Math.max(0, stock_level.quantity_reserved - group.total_quantity),
-              quantity_available: stock_level.quantity_available + group.total_quantity,
+              quantity_reserved: Math.max(
+                0,
+                stock_level.quantity_reserved - group.total_quantity,
+              ),
+              quantity_available:
+                stock_level.quantity_available + group.total_quantity,
               last_updated: new Date(),
               updated_at: new Date(),
             },
@@ -612,7 +639,12 @@ export class StockLevelManager {
       // Agrupar por (product_id, product_variant_id, location_id)
       const groups = new Map<
         string,
-        { product_id: number; product_variant_id: number | null; location_id: number; total_quantity: number }
+        {
+          product_id: number;
+          product_variant_id: number | null;
+          location_id: number;
+          total_quantity: number;
+        }
       >();
 
       let total_quantity = 0;
@@ -652,8 +684,12 @@ export class StockLevelManager {
           await prisma.stock_levels.update({
             where: { id: stock_level.id },
             data: {
-              quantity_reserved: Math.max(0, stock_level.quantity_reserved - group.total_quantity),
-              quantity_available: stock_level.quantity_available + group.total_quantity,
+              quantity_reserved: Math.max(
+                0,
+                stock_level.quantity_reserved - group.total_quantity,
+              ),
+              quantity_available:
+                stock_level.quantity_available + group.total_quantity,
               last_updated: new Date(),
               updated_at: new Date(),
             },
@@ -663,7 +699,11 @@ export class StockLevelManager {
         const productKey = `${group.product_id}-${group.product_variant_id ?? 'null'}`;
         if (!syncedProducts.has(productKey)) {
           syncedProducts.add(productKey);
-          await this.syncProductStock(prisma, group.product_id, group.product_variant_id ?? undefined);
+          await this.syncProductStock(
+            prisma,
+            group.product_id,
+            group.product_variant_id ?? undefined,
+          );
         }
       }
 
@@ -1091,5 +1131,279 @@ export class StockLevelManager {
     return stock_levels.filter(
       (sl) => sl.quantity_available <= (sl.reorder_point || 0),
     );
+  }
+
+  async transferBaseStockToVariants(
+    product_id: number,
+    variant_ids: number[],
+    user_id: number,
+    mode: 'first' | 'distribute' | 'reset',
+    tx?: Prisma.TransactionClient,
+  ): Promise<number[]> {
+    const prisma: any = tx || this.prisma;
+    const basePrisma = prisma._baseClient || prisma;
+
+    const baseStockLevels = await basePrisma.stock_levels.findMany({
+      where: {
+        product_id,
+        product_variant_id: null,
+      },
+    });
+
+    const locationIds: number[] = [];
+
+    if (mode === 'reset') {
+      for (const sl of baseStockLevels) {
+        locationIds.push(sl.location_id);
+
+        if (sl.quantity_on_hand > 0) {
+          await basePrisma.stock_levels.update({
+            where: { id: sl.id },
+            data: {
+              quantity_on_hand: 0,
+              quantity_available: 0,
+              last_updated: new Date(),
+              updated_at: new Date(),
+            },
+          });
+
+          await this.createStockTransferAuditEntries(
+            basePrisma,
+            product_id,
+            null,
+            sl.location_id,
+            -sl.quantity_on_hand,
+            user_id,
+            'Stock base reiniciado: producto transicionó a inventario por variantes',
+          );
+        }
+      }
+    } else {
+      for (const sl of baseStockLevels) {
+        locationIds.push(sl.location_id);
+        const totalStock = sl.quantity_on_hand;
+
+        if (totalStock <= 0) continue;
+
+        for (const variant_id of variant_ids) {
+          await this.getOrCreateStockLevel(
+            prisma,
+            product_id,
+            variant_id,
+            sl.location_id,
+          );
+        }
+
+        const distribution = this.calculateStockDistribution(
+          totalStock,
+          variant_ids.length,
+          mode,
+        );
+
+        for (let i = 0; i < variant_ids.length; i++) {
+          const allocated = distribution[i];
+          if (allocated > 0) {
+            const variantSl = await basePrisma.stock_levels.findFirst({
+              where: {
+                product_id,
+                product_variant_id: variant_ids[i],
+                location_id: sl.location_id,
+              },
+            });
+
+            if (variantSl) {
+              const newQty = (variantSl.quantity_on_hand || 0) + allocated;
+              const newReserved = variantSl.quantity_reserved || 0;
+              await basePrisma.stock_levels.update({
+                where: { id: variantSl.id },
+                data: {
+                  quantity_on_hand: newQty,
+                  quantity_available: newQty - newReserved,
+                  last_updated: new Date(),
+                  updated_at: new Date(),
+                },
+              });
+            }
+          }
+        }
+
+        await basePrisma.stock_levels.update({
+          where: { id: sl.id },
+          data: {
+            quantity_on_hand: 0,
+            quantity_available: 0,
+            last_updated: new Date(),
+            updated_at: new Date(),
+          },
+        });
+
+        await this.createStockTransferAuditEntries(
+          basePrisma,
+          product_id,
+          null,
+          sl.location_id,
+          -totalStock,
+          user_id,
+          `Stock base transferido a variantes (modo: ${mode === 'first' ? 'primera variante' : 'distribuido'})`,
+        );
+      }
+    }
+
+    await this.syncProductStock(prisma, product_id);
+
+    return [...new Set(locationIds)];
+  }
+
+  async transferVariantStockToBase(
+    product_id: number,
+    variant_ids: number[],
+    user_id: number,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const prisma: any = tx || this.prisma;
+    const basePrisma = prisma._baseClient || prisma;
+
+    const variantStockLevels = await basePrisma.stock_levels.findMany({
+      where: {
+        product_id,
+        product_variant_id: { in: variant_ids },
+      },
+    });
+
+    const stockByLocation = new Map<number, number>();
+    for (const sl of variantStockLevels) {
+      const current = stockByLocation.get(sl.location_id) || 0;
+      stockByLocation.set(sl.location_id, current + sl.quantity_on_hand);
+    }
+
+    for (const [location_id, totalQuantity] of stockByLocation) {
+      await this.getOrCreateStockLevel(
+        prisma,
+        product_id,
+        undefined,
+        location_id,
+      );
+
+      const baseSl = await basePrisma.stock_levels.findFirst({
+        where: {
+          product_id,
+          product_variant_id: null,
+          location_id,
+        },
+      });
+
+      if (baseSl && totalQuantity > 0) {
+        const newQty = (baseSl.quantity_on_hand || 0) + totalQuantity;
+        const newReserved = baseSl.quantity_reserved || 0;
+        await basePrisma.stock_levels.update({
+          where: { id: baseSl.id },
+          data: {
+            quantity_on_hand: newQty,
+            quantity_available: newQty - newReserved,
+            last_updated: new Date(),
+            updated_at: new Date(),
+          },
+        });
+
+        await this.createStockTransferAuditEntries(
+          basePrisma,
+          product_id,
+          null,
+          location_id,
+          totalQuantity,
+          user_id,
+          'Stock de variantes transferido al producto base al desactivar variantes',
+        );
+      }
+    }
+
+    for (const sl of variantStockLevels) {
+      if (sl.quantity_on_hand > 0) {
+        await basePrisma.stock_levels.update({
+          where: { id: sl.id },
+          data: {
+            quantity_on_hand: 0,
+            quantity_available: 0,
+            last_updated: new Date(),
+            updated_at: new Date(),
+          },
+        });
+
+        await this.createStockTransferAuditEntries(
+          basePrisma,
+          product_id,
+          sl.product_variant_id,
+          sl.location_id,
+          -sl.quantity_on_hand,
+          user_id,
+          'Stock de variante transferido al producto base',
+        );
+      }
+    }
+
+    await this.syncProductStock(prisma, product_id);
+  }
+
+  private calculateStockDistribution(
+    totalStock: number,
+    variantCount: number,
+    mode: 'first' | 'distribute' | 'reset',
+  ): number[] {
+    const distribution = new Array(variantCount).fill(0);
+
+    if (mode === 'first') {
+      distribution[0] = totalStock;
+    } else if (mode === 'distribute') {
+      const perVariant = Math.floor(totalStock / variantCount);
+      const remainder = totalStock - perVariant * variantCount;
+
+      for (let i = 0; i < variantCount; i++) {
+        distribution[i] = perVariant;
+      }
+      distribution[0] += remainder;
+    }
+
+    return distribution;
+  }
+
+  private async createStockTransferAuditEntries(
+    prisma: any,
+    product_id: number,
+    variant_id: number | null,
+    location_id: number,
+    quantity_change: number,
+    user_id: number,
+    reason: string,
+  ): Promise<void> {
+    await this.transactionsService.createTransaction(
+      {
+        productId: product_id,
+        type: 'adjustment_damage',
+        quantityChange: quantity_change,
+        reason,
+        userId: user_id,
+      },
+      prisma,
+    );
+
+    const context = RequestContextService.getContext();
+    const organization_id =
+      context?.organization_id || (await this.getOrganizationId(product_id));
+
+    await prisma.inventory_movements.create({
+      data: {
+        organization_id,
+        product_id,
+        product_variant_id: variant_id,
+        from_location_id: location_id,
+        to_location_id: location_id,
+        quantity: Math.abs(quantity_change),
+        movement_type: 'adjustment',
+        reason,
+        notes: reason,
+        user_id,
+        created_at: new Date(),
+      },
+    });
   }
 }

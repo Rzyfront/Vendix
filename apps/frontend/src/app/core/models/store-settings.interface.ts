@@ -45,8 +45,6 @@ export interface CheckoutSettings {
   require_payment_confirmation: boolean;
 }
 
-
-
 export interface CarrierConfig {
   tracking_enabled: boolean;
   estimated_days_min: number;
@@ -174,7 +172,6 @@ export interface CustomerQueueSettings {
   queue_expiry_hours: number;
   max_queue_size: number;
   require_email: boolean;
-  require_phone: boolean;
 }
 
 export interface ScaleSettings {
@@ -192,7 +189,11 @@ export interface ScaleDeviceConfig {
   protocol: 'generic' | 'cas' | 'ohaus';
 }
 
-export type ScaleConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+export type ScaleConnectionStatus =
+  | 'disconnected'
+  | 'connecting'
+  | 'connected'
+  | 'error';
 
 export interface ReceiptsSettings {
   print_receipt: boolean;

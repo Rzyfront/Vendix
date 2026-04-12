@@ -60,21 +60,45 @@ export class AnalyticsController {
   @Permissions('store:analytics:read')
   async getSalesByProduct(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesByProduct(query);
-    return result;
+    if (Array.isArray(result)) {
+      return this.response_service.success(result);
+    }
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+    );
   }
 
   @Get('sales/by-category')
   @Permissions('store:analytics:read')
   async getSalesByCategory(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesByCategory(query);
-    return result;
+    if (Array.isArray(result)) {
+      return this.response_service.success(result);
+    }
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+    );
   }
 
   @Get('sales/by-payment-method')
   @Permissions('store:analytics:read')
   async getSalesByPaymentMethod(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesByPaymentMethod(query);
-    return result;
+    if (Array.isArray(result)) {
+      return this.response_service.success(result);
+    }
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+    );
   }
 
   @Get('sales/trends')
@@ -88,14 +112,22 @@ export class AnalyticsController {
   @Permissions('store:analytics:read')
   async getSalesByCustomer(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesByCustomer(query);
-    return result;
+    if (Array.isArray(result)) {
+      return this.response_service.success(result);
+    }
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+    );
   }
 
   @Get('sales/by-channel')
   @Permissions('store:analytics:read')
   async getSalesByChannel(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesByChannel(query);
-    return result;
+    return this.response_service.success(result);
   }
 
   @Get('sales/export')
@@ -168,7 +200,12 @@ export class AnalyticsController {
   @Permissions('store:analytics:read')
   async getProductsTable(@Query() query: ProductsAnalyticsQueryDto) {
     const result = await this.products_analytics_service.getProductsTable(query);
-    return result;
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+    );
   }
 
   @Get('products/export')
@@ -209,14 +246,30 @@ export class AnalyticsController {
   @Permissions('store:analytics:read')
   async getProductPerformance(@Query() query: ProductsAnalyticsQueryDto) {
     const result = await this.products_analytics_service.getProductPerformance(query);
-    return result;
+    if (Array.isArray(result)) {
+      return this.response_service.success(result);
+    }
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+    );
   }
 
   @Get('products/profitability')
   @Permissions('store:analytics:read')
   async getProductProfitability(@Query() query: ProductsAnalyticsQueryDto) {
     const result = await this.products_analytics_service.getProductProfitability(query);
-    return result;
+    if ((result as any).products) {
+      return this.response_service.success(result);
+    }
+    return this.response_service.paginated(
+      (result as any).data,
+      (result as any).meta.pagination.total,
+      (result as any).meta.pagination.page,
+      (result as any).meta.pagination.limit,
+    );
   }
 
   @Get('products/performance/export')
@@ -278,21 +331,45 @@ export class AnalyticsController {
   @Permissions('store:analytics:read')
   async getStockLevels(@Query() query: InventoryAnalyticsQueryDto) {
     const result = await this.inventory_analytics_service.getStockLevels(query);
-    return result;
+    if (Array.isArray(result)) {
+      return this.response_service.success(result);
+    }
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+    );
   }
 
   @Get('inventory/low-stock')
   @Permissions('store:analytics:read')
   async getLowStockAlerts(@Query() query: InventoryAnalyticsQueryDto) {
     const result = await this.inventory_analytics_service.getLowStockAlerts(query);
-    return result;
+    if (Array.isArray(result)) {
+      return this.response_service.success(result);
+    }
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+    );
   }
 
   @Get('inventory/movements')
   @Permissions('store:analytics:read')
   async getStockMovements(@Query() query: InventoryAnalyticsQueryDto) {
     const result = await this.inventory_analytics_service.getStockMovements(query);
-    return result;
+    if (Array.isArray(result)) {
+      return this.response_service.success(result);
+    }
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+    );
   }
 
   @Get('inventory/valuation')
@@ -388,7 +465,15 @@ export class AnalyticsController {
   @Permissions('store:analytics:read')
   async getTopCustomers(@Query() query: AnalyticsQueryDto) {
     const result = await this.customers_analytics_service.getTopCustomers(query);
-    return result;
+    if (Array.isArray(result)) {
+      return this.response_service.success(result);
+    }
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+    );
   }
 
   @Get('customers/export')
@@ -438,7 +523,12 @@ export class AnalyticsController {
   @Permissions('store:analytics:read')
   async getCashSessionsReport(@Query() query: AnalyticsQueryDto) {
     const result = await this.financial_analytics_service.getCashSessionsReport(query);
-    return result;
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+    );
   }
 
   @Get('financial/profit-loss')

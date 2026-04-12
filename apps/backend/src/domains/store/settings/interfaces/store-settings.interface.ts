@@ -272,10 +272,6 @@ export interface CheckoutSettings {
   require_payment_confirmation: boolean;
 }
 
-
-
-
-
 export interface NotificationsSettings {
   email_enabled: boolean;
   sms_enabled: boolean;
@@ -292,7 +288,6 @@ export interface CustomerQueueSettings {
   queue_expiry_hours: number;
   max_queue_size: number;
   require_email: boolean;
-  require_phone: boolean;
 }
 
 export interface CashRegisterSettings {

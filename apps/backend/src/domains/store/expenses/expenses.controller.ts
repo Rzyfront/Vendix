@@ -21,6 +21,7 @@ import { UpdateExpenseDto } from './dto/update-expense.dto';
 import { QueryExpenseDto } from './dto/query-expense.dto';
 import { CreateExpenseCategoryDto } from './dto/create-category.dto';
 import { UpdateExpenseCategoryDto } from './dto/update-category.dto';
+import { RefundExpenseDto } from './dto/refund-expense.dto';
 
 @Controller('store/expenses')
 @UseGuards(PermissionsGuard)
@@ -29,7 +30,7 @@ export class ExpensesController {
     private readonly expenses_service: ExpensesService,
     private readonly expense_flow_service: ExpenseFlowService,
     private readonly response_service: ResponseService,
-  ) { }
+  ) {}
 
   @Get()
   @Permissions('store:expenses:read')
@@ -57,7 +58,10 @@ export class ExpensesController {
   @HttpCode(HttpStatus.CREATED)
   async createCategory(@Body() create_dto: CreateExpenseCategoryDto) {
     const result = await this.expenses_service.createCategory(create_dto);
-    return this.response_service.success(result, 'Category created successfully');
+    return this.response_service.success(
+      result,
+      'Category created successfully',
+    );
   }
 
   @Put('categories/:id')
@@ -67,7 +71,10 @@ export class ExpensesController {
     @Body() update_dto: UpdateExpenseCategoryDto,
   ) {
     const result = await this.expenses_service.updateCategory(+id, update_dto);
-    return this.response_service.success(result, 'Category updated successfully');
+    return this.response_service.success(
+      result,
+      'Category updated successfully',
+    );
   }
 
   @Delete('categories/:id')
@@ -154,6 +161,20 @@ export class ExpensesController {
     return this.response_service.success(
       result,
       'Expense marked as paid successfully',
+    );
+  }
+
+  @Post(':id/refund')
+  @Permissions('store:expenses:refund')
+  @HttpCode(HttpStatus.OK)
+  async refund(@Param('id') id: string, @Body() refund_dto: RefundExpenseDto) {
+    const result = await this.expense_flow_service.refund(
+      +id,
+      refund_dto.reason,
+    );
+    return this.response_service.success(
+      result,
+      'Expense refunded successfully',
     );
   }
 

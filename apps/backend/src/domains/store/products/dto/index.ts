@@ -535,6 +535,11 @@ export class UpdateProductDto {
   stock_by_location?: StockByLocationDto[];
 
   @IsOptional()
+  @IsString()
+  @IsIn(['first', 'distribute', 'reset'])
+  stock_transfer_mode?: 'first' | 'distribute' | 'reset';
+
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateVariantWithStockDto)

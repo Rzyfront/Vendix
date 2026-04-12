@@ -102,6 +102,7 @@ export const expensesReducer = createReducer(
     ExpensesActions.rejectExpense,
     ExpensesActions.payExpense,
     ExpensesActions.cancelExpense,
+    ExpensesActions.refundExpense,
     (state) => ({
       ...state,
       loading: true,
@@ -113,6 +114,7 @@ export const expensesReducer = createReducer(
     ExpensesActions.rejectExpenseSuccess,
     ExpensesActions.payExpenseSuccess,
     ExpensesActions.cancelExpenseSuccess,
+    ExpensesActions.refundExpenseSuccess,
     (state, { expense }) => ({
       ...state,
       currentExpense: expense,
@@ -125,6 +127,7 @@ export const expensesReducer = createReducer(
     ExpensesActions.rejectExpenseFailure,
     ExpensesActions.payExpenseFailure,
     ExpensesActions.cancelExpenseFailure,
+    ExpensesActions.refundExpenseFailure,
     (state, { error }) => ({
       ...state,
       loading: false,

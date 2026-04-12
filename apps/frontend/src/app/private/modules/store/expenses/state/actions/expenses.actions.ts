@@ -127,6 +127,19 @@ export const cancelExpenseFailure = createAction(
   props<{ error: string }>(),
 );
 
+export const refundExpense = createAction(
+  '[Expenses] Refund Expense',
+  props<{ id: number; reason: string }>(),
+);
+export const refundExpenseSuccess = createAction(
+  '[Expenses] Refund Expense Success',
+  props<{ expense: Expense }>(),
+);
+export const refundExpenseFailure = createAction(
+  '[Expenses] Refund Expense Failure',
+  props<{ error: string }>(),
+);
+
 // Summary
 export const loadExpensesSummary = createAction('[Expenses] Load Summary');
 export const loadExpensesSummarySuccess = createAction(

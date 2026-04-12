@@ -814,9 +814,16 @@ export class ProductsService {
               id: variant.id,
               name: variant.name,
               sku: variant.sku,
-              price_override: variant.price_override ? Number(variant.price_override) : null,
-              cost_price: variant.cost_price ? Number(variant.cost_price) : null,
-              stock_quantity: variant.stock_levels?.[0]?.quantity_available ?? variant.stock_quantity ?? 0,
+              price_override: variant.price_override
+                ? Number(variant.price_override)
+                : null,
+              cost_price: variant.cost_price
+                ? Number(variant.cost_price)
+                : null,
+              stock_quantity:
+                variant.stock_levels?.[0]?.quantity_available ??
+                variant.stock_quantity ??
+                0,
               attributes: this.parseVariantAttributes(variant.attributes),
             })) || []
           : undefined;
@@ -1121,6 +1128,14 @@ export class ProductsService {
         }
       }
 
+      // Validate: variants require product to have SKU
+      if (updateProductDto.variants && updateProductDto.variants.length > 0) {
+        const productSku = updateProductDto.sku || existingProduct.sku;
+        if (!productSku || productSku.trim() === '') {
+          throw new VendixHttpException(ErrorCodes.PROD_VALIDATE_002);
+        }
+      }
+
       // Obtener contexto al inicio
       const context = RequestContextService.getContext();
       const user_id = context?.user_id;
@@ -1142,6 +1157,7 @@ export class ProductsService {
         stock_quantity,
         stock_by_location,
         variants,
+        stock_transfer_mode,
         price, // Exclude as it's not in DB
         ...productData
       } = updateProductDto;
@@ -1286,15 +1302,58 @@ export class ProductsService {
             const isTransitionToVariants =
               allExistingVariants.length === 0 && variants.length > 0;
 
-            // If transitioning, clear base stock and get location_ids for inheritance
+            // If transitioning, transfer/distribute base stock to variants
             let inheritedLocationIds: number[] = [];
             if (isTransitionToVariants) {
+              const tempVariantIds: number[] = [];
+              for (const variantData of variants) {
+                const {
+                  variant_image_url,
+                  id: variantDbId,
+                  ...variantFields
+                } = variantData as CreateVariantWithStockDto & { id?: number };
+
+                let existingVariant = variantDbId
+                  ? await prisma.product_variants.findFirst({
+                      where: { id: variantDbId, product_id: id },
+                    })
+                  : null;
+
+                if (!existingVariant) {
+                  existingVariant = await prisma.product_variants.findFirst({
+                    where: { product_id: id, sku: variantData.sku },
+                  });
+                }
+
+                if (existingVariant) {
+                  tempVariantIds.push(existingVariant.id);
+                }
+              }
+
+              const transferMode =
+                updateProductDto.stock_transfer_mode || 'reset';
               inheritedLocationIds =
-                await this.stockLevelManager.clearBaseStock(
+                await this.stockLevelManager.transferBaseStockToVariants(
                   id,
+                  tempVariantIds.length > 0 ? tempVariantIds : [0],
                   user_id!,
+                  transferMode,
                   prisma,
                 );
+
+              if (
+                inheritedLocationIds.length > 0 &&
+                tempVariantIds.length > 0
+              ) {
+                for (const vId of tempVariantIds) {
+                  await this.stockLevelManager.initializeVariantStockAtLocations(
+                    id,
+                    vId,
+                    inheritedLocationIds,
+                    prisma,
+                  );
+                }
+              }
             }
 
             // IDs de variantes que se mantienen (enviadas desde el frontend)
@@ -1384,6 +1443,24 @@ export class ProductsService {
                   where: { id: variantId },
                   data: { image_id: variantImage.id },
                 });
+              }
+            }
+
+            // Before deleting variants: transfer their stock to base product
+            const variantsToDelete = allExistingVariants.filter(
+              (ev) => !keptVariantIds.has(ev.id),
+            );
+            if (variantsToDelete.length > 0 && allExistingVariants.length > 0) {
+              const allVariantsDeleting =
+                variantsToDelete.length === allExistingVariants.length;
+              if (allVariantsDeleting) {
+                const allVariantIds = allExistingVariants.map((v) => v.id);
+                await this.stockLevelManager.transferVariantStockToBase(
+                  id,
+                  allVariantIds,
+                  user_id!,
+                  prisma,
+                );
               }
             }
 

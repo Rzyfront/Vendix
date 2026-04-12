@@ -4,10 +4,10 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   ProductsAnalyticsQueryDto,
-  DatePreset,
   Granularity,
 } from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
+import { formatPeriodFromDate, parseDateRange, getPreviousPeriod, getDateTruncInterval } from '../utils/date.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -17,8 +17,8 @@ export class ProductsAnalyticsService {
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
 
   async getProductsSummary(query: ProductsAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
-    const { previousStartDate, previousEndDate } = this.getPreviousPeriod(
+    const { startDate, endDate } = parseDateRange(query);
+    const { previousStartDate, previousEndDate } = getPreviousPeriod(
       startDate,
       endDate,
     );
@@ -84,7 +84,7 @@ export class ProductsAnalyticsService {
   }
 
   async getTopSellingProducts(query: ProductsAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     const results = await this.prisma.order_items.groupBy({
       by: ['product_id'],
@@ -163,7 +163,7 @@ export class ProductsAnalyticsService {
   }
 
   async getProductsTable(query: ProductsAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
     const page = query.page || 1;
     const limit = query.limit || 20;
     const search = query.search?.trim();
@@ -321,7 +321,7 @@ export class ProductsAnalyticsService {
   }
 
   async getProductsForExport(query: ProductsAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     // Get all active products
     const products = await this.prisma.products.findMany({
@@ -403,7 +403,7 @@ export class ProductsAnalyticsService {
   }
 
   async getProductsTrends(query: ProductsAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
     const granularity = query.granularity || Granularity.DAY;
     const context = RequestContextService.getContext();
 
@@ -412,7 +412,7 @@ export class ProductsAnalyticsService {
     }
     const storeId = context.store_id;
 
-    const truncSql = Prisma.raw(`'${this.getDateTruncInterval(granularity)}'`);
+    const truncSql = Prisma.raw(`'${getDateTruncInterval(granularity)}'`);
 
     const results = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
@@ -436,7 +436,7 @@ export class ProductsAnalyticsService {
     `;
 
     const mapped = results.map((r) => ({
-      period: this.formatPeriodFromDate(new Date(r.period), granularity),
+      period: formatPeriodFromDate(new Date(r.period), granularity),
       units_sold: Number(r.units_sold),
       revenue: Number(r.revenue),
     }));
@@ -447,12 +447,12 @@ export class ProductsAnalyticsService {
       endDate,
       granularity,
       { units_sold: 0, revenue: 0 },
-      this.formatPeriodFromDate.bind(this),
+      formatPeriodFromDate,
     );
   }
 
   async getProductPerformance(query: ProductsAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     const completedItems = await this.prisma.order_items.groupBy({
       by: ['product_id'],
@@ -583,7 +583,7 @@ export class ProductsAnalyticsService {
   }
 
   async getProductProfitability(query: ProductsAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     const items = await this.prisma.order_items.groupBy({
       by: ['product_id'],
@@ -735,109 +735,4 @@ export class ProductsAnalyticsService {
     }));
   }
 
-  private getDateTruncInterval(granularity: Granularity): string {
-    switch (granularity) {
-      case Granularity.HOUR:
-        return 'hour';
-      case Granularity.DAY:
-        return 'day';
-      case Granularity.WEEK:
-        return 'week';
-      case Granularity.MONTH:
-        return 'month';
-      case Granularity.YEAR:
-        return 'year';
-      default:
-        return 'day';
-    }
-  }
-
-  private formatPeriodFromDate(date: Date, granularity: Granularity): string {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-
-    switch (granularity) {
-      case Granularity.HOUR:
-        return `${y}-${m}-${d}T${String(date.getHours()).padStart(2, '0')}:00`;
-      case Granularity.DAY:
-        return `${y}-${m}-${d}`;
-      case Granularity.WEEK:
-        return `${y}-${m}-${d}`;
-      case Granularity.MONTH:
-        return `${y}-${m}`;
-      case Granularity.YEAR:
-        return `${y}`;
-      default:
-        return `${y}-${m}-${d}`;
-    }
-  }
-
-  // Helper methods (duplicated from SalesAnalyticsService to keep services independent)
-  private parseDateRange(query: ProductsAnalyticsQueryDto): {
-    startDate: Date;
-    endDate: Date;
-  } {
-    if (query.date_from && query.date_to) {
-      const endDate = new Date(query.date_to);
-      endDate.setUTCHours(23, 59, 59, 999);
-      return {
-        startDate: new Date(query.date_from),
-        endDate,
-      };
-    }
-
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-    switch (query.date_preset) {
-      case DatePreset.TODAY:
-        return { startDate: today, endDate: now };
-      case DatePreset.YESTERDAY:
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        return { startDate: yesterday, endDate: today };
-      case DatePreset.THIS_WEEK:
-        const weekStart = new Date(today);
-        weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-        return { startDate: weekStart, endDate: now };
-      case DatePreset.LAST_WEEK:
-        const lastWeekEnd = new Date(today);
-        lastWeekEnd.setDate(lastWeekEnd.getDate() - lastWeekEnd.getDay());
-        const lastWeekStart = new Date(lastWeekEnd);
-        lastWeekStart.setDate(lastWeekStart.getDate() - 7);
-        return { startDate: lastWeekStart, endDate: lastWeekEnd };
-      case DatePreset.LAST_MONTH:
-        const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
-        const lastMonthStart = new Date(
-          today.getFullYear(),
-          today.getMonth() - 1,
-          1,
-        );
-        return { startDate: lastMonthStart, endDate: lastMonthEnd };
-      case DatePreset.THIS_YEAR:
-        return { startDate: new Date(today.getFullYear(), 0, 1), endDate: now };
-      case DatePreset.LAST_YEAR:
-        return {
-          startDate: new Date(today.getFullYear() - 1, 0, 1),
-          endDate: new Date(today.getFullYear() - 1, 11, 31),
-        };
-      case DatePreset.THIS_MONTH:
-      default:
-        return {
-          startDate: new Date(today.getFullYear(), today.getMonth(), 1),
-          endDate: now,
-        };
-    }
-  }
-
-  private getPreviousPeriod(
-    startDate: Date,
-    endDate: Date,
-  ): { previousStartDate: Date; previousEndDate: Date } {
-    const duration = endDate.getTime() - startDate.getTime();
-    const previousEndDate = new Date(startDate.getTime() - 1);
-    const previousStartDate = new Date(previousEndDate.getTime() - duration);
-    return { previousStartDate, previousEndDate };
-  }
 }

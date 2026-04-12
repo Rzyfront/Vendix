@@ -37,6 +37,7 @@ model users {
   inventory_adjustments      inventory_adjustments[]      @relation("inventory_adjustments_created_by")
   expenses1                  expenses[]                   @relation("expenses_approved_by")
   expenses                   expenses[]                   @relation("expenses_created_by")
+  expenses2                  expenses[]                   @relation("expenses_refunded_by")
   inventory_movements        inventory_movements[]
   inventory_transactions     inventory_transactions[]
   password_reset_tokens      password_reset_tokens[]
@@ -1374,6 +1375,9 @@ model expenses {
   created_by_user_id  Int?
   approved_by_user_id Int?
   approved_at         DateTime?           @db.Timestamp(6)
+  refunded_at         DateTime?           @db.Timestamp(6)
+  refunded_by_user_id Int?
+  refund_reason       String?             @db.VarChar(500)
   created_at          DateTime?           @default(now()) @db.Timestamp(6)
   updated_at          DateTime?           @default(now()) @db.Timestamp(6)
 
@@ -1382,6 +1386,7 @@ model expenses {
   expense_categories expense_categories? @relation(fields: [category_id], references: [id])
   created_by_user    users?              @relation("expenses_created_by", fields: [created_by_user_id], references: [id])
   approved_by_user   users?              @relation("expenses_approved_by", fields: [approved_by_user_id], references: [id])
+  refunded_by_user   users?              @relation("expenses_refunded_by", fields: [refunded_by_user_id], references: [id])
 
   @@index([store_id, expense_date])
   @@index([organization_id, expense_date])
@@ -2531,6 +2536,7 @@ enum expenses_state_enum {
   rejected
   paid
   cancelled
+  refunded
 }
 
 // ===== INVOICING, ACCOUNTING & PAYROLL ENUMS =====
@@ -4728,6 +4734,7 @@ model bookings {
   internal_notes     String?             @db.Text
   order_id           Int?
   created_by_user_id Int?
+  expires_at         DateTime?           @db.Timestamp(6)
   provider_id        Int?
   created_at         DateTime?           @default(now()) @db.Timestamp(6)
   updated_at         DateTime?           @default(now()) @db.Timestamp(6)

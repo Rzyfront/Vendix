@@ -109,7 +109,6 @@ export function getDefaultStoreSettings(): StoreSettings {
         queue_expiry_hours: 12,
         max_queue_size: 0,
         require_email: false,
-        require_phone: false,
       },
       default_payment_form: 'contado',
       show_onscreen_keypad: true,
@@ -286,10 +285,6 @@ export function getDefaultStoreSettings(): StoreSettings {
     },
   };
 }
-
-
-
-
 
 function getDefaultBusinessHours(): Record<
   string,

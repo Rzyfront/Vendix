@@ -57,10 +57,10 @@ export class DispatchNotePrintService {
     };
 
     const emission_date = dn.emission_date
-      ? new Date(dn.emission_date).toLocaleDateString('es-CO')
-      : new Date(dn.created_at).toLocaleDateString('es-CO');
+      ? new Date(dn.emission_date).toLocaleDateString('es-CO', { timeZone: 'UTC' })
+      : new Date(dn.created_at).toLocaleDateString('es-CO', { timeZone: 'UTC' });
     const agreed_delivery = dn.agreed_delivery_date
-      ? new Date(dn.agreed_delivery_date).toLocaleDateString('es-CO')
+      ? new Date(dn.agreed_delivery_date).toLocaleDateString('es-CO', { timeZone: 'UTC' })
       : null;
 
     const items = dn.dispatch_note_items || [];

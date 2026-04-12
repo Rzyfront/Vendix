@@ -37,6 +37,7 @@ import {
   CurrencyPipe,
 } from '../../../../../shared/pipes/currency';
 import { CurrencyInputDirective } from '../../../../../shared/directives/currency-input.directive';
+import { toLocalDateString } from '../../../../../shared/utils/date.util';
 import {
   PosPaymentService,
   PaymentMethod,
@@ -1747,7 +1748,7 @@ export class PosPaymentInterfaceComponent
   private setDefaultCreditFirstDate(): void {
     const date = new Date();
     date.setDate(date.getDate() + 30);
-    this.creditFirstDate = date.toISOString().split('T')[0];
+    this.creditFirstDate = toLocalDateString(date);
   }
 
   selectPaymentMethod(method: PaymentMethod): void {
@@ -2320,7 +2321,7 @@ export class PosPaymentInterfaceComponent
       due.setDate(due.getDate() + freqDays[this.creditFrequency] * i);
       return {
         amount: i === n - 1 ? Math.round((total - baseAmount * (n - 1)) * 100) / 100 : baseAmount,
-        due_date: due.toISOString().split('T')[0],
+        due_date: toLocalDateString(due),
       };
     });
   }
@@ -2386,7 +2387,7 @@ export class PosPaymentInterfaceComponent
         due.setDate(due.getDate() + freqDays[this.creditFrequency] * i);
         return {
           amount: i === n - 1 ? Math.round((amountToFinance - baseAmount * (n - 1)) * 100) / 100 : baseAmount,
-          due_date: due.toISOString().split('T')[0],
+          due_date: toLocalDateString(due),
         };
       });
     } else if (interestType === 'compound') {
@@ -2400,7 +2401,7 @@ export class PosPaymentInterfaceComponent
         due.setDate(due.getDate() + freqDays[this.creditFrequency] * i);
         return {
           amount: i === n - 1 ? Math.round((totalWithInterest - baseAmount * (n - 1)) * 100) / 100 : baseAmount,
-          due_date: due.toISOString().split('T')[0],
+          due_date: toLocalDateString(due),
         };
       });
     } else {
@@ -2414,7 +2415,7 @@ export class PosPaymentInterfaceComponent
         due.setDate(due.getDate() + freqDays[this.creditFrequency] * i);
         return {
           amount: i === n - 1 ? Math.round((totalWithInterest - baseAmount * (n - 1)) * 100) / 100 : baseAmount,
-          due_date: due.toISOString().split('T')[0],
+          due_date: toLocalDateString(due),
         };
       });
     }

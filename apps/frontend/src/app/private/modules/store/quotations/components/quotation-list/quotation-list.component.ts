@@ -17,6 +17,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { Quotation } from '../../interfaces/quotation.interface';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-quotation-list',
@@ -177,7 +178,7 @@ export class QuotationListComponent {
       key: 'valid_until',
       label: 'Válida hasta',
       transform: (v: string) =>
-        v ? new Date(v).toLocaleDateString('es-CO') : '-',
+        v ? formatDateOnlyUTC(v) : '-',
     },
     {
       key: 'created_at',
@@ -205,7 +206,7 @@ export class QuotationListComponent {
         key: 'valid_until',
         label: 'Válida hasta',
         transform: (v: string) =>
-          v ? new Date(v).toLocaleDateString('es-CO') : '-',
+          v ? formatDateOnlyUTC(v) : '-',
       },
       {
         key: 'created_at',

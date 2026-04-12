@@ -1,5 +1,6 @@
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
 import { CustomersSummary, CustomerTrend, TopCustomer } from '../../../interfaces/customers-analytics.interface';
+import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../../shared/utils/date.util';
 
 export interface CustomersAnalyticsState {
   summary: CustomersSummary | null;
@@ -28,13 +29,3 @@ export const initialCustomersAnalyticsState: CustomersAnalyticsState = {
   exporting: false,
   error: null,
 };
-
-function getDefaultStartDate(): string {
-  const date = new Date();
-  date.setDate(1);
-  return date.toISOString().split('T')[0];
-}
-
-function getDefaultEndDate(): string {
-  return new Date().toISOString().split('T')[0];
-}

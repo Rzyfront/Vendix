@@ -43,34 +43,50 @@ export class AvailabilityService {
 
     if (!product) return [];
 
-    // 2. Si booking_mode = free_booking, no se necesitan slots
-    if (product.booking_mode === booking_mode_enum.free_booking) {
+    const duration = product.service_duration_minutes || 60;
+    const buffer = product.buffer_minutes || 0;
+    const isFreeBooking =
+      product.booking_mode === booking_mode_enum.free_booking;
+
+    if (provider_id && isFreeBooking) {
       return [];
     }
 
-    const duration = product.service_duration_minutes || 60;
-    const buffer = product.buffer_minutes || 0;
+    let providers: {
+      id: number;
+      display_name: string;
+      avatar_url: string | null;
+    }[] = [];
 
-    // 3. Obtener proveedores activos para este servicio
-    const providerWhere: any = {
-      is_active: true,
-      services: { some: { product_id } },
-    };
+    if (!isFreeBooking) {
+      const providerWhere: any = {
+        is_active: true,
+        services: { some: { product_id } },
+      };
 
-    if (provider_id) {
-      providerWhere.id = provider_id;
+      if (provider_id) {
+        providerWhere.id = provider_id;
+      }
+
+      providers = await this.prisma.service_providers.findMany({
+        where: providerWhere,
+        select: {
+          id: true,
+          display_name: true,
+          avatar_url: true,
+        },
+      });
     }
 
-    const providers = await this.prisma.service_providers.findMany({
-      where: providerWhere,
-      select: {
-        id: true,
-        display_name: true,
-        avatar_url: true,
-      },
-    });
-
-    if (providers.length === 0) return [];
+    if (isFreeBooking || providers.length === 0) {
+      return this.generateGenericSlots(
+        product_id,
+        date_from,
+        date_to,
+        duration,
+        buffer,
+      );
+    }
 
     const providerIds = providers.map((p) => p.id);
 
@@ -103,7 +119,12 @@ export class AvailabilityService {
         },
         status: { notIn: [booking_status_enum.cancelled] },
       },
-      select: { date: true, start_time: true, end_time: true, provider_id: true },
+      select: {
+        date: true,
+        start_time: true,
+        end_time: true,
+        provider_id: true,
+      },
     });
 
     // 7. Generar slots por fecha y provider
@@ -128,7 +149,15 @@ export class AvailabilityService {
     }
 
     // Mapa temporal para agrupar providers por slot (date+start+end)
-    const slotMap = new Map<string, { date: string; start_time: string; end_time: string; providers: AvailableProvider[] }>();
+    const slotMap = new Map<
+      string,
+      {
+        date: string;
+        start_time: string;
+        end_time: string;
+        providers: AvailableProvider[];
+      }
+    >();
 
     for (const currentDate of dates) {
       const dayOfWeek = currentDate.getUTCDay();
@@ -149,11 +178,17 @@ export class AvailabilityService {
         if (exception?.is_unavailable) continue;
 
         // Determinar horario efectivo
-        const effectiveStart = exception?.custom_start_time || schedule.start_time;
+        const effectiveStart =
+          exception?.custom_start_time || schedule.start_time;
         const effectiveEnd = exception?.custom_end_time || schedule.end_time;
 
         // Generar time slots
-        const timeSlots = this.generateTimeSlots(effectiveStart, effectiveEnd, duration, buffer);
+        const timeSlots = this.generateTimeSlots(
+          effectiveStart,
+          effectiveEnd,
+          duration,
+          buffer,
+        );
 
         for (const slot of timeSlots) {
           // Verificar si este provider ya tiene booking en este slot
@@ -203,6 +238,17 @@ export class AvailabilityService {
       return a.start_time.localeCompare(b.start_time);
     });
 
+    // Fallback a slots genéricos si proveedores no tienen schedules configurados
+    if (slots.length === 0) {
+      return this.generateGenericSlots(
+        product_id,
+        date_from,
+        date_to,
+        duration,
+        buffer,
+      );
+    }
+
     return slots;
   }
 
@@ -232,11 +278,24 @@ export class AvailabilityService {
 
     if (provider_id) {
       // Verificar solo este provider
-      return this.isProviderAvailableForSlot(provider_id, product_id, date, start_time, end_time, exclude_booking_id);
+      return this.isProviderAvailableForSlot(
+        provider_id,
+        product_id,
+        date,
+        start_time,
+        end_time,
+        exclude_booking_id,
+      );
     }
 
     // Verificar si ALGUN provider esta disponible
-    const availableProviders = await this.getAvailableProvidersForSlot(product_id, date, start_time, end_time, exclude_booking_id);
+    const availableProviders = await this.getAvailableProvidersForSlot(
+      product_id,
+      date,
+      start_time,
+      end_time,
+      exclude_booking_id,
+    );
     return availableProviders.length > 0;
   }
 
@@ -268,7 +327,11 @@ export class AvailabilityService {
     for (const provider of providers) {
       // Verificar schedule para este dia
       const schedule = await this.prisma.provider_schedules.findFirst({
-        where: { provider_id: provider.id, day_of_week: dayOfWeek, is_active: true },
+        where: {
+          provider_id: provider.id,
+          day_of_week: dayOfWeek,
+          is_active: true,
+        },
       });
 
       if (!schedule) continue;
@@ -281,7 +344,8 @@ export class AvailabilityService {
       if (exception?.is_unavailable) continue;
 
       // Verificar que el slot cae dentro del horario efectivo
-      const effectiveStart = exception?.custom_start_time || schedule.start_time;
+      const effectiveStart =
+        exception?.custom_start_time || schedule.start_time;
       const effectiveEnd = exception?.custom_end_time || schedule.end_time;
 
       if (
@@ -450,7 +514,9 @@ export class AvailabilityService {
   }
 
   private minutesToTime(minutes: number): string {
-    const h = Math.floor(minutes / 60).toString().padStart(2, '0');
+    const h = Math.floor(minutes / 60)
+      .toString()
+      .padStart(2, '0');
     const m = (minutes % 60).toString().padStart(2, '0');
     return `${h}:${m}`;
   }
@@ -471,5 +537,61 @@ export class AvailabilityService {
     const m = (date.getUTCMonth() + 1).toString().padStart(2, '0');
     const d = date.getUTCDate().toString().padStart(2, '0');
     return `${y}-${m}-${d}`;
+  }
+
+  private async generateGenericSlots(
+    product_id: number,
+    date_from: string,
+    date_to: string,
+    duration: number,
+    buffer: number,
+  ): Promise<AvailabilitySlot[]> {
+    const slots: AvailabilitySlot[] = [];
+    const dates = this.getDatesInRange(date_from, date_to);
+
+    const existingBookings = await this.prisma.bookings.findMany({
+      where: {
+        product_id,
+        date: {
+          gte: new Date(date_from),
+          lte: new Date(date_to),
+        },
+        status: { notIn: [booking_status_enum.cancelled] },
+      },
+      select: { date: true, start_time: true, end_time: true },
+    });
+
+    for (const currentDate of dates) {
+      const dateStr = this.formatDate(currentDate);
+      const dayOfWeek = currentDate.getUTCDay();
+
+      if (dayOfWeek === 0) continue;
+
+      const timeSlots = this.generateTimeSlots(
+        '08:00',
+        '18:00',
+        duration,
+        buffer,
+      );
+
+      for (const slot of timeSlots) {
+        const bookedCount = existingBookings.filter(
+          (b) =>
+            this.formatDate(new Date(b.date)) === dateStr &&
+            b.start_time === slot.start_time &&
+            b.end_time === slot.end_time,
+        ).length;
+
+        slots.push({
+          date: dateStr,
+          start_time: slot.start_time,
+          end_time: slot.end_time,
+          available_providers: [],
+          total_available: Math.max(10 - bookedCount, 0),
+        });
+      }
+    }
+
+    return slots;
   }
 }

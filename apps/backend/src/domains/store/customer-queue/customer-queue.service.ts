@@ -64,7 +64,7 @@ export class CustomerQueueService {
 
     // Calculate position (daily reset)
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    today.setUTCHours(0, 0, 0, 0);
     const lastEntry = await this.prisma.customer_queue.findFirst({
       where: {
         store_id: storeId,

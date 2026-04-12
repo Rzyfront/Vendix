@@ -65,6 +65,7 @@ export interface CreateBookingDto {
   notes?: string;
   provider_id?: number;
   skip_availability_check?: boolean;
+  skip_order_creation?: boolean;
 }
 
 export interface RescheduleBookingDto {

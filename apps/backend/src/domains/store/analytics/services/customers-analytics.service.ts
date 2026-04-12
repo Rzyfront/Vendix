@@ -4,10 +4,10 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   AnalyticsQueryDto,
-  DatePreset,
   Granularity,
 } from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
+import { formatPeriodFromDate, parseDateRange, getPreviousPeriod, getDateTruncInterval } from '../utils/date.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -17,8 +17,8 @@ export class CustomersAnalyticsService {
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
 
   async getCustomersSummary(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
-    const { previousStartDate, previousEndDate } = this.getPreviousPeriod(
+    const { startDate, endDate } = parseDateRange(query);
+    const { previousStartDate, previousEndDate } = getPreviousPeriod(
       startDate,
       endDate,
     );
@@ -123,7 +123,7 @@ export class CustomersAnalyticsService {
   }
 
   async getCustomersTrends(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
     const granularity = query.granularity || Granularity.DAY;
     const context = RequestContextService.getContext();
 
@@ -132,7 +132,7 @@ export class CustomersAnalyticsService {
     }
     const storeId = context.store_id;
 
-    const truncSql = Prisma.raw(`'${this.getDateTruncInterval(granularity)}'`);
+    const truncSql = Prisma.raw(`'${getDateTruncInterval(granularity)}'`);
 
     // New customers by period (using store_users creation date)
     const results = await (this.prisma.withoutScope() as any).$queryRaw<
@@ -167,7 +167,7 @@ export class CustomersAnalyticsService {
       const newCustomers = Number(r.new_customers);
       cumulative += newCustomers;
       return {
-        period: this.formatPeriodFromDate(new Date(r.period), granularity),
+        period: formatPeriodFromDate(new Date(r.period), granularity),
         new_customers: newCustomers,
         cumulative_customers: cumulative,
       };
@@ -179,12 +179,12 @@ export class CustomersAnalyticsService {
       endDate,
       granularity,
       { new_customers: 0, cumulative_customers: cumulative },
-      this.formatPeriodFromDate.bind(this),
+      formatPeriodFromDate,
     );
   }
 
   async getTopCustomers(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
     const isPaginated = query.page !== undefined && query.limit !== undefined;
 
     const where = {
@@ -296,7 +296,7 @@ export class CustomersAnalyticsService {
   }
 
   async getCustomersForExport(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
     const context = RequestContextService.getContext();
 
     if (!context?.store_id) {
@@ -359,110 +359,4 @@ export class CustomersAnalyticsService {
     });
   }
 
-  // ==================== HELPERS ====================
-
-  private parseDateRange(query: AnalyticsQueryDto): {
-    startDate: Date;
-    endDate: Date;
-  } {
-    if (query.date_from && query.date_to) {
-      const endDate = new Date(query.date_to);
-      endDate.setUTCHours(23, 59, 59, 999);
-      return {
-        startDate: new Date(query.date_from),
-        endDate,
-      };
-    }
-
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-    switch (query.date_preset) {
-      case DatePreset.TODAY:
-        return { startDate: today, endDate: now };
-      case DatePreset.YESTERDAY:
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        return { startDate: yesterday, endDate: today };
-      case DatePreset.THIS_WEEK:
-        const weekStart = new Date(today);
-        weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-        return { startDate: weekStart, endDate: now };
-      case DatePreset.LAST_WEEK:
-        const lastWeekEnd = new Date(today);
-        lastWeekEnd.setDate(lastWeekEnd.getDate() - lastWeekEnd.getDay());
-        const lastWeekStart = new Date(lastWeekEnd);
-        lastWeekStart.setDate(lastWeekStart.getDate() - 7);
-        return { startDate: lastWeekStart, endDate: lastWeekEnd };
-      case DatePreset.LAST_MONTH:
-        const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
-        const lastMonthStart = new Date(
-          today.getFullYear(),
-          today.getMonth() - 1,
-          1,
-        );
-        return { startDate: lastMonthStart, endDate: lastMonthEnd };
-      case DatePreset.THIS_YEAR:
-        return { startDate: new Date(today.getFullYear(), 0, 1), endDate: now };
-      case DatePreset.LAST_YEAR:
-        return {
-          startDate: new Date(today.getFullYear() - 1, 0, 1),
-          endDate: new Date(today.getFullYear() - 1, 11, 31),
-        };
-      case DatePreset.THIS_MONTH:
-      default:
-        return {
-          startDate: new Date(today.getFullYear(), today.getMonth(), 1),
-          endDate: now,
-        };
-    }
-  }
-
-  private getPreviousPeriod(
-    startDate: Date,
-    endDate: Date,
-  ): { previousStartDate: Date; previousEndDate: Date } {
-    const duration = endDate.getTime() - startDate.getTime();
-    const previousEndDate = new Date(startDate.getTime() - 1);
-    const previousStartDate = new Date(previousEndDate.getTime() - duration);
-    return { previousStartDate, previousEndDate };
-  }
-
-  private getDateTruncInterval(granularity: Granularity): string {
-    switch (granularity) {
-      case Granularity.HOUR:
-        return 'hour';
-      case Granularity.DAY:
-        return 'day';
-      case Granularity.WEEK:
-        return 'week';
-      case Granularity.MONTH:
-        return 'month';
-      case Granularity.YEAR:
-        return 'year';
-      default:
-        return 'day';
-    }
-  }
-
-  private formatPeriodFromDate(date: Date, granularity: Granularity): string {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-
-    switch (granularity) {
-      case Granularity.HOUR:
-        return `${y}-${m}-${d}T${String(date.getHours()).padStart(2, '0')}:00`;
-      case Granularity.DAY:
-        return `${y}-${m}-${d}`;
-      case Granularity.WEEK:
-        return `${y}-${m}-${d}`;
-      case Granularity.MONTH:
-        return `${y}-${m}`;
-      case Granularity.YEAR:
-        return `${y}`;
-      default:
-        return `${y}-${m}-${d}`;
-    }
-  }
 }

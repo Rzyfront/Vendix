@@ -10,10 +10,14 @@ import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
-import { PosSettings, BusinessHours, ScaleSettings, ScaleDeviceConfig } from '../../../../../../../core/models/store-settings.interface';
+import {
+  PosSettings,
+  BusinessHours,
+  ScaleSettings,
+  ScaleDeviceConfig,
+} from '../../../../../../../core/models/store-settings.interface';
 import { PosScaleService } from '../../../../pos/services/pos-scale.service';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
-
 
 @Component({
   selector: 'app-pos-settings-form',
@@ -68,7 +72,6 @@ export class PosSettingsForm implements OnInit, OnChanges {
       queue_expiry_hours: new FormControl(12),
       max_queue_size: new FormControl(0),
       require_email: new FormControl(false),
-      require_phone: new FormControl(false),
     }),
   });
 
@@ -130,7 +133,9 @@ export class PosSettingsForm implements OnInit, OnChanges {
   }
 
   get allowManualWeightEntryControl(): FormControl<boolean> {
-    return this.form.get('scale.allow_manual_weight_entry') as FormControl<boolean>;
+    return this.form.get(
+      'scale.allow_manual_weight_entry',
+    ) as FormControl<boolean>;
   }
 
   get defaultWeightUnitControl(): FormControl<string> {
@@ -151,23 +156,33 @@ export class PosSettingsForm implements OnInit, OnChanges {
   }
 
   get requireSessionForSalesControl(): FormControl<boolean> {
-    return this.form.get('cash_register.require_session_for_sales') as FormControl<boolean>;
+    return this.form.get(
+      'cash_register.require_session_for_sales',
+    ) as FormControl<boolean>;
   }
 
   get allowMultipleSessionsControl(): FormControl<boolean> {
-    return this.form.get('cash_register.allow_multiple_sessions_per_user') as FormControl<boolean>;
+    return this.form.get(
+      'cash_register.allow_multiple_sessions_per_user',
+    ) as FormControl<boolean>;
   }
 
   get autoCreateDefaultRegisterControl(): FormControl<boolean> {
-    return this.form.get('cash_register.auto_create_default_register') as FormControl<boolean>;
+    return this.form.get(
+      'cash_register.auto_create_default_register',
+    ) as FormControl<boolean>;
   }
 
   get requireClosingCountControl(): FormControl<boolean> {
-    return this.form.get('cash_register.require_closing_count') as FormControl<boolean>;
+    return this.form.get(
+      'cash_register.require_closing_count',
+    ) as FormControl<boolean>;
   }
 
   get trackNonCashPaymentsControl(): FormControl<boolean> {
-    return this.form.get('cash_register.track_non_cash_payments') as FormControl<boolean>;
+    return this.form.get(
+      'cash_register.track_non_cash_payments',
+    ) as FormControl<boolean>;
   }
 
   // Customer Queue getters
@@ -176,19 +191,21 @@ export class PosSettingsForm implements OnInit, OnChanges {
   }
 
   get queueExpiryHoursControl(): FormControl<number> {
-    return this.form.get('customer_queue.queue_expiry_hours') as FormControl<number>;
+    return this.form.get(
+      'customer_queue.queue_expiry_hours',
+    ) as FormControl<number>;
   }
 
   get maxQueueSizeControl(): FormControl<number> {
-    return this.form.get('customer_queue.max_queue_size') as FormControl<number>;
+    return this.form.get(
+      'customer_queue.max_queue_size',
+    ) as FormControl<number>;
   }
 
   get requireEmailControl(): FormControl<boolean> {
-    return this.form.get('customer_queue.require_email') as FormControl<boolean>;
-  }
-
-  get requirePhoneControl(): FormControl<boolean> {
-    return this.form.get('customer_queue.require_phone') as FormControl<boolean>;
+    return this.form.get(
+      'customer_queue.require_email',
+    ) as FormControl<boolean>;
   }
 
   get isWebSerialSupported(): boolean {

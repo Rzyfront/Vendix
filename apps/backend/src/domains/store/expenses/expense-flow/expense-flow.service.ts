@@ -8,14 +8,21 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 
-type ExpenseState = 'pending' | 'approved' | 'rejected' | 'paid' | 'cancelled';
+type ExpenseState =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'paid'
+  | 'cancelled'
+  | 'refunded';
 
 const VALID_TRANSITIONS: Record<ExpenseState, ExpenseState[]> = {
   pending: ['approved', 'rejected', 'cancelled'],
   approved: ['paid', 'cancelled'],
   rejected: [],
-  paid: [],
+  paid: ['refunded'],
   cancelled: [],
+  refunded: [],
 };
 
 const EXPENSE_INCLUDE = {
@@ -24,6 +31,9 @@ const EXPENSE_INCLUDE = {
     select: { id: true, first_name: true, last_name: true },
   },
   approved_by_user: {
+    select: { id: true, first_name: true, last_name: true },
+  },
+  refunded_by_user: {
     select: { id: true, first_name: true, last_name: true },
   },
 };
@@ -58,12 +68,15 @@ export class ExpenseFlowService {
     return expense;
   }
 
-  private validateTransition(currentState: string, targetState: ExpenseState): void {
+  private validateTransition(
+    currentState: string,
+    targetState: ExpenseState,
+  ): void {
     const validTargets = VALID_TRANSITIONS[currentState as ExpenseState] || [];
     if (!validTargets.includes(targetState)) {
       throw new ConflictException(
         `Invalid state transition: cannot change from '${currentState}' to '${targetState}'. ` +
-        `Valid transitions from '${currentState}': [${validTargets.join(', ') || 'none (terminal state)'}]`,
+          `Valid transitions from '${currentState}': [${validTargets.join(', ') || 'none (terminal state)'}]`,
       );
     }
   }
@@ -131,7 +144,9 @@ export class ExpenseFlowService {
       include: EXPENSE_INCLUDE,
     });
 
-    this.logger.log(`Expense #${id} marked as paid by user #${context.user_id}`);
+    this.logger.log(
+      `Expense #${id} marked as paid by user #${context.user_id}`,
+    );
 
     // Emit event for Accounting AutoEntryService to create automatic journal entries
     this.event_emitter.emit('expense.paid', {
@@ -159,6 +174,47 @@ export class ExpenseFlowService {
     });
 
     this.logger.log(`Expense #${id} cancelled by user #${context.user_id}`);
+
+    if (expense.state === 'approved') {
+      this.event_emitter.emit('expense.cancelled', {
+        expense_id: updated.id,
+        organization_id: context.organization_id,
+        store_id: context.store_id,
+        amount: updated.amount,
+      });
+    }
+
+    return updated;
+  }
+
+  async refund(id: number, reason: string) {
+    const expense = await this.getExpense(id);
+    const context = this.getContext();
+
+    this.validateTransition(expense.state, 'refunded');
+
+    const updated = await this.prisma.expenses.update({
+      where: { id },
+      data: {
+        state: 'refunded',
+        refunded_at: new Date(),
+        refunded_by_user_id: context.user_id,
+        refund_reason: reason,
+      },
+      include: EXPENSE_INCLUDE,
+    });
+
+    this.logger.log(
+      `Expense #${id} refunded by user #${context.user_id}. Reason: ${reason}`,
+    );
+
+    this.event_emitter.emit('expense.refunded', {
+      expense_id: updated.id,
+      organization_id: context.organization_id,
+      store_id: context.store_id,
+      amount: updated.amount,
+    });
+
     return updated;
   }
 

@@ -4,10 +4,10 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   SalesAnalyticsQueryDto,
-  DatePreset,
   Granularity,
 } from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
+import { formatPeriodFromDate, parseDateRange, getPreviousPeriod, getDateTruncInterval } from '../utils/date.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -18,8 +18,8 @@ export class SalesAnalyticsService {
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
 
   async getSalesSummary(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
-    const { previousStartDate, previousEndDate } = this.getPreviousPeriod(
+    const { startDate, endDate } = parseDateRange(query);
+    const { previousStartDate, previousEndDate } = getPreviousPeriod(
       startDate,
       endDate,
     );
@@ -119,7 +119,7 @@ export class SalesAnalyticsService {
   }
 
   async getSalesByProduct(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     const groupWhere: any = {
       orders: {
@@ -302,7 +302,7 @@ export class SalesAnalyticsService {
   }
 
   async getSalesByCategory(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     // Step 1: Aggregate order_items by product_id at DB level
     const productAggregates = await this.prisma.order_items.groupBy({
@@ -424,7 +424,7 @@ export class SalesAnalyticsService {
   }
 
   async getSalesByPaymentMethod(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     const payments = await this.prisma.payments.findMany({
       where: {
@@ -508,7 +508,7 @@ export class SalesAnalyticsService {
   }
 
   async getSalesTrends(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
     const granularity = query.granularity || Granularity.DAY;
     const context = RequestContextService.getContext();
 
@@ -520,7 +520,7 @@ export class SalesAnalyticsService {
     // Map granularity to PostgreSQL DATE_TRUNC interval
     // Use Prisma.raw() so the interval is inlined as a SQL literal
     // instead of parameterized (avoids GROUP BY mismatch with SELECT)
-    const truncSql = Prisma.raw(`'${this.getDateTruncInterval(granularity)}'`);
+    const truncSql = Prisma.raw(`'${getDateTruncInterval(granularity)}'`);
 
     // withoutScope() needed: $queryRaw is not available on the scoped client.
     // storeId is validated above and used in the WHERE clause.
@@ -552,7 +552,7 @@ export class SalesAnalyticsService {
       const revenue = Number(r.revenue);
       const orders = Number(r.order_count);
       return {
-        period: this.formatPeriodFromDate(new Date(r.period), granularity),
+        period: formatPeriodFromDate(new Date(r.period), granularity),
         revenue,
         orders,
         units_sold: Number(r.units_sold),
@@ -566,50 +566,12 @@ export class SalesAnalyticsService {
       endDate,
       granularity,
       { revenue: 0, orders: 0, units_sold: 0, average_order_value: 0 },
-      this.formatPeriodFromDate.bind(this),
+      formatPeriodFromDate,
     );
   }
 
-  private getDateTruncInterval(granularity: Granularity): string {
-    switch (granularity) {
-      case Granularity.HOUR:
-        return 'hour';
-      case Granularity.DAY:
-        return 'day';
-      case Granularity.WEEK:
-        return 'week';
-      case Granularity.MONTH:
-        return 'month';
-      case Granularity.YEAR:
-        return 'year';
-      default:
-        return 'day';
-    }
-  }
-
-  private formatPeriodFromDate(date: Date, granularity: Granularity): string {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-
-    switch (granularity) {
-      case Granularity.HOUR:
-        return `${y}-${m}-${d}T${String(date.getHours()).padStart(2, '0')}:00`;
-      case Granularity.DAY:
-        return `${y}-${m}-${d}`;
-      case Granularity.WEEK:
-        return `${y}-${m}-${d}`;
-      case Granularity.MONTH:
-        return `${y}-${m}`;
-      case Granularity.YEAR:
-        return `${y}`;
-      default:
-        return `${y}-${m}-${d}`;
-    }
-  }
-
   async getSalesByCustomer(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     const where = {
       state: { in: this.COMPLETED_STATES },
@@ -726,7 +688,7 @@ export class SalesAnalyticsService {
   }
 
   async getSalesByChannel(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     const results = await this.prisma.orders.groupBy({
       by: ['channel'],
@@ -793,7 +755,7 @@ export class SalesAnalyticsService {
   }
 
   async getOrdersForExport(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     const orders = await this.prisma.orders.findMany({
       where: {
@@ -859,104 +821,4 @@ export class SalesAnalyticsService {
     });
   }
 
-  // Helper methods
-  private parseDateRange(query: SalesAnalyticsQueryDto): {
-    startDate: Date;
-    endDate: Date;
-  } {
-    if (query.date_from && query.date_to) {
-      // date_to comes as 'YYYY-MM-DD' which parses to midnight UTC.
-      // Set to end-of-day so orders created during that day are included.
-      const endDate = new Date(query.date_to);
-      endDate.setUTCHours(23, 59, 59, 999);
-      return {
-        startDate: new Date(query.date_from),
-        endDate,
-      };
-    }
-
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-    switch (query.date_preset) {
-      case DatePreset.TODAY:
-        return { startDate: today, endDate: now };
-      case DatePreset.YESTERDAY:
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        return { startDate: yesterday, endDate: today };
-      case DatePreset.THIS_WEEK:
-        const weekStart = new Date(today);
-        weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-        return { startDate: weekStart, endDate: now };
-      case DatePreset.LAST_WEEK:
-        const lastWeekEnd = new Date(today);
-        lastWeekEnd.setDate(lastWeekEnd.getDate() - lastWeekEnd.getDay());
-        const lastWeekStart = new Date(lastWeekEnd);
-        lastWeekStart.setDate(lastWeekStart.getDate() - 7);
-        return { startDate: lastWeekStart, endDate: lastWeekEnd };
-      case DatePreset.LAST_MONTH:
-        const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
-        const lastMonthStart = new Date(
-          today.getFullYear(),
-          today.getMonth() - 1,
-          1,
-        );
-        return { startDate: lastMonthStart, endDate: lastMonthEnd };
-      case DatePreset.THIS_YEAR:
-        return { startDate: new Date(today.getFullYear(), 0, 1), endDate: now };
-      case DatePreset.LAST_YEAR:
-        return {
-          startDate: new Date(today.getFullYear() - 1, 0, 1),
-          endDate: new Date(today.getFullYear() - 1, 11, 31),
-        };
-      case DatePreset.THIS_MONTH:
-      default:
-        return {
-          startDate: new Date(today.getFullYear(), today.getMonth(), 1),
-          endDate: now,
-        };
-    }
-  }
-
-  private getPreviousPeriod(
-    startDate: Date,
-    endDate: Date,
-  ): { previousStartDate: Date; previousEndDate: Date } {
-    const duration = endDate.getTime() - startDate.getTime();
-    const previousEndDate = new Date(startDate.getTime() - 1);
-    const previousStartDate = new Date(previousEndDate.getTime() - duration);
-    return { previousStartDate, previousEndDate };
-  }
-
-  private getPeriodKey(date: Date, granularity: Granularity): string {
-    const d = new Date(date);
-
-    switch (granularity) {
-      case Granularity.HOUR:
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:00`;
-      case Granularity.DAY:
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      case Granularity.WEEK:
-        // ISO-8601 week number calculation
-        const target = new Date(d.valueOf());
-        target.setDate(target.getDate() + 3 - ((target.getDay() + 6) % 7));
-        const yearStart = new Date(target.getFullYear(), 0, 4);
-        const weekNo =
-          1 +
-          Math.round(
-            ((target.getTime() - yearStart.getTime()) / 86400000 -
-              3 +
-              ((yearStart.getDay() + 6) % 7)) /
-              7,
-          );
-        return `${target.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
-      case Granularity.MONTH:
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      case Granularity.YEAR:
-        return `${d.getFullYear()}`;
-      default:
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    }
-  }
 }

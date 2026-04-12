@@ -1,41 +1,19 @@
 @if (report(); as report) {
-  <div class="report-detail">
-    <!-- Header -->
-    <div class="detail-header">
-      <div class="header-left">
-        <button class="back-btn" (click)="goBack()">
-          <app-icon name="chevron-left" [size]="20" />
-          <span>Reportes</span>
-        </button>
-        <div class="header-info">
-          <div class="title-row">
-            <app-icon [name]="report.icon" [size]="24" [style.color]="categoryColor()" />
-            <h1 class="report-title">{{ report.title }}</h1>
-          </div>
-          <div class="meta-row">
-            <span class="category-badge" [style.--badge-color]="categoryColor()">
-              {{ categoryLabel() }}
-            </span>
-            <span class="report-description">{{ report.description }}</span>
-          </div>
-        </div>
-      </div>
-      <div class="header-actions">
-        @if (report.fullViewRoute) {
-          <app-button
-            variant="outline"
-            size="sm"
-            (clicked)="goToFullView()"
-          >
-            <app-icon slot="icon" name="external-link" [size]="16" />
-            Ver reporte completo
-          </app-button>
-        }
-      </div>
-    </div>
+  <app-sticky-header
+    [title]="report.title"
+    [subtitle]="report.description"
+    [icon]="report.icon"
+    [showBackButton]="true"
+    backRoute="/admin/reports"
+    [badgeText]="categoryLabel()"
+    [badgeColor]="categoryBadgeColor()"
+    [actions]="headerActions()"
+    (actionClicked)="onHeaderAction($event)"
+  />
 
-    <!-- Filters Bar -->
-    <div class="filters-bar">
+  <div class="report-detail">
+    <!-- Configuration Toolbar -->
+    <div class="config-toolbar">
       @if (report.requiresDateRange) {
         <vendix-date-range-filter
           [value]="dateRange()"
@@ -45,8 +23,9 @@
       @if (report.requiresFiscalPeriod) {
         <app-selector
           [options]="fiscalPeriodOptions()"
-          placeholder="Seleccionar periodo fiscal..."
+          placeholder="Periodo fiscal..."
           size="sm"
+          class="config-fiscal"
           (valueChange)="onFiscalPeriodChange($event)"
         />
       }
@@ -55,31 +34,53 @@
         size="sm"
         [loading]="!!loading()"
         (clicked)="generateReport()"
+        class="config-generate"
       >
         <app-icon slot="icon" name="play" [size]="16" />
-        Generar Reporte
+        Generar
       </app-button>
-      @if (hasGenerated() && (reportData() && reportData()!.length > 0 || isSummary())) {
-        <div class="ml-auto">
-          <vendix-export-button
-            [loading]="!!exporting()"
-            (export)="exportReport()"
-          />
-        </div>
-      }
     </div>
 
-    <!-- Results Area -->
-    <div class="results-area">
+    <!-- Summary Stats Strip (conditional for list reports with footer columns) -->
+    @if (listSummaryStats().length > 0 && !loading()) {
+      <div class="stats-container">
+        @for (stat of listSummaryStats(); track stat.key) {
+          <app-stats
+            [title]="stat.label"
+            [value]="formatStatValue(stat.value, stat.type)"
+            smallText=" "
+            [iconName]="getStatIcon(stat.type)"
+            [iconBgColor]="getStatColor(stat.type).bg"
+            [iconColor]="getStatColor(stat.type).fg"
+          />
+        }
+      </div>
+    }
+
+    <!-- Results Card -->
+    <app-card [responsive]="true" [padding]="false" shadow="sm" [animateOnLoad]="hasGenerated()">
       @if (!hasGenerated()) {
-        <!-- Initial empty state -->
-        <div class="empty-initial">
-          <app-icon name="file-bar-chart" [size]="48" class="empty-icon" />
-          <h3>Configura y genera tu reporte</h3>
-          <p>Selecciona el rango de fechas y haz clic en "Generar Reporte"</p>
-        </div>
+        <app-empty-state
+          icon="file-bar-chart"
+          iconColor="primary"
+          title="Configura y genera tu reporte"
+          [description]="getEmptyDescription()"
+          actionButtonText="Generar Reporte"
+          actionButtonIcon="play"
+          [showActionButton]="true"
+          (actionClick)="generateReport()"
+        />
+      } @else if (error()) {
+        <app-empty-state
+          icon="alert-circle"
+          iconColor="error"
+          title="Error al generar el reporte"
+          [description]="error()!"
+          [showActionButton]="false"
+          [showRefreshButton]="true"
+          (refreshClick)="generateReport()"
+        />
       } @else {
-        <!-- Report Content -->
         @switch (getReportType()) {
           @case ('summary') {
             <app-summary-report
@@ -103,65 +104,50 @@
             />
           }
           @default {
-            <vendix-report-table
-              [columns]="report.columns"
+            <app-responsive-data-view
+              [columns]="tableColumns()"
+              [cardConfig]="cardConfig()"
               [data]="reportData() || []"
               [loading]="!!loading()"
+              [compact]="true"
+              [striped]="true"
+              emptyIcon="search-x"
+              emptyTitle="Sin resultados"
+              emptyDescription="No se encontraron datos para los filtros seleccionados"
             />
           }
         }
 
-        <!-- Pagination -->
         @if (showPagination()) {
-          <div class="pagination-bar">
-            <div class="pagination-info">
-              Mostrando {{ paginationStart() }}-{{ paginationEnd() }} de {{ totalItems() }} resultados
-            </div>
-            <div class="pagination-controls">
-              <select class="page-size-select" [value]="itemsPerPage()" (change)="onItemsPerPageChange($event)">
-                <option value="10">10</option>
-                <option value="25">25</option>
-                <option value="50">50</option>
-                <option value="100">100</option>
-              </select>
-              <button
-                class="page-btn"
-                [disabled]="currentPage() === 1"
-                (click)="onPageChange(currentPage() - 1)"
-              >
-                <app-icon name="chevron-left" [size]="16" />
-              </button>
-              @for (page of getPageNumbers(); track page) {
-                @if (page === -1) {
-                  <span class="page-ellipsis">&hellip;</span>
-                } @else {
-                  <button
-                    class="page-btn"
-                    [class.active]="page === currentPage()"
-                    (click)="onPageChange(page)"
-                  >
-                    {{ page }}
-                  </button>
-                }
-              }
-              <button
-                class="page-btn"
-                [disabled]="currentPage() === totalPages()"
-                (click)="onPageChange(currentPage() + 1)"
-              >
-                <app-icon name="chevron-right" [size]="16" />
-              </button>
-            </div>
+          <div class="results-pagination">
+            <app-selector
+              [options]="pageSizeOptions"
+              [ngModel]="itemsPerPage()"
+              (valueChange)="onItemsPerPageChange($event)"
+              size="sm"
+              class="pagination-size"
+            />
+            <app-pagination
+              [currentPage]="currentPage()"
+              [totalPages]="totalPages()"
+              [total]="totalItems()"
+              [limit]="itemsPerPage()"
+              infoStyle="range"
+              (pageChange)="onPageChange($event)"
+            />
           </div>
         }
       }
-    </div>
+    </app-card>
   </div>
 } @else {
-  <!-- Report not found -->
-  <div class="not-found">
-    <app-icon name="alert-triangle" [size]="48" />
-    <h3>Reporte no encontrado</h3>
-    <app-button (clicked)="goBack()">Volver a reportes</app-button>
-  </div>
+  <app-empty-state
+    icon="alert-triangle"
+    iconColor="warning"
+    title="Reporte no encontrado"
+    actionButtonText="Volver a reportes"
+    actionButtonIcon="arrow-left"
+    [showActionButton]="true"
+    (actionClick)="goBack()"
+  />
 }

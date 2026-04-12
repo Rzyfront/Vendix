@@ -2,6 +2,7 @@ import { Component, input, output, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SelectorComponent, SelectorOption } from '../../../../../../shared/components/selector/selector.component';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 
 type DatePreset =
@@ -81,10 +82,12 @@ export class DateRangeFilterComponent {
     const start = new Date(range.start_date).toLocaleDateString('es-CO', {
       day: '2-digit',
       month: 'short',
+      timeZone: 'UTC',
     });
     const end = new Date(range.end_date).toLocaleDateString('es-CO', {
       day: '2-digit',
       month: 'short',
+      timeZone: 'UTC',
     });
     return `${start} - ${end}`;
   });
@@ -196,8 +199,8 @@ export class DateRangeFilterComponent {
     }
 
     return {
-      start_date: start.toISOString().split('T')[0],
-      end_date: end.toISOString().split('T')[0],
+      start_date: toLocalDateString(start),
+      end_date: toLocalDateString(end),
       preset,
     };
   }

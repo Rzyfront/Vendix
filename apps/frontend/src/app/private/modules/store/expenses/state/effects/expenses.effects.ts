@@ -2,7 +2,13 @@ import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { Store } from '@ngrx/store';
 import { of } from 'rxjs';
-import { map, switchMap, exhaustMap, catchError, withLatestFrom } from 'rxjs/operators';
+import {
+  map,
+  switchMap,
+  exhaustMap,
+  catchError,
+  withLatestFrom,
+} from 'rxjs/operators';
 import { ExpensesService } from '../../services/expenses.service';
 import * as ExpensesActions from '../actions/expenses.actions';
 import { selectExpensesState } from '../selectors/expenses.selectors';
@@ -19,28 +25,38 @@ export class ExpensesEffects {
       ofType(ExpensesActions.loadExpenses),
       withLatestFrom(this.store.select(selectExpensesState)),
       switchMap(([, state]) =>
-        this.expensesService.getExpenses({
-          page: state.page,
-          limit: state.limit,
-          search: state.search || undefined,
-          sort_by: state.sortBy,
-          sort_order: state.sortOrder,
-          state: state.stateFilter || undefined,
-          category_id: state.categoryFilter || undefined,
-          date_from: state.dateFrom || undefined,
-          date_to: state.dateTo || undefined,
-        }).pipe(
-          map((response) =>
-            ExpensesActions.loadExpensesSuccess({ expenses: response.data, meta: response.meta })
+        this.expensesService
+          .getExpenses({
+            page: state.page,
+            limit: state.limit,
+            search: state.search || undefined,
+            sort_by: state.sortBy,
+            sort_order: state.sortOrder,
+            state: state.stateFilter || undefined,
+            category_id: state.categoryFilter || undefined,
+            date_from: state.dateFrom || undefined,
+            date_to: state.dateTo || undefined,
+          })
+          .pipe(
+            map((response) =>
+              ExpensesActions.loadExpensesSuccess({
+                expenses: response.data,
+                meta: response.meta,
+              }),
+            ),
+            catchError((error) =>
+              of(
+                ExpensesActions.loadExpensesFailure({
+                  error:
+                    error.error?.message ||
+                    error.message ||
+                    'Error loading expenses',
+                }),
+              ),
+            ),
           ),
-          catchError((error) =>
-            of(ExpensesActions.loadExpensesFailure({
-              error: error.error?.message || error.message || 'Error loading expenses'
-            }))
-          )
-        )
-      )
-    )
+      ),
+    ),
   );
 
   // Cascade: any filter change dispatches loadExpenses
@@ -55,8 +71,8 @@ export class ExpensesEffects {
         ExpensesActions.setDateRange,
         ExpensesActions.clearFilters,
       ),
-      map(() => ExpensesActions.loadExpenses())
-    )
+      map(() => ExpensesActions.loadExpenses()),
+    ),
   );
 
   // After any mutation success, reload expenses + summary
@@ -70,12 +86,13 @@ export class ExpensesEffects {
         ExpensesActions.rejectExpenseSuccess,
         ExpensesActions.payExpenseSuccess,
         ExpensesActions.cancelExpenseSuccess,
+        ExpensesActions.refundExpenseSuccess,
       ),
       switchMap(() => [
         ExpensesActions.loadExpenses(),
         ExpensesActions.loadExpensesSummary(),
-      ])
-    )
+      ]),
+    ),
   );
 
   // Load summary
@@ -85,16 +102,23 @@ export class ExpensesEffects {
       switchMap(() =>
         this.expensesService.getExpensesSummary().pipe(
           map((response) =>
-            ExpensesActions.loadExpensesSummarySuccess({ summary: response.data })
+            ExpensesActions.loadExpensesSummarySuccess({
+              summary: response.data,
+            }),
           ),
           catchError((error) =>
-            of(ExpensesActions.loadExpensesSummaryFailure({
-              error: error.error?.message || error.message || 'Error loading summary'
-            }))
-          )
-        )
-      )
-    )
+            of(
+              ExpensesActions.loadExpensesSummaryFailure({
+                error:
+                  error.error?.message ||
+                  error.message ||
+                  'Error loading summary',
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
   );
 
   createExpense$ = createEffect(() =>
@@ -103,16 +127,21 @@ export class ExpensesEffects {
       switchMap(({ expense }) =>
         this.expensesService.createExpense(expense).pipe(
           map((response) =>
-            ExpensesActions.createExpenseSuccess({ expense: response.data })
+            ExpensesActions.createExpenseSuccess({ expense: response.data }),
           ),
           catchError((error) =>
-            of(ExpensesActions.createExpenseFailure({
-              error: error.error?.message || error.message || 'Error creating expense'
-            }))
-          )
-        )
-      )
-    )
+            of(
+              ExpensesActions.createExpenseFailure({
+                error:
+                  error.error?.message ||
+                  error.message ||
+                  'Error creating expense',
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
   );
 
   updateExpense$ = createEffect(() =>
@@ -121,16 +150,21 @@ export class ExpensesEffects {
       switchMap(({ id, expense }) =>
         this.expensesService.updateExpense(id, expense).pipe(
           map((response) =>
-            ExpensesActions.updateExpenseSuccess({ expense: response.data })
+            ExpensesActions.updateExpenseSuccess({ expense: response.data }),
           ),
           catchError((error) =>
-            of(ExpensesActions.updateExpenseFailure({
-              error: error.error?.message || error.message || 'Error updating expense'
-            }))
-          )
-        )
-      )
-    )
+            of(
+              ExpensesActions.updateExpenseFailure({
+                error:
+                  error.error?.message ||
+                  error.message ||
+                  'Error updating expense',
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
   );
 
   deleteExpense$ = createEffect(() =>
@@ -140,13 +174,18 @@ export class ExpensesEffects {
         this.expensesService.deleteExpense(id).pipe(
           map(() => ExpensesActions.deleteExpenseSuccess({ id })),
           catchError((error) =>
-            of(ExpensesActions.deleteExpenseFailure({
-              error: error.error?.message || error.message || 'Error deleting expense'
-            }))
-          )
-        )
-      )
-    )
+            of(
+              ExpensesActions.deleteExpenseFailure({
+                error:
+                  error.error?.message ||
+                  error.message ||
+                  'Error deleting expense',
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
   );
 
   approveExpense$ = createEffect(() =>
@@ -154,15 +193,22 @@ export class ExpensesEffects {
       ofType(ExpensesActions.approveExpense),
       switchMap(({ id }) =>
         this.expensesService.approveExpense(id).pipe(
-          map((response) => ExpensesActions.approveExpenseSuccess({ expense: response.data })),
+          map((response) =>
+            ExpensesActions.approveExpenseSuccess({ expense: response.data }),
+          ),
           catchError((error) =>
-            of(ExpensesActions.approveExpenseFailure({
-              error: error.error?.message || error.message || 'Error approving expense'
-            }))
-          )
-        )
-      )
-    )
+            of(
+              ExpensesActions.approveExpenseFailure({
+                error:
+                  error.error?.message ||
+                  error.message ||
+                  'Error approving expense',
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
   );
 
   rejectExpense$ = createEffect(() =>
@@ -170,15 +216,22 @@ export class ExpensesEffects {
       ofType(ExpensesActions.rejectExpense),
       switchMap(({ id }) =>
         this.expensesService.rejectExpense(id).pipe(
-          map((response) => ExpensesActions.rejectExpenseSuccess({ expense: response.data })),
+          map((response) =>
+            ExpensesActions.rejectExpenseSuccess({ expense: response.data }),
+          ),
           catchError((error) =>
-            of(ExpensesActions.rejectExpenseFailure({
-              error: error.error?.message || error.message || 'Error rejecting expense'
-            }))
-          )
-        )
-      )
-    )
+            of(
+              ExpensesActions.rejectExpenseFailure({
+                error:
+                  error.error?.message ||
+                  error.message ||
+                  'Error rejecting expense',
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
   );
 
   payExpense$ = createEffect(() =>
@@ -186,15 +239,22 @@ export class ExpensesEffects {
       ofType(ExpensesActions.payExpense),
       switchMap(({ id }) =>
         this.expensesService.payExpense(id).pipe(
-          map((response) => ExpensesActions.payExpenseSuccess({ expense: response.data })),
+          map((response) =>
+            ExpensesActions.payExpenseSuccess({ expense: response.data }),
+          ),
           catchError((error) =>
-            of(ExpensesActions.payExpenseFailure({
-              error: error.error?.message || error.message || 'Error marking expense as paid'
-            }))
-          )
-        )
-      )
-    )
+            of(
+              ExpensesActions.payExpenseFailure({
+                error:
+                  error.error?.message ||
+                  error.message ||
+                  'Error marking expense as paid',
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
   );
 
   cancelExpense$ = createEffect(() =>
@@ -202,15 +262,45 @@ export class ExpensesEffects {
       ofType(ExpensesActions.cancelExpense),
       switchMap(({ id }) =>
         this.expensesService.cancelExpense(id).pipe(
-          map((response) => ExpensesActions.cancelExpenseSuccess({ expense: response.data })),
+          map((response) =>
+            ExpensesActions.cancelExpenseSuccess({ expense: response.data }),
+          ),
           catchError((error) =>
-            of(ExpensesActions.cancelExpenseFailure({
-              error: error.error?.message || error.message || 'Error cancelling expense'
-            }))
-          )
-        )
-      )
-    )
+            of(
+              ExpensesActions.cancelExpenseFailure({
+                error:
+                  error.error?.message ||
+                  error.message ||
+                  'Error cancelling expense',
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  refundExpense$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(ExpensesActions.refundExpense),
+      switchMap(({ id, reason }) =>
+        this.expensesService.refundExpense(id, reason).pipe(
+          map((response) =>
+            ExpensesActions.refundExpenseSuccess({ expense: response.data }),
+          ),
+          catchError((error) =>
+            of(
+              ExpensesActions.refundExpenseFailure({
+                error:
+                  error.error?.message ||
+                  error.message ||
+                  'Error refunding expense',
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
   );
 
   loadCategories$ = createEffect(() =>
@@ -219,16 +309,23 @@ export class ExpensesEffects {
       exhaustMap(() =>
         this.expensesService.getExpenseCategories().pipe(
           map((response) =>
-            ExpensesActions.loadExpenseCategoriesSuccess({ categories: response.data })
+            ExpensesActions.loadExpenseCategoriesSuccess({
+              categories: response.data,
+            }),
           ),
           catchError((error) =>
-            of(ExpensesActions.loadExpenseCategoriesFailure({
-              error: error.error?.message || error.message || 'Error loading categories'
-            }))
-          )
-        )
-      )
-    )
+            of(
+              ExpensesActions.loadExpenseCategoriesFailure({
+                error:
+                  error.error?.message ||
+                  error.message ||
+                  'Error loading categories',
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
   );
 
   createCategory$ = createEffect(() =>
@@ -237,16 +334,23 @@ export class ExpensesEffects {
       switchMap(({ category }) =>
         this.expensesService.createExpenseCategory(category).pipe(
           map((response) =>
-            ExpensesActions.createExpenseCategorySuccess({ category: response.data })
+            ExpensesActions.createExpenseCategorySuccess({
+              category: response.data,
+            }),
           ),
           catchError((error) =>
-            of(ExpensesActions.createExpenseCategoryFailure({
-              error: error.error?.message || error.message || 'Error creating category'
-            }))
-          )
-        )
-      )
-    )
+            of(
+              ExpensesActions.createExpenseCategoryFailure({
+                error:
+                  error.error?.message ||
+                  error.message ||
+                  'Error creating category',
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
   );
 
   updateCategory$ = createEffect(() =>
@@ -255,16 +359,23 @@ export class ExpensesEffects {
       switchMap(({ id, category }) =>
         this.expensesService.updateExpenseCategory(id, category).pipe(
           map((response) =>
-            ExpensesActions.updateExpenseCategorySuccess({ category: response.data })
+            ExpensesActions.updateExpenseCategorySuccess({
+              category: response.data,
+            }),
           ),
           catchError((error) =>
-            of(ExpensesActions.updateExpenseCategoryFailure({
-              error: error.error?.message || error.message || 'Error updating category'
-            }))
-          )
-        )
-      )
-    )
+            of(
+              ExpensesActions.updateExpenseCategoryFailure({
+                error:
+                  error.error?.message ||
+                  error.message ||
+                  'Error updating category',
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
   );
 
   deleteCategory$ = createEffect(() =>
@@ -274,12 +385,17 @@ export class ExpensesEffects {
         this.expensesService.deleteExpenseCategory(id).pipe(
           map(() => ExpensesActions.deleteExpenseCategorySuccess({ id })),
           catchError((error) =>
-            of(ExpensesActions.deleteExpenseCategoryFailure({
-              error: error.error?.message || error.message || 'Error deleting category'
-            }))
-          )
-        )
-      )
-    )
+            of(
+              ExpensesActions.deleteExpenseCategoryFailure({
+                error:
+                  error.error?.message ||
+                  error.message ||
+                  'Error deleting category',
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
   );
 }

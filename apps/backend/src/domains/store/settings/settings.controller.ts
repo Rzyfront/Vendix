@@ -1,4 +1,12 @@
-import { Controller, Get, Patch, Post, Body, UseGuards, UsePipes } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Patch,
+  Post,
+  Body,
+  UseGuards,
+  UsePipes,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { SettingsService } from './settings.service';
 import { ScheduleValidationService } from './schedule-validation.service';
@@ -53,10 +61,12 @@ export class SettingsController {
     }
 
     // Verificar si el usuario es admin
-    const isAdmin = await this.scheduleValidationService.canBypassScheduleCheck();
-    
+    const isAdmin =
+      await this.scheduleValidationService.canBypassScheduleCheck();
+
     // Obtener el estado de validación
-    const validation = await this.scheduleValidationService.validateBusinessHours(storeId);
+    const validation =
+      await this.scheduleValidationService.validateBusinessHours(storeId);
 
     return this.responseService.success({
       ...validation,
@@ -72,14 +82,16 @@ export class SettingsController {
     status: 200,
     description: 'Settings updated successfully',
   })
-  @UsePipes(new ValidationPipe({
-    transform: true,
-    whitelist: false, // Permitir propiedades no definidas para updates parciales
-    forbidNonWhitelisted: false,
-    transformOptions: {
-      enableImplicitConversion: true,
-    },
-  }))
+  @UsePipes(
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: false,
+      transformOptions: {
+        enableImplicitConversion: true,
+      },
+    }),
+  )
   async updateSettings(@Body() dto: UpdateSettingsDto) {
     await this.settingsService.updateSettings(dto);
     // Re-read via getSettings() to return the full projection (including app from branding)

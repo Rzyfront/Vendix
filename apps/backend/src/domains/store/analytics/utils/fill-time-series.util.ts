@@ -53,35 +53,35 @@ function alignToGranularity(date: Date, granularity: Granularity): Date {
 
   switch (granularity) {
     case Granularity.HOUR:
-      d.setMinutes(0, 0, 0);
+      d.setUTCMinutes(0, 0, 0);
       return d;
 
     case Granularity.DAY:
-      d.setHours(0, 0, 0, 0);
+      d.setUTCHours(0, 0, 0, 0);
       return d;
 
     case Granularity.WEEK: {
-      d.setHours(0, 0, 0, 0);
+      d.setUTCHours(0, 0, 0, 0);
       // getDay(): 0=Sun, 1=Mon ... 6=Sat
       // ISO weeks start on Monday (day 1)
-      const day = d.getDay();
+      const day = d.getUTCDay();
       const diff = day === 0 ? 6 : day - 1; // days since Monday
-      d.setDate(d.getDate() - diff);
+      d.setUTCDate(d.getUTCDate() - diff);
       return d;
     }
 
     case Granularity.MONTH:
-      d.setDate(1);
-      d.setHours(0, 0, 0, 0);
+      d.setUTCDate(1);
+      d.setUTCHours(0, 0, 0, 0);
       return d;
 
     case Granularity.YEAR:
-      d.setMonth(0, 1);
-      d.setHours(0, 0, 0, 0);
+      d.setUTCMonth(0, 1);
+      d.setUTCHours(0, 0, 0, 0);
       return d;
 
     default:
-      d.setHours(0, 0, 0, 0);
+      d.setUTCHours(0, 0, 0, 0);
       return d;
   }
 }
@@ -92,27 +92,27 @@ function advanceCursor(date: Date, granularity: Granularity): Date {
 
   switch (granularity) {
     case Granularity.HOUR:
-      d.setHours(d.getHours() + 1);
+      d.setUTCHours(d.getUTCHours() + 1);
       return d;
 
     case Granularity.DAY:
-      d.setDate(d.getDate() + 1);
+      d.setUTCDate(d.getUTCDate() + 1);
       return d;
 
     case Granularity.WEEK:
-      d.setDate(d.getDate() + 7);
+      d.setUTCDate(d.getUTCDate() + 7);
       return d;
 
     case Granularity.MONTH:
-      d.setMonth(d.getMonth() + 1);
+      d.setUTCMonth(d.getUTCMonth() + 1);
       return d;
 
     case Granularity.YEAR:
-      d.setFullYear(d.getFullYear() + 1);
+      d.setUTCFullYear(d.getUTCFullYear() + 1);
       return d;
 
     default:
-      d.setDate(d.getDate() + 1);
+      d.setUTCDate(d.getUTCDate() + 1);
       return d;
   }
 }
