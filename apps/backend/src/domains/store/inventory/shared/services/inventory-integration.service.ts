@@ -294,10 +294,12 @@ export class InventoryIntegrationService {
   > {
     const stockLevels = await this.prisma.stock_levels.findMany({
       where: {
-        organization_id: organizationId,
         product_id: productId,
-        product_variant_id: productVariantId,
+        product_variant_id: productVariantId ?? null,
         quantity_available: { gt: 0 },
+        inventory_locations: {
+          organization_id: organizationId,
+        },
       },
       include: {
         inventory_locations: {
@@ -343,9 +345,11 @@ export class InventoryIntegrationService {
     // Get ALL stock levels for this product across all locations
     const stockLevels = await this.prisma.stock_levels.findMany({
       where: {
-        organization_id: organizationId,
         product_id: productId,
-        product_variant_id: productVariantId,
+        product_variant_id: productVariantId ?? null,
+        inventory_locations: {
+          organization_id: organizationId,
+        },
       },
       include: {
         inventory_locations: {
@@ -442,9 +446,9 @@ export class InventoryIntegrationService {
     }>
   > {
     const where: any = {
-      organization_id: organizationId,
-      quantity_available: {
-        lte: this.prisma.stock_levels.fields.reorder_point,
+      reorder_point: { not: null },
+      inventory_locations: {
+        organization_id: organizationId,
       },
     };
 
@@ -452,7 +456,7 @@ export class InventoryIntegrationService {
       where.location_id = locationId;
     }
 
-    const lowStockItems = await this.prisma.stock_levels.findMany({
+    const stockItems = await this.prisma.stock_levels.findMany({
       where,
       include: {
         products: {
@@ -470,13 +474,18 @@ export class InventoryIntegrationService {
       },
     });
 
+    // Filter in memory since Prisma doesn't support field-to-field comparison
+    const lowStockItems = stockItems.filter(
+      (item) => item.quantity_available <= (item.reorder_point ?? Infinity),
+    );
+
     return lowStockItems.map((item) => ({
       productId: item.product_id,
       productName: item.products.name,
       locationId: item.location_id,
       locationName: item.inventory_locations.name,
       currentStock: item.quantity_available,
-      reorderPoint: item.reorder_point,
+      reorderPoint: item.reorder_point ?? 0,
     }));
   }
 
@@ -496,7 +505,9 @@ export class InventoryIntegrationService {
     }>;
   }> {
     const where: any = {
-      organization_id: organizationId,
+      inventory_locations: {
+        organization_id: organizationId,
+      },
     };
 
     if (locationId) {

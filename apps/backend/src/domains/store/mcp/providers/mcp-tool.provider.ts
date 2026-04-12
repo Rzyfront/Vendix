@@ -20,7 +20,7 @@ export class McpToolProvider {
   listTools(): McpToolDefinition[] {
     const context = RequestContextService.getContext();
     const definitions = this.toolRegistry.getAvailableDefinitions(
-      context?.roles,
+      context?.permissions || context?.roles,
     );
 
     return definitions.map((d) => ({
