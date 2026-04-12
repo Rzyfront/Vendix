@@ -1,0 +1,19 @@
+meta {
+  name: MCP Tools - No Auth
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{baseUrl}}/mcp/tools/list
+  body: none
+  headers: {
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("MCP tools require authentication", function() {
+    expect(res.status).to.equal(401);
+  });
+}
