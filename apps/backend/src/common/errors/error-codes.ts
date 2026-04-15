@@ -1518,6 +1518,33 @@ export const ErrorCodes = {
     httpStatus: 500,
     devMessage: 'Failed to collect server metrics',
   },
+
+  // Metadata Fields
+  META_FIND_001: { code: 'META_FIND_001', httpStatus: 404, devMessage: 'Metadata field not found' },
+  META_CREATE_001: { code: 'META_CREATE_001', httpStatus: 400, devMessage: 'Error creating metadata field' },
+  META_DUP_001: { code: 'META_DUP_001', httpStatus: 409, devMessage: 'Duplicate metadata field key' },
+  META_VALIDATE_001: { code: 'META_VALIDATE_001', httpStatus: 400, devMessage: 'Invalid metadata value' },
+
+  // Data Collection
+  DCOL_FIND_001: { code: 'DCOL_FIND_001', httpStatus: 404, devMessage: 'Data collection template not found' },
+  DCOL_FIND_002: { code: 'DCOL_FIND_002', httpStatus: 404, devMessage: 'Submission not found' },
+  DCOL_TOKEN_001: { code: 'DCOL_TOKEN_001', httpStatus: 404, devMessage: 'Invalid or expired token' },
+  DCOL_TOKEN_002: { code: 'DCOL_TOKEN_002', httpStatus: 400, devMessage: 'Submission already completed' },
+  DCOL_CREATE_001: { code: 'DCOL_CREATE_001', httpStatus: 400, devMessage: 'Error creating submission' },
+
+  // Customer History
+  CUST_HISTORY_001: { code: 'CUST_HISTORY_001', httpStatus: 404, devMessage: 'Customer history not found' },
+  CUST_HISTORY_002: { code: 'CUST_HISTORY_002', httpStatus: 404, devMessage: 'Booking not found in history' },
+  CUST_HISTORY_003: { code: 'CUST_HISTORY_003', httpStatus: 404, devMessage: 'Note not found' },
+
+  // Booking Confirmation
+  BOOK_CONFIRM_001: { code: 'BOOK_CONFIRM_001', httpStatus: 404, devMessage: 'Invalid or expired confirmation token' },
+  BOOK_CONFIRM_002: { code: 'BOOK_CONFIRM_002', httpStatus: 400, devMessage: 'Token already used' },
+  BOOK_CHECKIN_001: { code: 'BOOK_CHECKIN_001', httpStatus: 400, devMessage: 'Booking not in confirmed state' },
+  BOOK_CHECKIN_002: { code: 'BOOK_CHECKIN_002', httpStatus: 400, devMessage: 'Already checked in' },
+
+  // Email Templates
+  EMAIL_TPL_001: { code: 'EMAIL_TPL_001', httpStatus: 404, devMessage: 'Email template not found' },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export type ErrorCodeKey = keyof typeof ErrorCodes;

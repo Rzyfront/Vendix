@@ -11,12 +11,14 @@
 
       <!-- Search + Options -->
       <div class="flex items-center gap-2 w-full md:w-auto">
-        <app-inputsearch
-          class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-          size="sm"
-          placeholder="Buscar reservas..."
-          (search)="onSearch($event)"
-        ></app-inputsearch>
+        <app-tooltip content="Buscar por número, cliente o servicio" position="bottom" size="sm">
+          <app-inputsearch
+            class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+            size="sm"
+            placeholder="Buscar reservas..."
+            (search)="onSearch($event)"
+          ></app-inputsearch>
+        </app-tooltip>
 
         <app-button
           variant="outline"
@@ -98,3 +100,13 @@
     </div>
   }
 </app-card>
+
+<!-- Custom template for Service column (desktop table) -->
+<ng-template #serviceTemplate let-item>
+  <span class="inline-flex items-center gap-1.5">
+    {{ item.product?.name || '-' }}
+    @if (item.product?.is_consultation) {
+      <app-badge variant="service" size="xsm">Consulta</app-badge>
+    }
+  </span>
+</ng-template>

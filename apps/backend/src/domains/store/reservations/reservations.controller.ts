@@ -22,7 +22,9 @@ import {
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { Public } from '@common/decorators/public.decorator';
 import { ResponseService } from '@common/responses/response.service';
+import { BookingConfirmationService } from './booking-confirmation.service';
 
 @Controller('store/reservations')
 @UseGuards(PermissionsGuard)
@@ -30,6 +32,7 @@ export class ReservationsController {
   constructor(
     private readonly reservationsService: ReservationsService,
     private readonly availabilityService: AvailabilityService,
+    private readonly bookingConfirmationService: BookingConfirmationService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -75,6 +78,13 @@ export class ReservationsController {
       providerId ? parseInt(providerId, 10) : undefined,
     );
     return this.responseService.success(result, 'Disponibilidad obtenida exitosamente');
+  }
+
+  @Public()
+  @Get('confirm/:token')
+  async confirmByToken(@Param('token') token: string) {
+    const result = await this.bookingConfirmationService.processToken(token);
+    return this.responseService.success(result);
   }
 
   @Get(':id')
@@ -124,6 +134,13 @@ export class ReservationsController {
   async noShow(@Param('id', ParseIntPipe) id: number) {
     const result = await this.reservationsService.noShow(id);
     return this.responseService.success(result, 'Reserva marcada como no-show exitosamente');
+  }
+
+  @Patch(':id/check-in')
+  @Permissions('store:reservations:write')
+  async checkIn(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.reservationsService.checkIn(id, 'staff');
+    return this.responseService.success(result, 'Check-in registrado correctamente');
   }
 
   @Patch(':id/reschedule')

@@ -1,5 +1,5 @@
-import { Component, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, OnInit, signal, computed, inject } from '@angular/core';
+import { CommonModule, DatePipe } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import {
@@ -11,6 +11,8 @@ import {
 } from '@angular/forms';
 import { environment } from '../../../../../../environments/environment';
 import { CustomersService } from '../services/customers.service';
+import { MetadataFieldsService } from '../../data-collection/services/metadata-fields.service';
+import { CustomerHistoryService, ConsultationHistoryEntry } from '../services/customer-history.service';
 import {
   CurrencyPipe,
   CurrencyFormatService,
@@ -35,6 +37,7 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
     CommonModule,
     FormsModule,
     ReactiveFormsModule,
+    DatePipe,
     CurrencyPipe,
     CardComponent,
     ButtonComponent,
@@ -143,6 +146,101 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
             </div>
           </div>
         </app-card>
+
+        <!-- Customer Metadata Card -->
+        @if (customerMetadata().length > 0) {
+          <div class="card p-4 mb-4" style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 0.75rem">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="font-bold text-base flex items-center gap-2" style="color: var(--color-text)">
+                <app-icon name="file-text" [size]="18"></app-icon>
+                Ficha del Cliente
+              </h3>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+              @for (field of summaryFields(); track field.id) {
+                <div class="flex flex-col">
+                  <span class="text-xs font-medium" style="color: var(--color-text-muted)">{{ field.field?.label }}</span>
+                  <span class="text-sm font-medium" style="color: var(--color-text)">
+                    {{ field.value_text || field.value_number || field.value_bool || field.value_date || '-' }}
+                  </span>
+                </div>
+              }
+            </div>
+
+            @if (detailFields().length > 0) {
+              <button class="text-xs" style="color: var(--color-primary)" (click)="showAllMetadata.set(!showAllMetadata())">
+                {{ showAllMetadata() ? 'Ver menos' : 'Ver todos los datos (' + detailFields().length + ')' }}
+              </button>
+              @if (showAllMetadata()) {
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                  @for (field of detailFields(); track field.id) {
+                    <div class="flex flex-col">
+                      <span class="text-xs" style="color: var(--color-text-muted)">{{ field.field?.label }}</span>
+                      <span class="text-sm" style="color: var(--color-text)">
+                        {{ field.value_text || field.value_number || field.value_bool || field.value_date || '-' }}
+                      </span>
+                    </div>
+                  }
+                </div>
+              }
+            }
+          </div>
+        }
+
+        <!-- Consultation History -->
+        @if (bookingHistory().length > 0) {
+          <div class="card p-4" style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 0.75rem">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-bold text-base flex items-center gap-2" style="color: var(--color-text)">
+                <app-icon name="clipboard-list" [size]="18"></app-icon>
+                Historia de Consultas
+              </h3>
+            </div>
+
+            @for (entry of bookingHistory(); track entry.id) {
+              <div class="flex gap-3 py-3" style="border-bottom: 1px solid var(--color-border)">
+                <div class="flex flex-col items-center flex-shrink-0">
+                  <div class="w-3 h-3 rounded-full"
+                       [style.background]="entry.status === 'completed' ? '#22c55e' : entry.status === 'confirmed' ? '#3b82f6' : entry.status === 'cancelled' ? '#ef4444' : '#9ca3af'">
+                  </div>
+                  <div class="w-px flex-1 mt-1" style="background: var(--color-border)"></div>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center justify-between">
+                    <span class="text-sm font-semibold truncate" style="color: var(--color-text)">{{ entry.product?.name }}</span>
+                    <span class="text-xs px-2 py-0.5 rounded-full flex-shrink-0"
+                          [style.background]="entry.status === 'completed' ? '#dcfce7' : entry.status === 'confirmed' ? '#dbeafe' : '#fee2e2'"
+                          [style.color]="entry.status === 'completed' ? '#166534' : entry.status === 'confirmed' ? '#1e40af' : '#991b1b'">
+                      {{ entry.status }}
+                    </span>
+                  </div>
+                  <div class="text-xs mt-1" style="color: var(--color-text-muted)">
+                    {{ entry.date | date:'mediumDate' }} · {{ entry.start_time }}
+                    @if (entry.provider) { · {{ entry.provider.display_name }} }
+                  </div>
+                  <div class="flex gap-2 mt-1.5 flex-wrap">
+                    @if (entry.has_intake_data) {
+                      <span class="text-xs flex items-center gap-1" style="color: #3b82f6">
+                        <app-icon name="file-text" [size]="12"></app-icon> Formulario
+                      </span>
+                    }
+                    @if (entry.has_prediagnosis) {
+                      <span class="text-xs flex items-center gap-1" style="color: #7c3aed">
+                        <app-icon name="brain" [size]="12"></app-icon> Prediagnóstico
+                      </span>
+                    }
+                    @if (entry.notes_count > 0) {
+                      <span class="text-xs flex items-center gap-1" style="color: #22c55e">
+                        <app-icon name="clipboard-check" [size]="12"></app-icon> {{ entry.notes_count }} notas
+                      </span>
+                    }
+                  </div>
+                </div>
+              </div>
+            }
+          </div>
+        }
 
           <!-- Wallet Card -->
           <app-card *ngIf="customer && !loadingCustomer">
@@ -553,6 +651,19 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
   `,
 })
 export class CustomerDetailsComponent implements OnInit {
+  private metadataService = inject(MetadataFieldsService);
+  private historyService = inject(CustomerHistoryService);
+
+  // Metadata & History signals
+  customerMetadata = signal<any[]>([]);
+  showAllMetadata = signal(false);
+  bookingHistory = signal<ConsultationHistoryEntry[]>([]);
+  historyLoading = signal(false);
+  showConsolidatedSummary = signal(false);
+
+  summaryFields = computed(() => this.customerMetadata().filter((f: any) => f.field?.display_mode === 'summary'));
+  detailFields = computed(() => this.customerMetadata().filter((f: any) => f.field?.display_mode === 'detail'));
+
   customerId: number | null = null;
   customer: any = null;
   wallet: any = null;
@@ -631,6 +742,8 @@ export class CustomerDetailsComponent implements OnInit {
         this.loadCustomer();
         this.loadWallet();
         this.loadWalletHistory();
+        this.loadCustomerMetadata(this.customerId);
+        this.loadBookingHistory(this.customerId);
       }
     });
   }
@@ -800,6 +913,27 @@ export class CustomerDetailsComponent implements OnInit {
 
   get hasActiveFilters(): boolean {
     return !!this.historyFilterType || !!this.historyDateFrom || !!this.historyDateTo;
+  }
+
+  private loadCustomerMetadata(customerId: number) {
+    this.metadataService.getValues('customer', customerId).subscribe({
+      next: (values) => this.customerMetadata.set(values),
+      error: () => this.customerMetadata.set([]),
+    });
+  }
+
+  private loadBookingHistory(customerId: number) {
+    this.historyLoading.set(true);
+    this.historyService.getTimeline(customerId).subscribe({
+      next: (result) => {
+        this.bookingHistory.set(result.data);
+        this.historyLoading.set(false);
+      },
+      error: () => {
+        this.bookingHistory.set([]);
+        this.historyLoading.set(false);
+      },
+    });
   }
 
   goBack(): void {

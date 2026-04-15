@@ -706,6 +706,61 @@
                 customWrapperClass="!mt-0"
               >
               </app-selector>
+
+              <div class="flex items-center gap-2">
+                <app-setting-toggle
+                  formControlName="is_consultation"
+                  label="Es consulta médica/estética"
+                  description="Este servicio requiere una plantilla de consulta y seguimiento del paciente"
+                ></app-setting-toggle>
+                <app-tooltip content="Activa esta opción si este servicio es una consulta médica o estética. Esto habilita el flujo completo de consulta con plantillas y preconsulta." position="top" size="sm">
+                  <app-icon name="help-circle" [size]="14" color="var(--color-text-muted)"></app-icon>
+                </app-tooltip>
+              </div>
+
+              @if (productForm.get("is_consultation")?.value) {
+                <div class="rounded-lg border p-4 space-y-3 mt-2" style="border-color: var(--color-border); background: var(--color-surface-secondary)">
+                  <!-- Consultation Template (required - provider fills during consultation) -->
+                  <div class="flex items-start gap-2">
+                    <app-selector
+                      class="flex-1"
+                      label="Plantilla de Consulta"
+                      formControlName="consultation_template_id"
+                      [options]="templateSelectorOptions"
+                      placeholder="Seleccionar plantilla"
+                      [required]="true"
+                      helpText="Formulario que el profesional llenará durante la consulta"
+                    ></app-selector>
+                    <app-tooltip content="Plantilla que el proveedor completará durante la consulta. Define las secciones y campos del formulario de atención." position="top" size="sm">
+                      <app-icon name="help-circle" [size]="14" color="var(--color-text-muted)" class="mt-1"></app-icon>
+                    </app-tooltip>
+                  </div>
+
+                  <app-setting-toggle
+                    formControlName="send_preconsultation"
+                    label="Enviar preconsulta al cliente"
+                    description="Al confirmar la reserva, se enviará automáticamente un formulario de preconsulta al paciente por email"
+                  ></app-setting-toggle>
+
+                  <!-- Preconsultation Template (only when send_preconsultation is on) -->
+                  @if (productForm.get("send_preconsultation")?.value) {
+                    <div class="flex items-start gap-2">
+                      <app-selector
+                        class="flex-1"
+                        label="Plantilla de Preconsulta"
+                        formControlName="preconsultation_template_id"
+                        [options]="templateSelectorOptions"
+                        placeholder="Seleccionar plantilla"
+                        [required]="true"
+                        helpText="Formulario que el paciente llenará antes de la cita"
+                      ></app-selector>
+                      <app-tooltip content="Plantilla que el paciente completará antes de la cita. Se envía automáticamente por email al confirmar la reserva." position="top" size="sm">
+                        <app-icon name="help-circle" [size]="14" color="var(--color-text-muted)" class="mt-1"></app-icon>
+                      </app-tooltip>
+                    </div>
+                  }
+                </div>
+              }
             }
 
             <app-textarea
@@ -715,6 +770,7 @@
               customWrapperClass="!mt-0"
             >
             </app-textarea>
+
           </section>
         }
 
@@ -1453,6 +1509,92 @@
         >
           <app-icon name="list" size="14"></app-icon>
           Ver detalle completo
+        </button>
+      </section>
+    }
+
+    <!-- MOBILE: Proveedores del Servicio (visible only on mobile) -->
+    @if (
+      productForm.get("requires_booking")?.value &&
+      isEditMode() &&
+      productId
+    ) {
+      <section
+        class="lg:hidden bg-white rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4"
+      >
+        <div class="flex items-center gap-2">
+          <app-icon
+            name="users"
+            size="20"
+            class="text-indigo-500"
+          ></app-icon>
+          <h2 class="text-base font-bold text-gray-900">
+            Proveedores del Servicio
+          </h2>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          @for (provider of assignedProviders(); track provider.id) {
+            <div
+              class="inline-flex items-center gap-2 pl-1 pr-2 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-sm"
+            >
+              <span
+                class="w-6 h-6 rounded-full bg-indigo-500 text-white text-xs font-bold flex items-center justify-center"
+              >
+                {{ getProviderInitials(provider) }}
+              </span>
+              <span class="text-gray-700 font-medium">{{
+                provider.display_name || provider.employee?.first_name
+              }}</span>
+              <button
+                class="w-5 h-5 rounded-full flex items-center justify-center text-indigo-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                (click)="removeProviderFromService(provider.id)"
+              >
+                <app-icon name="x" [size]="12"></app-icon>
+              </button>
+            </div>
+          }
+
+          @if (availableProvidersForProduct().length > 0) {
+            <select
+              class="text-sm border border-dashed border-gray-300 rounded-full px-3 py-1.5 bg-white text-gray-500 hover:border-indigo-400 hover:text-indigo-500 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              (change)="
+                addProviderToService($any($event.target).value);
+                $any($event.target).value = ''
+              "
+            >
+              <option value="">+ Agregar proveedor</option>
+              @for (
+                provider of availableProvidersForProduct();
+                track provider.id
+              ) {
+                <option [value]="provider.id">
+                  {{
+                    provider.display_name ||
+                      provider.employee?.first_name +
+                        " " +
+                        provider.employee?.last_name
+                  }}
+                </option>
+              }
+            </select>
+          }
+        </div>
+
+        @if (assignedProviders().length === 0 && !loadingProviders()) {
+          <p class="text-sm text-gray-400 italic">
+            No hay proveedores asignados.
+          </p>
+        }
+
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 text-sm text-indigo-500 hover:text-indigo-700 transition-colors font-medium"
+          (click)="goToScheduleConfig()"
+        >
+          <app-icon name="settings" [size]="14"></app-icon>
+          Configurar horarios y disponibilidad
+          <app-icon name="arrow-right" [size]="14"></app-icon>
         </button>
       </section>
     }

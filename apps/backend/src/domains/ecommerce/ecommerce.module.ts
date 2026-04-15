@@ -9,6 +9,7 @@ import { EcommerceReviewsModule } from './reviews/reviews.module';
 import { EcommerceReservationsModule } from './reservations/ecommerce-reservations.module';
 import { EcommerceCustomerQueueModule } from './customer-queue/ecommerce-customer-queue.module';
 import { EcommerceInvoiceDataModule } from './invoice-data/ecommerce-invoice-data.module';
+import { EcommerceDataCollectionModule } from './data-collection/ecommerce-data-collection.module';
 
 /**
  * 🛒 Ecommerce Domain Module
@@ -33,6 +34,7 @@ import { EcommerceInvoiceDataModule } from './invoice-data/ecommerce-invoice-dat
         EcommerceReservationsModule,
         EcommerceCustomerQueueModule,
         EcommerceInvoiceDataModule,
+        EcommerceDataCollectionModule,
     ],
 })
 export class EcommerceDomainModule { }

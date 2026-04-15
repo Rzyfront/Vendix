@@ -343,6 +343,25 @@ export class CreateProductDto {
   @IsString()
   service_instructions?: string;
 
+  // Consultation-specific fields
+  @IsOptional()
+  @IsBoolean()
+  is_consultation?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  send_preconsultation?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  consultation_template_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  preconsultation_template_id?: number;
+
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
@@ -512,6 +531,25 @@ export class UpdateProductDto {
   @IsOptional()
   @IsString()
   service_instructions?: string;
+
+  // Consultation-specific fields
+  @IsOptional()
+  @IsBoolean()
+  is_consultation?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  send_preconsultation?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  consultation_template_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  preconsultation_template_id?: number;
 
   @IsOptional()
   @IsArray()
@@ -920,6 +958,25 @@ export class UpdateProductWithVariantsDto {
   @IsOptional()
   @IsString()
   service_instructions?: string;
+
+  // Consultation-specific fields
+  @IsOptional()
+  @IsBoolean()
+  is_consultation?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  send_preconsultation?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  consultation_template_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  preconsultation_template_id?: number;
 
   @IsOptional()
   @IsArray()

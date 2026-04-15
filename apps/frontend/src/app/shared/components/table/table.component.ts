@@ -39,6 +39,8 @@ export interface TableAction {
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'success' | 'warning' | 'info' | 'gaming' | 'royal' | 'muted' | ((item: any) => string);
   disabled?: (item: any) => boolean;
   show?: (item: any) => boolean;
+  /** Optional tooltip text shown on hover. Falls back to label if not provided. */
+  tooltip?: string | ((item: any) => string);
 }
 
 export type TableSize = 'sm' | 'md' | 'lg';
@@ -135,6 +137,15 @@ export class TableComponent implements AfterContentInit {
     return typeof action.label === 'function'
       ? action.label(item)
       : action.label;
+  }
+
+  getActionTooltip(action: TableAction, item: any): string {
+    if (action.tooltip) {
+      return typeof action.tooltip === 'function'
+        ? action.tooltip(item)
+        : action.tooltip;
+    }
+    return this.getActionLabel(action, item);
   }
 
   getActionIcon(action: TableAction, item: any): string {

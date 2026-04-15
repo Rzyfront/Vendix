@@ -52,6 +52,9 @@ export interface CustomerBooking {
     | 'cancelled'
     | 'no_show';
   notes: string | null;
+  checked_in_at: string | null;
+  confirmation_requested_at: string | null;
+  data_collection_submissions?: { id: number; token: string; status: string }[];
   created_at: string;
   updated_at: string;
 }
