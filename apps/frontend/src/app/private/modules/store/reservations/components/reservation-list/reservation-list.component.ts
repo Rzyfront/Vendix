@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
+import { Component, EventEmitter, Input, Output, inject, ViewChild, TemplateRef, AfterViewInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -16,6 +16,8 @@ import {
   FilterValues,
   PaginationComponent,
   EmptyStateComponent,
+  BadgeComponent,
+  TooltipComponent,
 } from '../../../../../../shared/components';
 import { Booking, BookingStatus } from '../../interfaces/reservation.interface';
 import { ReservationPrintService } from '../../services/reservation-print.service';
@@ -35,12 +37,16 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
     ButtonComponent,
     PaginationComponent,
     EmptyStateComponent,
+    BadgeComponent,
+    TooltipComponent,
   ],
   templateUrl: './reservation-list.component.html',
   styleUrls: ['./reservation-list.component.scss'],
 })
-export class ReservationListComponent {
+export class ReservationListComponent implements AfterViewInit {
   private printService = inject(ReservationPrintService);
+
+  @ViewChild('serviceTemplate') serviceTemplate!: TemplateRef<any>;
 
   @Input() bookings: Booking[] = [];
   @Input() loading = false;
@@ -57,6 +63,7 @@ export class ReservationListComponent {
   @Output() complete = new EventEmitter<Booking>();
   @Output() noShow = new EventEmitter<Booking>();
   @Output() reschedule = new EventEmitter<Booking>();
+  @Output() attendConsultation = new EventEmitter<Booking>();
 
   get totalPages(): number {
     return Math.ceil(this.totalItems / this.limit);
@@ -169,6 +176,8 @@ export class ReservationListComponent {
         label: 'Servicio',
         icon: 'package',
         transform: (v: any) => v?.name || '-',
+        infoIconTransform: (v: any) => v?.is_consultation ? 'stethoscope' : undefined,
+        infoIconVariantTransform: (v: any) => v?.is_consultation ? 'primary' : undefined,
       },
       {
         key: 'date',
@@ -199,6 +208,23 @@ export class ReservationListComponent {
   };
 
   actions: TableAction[] = [
+    {
+      label: 'Atender Consulta',
+      icon: 'stethoscope',
+      variant: 'primary',
+      tooltip: 'Ir a la vista de atención de consulta',
+      action: (row: any) => this.attendConsultation.emit(row),
+      show: (row: any) =>
+        row.product?.is_consultation && (row.status === 'confirmed' || row.status === 'in_progress'),
+    },
+    {
+      label: 'Ver Consulta',
+      icon: 'eye',
+      variant: 'ghost',
+      action: (row: any) => this.attendConsultation.emit(row),
+      show: (row: any) =>
+        row.product?.is_consultation && row.status === 'completed',
+    },
     {
       label: 'Confirmar',
       icon: 'check',
@@ -246,6 +272,15 @@ export class ReservationListComponent {
       show: (row: any) => !['cancelled', 'no_show'].includes(row.status),
     },
   ];
+
+  ngAfterViewInit(): void {
+    if (this.serviceTemplate) {
+      const productCol = this.columns.find((col) => col.key === 'product');
+      if (productCol) {
+        productCol.template = this.serviceTemplate;
+      }
+    }
+  }
 
   onSearch(query: string): void {
     this.search.emit(query);

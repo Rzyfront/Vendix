@@ -304,6 +304,18 @@ export class ItemListComponent {
   }
 
   /**
+   * Get action tooltip (falls back to label)
+   */
+  getActionTooltip(action: TableAction, item: any): string {
+    if (action.tooltip) {
+      return typeof action.tooltip === 'function'
+        ? action.tooltip(item)
+        : action.tooltip;
+    }
+    return this.getActionLabel(action, item);
+  }
+
+  /**
    * Get action icon
    */
   getActionIcon(action: TableAction, item: any): string {

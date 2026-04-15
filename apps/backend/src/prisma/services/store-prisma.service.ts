@@ -50,6 +50,15 @@ export class StorePrismaService extends BasePrismaService {
     'commission_rules',
     'commission_calculations',
     'payment_links',
+    'entity_metadata_fields',
+    'entity_metadata_values',
+    'data_collection_templates',
+    'data_collection_submissions',
+    'booking_metadata_snapshots',
+    'customer_consultation_notes',
+    'booking_confirmation_tokens',
+    'email_templates',
+    'messaging_channels',
   ];
 
   constructor() {
@@ -165,6 +174,11 @@ export class StorePrismaService extends BasePrismaService {
       'accounts_payable', // Org scoped
       'ap_payments', // Relational
       'ap_payment_schedules', // Relational
+      'data_collection_sections', // Relational
+      'data_collection_items', // Relational
+      'data_collection_template_products', // Relational
+      'data_collection_responses', // Relational
+      'booking_reminder_logs', // Relational
     ];
 
     for (const model of all_scoped_models) {
@@ -302,6 +316,12 @@ export class StorePrismaService extends BasePrismaService {
       wallet_transactions: { wallet: { store_id: context.store_id } },
       ap_payments: { accounts_payable: { organization_id: context.organization_id } },
       ap_payment_schedules: { accounts_payable: { organization_id: context.organization_id } },
+      data_collection_tabs: { template: { store_id: context.store_id } },
+      data_collection_sections: { template: { store_id: context.store_id } },
+      data_collection_items: { section: { template: { store_id: context.store_id } } },
+      data_collection_template_products: { template: { store_id: context.store_id } },
+      data_collection_responses: { submission: { store_id: context.store_id } },
+      booking_reminder_logs: { booking: { store_id: context.store_id } },
     };
 
     const security_filter: Record<string, any> = {};
@@ -960,6 +980,72 @@ export class StorePrismaService extends BasePrismaService {
   // Invoice Data Requests (manually scoped by store_id in service layer, public access by token)
   get invoice_data_requests() {
     return this.baseClient.invoice_data_requests;
+  }
+
+  // Entity Metadata models
+  get entity_metadata_fields() {
+    return this.scoped_client.entity_metadata_fields;
+  }
+
+  get entity_metadata_values() {
+    return this.scoped_client.entity_metadata_values;
+  }
+
+  // Data Collection models
+  get data_collection_templates() {
+    return this.scoped_client.data_collection_templates;
+  }
+
+  get data_collection_sections() {
+    return this.scoped_client.data_collection_sections;
+  }
+
+  get data_collection_items() {
+    return this.scoped_client.data_collection_items;
+  }
+
+  get data_collection_template_products() {
+    return this.scoped_client.data_collection_template_products;
+  }
+
+  get data_collection_submissions() {
+    return this.scoped_client.data_collection_submissions;
+  }
+
+  get data_collection_responses() {
+    return this.scoped_client.data_collection_responses;
+  }
+
+  get data_collection_tabs() {
+    return this.scoped_client.data_collection_tabs;
+  }
+
+  // Consultation History models
+  get booking_metadata_snapshots() {
+    return this.scoped_client.booking_metadata_snapshots;
+  }
+
+  get customer_consultation_notes() {
+    return this.scoped_client.customer_consultation_notes;
+  }
+
+  // Booking Confirmation & Reminders
+  get booking_confirmation_tokens() {
+    return this.scoped_client.booking_confirmation_tokens;
+  }
+
+  get booking_reminder_logs() {
+    return this.scoped_client.booking_reminder_logs;
+  }
+
+  // Email Templates (store_id nullable - system defaults have null)
+  get email_templates() {
+    return this.scoped_client.email_templates;
+  }
+
+  // Messaging Channels
+  get messaging_channels() {
+    return this.scoped_client.messaging_channels;
   }
 
   // Global tables (no store scoping)

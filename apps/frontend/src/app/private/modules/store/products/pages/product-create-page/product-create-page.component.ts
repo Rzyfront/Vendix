@@ -6,8 +6,10 @@ import {
   inject,
   ChangeDetectorRef,
 } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import { CommonModule } from '@angular/common';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { map } from 'rxjs/operators';
 import { RouterModule, ActivatedRoute, Router, Params } from '@angular/router';
 import {
   FormBuilder,
@@ -34,6 +36,7 @@ import {
   StickyHeaderComponent,
   StickyHeaderActionButton,
   BadgeComponent,
+  TooltipComponent,
 } from '../../../../../../shared/components';
 import {
   CurrencyPipe,
@@ -66,6 +69,7 @@ import {
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { ProductUtils } from '../../utils/product.utils';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
+import { environment } from '../../../../../../../environments/environment';
 
 interface VariantAttribute {
   name: string;
@@ -112,6 +116,7 @@ interface GeneratedVariant {
     StickyHeaderComponent,
     CurrencyPipe,
     BadgeComponent,
+    TooltipComponent,
   ],
   templateUrl: './product-create-page.component.html',
   styles: [
@@ -337,6 +342,14 @@ export class ProductCreatePageComponent implements OnInit {
   private cdr = inject(ChangeDetectorRef);
   private promotionsService = inject(PromotionsService);
   private reservationsService = inject(ReservationsService);
+  private http = inject(HttpClient);
+
+  // Data Collection Templates (for consultation configuration)
+  dataCollectionTemplates: { id: number; name: string; productIds: number[] }[] = [];
+
+  get templateSelectorOptions(): SelectorOption[] {
+    return this.dataCollectionTemplates.map(t => ({ value: t.id, label: t.name }));
+  }
 
   // Provider assignment (for services with requires_booking)
   assignedProviders = signal<ServiceProvider[]>([]);
@@ -432,6 +445,10 @@ export class ProductCreatePageComponent implements OnInit {
         booking_mode: null,
         is_recurring: false,
         service_instructions: '',
+        is_consultation: false,
+        send_preconsultation: false,
+        consultation_template_id: null,
+        preconsultation_template_id: null,
       });
     }
     this.cdr.detectChanges();
@@ -495,6 +512,7 @@ export class ProductCreatePageComponent implements OnInit {
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
     this.loadCategoriesAndBrands();
+    this.loadDataCollectionTemplates();
 
     // Verificar draft del modal de creación rápida
     const navState = history.state;
@@ -561,6 +579,21 @@ export class ProductCreatePageComponent implements OnInit {
       });
   }
 
+  private loadDataCollectionTemplates(): void {
+    this.http.get<any>(`${environment.apiUrl}/store/data-collection/templates`).pipe(
+      map((r: any) => r.data || [])
+    ).subscribe({
+      next: (templates: any[]) => {
+        this.dataCollectionTemplates = templates.map((t: any) => ({
+          id: t.id,
+          name: t.name,
+          productIds: (t.products || []).map((p: any) => p.product_id || p.product?.id),
+        }));
+      },
+      error: () => {}, // Silently fail — not critical
+    });
+  }
+
   private createForm(): FormGroup {
     const form = this.fb.group({
       name: [
@@ -601,6 +634,10 @@ export class ProductCreatePageComponent implements OnInit {
       booking_mode: [null],
       is_recurring: [false],
       service_instructions: [''],
+      is_consultation: [false],
+      send_preconsultation: [false],
+      consultation_template_id: [null],
+      preconsultation_template_id: [null],
     });
 
     this.setupPriceCalculations(form);
@@ -740,6 +777,10 @@ export class ProductCreatePageComponent implements OnInit {
       booking_mode: product.booking_mode || null,
       is_recurring: product.is_recurring || false,
       service_instructions: product.service_instructions || '',
+      is_consultation: product.is_consultation || false,
+      send_preconsultation: product.send_preconsultation || false,
+      consultation_template_id: product.consultation_template_id || null,
+      preconsultation_template_id: (product as any).preconsultation_template_id || null,
       weight: product.weight || 0,
       dimensions: {
         length: product.dimensions?.length || 0,
@@ -1682,6 +1723,10 @@ export class ProductCreatePageComponent implements OnInit {
         booking_mode: formValue.booking_mode || undefined,
         is_recurring: !!formValue.is_recurring,
         service_instructions: formValue.service_instructions || undefined,
+        is_consultation: !!formValue.is_consultation,
+        send_preconsultation: !!formValue.send_preconsultation,
+        consultation_template_id: formValue.consultation_template_id || null,
+        preconsultation_template_id: formValue.preconsultation_template_id || null,
       }),
       images: images.length > 0 ? images : undefined,
       weight: isServiceType
@@ -1743,7 +1788,7 @@ export class ProductCreatePageComponent implements OnInit {
         : this.productsService.createProduct(productData);
 
     request$.subscribe({
-      next: () => {
+      next: (savedProduct: Product) => {
         this.toastService.success(
           this.isEditMode()
             ? 'Producto actualizado correctamente'

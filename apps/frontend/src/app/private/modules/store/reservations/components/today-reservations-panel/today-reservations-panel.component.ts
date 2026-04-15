@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
 import { CommonModule } from '@angular/common';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
-import { BadgeComponent, EmptyStateComponent, IconComponent } from '../../../../../../shared/components';
+import { BadgeComponent, EmptyStateComponent, IconComponent, TooltipComponent } from '../../../../../../shared/components';
 import { BadgeVariant } from '../../../../../../shared/components/badge/badge.component';
 import { Booking, BookingStatus } from '../../interfaces/reservation.interface';
 
@@ -14,7 +14,7 @@ const SPANISH_MONTHS = [
 @Component({
   selector: 'app-today-reservations-panel',
   standalone: true,
-  imports: [CommonModule, CardComponent, BadgeComponent, EmptyStateComponent, IconComponent],
+  imports: [CommonModule, CardComponent, BadgeComponent, EmptyStateComponent, IconComponent, TooltipComponent],
   templateUrl: './today-reservations-panel.component.html',
   styleUrls: ['./today-reservations-panel.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -35,16 +35,16 @@ export class TodayReservationsPanelComponent {
 
   bookingsCount = computed(() => this.bookings().length);
 
-  getStatusColor(status: BookingStatus): string {
+  getStatusBorderColor(status: BookingStatus): string {
     const map: Record<BookingStatus, string> = {
-      pending: 'border-l-amber-500',
-      confirmed: 'border-l-blue-500',
-      in_progress: 'border-l-indigo-500',
-      completed: 'border-l-emerald-500',
-      cancelled: 'border-l-red-500',
-      no_show: 'border-l-gray-400',
+      pending: 'var(--color-warning)',
+      confirmed: 'var(--color-info)',
+      in_progress: 'var(--color-primary)',
+      completed: 'var(--color-success)',
+      cancelled: 'var(--color-error)',
+      no_show: 'var(--color-text-muted)',
     };
-    return map[status] ?? 'border-l-gray-300';
+    return map[status] ?? 'var(--color-border)';
   }
 
   getStatusBadgeVariant(status: BookingStatus): BadgeVariant {

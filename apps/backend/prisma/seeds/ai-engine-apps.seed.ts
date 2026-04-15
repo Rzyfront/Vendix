@@ -107,6 +107,85 @@ Genera el resumen en estos bloques:
 
 Se directo pero natural. No repitas datos en bruto, interpreta y analiza.`,
     },
+    {
+      key: 'consultation_prediagnosis',
+      name: 'Prediagnóstico de Consulta',
+      description:
+        'Genera prediagnóstico previo a consulta basado en formulario de precarga e historial del paciente',
+      output_format: 'markdown',
+      temperature: 0.4,
+      max_tokens: 1500,
+      is_active: true,
+      system_prompt: `Eres un asistente clínico profesional que genera prediagnósticos previos a consultas.
+Analiza los datos del paciente/cliente y genera un resumen estructurado para el profesional.
+
+REGLAS:
+- Idioma: Español
+- Tono: Profesional y conciso
+- NO diagnosticar — solo PRE-diagnóstico (observaciones previas)
+- Destacar alergias, medicamentos y condiciones relevantes
+- Correlacionar con historial previo si está disponible
+- Formato: Markdown
+- Extensión: 200-400 palabras
+- NO inventar datos que no estén proporcionados
+
+ESTRUCTURA:
+1. **Resumen del Paciente** — Datos básicos relevantes
+2. **Datos de Preconsulta** — Información del formulario actual
+3. **Alertas** — Alergias, medicamentos, contraindicaciones
+4. **Historial Relevante** — Conexiones con visitas previas
+5. **Puntos de Atención** — Sugerencias para el profesional`,
+      prompt_template: `**Servicio:** {{service_name}}
+{{service_instructions}}
+
+**Paciente:** {{customer_name}} ({{customer_document}})
+**Cita:** {{booking_date}} {{booking_time}} con {{provider_name}}
+
+**Datos del formulario de preconsulta:**
+{{intake_data}}
+
+**Historial previo del paciente:**
+{{customer_history}}`,
+    },
+    {
+      key: 'customer_history_summary',
+      name: 'Resumen de Historial del Cliente',
+      description:
+        'Genera resumen consolidado del historial de consultas de un cliente',
+      output_format: 'markdown',
+      temperature: 0.3,
+      max_tokens: 2000,
+      is_active: true,
+      system_prompt: `Eres un asistente que consolida historiales de consultas de pacientes/clientes.
+Tu objetivo es crear un resumen ejecutivo útil para el profesional.
+
+REGLAS:
+- Idioma: Español
+- Tono: Profesional y conciso
+- Organizar cronológicamente
+- Destacar patrones y tendencias
+- Resaltar datos importantes que persisten entre visitas
+- Formato: Markdown con secciones claras
+- NO inventar datos
+
+ESTRUCTURA:
+1. **Perfil del Paciente** — Datos permanentes relevantes
+2. **Resumen de Visitas** — Cronología con puntos clave
+3. **Patrones Observados** — Tendencias entre visitas
+4. **Notas Importantes** — Datos marcados como relevantes por profesionales
+5. **Recomendaciones** — Puntos a considerar para próxima visita`,
+      prompt_template: `**Paciente:** {{customer_name}} ({{customer_document}})
+**Total de visitas:** {{total_visits}}
+
+**Datos permanentes del paciente:**
+{{customer_metadata}}
+
+**Historial de visitas:**
+{{visits_history}}
+
+**Notas marcadas como importantes:**
+{{summary_notes}}`,
+    },
   ];
 
   let appsCreated = 0;

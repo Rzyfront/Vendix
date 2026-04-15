@@ -65,6 +65,10 @@ export interface Product {
   buffer_minutes?: number;
   is_recurring?: boolean;
   service_instructions?: string;
+  is_consultation?: boolean;
+  send_preconsultation?: boolean;
+  consultation_template_id?: number;
+  preconsultation_template_id?: number | null;
   final_price: number;
   created_at: Date;
   updated_at: Date;
@@ -227,6 +231,10 @@ export interface CreateProductDto {
   buffer_minutes?: number;
   is_recurring?: boolean;
   service_instructions?: string;
+  is_consultation?: boolean;
+  send_preconsultation?: boolean;
+  consultation_template_id?: number | null;
+  preconsultation_template_id?: number | null;
   brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];
@@ -270,6 +278,10 @@ export interface UpdateProductDto {
   buffer_minutes?: number;
   is_recurring?: boolean;
   service_instructions?: string;
+  is_consultation?: boolean;
+  send_preconsultation?: boolean;
+  consultation_template_id?: number | null;
+  preconsultation_template_id?: number | null;
   brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];

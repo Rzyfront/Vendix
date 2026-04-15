@@ -69,6 +69,7 @@ export class DefaultPanelUIService {
         orders_quotations: true,
         orders_layaway: true,
         orders_reservations: true,
+        orders_consultations: true,
         orders_dispatch_notes: true,
         inventory: true,
         inventory_pop: true,

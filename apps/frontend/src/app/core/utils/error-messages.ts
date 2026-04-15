@@ -269,6 +269,33 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ICA_RATE_NOT_FOUND: 'No se encontro tarifa ICA para el municipio.',
   ICA_STORE_NO_ADDRESS: 'La tienda no tiene direccion con codigo de municipio.',
   ICA_INVALID_PERIOD: 'Formato de periodo invalido. Use AAAA-TN o AAAA-MM.',
+
+  // Metadata Fields
+  META_FIND_001: 'Campo de metadata no encontrado.',
+  META_CREATE_001: 'Error al crear el campo de metadata.',
+  META_DUP_001: 'Ya existe un campo con esa clave para este tipo de entidad.',
+  META_VALIDATE_001: 'El valor de metadata no es valido.',
+
+  // Data Collection
+  DCOL_FIND_001: 'Plantilla de recoleccion no encontrada.',
+  DCOL_FIND_002: 'Formulario no encontrado.',
+  DCOL_TOKEN_001: 'El enlace del formulario es invalido o ha expirado.',
+  DCOL_TOKEN_002: 'Este formulario ya fue completado.',
+  DCOL_CREATE_001: 'Error al crear el formulario.',
+
+  // Customer History
+  CUST_HISTORY_001: 'Historial del cliente no encontrado.',
+  CUST_HISTORY_002: 'Reserva no encontrada en el historial.',
+  CUST_HISTORY_003: 'Nota no encontrada.',
+
+  // Booking Confirmation
+  BOOK_CONFIRM_001: 'El enlace de confirmacion es invalido o ha expirado.',
+  BOOK_CONFIRM_002: 'Este enlace ya fue utilizado.',
+  BOOK_CHECKIN_001: 'La reserva debe estar confirmada para hacer check-in.',
+  BOOK_CHECKIN_002: 'Ya se realizo el check-in para esta reserva.',
+
+  // Email Templates
+  EMAIL_TPL_001: 'Plantilla de email no encontrada.',
 };
 
 export const DEFAULT_ERROR_MESSAGE = 'Ocurrio un error. Intente de nuevo.';

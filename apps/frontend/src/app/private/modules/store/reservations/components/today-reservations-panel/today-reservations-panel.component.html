@@ -31,7 +31,8 @@
         <button
           type="button"
           (click)="bookingClicked.emit(booking)"
-          class="w-full text-left px-4 py-3 hover:bg-[var(--color-surface-hover)] transition-colors flex items-center gap-3 min-h-[52px] border-l-[3px] {{ getStatusColor(booking.status) }}">
+          class="w-full text-left px-4 py-3 hover:bg-[var(--color-surface-hover)] transition-colors flex items-center gap-3 min-h-[52px]"
+          [style.border-left]="'3px solid ' + getStatusBorderColor(booking.status)">
           <!-- Time -->
           <div class="shrink-0 w-[52px] text-center">
             <div class="text-sm font-bold text-[var(--color-text-primary)]">{{ formatTime(booking.start_time) }}</div>
@@ -58,13 +59,15 @@
 
     <!-- Footer -->
     <div class="border-t border-[var(--color-border)]">
-      <button
-        type="button"
-        (click)="viewAllClicked.emit()"
-        class="w-full text-center py-3 text-xs font-semibold min-h-[44px] hover:bg-[var(--color-surface-hover)] transition-colors"
-        style="color: var(--color-primary)">
-        Ver todas las reservas del dia →
-      </button>
+      <app-tooltip content="Ver todas las reservas de hoy en la lista" position="top">
+        <button
+          type="button"
+          (click)="viewAllClicked.emit()"
+          class="w-full text-center py-3 text-xs font-semibold min-h-[44px] hover:bg-[var(--color-surface-hover)] transition-colors"
+          style="color: var(--color-primary)">
+          Ver todas las reservas del dia →
+        </button>
+      </app-tooltip>
     </div>
   }
 </app-card>

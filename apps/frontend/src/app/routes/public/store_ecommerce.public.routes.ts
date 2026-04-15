@@ -174,6 +174,13 @@ export const storeEcommercePublicRoutes: Routes = [
           ).then((c) => c.InvoiceDataComponent),
       },
       {
+        path: 'preconsulta/:token',
+        loadComponent: () =>
+          import(
+            '../../private/modules/ecommerce/pages/data-collection-form/data-collection-form.component'
+          ).then((c) => c.DataCollectionFormComponent),
+      },
+      {
         path: 'account/reservations',
         canActivate: [AuthGuard],
         loadComponent: () =>

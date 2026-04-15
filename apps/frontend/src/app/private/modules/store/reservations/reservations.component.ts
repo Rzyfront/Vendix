@@ -19,7 +19,7 @@ import {
   BookingQuery,
   BookingStatus,
 } from './interfaces/reservation.interface';
-import { ToastService, DialogService, IconComponent } from '../../../../shared/components';
+import { ToastService, DialogService, IconComponent, TooltipComponent } from '../../../../shared/components';
 
 @Component({
   selector: 'app-reservations',
@@ -37,6 +37,7 @@ import { ToastService, DialogService, IconComponent } from '../../../../shared/c
     QuickActionsPanelComponent,
     CardComponent,
     IconComponent,
+    TooltipComponent,
   ],
   templateUrl: './reservations.component.html',
   styleUrls: ['./reservations.component.scss'],
@@ -387,6 +388,11 @@ export class ReservationsComponent implements OnInit, OnDestroy {
 
   onWalkIn(): void {
     this.isFormModalOpen = true;
+  }
+
+  onAttendConsultation(booking: Booking): void {
+    this.isDetailModalOpen = false;
+    this.router.navigate(['/admin', 'consultations', booking.id, 'attend']);
   }
 
   onBlockSchedule(): void {

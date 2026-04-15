@@ -137,6 +137,11 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
           description: 'Gesti\u00f3n de reservas y agendamiento de servicios',
         },
         {
+          key: 'orders_consultations',
+          label: 'Consultas',
+          description: 'Atenci\u00f3n de consultas m\u00e9dicas y est\u00e9ticas',
+        },
+        {
           key: 'orders_dispatch_notes',
           label: 'Remisiones',
           description: 'Notas de despacho / remisiones',
@@ -200,6 +205,11 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
           key: 'customers_reviews',
           label: 'Rese\u00f1as',
           description: 'Rese\u00f1as de clientes',
+        },
+        {
+          key: 'customers_data_collection',
+          label: 'Recolección de Datos',
+          description: 'Campos personalizados y formularios de preconsulta',
         },
       ],
     },
