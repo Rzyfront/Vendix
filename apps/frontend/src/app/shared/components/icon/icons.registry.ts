@@ -237,6 +237,11 @@ import {
   Stethoscope,
   // Additional icons
   Radio,
+  // Data collection drag & settings icons
+  GripVertical,
+  Settings2,
+  // Data collection interaction icons
+  MousePointerClick,
 } from 'lucide-angular';
 
 /**
@@ -547,6 +552,13 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'calendar-days': CalendarDays,
   'circle-check': CircleCheck,
   'radio': Radio,
+
+  // Data collection drag & settings icons
+  'grip-vertical': GripVertical,
+  'settings-2': Settings2,
+
+  // Data collection interaction icons
+  'mouse-pointer-click': MousePointerClick,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

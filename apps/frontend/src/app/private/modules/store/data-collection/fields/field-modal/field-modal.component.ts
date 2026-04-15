@@ -1,118 +1,91 @@
 import { Component, ChangeDetectionStrategy, input, output, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { MetadataField } from '../../interfaces/metadata-field.interface';
+import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
+import { InputComponent } from '../../../../../../shared/components/input/input.component';
+import { SelectorComponent } from '../../../../../../shared/components/selector/selector.component';
+import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { SettingToggleComponent } from '../../../../../../shared/components/setting-toggle/setting-toggle.component';
 
 @Component({
   selector: 'app-field-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent],
+  imports: [CommonModule, FormsModule, ModalComponent, InputComponent, SelectorComponent, TextareaComponent, ButtonComponent, SettingToggleComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="fixed inset-0 z-50 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.5)"
-         (click)="close.emit()">
-      <div class="w-full max-w-lg rounded-xl shadow-xl" style="background: var(--color-surface)"
-           (click)="$event.stopPropagation()">
-        <!-- Header -->
-        <div class="flex items-center justify-between px-6 py-4" style="border-bottom: 1px solid var(--color-border)">
-          <h3 class="font-bold text-base" style="color: var(--color-text)">
-            {{ field() ? 'Editar Campo' : 'Nuevo Campo' }}
-          </h3>
-          <button class="p-1 rounded-lg" style="color: var(--color-text-muted)" (click)="close.emit()">
-            <app-icon name="x" [size]="18"></app-icon>
-          </button>
+    <app-modal
+      [isOpen]="true"
+      (isOpenChange)="onOpenChange($event)"
+      [title]="field() ? 'Editar Campo' : 'Nuevo Campo'"
+      size="md"
+    >
+      <div class="space-y-4">
+        <app-input
+          label="Label"
+          [(ngModel)]="formData.label"
+          (inputChange)="autoGenerateKey()"
+          [required]="true"
+        />
+
+        <app-input
+          label="Key"
+          [(ngModel)]="formData.field_key"
+          [disabled]="!!field()"
+        />
+
+        <div class="grid grid-cols-2 gap-4">
+          <app-selector
+            label="Tipo de Entidad"
+            [(ngModel)]="formData.entity_type"
+            [options]="entityTypeOptions"
+            [required]="true"
+          />
+
+          <app-selector
+            label="Tipo de Campo"
+            [(ngModel)]="formData.field_type"
+            [options]="fieldTypeOptions"
+            [required]="true"
+          />
         </div>
 
-        <!-- Body -->
-        <div class="px-6 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
-          <div>
-            <label class="block text-sm font-medium mb-1" style="color: var(--color-text)">Label *</label>
-            <input type="text" class="w-full px-3 py-2 border rounded-lg text-sm"
-                   style="border-color: var(--color-border); background: var(--color-surface)"
-                   [(ngModel)]="formData.label" (ngModelChange)="autoGenerateKey()" />
-          </div>
+        <app-textarea
+          label="Descripción"
+          [(ngModel)]="formData.description"
+          [rows]="2"
+        />
 
-          <div>
-            <label class="block text-sm font-medium mb-1" style="color: var(--color-text)">Key *</label>
-            <input type="text" class="w-full px-3 py-2 border rounded-lg text-sm"
-                   style="border-color: var(--color-border); background: var(--color-surface)"
-                   [(ngModel)]="formData.field_key" [disabled]="!!field()" />
-          </div>
+        <div class="grid grid-cols-2 gap-4">
+          <app-selector
+            label="Modo de Display"
+            [(ngModel)]="formData.display_mode"
+            [options]="displayModeOptions"
+          />
 
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm font-medium mb-1" style="color: var(--color-text)">Tipo de Entidad *</label>
-              <select class="w-full px-3 py-2 border rounded-lg text-sm"
-                      style="border-color: var(--color-border); background: var(--color-surface)"
-                      [(ngModel)]="formData.entity_type">
-                <option value="customer">Cliente</option>
-                <option value="booking">Reserva</option>
-                <option value="order">Orden</option>
-              </select>
-            </div>
-            <div>
-              <label class="block text-sm font-medium mb-1" style="color: var(--color-text)">Tipo de Campo *</label>
-              <select class="w-full px-3 py-2 border rounded-lg text-sm"
-                      style="border-color: var(--color-border); background: var(--color-surface)"
-                      [(ngModel)]="formData.field_type">
-                @for (type of fieldTypes; track type) {
-                  <option [value]="type">{{ type }}</option>
-                }
-              </select>
-            </div>
+          <div class="flex items-end pb-1">
+            <app-setting-toggle
+              label="Obligatorio"
+              [(ngModel)]="formData.is_required"
+            />
           </div>
-
-          <div>
-            <label class="block text-sm font-medium mb-1" style="color: var(--color-text)">Descripcion</label>
-            <textarea class="w-full px-3 py-2 border rounded-lg text-sm resize-none" rows="2"
-                      style="border-color: var(--color-border); background: var(--color-surface)"
-                      [(ngModel)]="formData.description"></textarea>
-          </div>
-
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm font-medium mb-1" style="color: var(--color-text)">Modo de Display</label>
-              <select class="w-full px-3 py-2 border rounded-lg text-sm"
-                      style="border-color: var(--color-border); background: var(--color-surface)"
-                      [(ngModel)]="formData.display_mode">
-                <option value="detail">Detalle</option>
-                <option value="summary">Resumen</option>
-              </select>
-            </div>
-            <div class="flex items-end pb-1">
-              <label class="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" class="w-4 h-4 rounded" [(ngModel)]="formData.is_required" />
-                <span class="text-sm" style="color: var(--color-text)">Obligatorio</span>
-              </label>
-            </div>
-          </div>
-
-          @if (formData.field_type === 'select') {
-            <div>
-              <label class="block text-sm font-medium mb-1" style="color: var(--color-text)">Opciones (una por linea)</label>
-              <textarea class="w-full px-3 py-2 border rounded-lg text-sm resize-none" rows="4"
-                        style="border-color: var(--color-border); background: var(--color-surface)"
-                        [(ngModel)]="optionsText"></textarea>
-            </div>
-          }
         </div>
 
-        <!-- Footer -->
-        <div class="flex justify-end gap-2 px-6 py-4" style="border-top: 1px solid var(--color-border)">
-          <button class="px-4 py-2 rounded-lg text-sm font-medium"
-                  style="color: var(--color-text); border: 1px solid var(--color-border)"
-                  (click)="close.emit()">
-            Cancelar
-          </button>
-          <button class="px-4 py-2 rounded-lg text-sm font-medium text-white"
-                  style="background: var(--color-primary)"
-                  (click)="onSave()">
-            {{ field() ? 'Guardar' : 'Crear' }}
-          </button>
-        </div>
+        @if (formData.field_type === 'select') {
+          <app-textarea
+            label="Opciones (una por línea)"
+            [(ngModel)]="optionsText"
+            [rows]="4"
+          />
+        }
       </div>
-    </div>
+
+      <div slot="footer" class="flex items-center justify-end gap-3">
+        <app-button variant="outline" (clicked)="close.emit()">Cancelar</app-button>
+        <app-button variant="primary" (clicked)="onSave()">{{ field() ? 'Guardar' : 'Crear' }}</app-button>
+      </div>
+    </app-modal>
   `,
 })
 export class FieldModalComponent implements OnInit {
@@ -121,6 +94,19 @@ export class FieldModalComponent implements OnInit {
   close = output<void>();
 
   fieldTypes = ['text', 'number', 'date', 'select', 'checkbox', 'textarea', 'file', 'email', 'phone', 'url'];
+
+  entityTypeOptions = [
+    { value: 'customer', label: 'Cliente' },
+    { value: 'booking', label: 'Reserva' },
+    { value: 'order', label: 'Orden' },
+  ];
+
+  fieldTypeOptions = this.fieldTypes.map(t => ({ value: t, label: t }));
+
+  displayModeOptions = [
+    { value: 'detail', label: 'Detalle' },
+    { value: 'summary', label: 'Resumen' },
+  ];
 
   formData: any = {
     label: '',
@@ -149,6 +135,12 @@ export class FieldModalComponent implements OnInit {
       if (f.options && Array.isArray(f.options)) {
         this.optionsText = f.options.join('\n');
       }
+    }
+  }
+
+  onOpenChange(isOpen: boolean) {
+    if (!isOpen) {
+      this.close.emit();
     }
   }
 

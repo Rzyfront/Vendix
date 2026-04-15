@@ -6,6 +6,7 @@ import {
   inject,
   OnInit,
   signal,
+  computed,
 } from '@angular/core';
 import { CommonModule, DatePipe } from '@angular/common';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -20,6 +21,15 @@ import {
   TemplateTab,
 } from '../../interfaces/data-collection-template.interface';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
+import {
+  ScrollableTabsComponent,
+  ScrollableTab,
+} from '../../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
+import { EmptyStateComponent } from '../../../../../../shared/components/empty-state/empty-state.component';
+import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
 
 interface GroupedResponse {
   response: SubmissionResponse;
@@ -42,196 +52,152 @@ interface GroupedTab {
 @Component({
   selector: 'app-submission-detail-modal',
   standalone: true,
-  imports: [CommonModule, IconComponent, DatePipe],
+  imports: [
+    CommonModule,
+    DatePipe,
+    IconComponent,
+    ModalComponent,
+    ScrollableTabsComponent,
+    EmptyStateComponent,
+    SpinnerComponent,
+    ButtonComponent,
+    BadgeComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div
-      class="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style="background: rgba(0,0,0,0.5)"
-      (click)="close.emit()"
+    <app-modal
+      [isOpen]="true"
+      (cancel)="close.emit()"
+      title="Detalle del Formulario"
+      size="lg"
     >
-      <div
-        class="w-full max-w-2xl rounded-xl shadow-xl"
-        style="background: var(--color-surface)"
-        (click)="$event.stopPropagation()"
-      >
-        @if (loading()) {
-          <!-- Loading state -->
-          <div class="flex items-center justify-center py-16">
+      <!-- Badge de estado en el header -->
+      @if (submission(); as sub) {
+        <div slot="header-end">
+          <app-badge [variant]="getBadgeVariant(sub.status)">
+            {{ getStatusLabel(sub.status) }}
+          </app-badge>
+        </div>
+      }
+
+      <!-- Loading state -->
+      @if (loading()) {
+        <div class="flex items-center justify-center py-16">
+          <app-spinner size="md" />
+        </div>
+      } @else if (submission(); as sub) {
+        <div class="space-y-5">
+          <!-- Customer info -->
+          @if (sub.customer || sub.booking?.customer) {
             <div
-              class="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin"
-              style="border-color: var(--color-primary); border-top-color: transparent"
-            ></div>
-          </div>
-        } @else if (submission(); as sub) {
-          <!-- Header -->
-          <div
-            class="flex items-center justify-between px-6 py-4"
-            style="border-bottom: 1px solid var(--color-border)"
-          >
-            <div class="flex items-center gap-3 min-w-0">
-              <h3 class="font-bold text-base" style="color: var(--color-text)">
-                Detalle del Formulario
-              </h3>
-              <span
-                class="text-xs px-2 py-0.5 rounded-full shrink-0"
-                [style.background]="getStatusColor(sub.status).bg"
-                [style.color]="getStatusColor(sub.status).text"
-              >
-                {{ getStatusLabel(sub.status) }}
-              </span>
-            </div>
-            <button
-              class="p-1 rounded-lg shrink-0"
-              style="color: var(--color-text-muted)"
-              (click)="close.emit()"
+              class="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2.5 rounded-lg"
+              style="background: var(--color-surface-secondary)"
             >
-              <app-icon name="x" [size]="18"></app-icon>
-            </button>
-          </div>
-
-          <!-- Body -->
-          <div class="px-6 py-4 space-y-5 max-h-[75vh] overflow-y-auto">
-            <!-- Customer info -->
-            @if (sub.customer || sub.booking?.customer) {
-              <div
-                class="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2.5 rounded-lg"
-                style="background: var(--color-surface-secondary)"
-              >
-                <div class="flex items-center gap-2">
-                  <app-icon
-                    name="user"
-                    [size]="14"
-                    color="var(--color-text-muted)"
-                  ></app-icon>
-                  <span
-                    class="text-sm font-medium"
-                    style="color: var(--color-text)"
-                  >
-                    {{ (sub.customer || sub.booking?.customer)?.first_name }}
-                    {{ (sub.customer || sub.booking?.customer)?.last_name }}
-                  </span>
-                </div>
-              </div>
-            }
-
-            <!-- Booking info -->
-            @if (sub.booking) {
-              <div
-                class="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2.5 rounded-lg"
-                style="background: var(--color-surface-secondary)"
-              >
-                <div class="flex items-center gap-2">
-                  <app-icon
-                    name="calendar"
-                    [size]="14"
-                    color="var(--color-text-muted)"
-                  ></app-icon>
-                  <span class="text-sm" style="color: var(--color-text)">
-                    #{{ sub.booking.booking_number }}
-                  </span>
-                </div>
-                <span class="text-sm" style="color: var(--color-text-muted)">
-                  {{ sub.booking.date | date: 'mediumDate' }}
-                </span>
-                @if (sub.booking.product) {
-                  <span class="text-sm" style="color: var(--color-text-muted)">
-                    {{ sub.booking.product.name }}
-                  </span>
-                }
-                @if (sub.booking.provider) {
-                  <span class="text-sm" style="color: var(--color-text-muted)">
-                    {{ sub.booking.provider.display_name }}
-                  </span>
-                }
-              </div>
-            }
-
-            <!-- AI Prediagnosis -->
-            @if (sub.ai_prediagnosis) {
-              <div
-                class="rounded-lg overflow-hidden"
-                style="border: 1px solid #c4b5fd"
-              >
-                <div
-                  class="flex items-center gap-2 px-4 py-2.5"
-                  style="background: #f5f3ff"
-                >
-                  <app-icon name="brain" [size]="16" color="#7c3aed"></app-icon>
-                  <span class="text-sm font-semibold" style="color: #7c3aed"
-                    >Pre-diagnostico IA</span
-                  >
-                </div>
-                <div
-                  class="px-4 py-3 text-sm leading-relaxed prose-sm"
-                  style="color: var(--color-text); background: #faf5ff"
-                  [innerHTML]="sub.ai_prediagnosis"
-                ></div>
-              </div>
-            }
-
-            <!-- Form link (pending status) -->
-            @if (sub.status === 'pending' && sub.token) {
-              <div
-                class="flex items-center gap-2 px-3 py-2.5 rounded-lg"
-                style="background: var(--color-surface-secondary); border: 1px solid var(--color-border)"
-              >
+              <div class="flex items-center gap-2">
                 <app-icon
-                  name="link"
+                  name="user"
                   [size]="14"
                   color="var(--color-text-muted)"
                 ></app-icon>
                 <span
-                  class="flex-1 text-xs truncate font-mono"
-                  style="color: var(--color-text-muted)"
+                  class="text-sm font-medium"
+                  style="color: var(--color-text)"
                 >
-                  {{ getFormUrl() }}
+                  {{ (sub.customer || sub.booking?.customer)?.first_name }}
+                  {{ (sub.customer || sub.booking?.customer)?.last_name }}
                 </span>
-                <button
-                  class="shrink-0 px-2.5 py-1 rounded-md text-xs font-medium"
-                  style="background: var(--color-primary); color: white"
-                  (click)="copyFormLink($event)"
-                >
-                  Copiar
-                </button>
               </div>
-            }
+            </div>
+          }
 
-            <!-- Tab navigation -->
-            @if (groupedTabs().length > 0) {
-              <div class="flex flex-wrap gap-2 mb-3">
-                @for (tab of groupedTabs(); track tab.title; let i = $index) {
-                  <button
-                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
-                    [style.background]="
-                      activeTab() === i
-                        ? 'var(--color-primary)'
-                        : 'var(--color-surface-secondary)'
-                    "
-                    [style.color]="
-                      activeTab() === i ? 'white' : 'var(--color-text)'
-                    "
-                    (click)="activeTab.set(i)"
-                  >
-                    @if (tab.icon) {
-                      <app-icon [name]="tab.icon" [size]="14"></app-icon>
-                    }
-                    {{ tab.title }}
-                  </button>
-                }
+          <!-- Booking info -->
+          @if (sub.booking) {
+            <div
+              class="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2.5 rounded-lg"
+              style="background: var(--color-surface-secondary)"
+            >
+              <div class="flex items-center gap-2">
+                <app-icon
+                  name="calendar"
+                  [size]="14"
+                  color="var(--color-text-muted)"
+                ></app-icon>
+                <span class="text-sm" style="color: var(--color-text)">
+                  #{{ sub.booking.booking_number }}
+                </span>
               </div>
-              @if (groupedTabs()[activeTab()]; as activeTabData) {
-                @for (section of activeTabData.sections; track section.title) {
-                  <ng-container
-                    *ngTemplateOutlet="
-                      sectionTmpl;
-                      context: { $implicit: section }
-                    "
-                  ></ng-container>
-                }
+              <span class="text-sm" style="color: var(--color-text-muted)">
+                {{ sub.booking.date | date: 'mediumDate' }}
+              </span>
+              @if (sub.booking.product) {
+                <span class="text-sm" style="color: var(--color-text-muted)">
+                  {{ sub.booking.product.name }}
+                </span>
               }
-            } @else if (groupedSections().length > 0) {
-              @for (section of groupedSections(); track section.title) {
+              @if (sub.booking.provider) {
+                <span class="text-sm" style="color: var(--color-text-muted)">
+                  {{ sub.booking.provider.display_name }}
+                </span>
+              }
+            </div>
+          }
+
+          <!-- AI Prediagnosis -->
+          @if (sub.ai_prediagnosis) {
+            <div
+              class="rounded-lg overflow-hidden"
+              style="border: 1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)"
+            >
+              <div
+                class="flex items-center gap-2 px-4 py-2.5"
+                style="background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface))"
+              >
+                <app-icon name="brain" [size]="16" color="var(--color-primary)"></app-icon>
+                <span class="text-sm font-semibold" style="color: var(--color-primary)"
+                  >Pre-diagnostico IA</span
+                >
+              </div>
+              <div
+                class="px-4 py-3 text-sm leading-relaxed prose-sm"
+                style="color: var(--color-text); background: color-mix(in srgb, var(--color-primary) 4%, var(--color-surface))"
+                [innerHTML]="sub.ai_prediagnosis"
+              ></div>
+            </div>
+          }
+
+          <!-- Form link (pending status) -->
+          @if (sub.status === 'pending' && sub.token) {
+            <div
+              class="flex items-center gap-2 px-3 py-2.5 rounded-lg"
+              style="background: var(--color-surface-secondary); border: 1px solid var(--color-border)"
+            >
+              <app-icon
+                name="link"
+                [size]="14"
+                color="var(--color-text-muted)"
+              ></app-icon>
+              <span
+                class="flex-1 text-xs truncate font-mono"
+                style="color: var(--color-text-muted)"
+              >
+                {{ getFormUrl() }}
+              </span>
+              <app-button variant="primary" size="sm" (clicked)="copyFormLink()">
+                Copiar
+              </app-button>
+            </div>
+          }
+
+          <!-- Tab navigation -->
+          @if (groupedTabs().length > 0) {
+            <app-scrollable-tabs
+              [tabs]="computedTabsList()"
+              [activeTab]="activeTabId()"
+              size="sm"
+              (tabChange)="onTabChange($event)"
+            />
+            @if (groupedTabs()[activeTab()]; as activeTabData) {
+              @for (section of activeTabData.sections; track section.title) {
                 <ng-container
                   *ngTemplateOutlet="
                     sectionTmpl;
@@ -239,179 +205,172 @@ interface GroupedTab {
                   "
                 ></ng-container>
               }
-            } @else if (sub.responses && sub.responses.length > 0) {
-              <div>
-                <h4
-                  class="text-sm font-semibold mb-2 px-1"
-                  style="color: var(--color-text)"
-                >
-                  Respuestas
-                </h4>
-                <div
-                  class="rounded-lg overflow-hidden"
-                  style="border: 1px solid var(--color-border)"
-                >
-                  @for (
-                    resp of sub.responses;
-                    track resp.id;
-                    let last = $last
-                  ) {
-                    <div
-                      class="flex items-start justify-between gap-4 px-4 py-2.5"
-                      [style.border-bottom]="
-                        last ? 'none' : '1px solid var(--color-border)'
-                      "
-                      style="background: var(--color-surface)"
-                    >
-                      <span
-                        class="text-sm shrink-0"
-                        style="color: var(--color-text-muted)"
-                      >
-                        {{ resp.field.label || 'Campo' }}
-                      </span>
-                      @if (isFileField(resp) && isFileUrl(resp)) {
-                        <a
-                          [href]="getFileUrl(resp)"
-                          target="_blank"
-                          rel="noopener"
-                          class="text-xs underline font-medium"
-                          style="color: var(--color-primary)"
-                        >
-                          Ver archivo
-                        </a>
-                      } @else {
-                        <span
-                          class="text-sm text-right font-medium"
-                          style="color: var(--color-text)"
-                        >
-                          {{ getDisplayValue(resp) }}
-                        </span>
-                      }
-                    </div>
-                  }
-                </div>
-              </div>
-            } @else {
-              <div
-                class="text-center py-6 border rounded-lg"
-                style="border-color: var(--color-border)"
-              >
-                <app-icon
-                  name="file-text"
-                  [size]="24"
-                  color="var(--color-text-muted)"
-                ></app-icon>
-                <p class="text-sm mt-2" style="color: var(--color-text-muted)">
-                  Sin respuestas registradas
-                </p>
-              </div>
             }
-
-            <ng-template #sectionTmpl let-section>
-              <div class="mb-4">
-                <div class="flex items-center gap-2 mb-2 px-1">
-                  @if (section.icon) {
-                    <app-icon
-                      [name]="section.icon"
-                      [size]="16"
-                      color="var(--color-text-muted)"
-                    ></app-icon>
-                  }
-                  <h4
-                    class="text-sm font-semibold"
-                    style="color: var(--color-text)"
-                  >
-                    {{ section.title }}
-                  </h4>
-                </div>
-                <div class="flex flex-wrap gap-3">
-                  @for (resp of section.responses; track resp.response.id) {
-                    <div
-                      class="px-4 py-2.5 rounded-lg"
-                      [ngClass]="getItemWidthClass(resp.width)"
-                      style="background: var(--color-surface); border: 1px solid var(--color-border)"
-                    >
-                      <span
-                        class="text-xs block mb-1"
-                        style="color: var(--color-text-muted)"
-                      >
-                        {{ resp.response.field.label || 'Campo' }}
-                      </span>
-                      @if (
-                        isFileField(resp.response) && isFileUrl(resp.response)
-                      ) {
-                        <a
-                          [href]="getFileUrl(resp.response)"
-                          target="_blank"
-                          rel="noopener"
-                          class="text-sm underline font-medium"
-                          style="color: var(--color-primary)"
-                        >
-                          Ver archivo
-                        </a>
-                      } @else {
-                        <span
-                          class="text-sm font-medium"
-                          style="color: var(--color-text)"
-                        >
-                          {{ getDisplayValue(resp.response) }}
-                        </span>
-                      }
-                    </div>
-                  }
-                </div>
-                @if (section.childSections?.length) {
+          } @else if (groupedSections().length > 0) {
+            @for (section of groupedSections(); track section.title) {
+              <ng-container
+                *ngTemplateOutlet="
+                  sectionTmpl;
+                  context: { $implicit: section }
+                "
+              ></ng-container>
+            }
+          } @else if (sub.responses && sub.responses.length > 0) {
+            <div>
+              <h4
+                class="text-sm font-semibold mb-2 px-1"
+                style="color: var(--color-text)"
+              >
+                Respuestas
+              </h4>
+              <div
+                class="rounded-lg overflow-hidden"
+                style="border: 1px solid var(--color-border)"
+              >
+                @for (
+                  resp of sub.responses;
+                  track resp.id;
+                  let last = $last
+                ) {
                   <div
-                    class="ml-4 pl-4 mt-2"
-                    style="border-left: 2px solid var(--color-border)"
+                    class="flex items-start justify-between gap-4 px-4 py-2.5"
+                    [style.border-bottom]="
+                      last ? 'none' : '1px solid var(--color-border)'
+                    "
+                    style="background: var(--color-surface)"
                   >
-                    @for (child of section.childSections; track child.title) {
-                      <ng-container
-                        *ngTemplateOutlet="
-                          sectionTmpl;
-                          context: { $implicit: child }
-                        "
-                      ></ng-container>
+                    <span
+                      class="text-sm shrink-0"
+                      style="color: var(--color-text-muted)"
+                    >
+                      {{ resp.field.label || 'Campo' }}
+                    </span>
+                    @if (isFileField(resp) && isFileUrl(resp)) {
+                      <a
+                        [href]="getFileUrl(resp)"
+                        target="_blank"
+                        rel="noopener"
+                        class="text-xs underline font-medium"
+                        style="color: var(--color-primary)"
+                      >
+                        Ver archivo
+                      </a>
+                    } @else {
+                      <span
+                        class="text-sm text-right font-medium"
+                        style="color: var(--color-text)"
+                      >
+                        {{ getDisplayValue(resp) }}
+                      </span>
                     }
                   </div>
                 }
               </div>
-            </ng-template>
+            </div>
+          } @else {
+            <app-empty-state
+              icon="file-text"
+              title="Sin respuestas"
+              description="No hay respuestas registradas en este formulario."
+              [showActionButton]="false"
+            />
+          }
 
-            <!-- Metadata -->
-            <div
-              class="text-xs flex flex-wrap gap-x-4 gap-y-1 pt-2"
-              style="color: var(--color-text-muted)"
-            >
-              @if (sub.template?.name; as templateName) {
-                <span>Plantilla: {{ templateName }}</span>
-              }
-              <span>Creado: {{ sub.created_at | date: 'short' }}</span>
-              @if (sub.submitted_at) {
-                <span>Enviado: {{ sub.submitted_at | date: 'short' }}</span>
-              }
-              @if (sub.processed_at) {
-                <span>Procesado: {{ sub.processed_at | date: 'short' }}</span>
+          <ng-template #sectionTmpl let-section>
+            <div class="mb-4">
+              <div class="flex items-center gap-2 mb-2 px-1">
+                @if (section.icon) {
+                  <app-icon
+                    [name]="section.icon"
+                    [size]="16"
+                    color="var(--color-text-muted)"
+                  ></app-icon>
+                }
+                <h4
+                  class="text-sm font-semibold"
+                  style="color: var(--color-text)"
+                >
+                  {{ section.title }}
+                </h4>
+              </div>
+              <div class="flex flex-wrap gap-3">
+                @for (resp of section.responses; track resp.response.id) {
+                  <div
+                    class="px-4 py-2.5 rounded-lg"
+                    [ngClass]="getItemWidthClass(resp.width)"
+                    style="background: var(--color-surface); border: 1px solid var(--color-border)"
+                  >
+                    <span
+                      class="text-xs block mb-1"
+                      style="color: var(--color-text-muted)"
+                    >
+                      {{ resp.response.field.label || 'Campo' }}
+                    </span>
+                    @if (
+                      isFileField(resp.response) && isFileUrl(resp.response)
+                    ) {
+                      <a
+                        [href]="getFileUrl(resp.response)"
+                        target="_blank"
+                        rel="noopener"
+                        class="text-sm underline font-medium"
+                        style="color: var(--color-primary)"
+                      >
+                        Ver archivo
+                      </a>
+                    } @else {
+                      <span
+                        class="text-sm font-medium"
+                        style="color: var(--color-text)"
+                      >
+                        {{ getDisplayValue(resp.response) }}
+                      </span>
+                    }
+                  </div>
+                }
+              </div>
+              @if (section.childSections?.length) {
+                <div
+                  class="ml-4 pl-4 mt-2"
+                  style="border-left: 2px solid var(--color-border)"
+                >
+                  @for (child of section.childSections; track child.title) {
+                    <ng-container
+                      *ngTemplateOutlet="
+                        sectionTmpl;
+                        context: { $implicit: child }
+                      "
+                    ></ng-container>
+                  }
+                </div>
               }
             </div>
-          </div>
+          </ng-template>
 
-          <!-- Footer -->
+          <!-- Metadata -->
           <div
-            class="flex justify-end px-6 py-4"
-            style="border-top: 1px solid var(--color-border)"
+            class="text-xs flex flex-wrap gap-x-4 gap-y-1 pt-2"
+            style="color: var(--color-text-muted)"
           >
-            <button
-              class="px-4 py-2 rounded-lg text-sm font-medium"
-              style="color: var(--color-text); border: 1px solid var(--color-border)"
-              (click)="close.emit()"
-            >
-              Cerrar
-            </button>
+            @if (sub.template?.name; as templateName) {
+              <span>Plantilla: {{ templateName }}</span>
+            }
+            <span>Creado: {{ sub.created_at | date: 'short' }}</span>
+            @if (sub.submitted_at) {
+              <span>Enviado: {{ sub.submitted_at | date: 'short' }}</span>
+            }
+            @if (sub.processed_at) {
+              <span>Procesado: {{ sub.processed_at | date: 'short' }}</span>
+            }
           </div>
-        }
+        </div>
+      }
+
+      <!-- Footer -->
+      <div slot="footer" class="flex items-center justify-end gap-3">
+        <app-button variant="outline" (clicked)="close.emit()">Cerrar</app-button>
       </div>
-    </div>
+    </app-modal>
   `,
 })
 export class SubmissionDetailModalComponent implements OnInit {
@@ -427,6 +386,16 @@ export class SubmissionDetailModalComponent implements OnInit {
   groupedTabs = signal<GroupedTab[]>([]);
   activeTab = signal(0);
   fileUrlMap = signal<Map<number, string>>(new Map());
+
+  readonly computedTabsList = computed<ScrollableTab[]>(() =>
+    this.groupedTabs().map((tab, i) => ({
+      id: String(i),
+      label: tab.title,
+      icon: tab.icon || undefined,
+    }))
+  );
+
+  readonly activeTabId = computed(() => String(this.activeTab()));
 
   ngOnInit() {
     this.loadSubmission();
@@ -449,6 +418,10 @@ export class SubmissionDetailModalComponent implements OnInit {
         this.loading.set(false);
       },
     });
+  }
+
+  onTabChange(tabId: string) {
+    this.activeTab.set(Number(tabId));
   }
 
   private buildGroupedData(sub: DataCollectionSubmission): {
@@ -655,25 +628,12 @@ export class SubmissionDetailModalComponent implements OnInit {
       : '';
   }
 
-  copyFormLink(event: Event) {
-    event.stopPropagation();
+  copyFormLink() {
     const url = this.getFormUrl();
     if (url) {
       navigator.clipboard.writeText(url);
       this.toastService.success('Enlace copiado');
     }
-  }
-
-  getStatusColor(status: string): { bg: string; text: string } {
-    const colors: Record<string, { bg: string; text: string }> = {
-      pending: { bg: '#fef3c7', text: '#92400e' },
-      in_progress: { bg: '#dbeafe', text: '#1e40af' },
-      submitted: { bg: '#dcfce7', text: '#166534' },
-      processing: { bg: '#f3e8ff', text: '#7c3aed' },
-      completed: { bg: '#dcfce7', text: '#166534' },
-      expired: { bg: '#fee2e2', text: '#991b1b' },
-    };
-    return colors[status] || { bg: '#f3f4f6', text: '#374151' };
   }
 
   getStatusLabel(status: string): string {
@@ -686,5 +646,17 @@ export class SubmissionDetailModalComponent implements OnInit {
       expired: 'Expirado',
     };
     return labels[status] || status;
+  }
+
+  getBadgeVariant(status: string): 'success' | 'neutral' | 'error' | 'primary' | 'warning' {
+    const variants: Record<string, 'success' | 'neutral' | 'error' | 'primary' | 'warning'> = {
+      pending: 'warning',
+      in_progress: 'primary',
+      submitted: 'success',
+      processing: 'primary',
+      completed: 'success',
+      expired: 'error',
+    };
+    return variants[status] ?? 'neutral';
   }
 }

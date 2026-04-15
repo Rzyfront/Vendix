@@ -11,9 +11,10 @@ export class MetadataFieldsService {
   private apiUrl = `${environment.apiUrl}/store/metadata-fields`;
   private valuesUrl = `${environment.apiUrl}/store/metadata-values`;
 
-  getFields(entityType?: string): Observable<MetadataField[]> {
+  getFields(entityType?: string, includeInactive = false): Observable<MetadataField[]> {
     let params = new HttpParams();
     if (entityType) params = params.set('entity_type', entityType);
+    if (includeInactive) params = params.set('include_inactive', 'true');
     return this.http.get<any>(this.apiUrl, { params }).pipe(map(r => r.data));
   }
 

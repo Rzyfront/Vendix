@@ -11,9 +11,9 @@
       [placeholder]="placeholder"
       [(ngModel)]="inputValue"
       (keyup.enter)="onConfirm()"
-      type="number"
-      step="0.01"
-      min="0"
+      [type]="inputType"
+      [step]="inputType === 'number' ? '0.01' : undefined"
+      [min]="inputType === 'number' ? '0' : undefined"
     ></app-input>
   </div>
   <div slot="footer" class="modal-footer flex justify-end gap-2 md:gap-4">

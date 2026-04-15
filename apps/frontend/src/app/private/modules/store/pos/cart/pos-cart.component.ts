@@ -613,6 +613,7 @@ export class PosCartComponent implements OnInit, OnDestroy {
           defaultValue: item.weight?.toString() || '1.0',
           confirmText: 'Actualizar',
           cancelText: 'Cancelar',
+          inputType: 'number',
         },
         { size: 'sm' }
       );

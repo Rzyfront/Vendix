@@ -1524,6 +1524,7 @@ export const ErrorCodes = {
   META_CREATE_001: { code: 'META_CREATE_001', httpStatus: 400, devMessage: 'Error creating metadata field' },
   META_DUP_001: { code: 'META_DUP_001', httpStatus: 409, devMessage: 'Duplicate metadata field key' },
   META_VALIDATE_001: { code: 'META_VALIDATE_001', httpStatus: 400, devMessage: 'Invalid metadata value' },
+  META_DEL_001: { code: 'META_DEL_001', httpStatus: 409, devMessage: 'Metadata field is used in a template' },
 
   // Data Collection
   DCOL_FIND_001: { code: 'DCOL_FIND_001', httpStatus: 404, devMessage: 'Data collection template not found' },
@@ -1531,6 +1532,7 @@ export const ErrorCodes = {
   DCOL_TOKEN_001: { code: 'DCOL_TOKEN_001', httpStatus: 404, devMessage: 'Invalid or expired token' },
   DCOL_TOKEN_002: { code: 'DCOL_TOKEN_002', httpStatus: 400, devMessage: 'Submission already completed' },
   DCOL_CREATE_001: { code: 'DCOL_CREATE_001', httpStatus: 400, devMessage: 'Error creating submission' },
+  DCOL_DELETE_001: { code: 'DCOL_DELETE_001', httpStatus: 400, devMessage: 'Cannot delete template with existing submissions' },
 
   // Customer History
   CUST_HISTORY_001: { code: 'CUST_HISTORY_001', httpStatus: 404, devMessage: 'Customer history not found' },

@@ -275,6 +275,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   META_CREATE_001: 'Error al crear el campo de metadata.',
   META_DUP_001: 'Ya existe un campo con esa clave para este tipo de entidad.',
   META_VALIDATE_001: 'El valor de metadata no es valido.',
+  META_DEL_001: 'Este campo está siendo usado en una plantilla. Elimínalo de la plantilla primero.',
 
   // Data Collection
   DCOL_FIND_001: 'Plantilla de recoleccion no encontrada.',
@@ -282,6 +283,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DCOL_TOKEN_001: 'El enlace del formulario es invalido o ha expirado.',
   DCOL_TOKEN_002: 'Este formulario ya fue completado.',
   DCOL_CREATE_001: 'Error al crear el formulario.',
+  DCOL_DELETE_001: 'No se puede eliminar una plantilla que tiene formularios enviados.',
 
   // Customer History
   CUST_HISTORY_001: 'Historial del cliente no encontrado.',

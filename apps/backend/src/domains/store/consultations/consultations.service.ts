@@ -8,6 +8,8 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { ReservationsService } from '../reservations/reservations.service';
 import { SubmissionsService } from '../data-collection/submissions.service';
+import { MetadataValuesService } from '../metadata/metadata-values.service';
+import { resolveEntityId, EntityContext } from '../data-collection/utils/entity-resolver.util';
 
 @Injectable()
 export class ConsultationsService {
@@ -17,6 +19,7 @@ export class ConsultationsService {
     private readonly prisma: StorePrismaService,
     private readonly reservationsService: ReservationsService,
     private readonly submissionsService: SubmissionsService,
+    private readonly metadataValues: MetadataValuesService,
   ) {}
 
   /**
@@ -125,7 +128,7 @@ export class ConsultationsService {
     const submission = await this.submissionsService.getSubmissionByBooking(bookingId);
 
     // Load the consultation template (provider's template) separately from product
-    let consultationTemplate = null;
+    let consultationTemplate: any = null;
     if ((booking.product as any).consultation_template_id) {
       consultationTemplate = await this.prisma.data_collection_templates.findUnique({
         where: { id: (booking.product as any).consultation_template_id },
@@ -166,6 +169,37 @@ export class ConsultationsService {
       where: { booking_id: bookingId },
       orderBy: { created_at: 'asc' },
     });
+
+    // Load existing consultation responses from metadata_values
+    let consultationResponses: any[] = [];
+    if (consultationTemplate) {
+      // Collect all field IDs from the consultation template
+      const fieldIds = new Set<number>();
+      const collectFields = (sections: any[]) => {
+        for (const s of sections || []) {
+          for (const item of s.items || []) {
+            fieldIds.add(item.metadata_field_id);
+          }
+          collectFields(s.child_sections || []);
+        }
+      };
+      collectFields(consultationTemplate.sections || []);
+      for (const tab of (consultationTemplate as any).tabs || []) {
+        collectFields(tab.sections || []);
+      }
+
+      // Load values from all entity scopes
+      const customerValues = booking.customer_id
+        ? await this.metadataValues.getValues('customer', booking.customer_id)
+        : [];
+      const bookingValues = await this.metadataValues.getValues('booking', bookingId);
+      const orderValues = booking.order_id
+        ? await this.metadataValues.getValues('order', booking.order_id)
+        : [];
+
+      const allValues = [...customerValues, ...bookingValues, ...orderValues];
+      consultationResponses = allValues.filter((v: any) => fieldIds.has(v.field_id));
+    }
 
     // Load customer history
     const customerHistory = await this.getCustomerHistory(
@@ -211,6 +245,7 @@ export class ConsultationsService {
             responses: submission.responses ?? [],
           }
         : null,
+      consultation_responses: consultationResponses,
       consultation_notes: consultationNotes,
       customer_history: customerHistory,
     };
@@ -284,28 +319,58 @@ export class ConsultationsService {
       value_json?: any;
     }[],
   ) {
-    // Load or create submission for this booking
-    let submission = await this.submissionsService.getSubmissionByBooking(bookingId);
+    // Load booking to get entity context
+    const booking = await this.prisma.bookings.findFirst({
+      where: { id: bookingId },
+      include: {
+        product: { select: { consultation_template_id: true } },
+      },
+    });
 
-    if (!submission) {
-      // Load booking to find the product's consultation template
-      const booking = await this.prisma.bookings.findFirst({
-        where: { id: bookingId },
-        include: {
-          product: { select: { consultation_template_id: true } },
-        },
+    if (!booking) {
+      throw new NotFoundException('Reserva no encontrada');
+    }
+
+    const entityCtx: EntityContext = {
+      customer_id: booking.customer_id,
+      booking_id: bookingId,
+      order_id: booking.order_id ?? null,
+    };
+
+    // Group responses by entity_type and write to metadata_values
+    const byEntity = new Map<string, { entityType: string; entityId: number; values: any[] }>();
+
+    for (const resp of responses) {
+      const field = await this.prisma.entity_metadata_fields.findUnique({
+        where: { id: resp.field_id },
+        select: { id: true, entity_type: true },
       });
+      if (!field) continue;
 
-      if (!booking) {
-        throw new NotFoundException('Reserva no encontrada');
+      const entityId = resolveEntityId(field.entity_type, entityCtx);
+      if (!entityId) continue;
+
+      const key = `${field.entity_type}:${entityId}`;
+      if (!byEntity.has(key)) {
+        byEntity.set(key, { entityType: field.entity_type, entityId, values: [] });
       }
+      byEntity.get(key)!.values.push({
+        field_id: resp.field_id,
+        value_text: resp.value_text,
+        value_number: resp.value_number,
+        value_date: resp.value_date,
+        value_bool: resp.value_bool,
+        value_json: resp.value_json,
+      });
+    }
 
-      if (!booking.product?.consultation_template_id) {
-        throw new BadRequestException(
-          'El servicio no tiene una plantilla de consulta configurada',
-        );
-      }
+    for (const [, group] of byEntity) {
+      await this.metadataValues.setValues(group.entityType, group.entityId, group.values);
+    }
 
+    // Ensure a submission exists for tracking (but don't write responses to it)
+    let submission = await this.submissionsService.getSubmissionByBooking(bookingId);
+    if (!submission && booking.product?.consultation_template_id) {
       submission = await this.submissionsService.createSubmission({
         template_id: booking.product.consultation_template_id,
         booking_id: bookingId,
@@ -313,36 +378,7 @@ export class ConsultationsService {
       });
     }
 
-    // Upsert responses
-    for (const resp of responses) {
-      await this.prisma.withoutScope().data_collection_responses.upsert({
-        where: {
-          submission_id_field_id: {
-            submission_id: submission.id,
-            field_id: resp.field_id,
-          },
-        },
-        create: {
-          submission_id: submission.id,
-          field_id: resp.field_id,
-          value_text: resp.value_text,
-          value_number: resp.value_number,
-          value_date: resp.value_date ? new Date(resp.value_date) : undefined,
-          value_bool: resp.value_bool,
-          value_json: resp.value_json ?? undefined,
-        },
-        update: {
-          value_text: resp.value_text,
-          value_number: resp.value_number,
-          value_date: resp.value_date ? new Date(resp.value_date) : undefined,
-          value_bool: resp.value_bool,
-          value_json: resp.value_json ?? undefined,
-          updated_at: new Date(),
-        },
-      });
-    }
-
-    return { success: true, submission_id: submission.id, responses_saved: responses.length };
+    return { success: true, submission_id: submission?.id, responses_saved: responses.length };
   }
 
   /**
