@@ -92,7 +92,7 @@
                   <span class="service-name">{{ service.name }}</span>
                   @if (selectedService()?.id === service.id) {
                     <div class="selected-badge">
-                      <app-icon name="circle-check" [size]="16"></app-icon>
+                      <app-icon name="check-circle" [size]="16"></app-icon>
                     </div>
                   }
                 </div>
@@ -139,7 +139,7 @@
           <div class="form-section">
             <div class="section-header">
               <div class="section-icon-badge channel-badge-icon">
-                <app-icon name="radio" [size]="14"></app-icon>
+                <app-icon name="circle" [size]="14"></app-icon>
               </div>
               <span class="section-title"><span class="title-text">Canal</span></span>
             </div>
@@ -416,7 +416,7 @@
         <!-- Channel -->
         <div class="confirm-section">
           <div class="confirm-label">
-            <app-icon name="radio" [size]="14"></app-icon>
+            <app-icon name="circle" [size]="14"></app-icon>
             Canal
           </div>
           <div class="confirm-value">

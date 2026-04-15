@@ -7,43 +7,51 @@
         <div class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0">
           <app-icon name="calendar-check" [size]="20" class="text-[var(--color-primary)]"></app-icon>
         </div>
-        <div class="min-w-0">
-          <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">Reservas</h1>
-          <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">Gestiona las reservas y citas de tu negocio</p>
-        </div>
+        <app-tooltip content="Gestiona las reservas y citas de tus clientes" position="bottom" size="sm">
+          <div class="min-w-0">
+            <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">Reservas</h1>
+            <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">Gestiona las reservas y citas de tu negocio</p>
+          </div>
+        </app-tooltip>
       </div>
 
       <!-- Right: View Toggle + New Button -->
       <div class="flex items-center gap-2 md:gap-3 shrink-0">
         <!-- View Toggle -->
         <div class="view-toggle">
-          <button
-            type="button"
-            class="toggle-btn"
-            [class.active]="activeView === 'calendar'"
-            (click)="activeView = 'calendar'">
-            <app-icon name="calendar" [size]="14"></app-icon>
-            <span class="hidden sm:inline">Calendario</span>
-          </button>
-          <button
-            type="button"
-            class="toggle-btn"
-            [class.active]="activeView === 'list'"
-            (click)="activeView = 'list'">
-            <app-icon name="list" [size]="14"></app-icon>
-            <span class="hidden sm:inline">Lista</span>
-          </button>
+          <app-tooltip content="Vista de calendario" position="bottom" size="sm">
+            <button
+              type="button"
+              class="toggle-btn"
+              [class.active]="activeView === 'calendar'"
+              (click)="activeView = 'calendar'">
+              <app-icon name="calendar" [size]="14"></app-icon>
+              <span class="hidden sm:inline">Calendario</span>
+            </button>
+          </app-tooltip>
+          <app-tooltip content="Vista de lista" position="bottom" size="sm">
+            <button
+              type="button"
+              class="toggle-btn"
+              [class.active]="activeView === 'list'"
+              (click)="activeView = 'list'">
+              <app-icon name="list" [size]="14"></app-icon>
+              <span class="hidden sm:inline">Lista</span>
+            </button>
+          </app-tooltip>
         </div>
 
         <!-- New Reservation Button -->
-        <button
-          type="button"
-          (click)="onCreateNew()"
-          class="flex items-center gap-1.5 px-3 md:px-4 py-2 rounded-lg font-bold text-xs md:text-sm shadow-sm active:scale-95 transition-all min-h-[36px]"
-          style="background: var(--color-primary); color: var(--color-text-on-primary)">
-          <app-icon name="plus" [size]="14"></app-icon>
-          <span class="hidden sm:inline">Nueva Reserva</span>
-        </button>
+        <app-tooltip content="Crear una nueva reserva para un cliente" position="bottom" size="sm">
+          <button
+            type="button"
+            (click)="onCreateNew()"
+            class="flex items-center gap-1.5 px-3 md:px-4 py-2 rounded-lg font-bold text-xs md:text-sm shadow-sm active:scale-95 transition-all min-h-[36px]"
+            style="background: var(--color-primary); color: var(--color-text-on-primary)">
+            <app-icon name="plus" [size]="14"></app-icon>
+            <span class="hidden sm:inline">Nueva Reserva</span>
+          </button>
+        </app-tooltip>
       </div>
     </div>
   </div>
@@ -55,8 +63,8 @@
       [value]="stats?.today_count || 0"
       smallText="Reservas programadas hoy"
       iconName="calendar"
-      iconBgColor="bg-indigo-100"
-      iconColor="text-indigo-600"
+      iconBgColor="bg-blue-100"
+      iconColor="text-blue-600"
     ></app-stats>
 
     <app-stats
@@ -146,6 +154,7 @@
           (complete)="onComplete($event)"
           (noShow)="onNoShow($event)"
           (reschedule)="onReschedule($event)"
+          (attendConsultation)="onAttendConsultation($event)"
         ></app-reservation-list>
       }
     </div>

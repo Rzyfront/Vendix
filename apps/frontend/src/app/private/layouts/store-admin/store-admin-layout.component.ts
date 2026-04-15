@@ -257,6 +257,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy, AfterViewIn
           icon: 'circle',
           route: '/admin/customers/reviews',
         },
+        {
+          label: 'Recolección de Datos',
+          icon: 'circle',
+          route: '/admin/data-collection',
+        },
       ],
     },
     {

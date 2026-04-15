@@ -17,6 +17,7 @@ import {
 } from './dto';
 import { AvailabilityService } from './availability.service';
 import { OrdersService } from '../orders/orders.service';
+import { S3Service } from '@common/services/s3.service';
 
 @Injectable()
 export class ReservationsService {
@@ -26,6 +27,7 @@ export class ReservationsService {
     private readonly prisma: StorePrismaService,
     private readonly availabilityService: AvailabilityService,
     private readonly ordersService: OrdersService,
+    private readonly s3Service: S3Service,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -55,6 +57,9 @@ export class ReservationsService {
         name: true,
         service_duration_minutes: true,
         base_price: true,
+        is_consultation: true,
+        consultation_template_id: true,
+        preconsultation_template_id: true,
         product_images: {
           where: { is_main: true },
           select: { image_url: true },
@@ -80,18 +85,27 @@ export class ReservationsService {
 
   /**
    * Normaliza un booking: extrae image_url de product_images al nivel de product
+   * y firma la URL de S3 para que sea accesible desde el frontend
    */
-  private mapBooking(booking: any) {
+  private async mapBooking(booking: any) {
     if (booking?.product?.product_images) {
       const mainImage = booking.product.product_images[0];
       booking.product.image_url = mainImage?.image_url || null;
       delete booking.product.product_images;
     }
+    // Sign the product image URL if it's an S3 key
+    if (booking?.product?.image_url) {
+      booking.product.image_url = await this.s3Service.signUrl(booking.product.image_url);
+    }
+    // Sign the provider avatar URL if it's an S3 key
+    if (booking?.provider?.avatar_url) {
+      booking.provider.avatar_url = await this.s3Service.signUrl(booking.provider.avatar_url);
+    }
     return booking;
   }
 
-  private mapBookings(bookings: any[]) {
-    return bookings.map((b) => this.mapBooking(b));
+  private async mapBookings(bookings: any[]) {
+    return Promise.all(bookings.map((b) => this.mapBooking(b)));
   }
 
   /**
@@ -246,7 +260,7 @@ export class ReservationsService {
           },
           include: this.BOOKING_INCLUDE,
         });
-        return this.mapBooking(created);
+        return await this.mapBooking(created);
       },
       { isolationLevel: 'Serializable' },
     );
@@ -377,7 +391,7 @@ export class ReservationsService {
       include: this.BOOKING_INCLUDE,
     });
 
-    return this.mapBooking(booking);
+    return await this.mapBooking(booking);
   }
 
   async confirmHold(id: number) {
@@ -390,7 +404,7 @@ export class ReservationsService {
       );
     }
 
-    const updated = this.mapBooking(
+    const updated = await this.mapBooking(
       await this.prisma.bookings.update({
         where: { id },
         data: {
@@ -443,11 +457,11 @@ export class ReservationsService {
       }),
     };
 
-    const orderBy: any = {};
+    let orderBy: any;
     if (sort_by) {
-      orderBy[sort_by] = sort_order === 'desc' ? 'desc' : 'asc';
+      orderBy = { [sort_by]: sort_order === 'desc' ? 'desc' : 'asc' };
     } else {
-      orderBy.date = 'asc';
+      orderBy = [{ date: 'asc' }, { start_time: 'asc' }];
     }
 
     const [data, total] = await Promise.all([
@@ -462,7 +476,7 @@ export class ReservationsService {
     ]);
 
     return {
-      data: this.mapBookings(data),
+      data: await this.mapBookings(data),
       pagination: {
         total,
         page,
@@ -485,7 +499,7 @@ export class ReservationsService {
       throw new NotFoundException('Reserva no encontrada');
     }
 
-    return this.mapBooking(booking);
+    return await this.mapBooking(booking);
   }
 
   /**
@@ -497,6 +511,8 @@ export class ReservationsService {
       store_id: booking.store_id,
       booking_id: booking.id,
       booking_number: booking.booking_number,
+      product_id: booking.product_id,
+      customer_id: booking.customer_id,
       customer_name:
         `${booking.customer?.first_name ?? ''} ${booking.customer?.last_name ?? ''}`.trim() ||
         'Cliente',
@@ -563,6 +579,8 @@ export class ReservationsService {
       store_id: booking.store_id,
       booking_id: booking.id,
       booking_number: booking.booking_number,
+      product_id: booking.product_id,
+      customer_id: booking.customer_id,
       customer_name:
         `${booking.customer?.first_name ?? ''} ${booking.customer?.last_name ?? ''}`.trim() ||
         'Cliente',
@@ -639,7 +657,7 @@ export class ReservationsService {
       booking.id,
     );
 
-    const updated = this.mapBooking(
+    const updated = await this.mapBooking(
       await this.prisma.bookings.update({
         where: { id },
         data: {
@@ -753,7 +771,7 @@ export class ReservationsService {
       orderBy: { start_time: 'asc' },
       include: this.BOOKING_INCLUDE,
     });
-    return this.mapBookings(bookings);
+    return await this.mapBookings(bookings);
   }
 
   /**
@@ -770,7 +788,7 @@ export class ReservationsService {
     if (query.product_id) where.product_id = query.product_id;
     if (query.status) where.status = query.status;
 
-    const bookings = this.mapBookings(
+    const bookings = await this.mapBookings(
       await this.prisma.bookings.findMany({
         where,
         include: this.BOOKING_INCLUDE,
@@ -792,6 +810,35 @@ export class ReservationsService {
     return grouped;
   }
 
+  async checkIn(id: number, source: 'customer' | 'staff') {
+    const booking = await this.prisma.bookings.findUnique({
+      where: { id },
+      include: { customer: true, product: true, provider: true },
+    });
+
+    if (!booking) throw new NotFoundException('Booking not found');
+    if (booking.status !== 'confirmed') throw new BadRequestException('Solo bookings confirmados pueden hacer check-in');
+    if (booking.checked_in_at) throw new BadRequestException('Check-in ya registrado');
+
+    const updated = await this.prisma.bookings.update({
+      where: { id },
+      data: { checked_in_at: new Date(), updated_at: new Date() },
+    });
+
+    this.eventEmitter.emit('booking.checked_in', {
+      store_id: updated.store_id,
+      booking_id: updated.id,
+      booking_number: booking.booking_number,
+      customer_name: `${booking.customer?.first_name} ${booking.customer?.last_name}`,
+      service_name: booking.product?.name,
+      provider_id: booking.provider_id,
+      source,
+    });
+
+    this.logger.log(`Check-in registered for booking ${id} by ${source}`);
+    return updated;
+  }
+
   // --- Helpers privados ---
 
   /**
@@ -807,7 +854,7 @@ export class ReservationsService {
       );
     }
 
-    return this.mapBooking(
+    return await this.mapBooking(
       await this.prisma.bookings.update({
         where: { id },
         data: {

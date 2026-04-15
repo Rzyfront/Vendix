@@ -209,6 +209,27 @@ export class ProductsService {
         // Si brand_id es nulo pero la tabla lo requiere, poner un valor por defecto o error
       }
 
+      // Consultation validation
+      if (createProductDto.is_consultation) {
+        if (createProductDto.product_type !== ProductType.SERVICE) {
+          throw new BadRequestException('Solo los servicios pueden ser consultas');
+        }
+        if (!createProductDto.requires_booking) {
+          throw new BadRequestException('Las consultas requieren reserva previa');
+        }
+        if (!createProductDto.consultation_template_id) {
+          throw new BadRequestException('Las consultas requieren una plantilla de consulta');
+        }
+        if (createProductDto.send_preconsultation && !createProductDto.preconsultation_template_id) {
+          throw new BadRequestException('Si se envía preconsulta, se requiere una plantilla de preconsulta');
+        }
+      }
+      if (createProductDto.is_consultation === false) {
+        createProductDto.send_preconsultation = false;
+        createProductDto.consultation_template_id = undefined;
+        createProductDto.preconsultation_template_id = undefined;
+      }
+
       const {
         store_id: dto_store_id,
         category_ids,
@@ -1025,6 +1046,11 @@ export class ProductsService {
       service_instructions: product.service_instructions,
       booking_mode: product.booking_mode,
       buffer_minutes: product.buffer_minutes,
+      // Consultation fields
+      is_consultation: product.is_consultation,
+      send_preconsultation: product.send_preconsultation,
+      consultation_template_id: product.consultation_template_id,
+      preconsultation_template_id: product.preconsultation_template_id,
       image_url: await this.signProductImage(product),
       brand: product.brands,
       categories:
@@ -1147,6 +1173,32 @@ export class ProductsService {
             updateProductDto.stock_by_location.length > 0))
       ) {
         throw new VendixHttpException(ErrorCodes.PROD_PERM_001);
+      }
+
+      // Consultation validation (only when explicitly setting is_consultation)
+      if (updateProductDto.is_consultation === true) {
+        const effectiveProductType = updateProductDto.product_type ?? (existingProduct as any).product_type;
+        if (effectiveProductType !== ProductType.SERVICE) {
+          throw new BadRequestException('Solo los servicios pueden ser consultas');
+        }
+        const effectiveRequiresBooking = updateProductDto.requires_booking ?? (existingProduct as any).requires_booking;
+        if (!effectiveRequiresBooking) {
+          throw new BadRequestException('Las consultas requieren reserva previa');
+        }
+        const effectiveTemplateId = updateProductDto.consultation_template_id ?? (existingProduct as any).consultation_template_id;
+        if (!effectiveTemplateId) {
+          throw new BadRequestException('Las consultas requieren una plantilla de consulta');
+        }
+        const effectiveSendPreconsultation = updateProductDto.send_preconsultation ?? (existingProduct as any).send_preconsultation;
+        const effectivePreconsultationTemplateId = updateProductDto.preconsultation_template_id ?? (existingProduct as any).preconsultation_template_id;
+        if (effectiveSendPreconsultation && !effectivePreconsultationTemplateId) {
+          throw new BadRequestException('Si se envía preconsulta, se requiere una plantilla de preconsulta');
+        }
+      }
+      if (updateProductDto.is_consultation === false) {
+        updateProductDto.send_preconsultation = false;
+        updateProductDto.consultation_template_id = undefined;
+        updateProductDto.preconsultation_template_id = undefined;
       }
 
       const {

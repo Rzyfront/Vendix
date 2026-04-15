@@ -118,7 +118,7 @@
                   <button *ngIf="isActionVisible(action, item)" [class]="getActionClasses(action, item)"
                     [disabled]="isActionDisabled(action, item)" (click)="
                       executeAction(action, item); $event.stopPropagation()
-                    " [attr.title]="getActionLabel(action, item)">
+                    " [attr.title]="getActionTooltip(action, item)">
                     <!-- Icon if provided -->
                     <app-icon *ngIf="getActionIcon(action, item)" [name]="getActionIcon(action, item)"
                       [size]="12"></app-icon>

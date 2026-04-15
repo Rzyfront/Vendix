@@ -234,6 +234,9 @@ export interface StoreSettings {
   // Module flows - Master toggles + per-module flow settings
   module_flows?: ModuleFlowsSettings;
 
+  // Reservations - Booking reminders, confirmation, and check-in
+  reservations?: ReservationsSettings;
+
   // Secciones existentes
   general: GeneralSettings;
   inventory: InventorySettings;
@@ -343,4 +346,34 @@ export interface ReceiptsSettings {
 export interface BusinessHours {
   open: string;
   close: string;
+}
+
+// ============================================================================
+// RESERVATIONS - Booking reminders, confirmation, and check-in settings
+// ============================================================================
+export interface BookingReminderRule {
+  time_before: string;       // '30m' | '1h' | '2h' | '24h' | '48h' | '1w'
+  channels: ('email' | 'push' | 'whatsapp' | 'in_app')[];
+  enabled: boolean;
+}
+
+export interface BookingConfirmationSettings {
+  enabled: boolean;
+  send_at: string;
+  channels: ('email' | 'push' | 'whatsapp')[];
+  auto_cancel_if_unconfirmed: boolean;
+  cancel_after: string;
+}
+
+export interface BookingCheckInSettings {
+  enabled: boolean;
+  allow_customer_check_in: boolean;
+  allow_staff_check_in: boolean;
+  notify_provider_on_check_in: boolean;
+}
+
+export interface ReservationsSettings {
+  reminders: BookingReminderRule[];
+  confirmation: BookingConfirmationSettings;
+  check_in: BookingCheckInSettings;
 }

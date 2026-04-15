@@ -2,7 +2,7 @@
 .accent-bar {
   height: 4px;
   border-radius: 2px;
-  margin: -4px -4px 16px -4px;
+  margin: 0 0 16px 0;
 }
 
 // ═══ Header ═══
@@ -16,7 +16,7 @@
 .header-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 .booking-number {
@@ -33,12 +33,12 @@
   font-weight: 600;
   letter-spacing: 0.02em;
 
-  &.status-pending { background: #fef3c7; color: #92400e; }
-  &.status-confirmed { background: #dbeafe; color: #1e40af; }
-  &.status-in-progress { background: #e0e7ff; color: #3730a3; }
-  &.status-completed { background: #d1fae5; color: #065f46; }
-  &.status-cancelled { background: #fee2e2; color: #991b1b; }
-  &.status-no-show { background: #f3f4f6; color: #4b5563; }
+  &.status-pending { background: var(--color-warning-bg, #fef3c7); color: var(--color-warning-text, #92400e); }
+  &.status-confirmed { background: var(--color-info-bg, #dbeafe); color: var(--color-info-text, #1e40af); }
+  &.status-in-progress { background: var(--color-primary-bg, #e0e7ff); color: var(--color-primary-text, #3730a3); }
+  &.status-completed { background: var(--color-success-bg, #d1fae5); color: var(--color-success-text, #065f46); }
+  &.status-cancelled { background: var(--color-error-bg, #fee2e2); color: var(--color-error-text, #991b1b); }
+  &.status-no-show { background: var(--color-neutral-bg, #f3f4f6); color: var(--color-neutral-text, #4b5563); }
 }
 
 .header-actions {
@@ -70,7 +70,7 @@
 .info-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 12px;
   margin-bottom: 14px;
 
   @media (max-width: 480px) {
@@ -80,7 +80,7 @@
 
 .info-card {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   padding: 10px 12px;
   background: var(--color-background);
   border-radius: 10px;
@@ -129,6 +129,9 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .info-value {
@@ -183,7 +186,7 @@
 .notes-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 12px;
   margin-bottom: 10px;
 
   @media (max-width: 480px) {
@@ -311,7 +314,7 @@
 
 // ═══ Reschedule Section ═══
 .reschedule-section {
-  margin-top: -4px;
+  margin-top: 0;
 }
 
 .reschedule-header {
@@ -486,25 +489,25 @@
   }
 
   &.success {
-    background: #10b981;
+    background: var(--color-success);
     color: white;
 
-    &:hover { background: #059669; }
+    &:hover { opacity: 0.9; }
   }
 
   &.danger-outline {
     background: transparent;
-    border: 1px solid #fecaca;
-    color: #dc2626;
+    border: 1px solid var(--color-error-light, #fecaca);
+    color: var(--color-error);
 
-    &:hover { background: #fef2f2; }
+    &:hover { background: var(--color-error-bg, #fef2f2); }
   }
 
   &.warning-outline {
     background: transparent;
-    border: 1px solid #fed7aa;
-    color: #c2410c;
+    border: 1px solid var(--color-warning-light, #fed7aa);
+    color: var(--color-warning);
 
-    &:hover { background: #fff7ed; }
+    &:hover { background: var(--color-warning-bg, #fff7ed); }
   }
 }

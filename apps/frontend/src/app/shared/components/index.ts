@@ -17,6 +17,7 @@ export { ToastContainerComponent } from './toast/toast-container.component';
 export { ToastService } from './toast/toast.service';
 export { DialogService } from './dialog/dialog.service';
 export { IconComponent } from './icon/icon.component';
+export { IconPickerComponent } from './icon-picker/icon-picker.component';
 export { InputsearchComponent } from './inputsearch/inputsearch.component';
 export { TableComponent } from './table/table.component';
 export { TooltipComponent } from './tooltip/tooltip.component';

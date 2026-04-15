@@ -6,45 +6,54 @@
 
   <div class="space-y-2">
     <!-- Walk-in -->
-    <button
-      type="button"
-      (click)="walkIn.emit()"
-      class="w-full min-h-[44px] flex items-center gap-3 px-3 py-2.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] hover:bg-[var(--color-surface-hover)] transition-colors text-left">
-      <div class="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
-        <app-icon name="user-plus" [size]="14" class="text-emerald-600"></app-icon>
-      </div>
-      <div>
-        <p class="text-sm font-semibold text-[var(--color-text-primary)]">Registrar sin cita</p>
-        <p class="text-xs text-[var(--color-text-secondary)]">Cliente sin reserva previa</p>
-      </div>
-    </button>
+    <app-tooltip content="Registrar un cliente que llega sin cita previa" position="top">
+      <button
+        type="button"
+        (click)="walkIn.emit()"
+        class="w-full min-h-[44px] flex items-center gap-3 px-3 py-2.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] hover:bg-[var(--color-surface-hover)] transition-colors text-left">
+        <div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+          style="background: color-mix(in srgb, var(--color-success) 12%, transparent); color: var(--color-success);">
+          <app-icon name="user-plus" [size]="14"></app-icon>
+        </div>
+        <div>
+          <p class="text-sm font-semibold text-[var(--color-text-primary)]">Registrar sin cita</p>
+          <p class="text-xs text-[var(--color-text-secondary)]">Cliente sin reserva previa</p>
+        </div>
+      </button>
+    </app-tooltip>
 
     <!-- Block schedule -->
-    <button
-      type="button"
-      (click)="blockSchedule.emit()"
-      class="w-full min-h-[44px] flex items-center gap-3 px-3 py-2.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] hover:bg-[var(--color-surface-hover)] transition-colors text-left">
-      <div class="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
-        <app-icon name="lock" [size]="14" class="text-amber-600"></app-icon>
-      </div>
-      <div>
-        <p class="text-sm font-semibold text-[var(--color-text-primary)]">Configuracion de horarios</p>
-        <p class="text-xs text-[var(--color-text-secondary)]">Proveedores, horarios y excepciones</p>
-      </div>
-    </button>
+    <app-tooltip content="Configurar horarios de atencion y bloqueos" position="top">
+      <button
+        type="button"
+        (click)="blockSchedule.emit()"
+        class="w-full min-h-[44px] flex items-center gap-3 px-3 py-2.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] hover:bg-[var(--color-surface-hover)] transition-colors text-left">
+        <div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+          style="background: color-mix(in srgb, var(--color-warning) 12%, transparent); color: var(--color-warning);">
+          <app-icon name="lock" [size]="14"></app-icon>
+        </div>
+        <div>
+          <p class="text-sm font-semibold text-[var(--color-text-primary)]">Configuracion de horarios</p>
+          <p class="text-xs text-[var(--color-text-secondary)]">Proveedores, horarios y excepciones</p>
+        </div>
+      </button>
+    </app-tooltip>
 
     <!-- Export -->
-    <button
-      type="button"
-      (click)="exportReport.emit()"
-      class="w-full min-h-[44px] flex items-center gap-3 px-3 py-2.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] hover:bg-[var(--color-surface-hover)] transition-colors text-left">
-      <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-        <app-icon name="download" [size]="14" class="text-blue-600"></app-icon>
-      </div>
-      <div>
-        <p class="text-sm font-semibold text-[var(--color-text-primary)]">Exportar reporte</p>
-        <p class="text-xs text-[var(--color-text-secondary)]">Descargar reservas</p>
-      </div>
-    </button>
+    <app-tooltip content="Exportar un reporte de las reservas" position="top">
+      <button
+        type="button"
+        (click)="exportReport.emit()"
+        class="w-full min-h-[44px] flex items-center gap-3 px-3 py-2.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] hover:bg-[var(--color-surface-hover)] transition-colors text-left">
+        <div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+          style="background: color-mix(in srgb, var(--color-info) 12%, transparent); color: var(--color-info);">
+          <app-icon name="download" [size]="14"></app-icon>
+        </div>
+        <div>
+          <p class="text-sm font-semibold text-[var(--color-text-primary)]">Exportar reporte</p>
+          <p class="text-xs text-[var(--color-text-secondary)]">Descargar reservas</p>
+        </div>
+      </button>
+    </app-tooltip>
   </div>
 </app-card>

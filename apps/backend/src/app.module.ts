@@ -35,6 +35,7 @@ import { EncryptionModule } from './common/services/encryption.module';
 import { RedisModule } from './common/redis/redis.module';
 import { QueueModule } from './common/queue/queue.module';
 import { VendixCacheModule } from './common/cache/cache.module';
+import { MessagingModule } from './messaging/messaging.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { VendixCacheModule } from './common/cache/cache.module';
     AIEngineModule,
     EncryptionModule,
     PerformanceModule,
+    MessagingModule,
   ],
   controllers: [AppController],
   providers: [
