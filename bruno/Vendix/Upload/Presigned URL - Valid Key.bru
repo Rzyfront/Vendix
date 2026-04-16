@@ -1,0 +1,18 @@
+meta {
+  name: Presigned URL - Valid Key
+  type: http
+  seq: 1
+}
+
+get {
+  url: http://{{url}}/upload/presigned-url?key=organizations/tech-solutions-2/products/img.webp
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("valid key returns 200", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property("url");
+  });
+}

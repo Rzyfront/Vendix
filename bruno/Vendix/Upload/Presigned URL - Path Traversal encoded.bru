@@ -1,0 +1,17 @@
+meta {
+  name: Presigned URL - Path Traversal encoded %2e%2e
+  type: http
+  seq: 3
+}
+
+get {
+  url: http://{{url}}/upload/presigned-url?key=organizations/tech-solutions-2/%2e%2e/other/file.txt
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("encoded path traversal is rejected", function() {
+    expect(res.status).to.equal(400);
+  });
+}
