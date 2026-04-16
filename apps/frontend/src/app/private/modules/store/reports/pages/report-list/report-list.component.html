@@ -1,12 +1,10 @@
-<div class="reports-page">
-  <!-- Header -->
-  <div class="page-header">
-    <div class="header-text">
-      <h1 class="page-title">Centro de Reportes</h1>
-      <p class="page-subtitle">Genera y exporta reportes de tu negocio</p>
-    </div>
-  </div>
+<app-sticky-header
+  title="Centro de Reportes"
+  subtitle="Genera y exporta reportes de tu negocio"
+  icon="file-bar-chart"
+/>
 
+<div class="reports-page">
   <!-- Search + Chips -->
   <div class="filters-section">
     <vendix-report-search (searchChange)="onSearchChange($event)" />

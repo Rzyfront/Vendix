@@ -29,6 +29,7 @@ import * as SalesActions from '../state/sales-summary.actions';
 import * as SalesSelectors from '../state/sales-summary.selectors';
 
 import { EChartsOption } from 'echarts';
+import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'vendix-sales-summary',
@@ -87,13 +88,13 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
       key: 'date_from',
       label: 'Desde',
       type: 'date',
-      defaultValue: this.getDefaultStartDate(),
+      defaultValue: getDefaultStartDate(),
     },
     {
       key: 'date_to',
       label: 'Hasta',
       type: 'date',
-      defaultValue: this.getDefaultEndDate(),
+      defaultValue: getDefaultEndDate(),
     },
     {
       key: 'granularity',
@@ -200,8 +201,8 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
     this.store.dispatch(
       SalesActions.setDateRange({
         dateRange: {
-          start_date: this.getDefaultStartDate(),
-          end_date: this.getDefaultEndDate(),
+          start_date: getDefaultStartDate(),
+          end_date: getDefaultEndDate(),
           preset: 'thisMonth',
         },
       }),
@@ -212,16 +213,6 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
 
   exportReport(): void {
     this.store.dispatch(SalesActions.exportSalesReport());
-  }
-
-  private getDefaultStartDate(): string {
-    const date = new Date();
-    date.setDate(1);
-    return date.toISOString().split('T')[0];
-  }
-
-  private getDefaultEndDate(): string {
-    return new Date().toISOString().split('T')[0];
   }
 
   getGrowthText(growth?: number): string {
@@ -242,7 +233,7 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
       style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
     const labels = trends.map((t) =>
-      this.formatPeriodLabel(t.period, granularity),
+      formatChartPeriod(t.period, granularity),
     );
     const revenues = trends.map((t) => t.revenue);
 
@@ -301,23 +292,4 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
     };
   }
 
-  private formatPeriodLabel(period: string, granularity: string): string {
-    if (granularity === 'year') return period;
-    if (granularity === 'month') {
-      const [year, month] = period.split('-');
-      const date = new Date(Number(year), Number(month) - 1);
-      return date.toLocaleDateString('es', { month: 'short', year: '2-digit' });
-    }
-    if (granularity === 'hour') {
-      const parts = period.split('T');
-      return parts[1] || period;
-    }
-    // day or week
-    try {
-      const date = new Date(period);
-      return date.toLocaleDateString('es', { day: '2-digit', month: 'short' });
-    } catch {
-      return period;
-    }
-  }
 }

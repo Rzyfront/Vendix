@@ -26,6 +26,7 @@ import {
   Archive,
   Shield,
   CheckCircle,
+  CircleCheck,
   Clock,
   UserX,
   MailCheck,
@@ -82,6 +83,7 @@ import {
   CircleAlert,
   Book,
   Calendar,
+  CalendarDays,
   ClipboardList,
   Cog,
   Download,
@@ -228,6 +230,18 @@ import {
   PiggyBank,
   MonitorCheck,
   Crown,
+  // Data Collection & Consultation icons
+  Brain,
+  LayoutTemplate,
+  Inbox,
+  Stethoscope,
+  // Additional icons
+  Radio,
+  // Data collection drag & settings icons
+  GripVertical,
+  Settings2,
+  // Data collection interaction icons
+  MousePointerClick,
 } from 'lucide-angular';
 
 /**
@@ -528,6 +542,23 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'piggy-bank': PiggyBank,
   'monitor-check': MonitorCheck,
   'crown': Crown,
+  // Data Collection & Consultation icons
+  'brain': Brain,
+  'layout-template': LayoutTemplate,
+  'inbox': Inbox,
+  'stethoscope': Stethoscope,
+
+  // Additional icon aliases
+  'calendar-days': CalendarDays,
+  'circle-check': CircleCheck,
+  'radio': Radio,
+
+  // Data collection drag & settings icons
+  'grip-vertical': GripVertical,
+  'settings-2': Settings2,
+
+  // Data collection interaction icons
+  'mouse-pointer-click': MousePointerClick,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

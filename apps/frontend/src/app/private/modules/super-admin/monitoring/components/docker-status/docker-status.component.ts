@@ -1,14 +1,16 @@
-import { Component, Input } from '@angular/core';
+import { Component, Input, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ProcessInfo } from '../../interfaces';
 import { formatBytes } from '../../../../../../core/utils/format.utils';
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 
 @Component({
   selector: 'app-process-info',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, CardComponent],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="rounded-xl overflow-hidden" style="background: var(--color-background); border: 1px solid var(--color-border);">
+    <app-card [padding]="false" overflow="hidden" customClasses="!overflow-hidden">
       <div class="px-4 py-3 flex items-center gap-2" style="border-bottom: 1px solid var(--color-border); background: linear-gradient(135deg, rgba(34,197,94,0.05) 0%, transparent 100%);">
         <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
         <h4 class="text-sm font-semibold" style="color: var(--color-text-primary);">Proceso Node.js</h4>
@@ -17,7 +19,7 @@ import { formatBytes } from '../../../../../../core/utils/format.utils';
 
       <div *ngIf="loading" class="p-6 animate-pulse">
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div *ngFor="let i of [1,2,3,4]" class="h-14 rounded-lg" style="background: var(--color-border); opacity: 0.3;"></div>
+          <div *ngFor="let i of [1,2,3,4]; trackBy: trackByIndex" class="h-14 rounded-lg" style="background: var(--color-border); opacity: 0.3;"></div>
         </div>
       </div>
 
@@ -56,12 +58,16 @@ import { formatBytes } from '../../../../../../core/utils/format.utils';
           </div>
         </div>
       </div>
-    </div>
+    </app-card>
   `,
 })
 export class ProcessInfoComponent {
   @Input() info: ProcessInfo | null = null;
   @Input() loading: boolean = false;
+
+  trackByIndex(index: number): number {
+    return index;
+  }
 
   get heapPercent(): number {
     if (!this.info) return 0;

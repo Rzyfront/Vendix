@@ -60,7 +60,7 @@ export class QuotationPrintService {
     };
 
     const validUntil = q.valid_until
-      ? new Date(q.valid_until).toLocaleDateString('es-CO')
+      ? new Date(q.valid_until).toLocaleDateString('es-CO', { timeZone: 'UTC' })
       : null;
     const createdAt = new Date(q.created_at).toLocaleDateString('es-CO');
 

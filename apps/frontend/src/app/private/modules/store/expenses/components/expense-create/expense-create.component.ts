@@ -21,6 +21,7 @@ import {
 } from '../../../../../../shared/components';
 import { ExpenseCategoryQuickCreateComponent } from '../expense-category-quick-create.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'vendix-expense-create',
@@ -349,7 +350,7 @@ export class ExpenseCreateComponent {
       })))
     );
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = toLocalDateString();
 
     this.expenseForm = this.fb.group({
       description: ['', [Validators.required, Validators.minLength(3)]],
@@ -483,7 +484,7 @@ export class ExpenseCreateComponent {
 
   private resetForm(): void {
     this.expenseForm.reset({
-      expense_date: new Date().toISOString().split('T')[0],
+      expense_date: toLocalDateString(),
     });
     this.receiptFile = null;
     this.dropzoneRef?.clear();

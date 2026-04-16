@@ -73,6 +73,7 @@ export class MenuFilterService {
     Clientes: 'customers',
     'Todos los Clientes': 'customers_all',
     Reseñas: 'customers_reviews',
+    'Recolección de Datos': 'customers_data_collection',
 
     // STORE_ADMIN - Marketing (padre + submódulos)
     Marketing: 'marketing',

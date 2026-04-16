@@ -13,6 +13,7 @@ import { BadgeComponent, BadgeVariant } from '../../../../../../shared/component
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { PaymentMethodsService } from '../../../settings/payments/services/payment-methods.service';
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { TableColumn, TableComponent } from '../../../../../../shared/components/table/table.component';
 
 @Component({
@@ -302,7 +303,7 @@ export class LayawayDetailPageComponent implements OnInit {
     next_date.setMonth(next_date.getMonth() + 1);
     this.modifiedInstallments.push({
       amount: 0,
-      due_date: next_date.toISOString().split('T')[0],
+      due_date: toLocalDateString(next_date),
     });
   }
 

@@ -27,6 +27,7 @@ export interface MetricQuery {
 export class CloudWatchService {
   private readonly logger = new Logger(CloudWatchService.name);
   private readonly client: CloudWatchClient;
+  private readonly CLOUDWATCH_TIMEOUT = 8_000;
   readonly ec2InstanceId: string;
   readonly rdsDbIdentifier: string;
 
@@ -57,6 +58,8 @@ export class CloudWatchService {
     period: number;
     stat?: string;
   }): Promise<MetricDataResult> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.CLOUDWATCH_TIMEOUT);
     try {
       const command = new GetMetricDataCommand({
         StartTime: params.startTime,
@@ -77,7 +80,7 @@ export class CloudWatchService {
         ],
       });
 
-      const response = await this.client.send(command);
+      const response = await this.client.send(command, { abortSignal: controller.signal });
       const result = response.MetricDataResults?.[0];
 
       return {
@@ -85,6 +88,10 @@ export class CloudWatchService {
         values: (result?.Values || []) as number[],
       };
     } catch (error) {
+      if (error.name === 'AbortError' || controller.signal.aborted) {
+        this.logger.warn(`CloudWatch getMetricData timed out after ${this.CLOUDWATCH_TIMEOUT}ms for ${params.metricName}`);
+        return { timestamps: [], values: [] };
+      }
       this.logger.error(
         `CloudWatch getMetricData failed: ${error.message}`,
         error.stack,
@@ -93,6 +100,8 @@ export class CloudWatchService {
         ErrorCodes.MON_CW_001,
         `CloudWatch query failed for ${params.metricName}: ${error.message}`,
       );
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
@@ -102,6 +111,8 @@ export class CloudWatchService {
     endTime: Date,
     period: number,
   ): Promise<Map<string, MetricDataResult>> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.CLOUDWATCH_TIMEOUT);
     try {
       const metricDataQueries: MetricDataQuery[] = queries.map((q) => ({
         Id: q.id,
@@ -122,7 +133,7 @@ export class CloudWatchService {
         MetricDataQueries: metricDataQueries,
       });
 
-      const response = await this.client.send(command);
+      const response = await this.client.send(command, { abortSignal: controller.signal });
       const resultMap = new Map<string, MetricDataResult>();
 
       for (const result of response.MetricDataResults || []) {
@@ -136,6 +147,10 @@ export class CloudWatchService {
 
       return resultMap;
     } catch (error) {
+      if (error.name === 'AbortError' || controller.signal.aborted) {
+        this.logger.warn(`CloudWatch getMultipleMetrics timed out after ${this.CLOUDWATCH_TIMEOUT}ms`);
+        return new Map();
+      }
       this.logger.error(
         `CloudWatch getMultipleMetrics failed: ${error.message}`,
         error.stack,
@@ -144,6 +159,8 @@ export class CloudWatchService {
         ErrorCodes.MON_CW_001,
         `CloudWatch batch query failed: ${error.message}`,
       );
+    } finally {
+      clearTimeout(timeout);
     }
   }
 }

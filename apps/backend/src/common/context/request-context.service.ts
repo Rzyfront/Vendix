@@ -6,6 +6,7 @@ export interface RequestContext {
   organization_id?: number;
   store_id?: number;
   roles?: string[];
+  permissions?: string[];
   is_super_admin: boolean;
   is_owner: boolean;
   email?: string;

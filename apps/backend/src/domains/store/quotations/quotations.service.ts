@@ -431,7 +431,7 @@ export class QuotationsService {
     const html = generateQuotationEmailHtml({
       quotation_number: quotation.quotation_number,
       customer_name: `${quotation.customer.first_name} ${quotation.customer.last_name}`,
-      valid_until: quotation.valid_until ? new Date(quotation.valid_until).toLocaleDateString('es-CO') : null,
+      valid_until: quotation.valid_until ? new Date(quotation.valid_until).toLocaleDateString('es-CO', { timeZone: 'UTC' }) : null,
       items: quotation.quotation_items.map((item: any) => ({
         product_name: item.product_name,
         variant_sku: item.variant_sku,

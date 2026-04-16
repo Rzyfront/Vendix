@@ -4,6 +4,13 @@ import { BehaviorSubject, Observable, of } from 'rxjs';
 import { map, tap, catchError } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 
+export interface AIStreamEvent {
+  type: 'text' | 'done' | 'error';
+  content?: string;
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+  error?: string;
+}
+
 export interface CashRegister {
   id: number;
   name: string;
@@ -29,6 +36,7 @@ export interface CashRegisterSession {
   difference?: number;
   closing_notes?: string;
   summary?: any;
+  ai_summary?: string;
   register?: CashRegister;
   opened_by_user?: { id: number; first_name: string; last_name: string };
   closed_by_user?: { id: number; first_name: string; last_name: string };
@@ -209,8 +217,55 @@ export class PosCashRegisterService {
     return this.http.delete<any>(`${this.baseUrl}/${id}`).pipe(map((res) => res.data));
   }
 
+  /** Stream AI closing summary via SSE */
+  streamClosingSummary(sessionId: number): Observable<AIStreamEvent> {
+    return new Observable<AIStreamEvent>((subscriber) => {
+      const token = this.getAccessToken();
+      const params = new URLSearchParams();
+      if (token) params.set('token', token);
+
+      const url = `${this.baseUrl}/sessions/${sessionId}/ai-summary?${params.toString()}`;
+      const eventSource = new EventSource(url);
+
+      eventSource.addEventListener('ai-chunk', (event: MessageEvent) => {
+        try {
+          const data: AIStreamEvent = JSON.parse(event.data);
+          subscriber.next(data);
+          if (data.type === 'done' || data.type === 'error') {
+            eventSource.close();
+            subscriber.complete();
+          }
+        } catch {
+          subscriber.next({ type: 'error', error: 'Failed to parse stream data' });
+          eventSource.close();
+          subscriber.complete();
+        }
+      });
+
+      eventSource.onerror = () => {
+        subscriber.next({ type: 'error', error: 'Stream connection lost' });
+        eventSource.close();
+        subscriber.complete();
+      };
+
+      return () => eventSource.close();
+    });
+  }
+
   /** Clear cached session (on logout or feature disable) */
   clearSession(): void {
     this.activeSession$.next(null);
+  }
+
+  /** Helper: get access token from vendix_auth_state */
+  private getAccessToken(): string | null {
+    try {
+      const authState = localStorage.getItem('vendix_auth_state');
+      if (!authState) return null;
+      const parsed = JSON.parse(authState);
+      return parsed.tokens?.access_token || null;
+    } catch {
+      return null;
+    }
   }
 }

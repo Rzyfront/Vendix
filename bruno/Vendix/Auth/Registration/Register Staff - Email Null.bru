@@ -1,0 +1,31 @@
+meta {
+  name: Register Staff - Email Null
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{url}}/auth/register-staff
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "email": null,
+    "password": "Password123!",
+    "first_name": "Staff",
+    "last_name": "User",
+    "role": "employee"
+  }
+}
+
+tests {
+  test("Debe fallar con email null", function() {
+    expect(res.status).to.equal(400);
+  });
+  
+  test("Error debe mencionar email o not empty", function() {
+    expect(res.body.message).to.include.any(["email", "not empty", "Email"]);
+  });
+}

@@ -4,7 +4,7 @@ import { Store } from '@ngrx/store';
 import { of } from 'rxjs';
 import { map, mergeMap, catchError, withLatestFrom, tap } from 'rxjs/operators';
 import { ReportsActions } from './reports.actions';
-import { selectSelectedReport, selectDateRange, selectFiscalPeriodId, selectReportData } from './reports.selectors';
+import { selectSelectedReport, selectDateRange, selectFiscalPeriodId, selectReportData, selectCurrentPage, selectItemsPerPage } from './reports.selectors';
 import { ReportsDataService } from '../services/reports-data.service';
 import { ReportExportService } from '../services/report-export.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
@@ -24,19 +24,28 @@ export class ReportsEffects {
         this.store.select(selectSelectedReport),
         this.store.select(selectDateRange),
         this.store.select(selectFiscalPeriodId),
+        this.store.select(selectCurrentPage),
+        this.store.select(selectItemsPerPage),
       ),
-      mergeMap(([, report, dateRange, fiscalPeriodId]) => {
+      mergeMap(([, report, dateRange, fiscalPeriodId, currentPage, itemsPerPage]) => {
         if (!report) {
           return of(ReportsActions.loadReportDataFailure({ error: 'No hay reporte seleccionado' }));
         }
 
         return this.reportsDataService
-          .fetchReportData(report.dataEndpoint, {
+          .fetchReportData(report.dataEndpoint, report, {
             dateRange: report.requiresDateRange ? dateRange : undefined,
             fiscalPeriodId: report.requiresFiscalPeriod ? fiscalPeriodId : undefined,
+            page: currentPage,
+            limit: itemsPerPage,
           })
           .pipe(
-            map(({ data, meta }) => ReportsActions.loadReportDataSuccess({ data, meta })),
+            map((adapted) => ReportsActions.loadReportDataSuccess({
+              data: adapted.data,
+              meta: adapted.meta,
+              isSummary: adapted.isSummary,
+              summaryData: adapted.summaryData,
+            })),
             catchError((error) =>
               of(
                 ReportsActions.loadReportDataFailure({

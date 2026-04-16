@@ -109,7 +109,6 @@ export function getDefaultStoreSettings(): StoreSettings {
         queue_expiry_hours: 12,
         max_queue_size: 0,
         require_email: false,
-        require_phone: false,
       },
       default_payment_form: 'contado',
       show_onscreen_keypad: true,
@@ -152,6 +151,7 @@ export function getDefaultStoreSettings(): StoreSettings {
         customers: true,
         customers_all: true,
         customers_reviews: true,
+        customers_data_collection: true,
 
         // Marketing
         marketing: true,
@@ -276,6 +276,27 @@ export function getDefaultStoreSettings(): StoreSettings {
       },
     },
 
+    // Reservations - Booking reminders, confirmation, and check-in
+    reservations: {
+      reminders: [
+        { time_before: '24h', channels: ['email', 'push'], enabled: true },
+        { time_before: '1h', channels: ['push'], enabled: true },
+      ],
+      confirmation: {
+        enabled: false,
+        send_at: '48h',
+        channels: ['email', 'push'],
+        auto_cancel_if_unconfirmed: false,
+        cancel_after: '12h',
+      },
+      check_in: {
+        enabled: false,
+        allow_customer_check_in: true,
+        allow_staff_check_in: true,
+        notify_provider_on_check_in: true,
+      },
+    },
+
     // Legacy: Mantener por compatibilidad (redundante con branding)
     app: {
       name: 'Vendix',
@@ -286,10 +307,6 @@ export function getDefaultStoreSettings(): StoreSettings {
     },
   };
 }
-
-
-
-
 
 function getDefaultBusinessHours(): Record<
   string,

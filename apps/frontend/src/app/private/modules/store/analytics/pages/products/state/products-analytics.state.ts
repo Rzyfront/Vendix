@@ -1,5 +1,6 @@
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
 import { ProductsSummary, TopSellingProduct, ProductAnalyticsRow, ProductTrend } from '../../../interfaces/products-analytics.interface';
+import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../../shared/utils/date.util';
 
 export interface ProductsAnalyticsState {
   summary: ProductsSummary | null;
@@ -46,13 +47,3 @@ export const initialProductsAnalyticsState: ProductsAnalyticsState = {
   exporting: false,
   error: null,
 };
-
-function getDefaultStartDate(): string {
-  const date = new Date();
-  date.setDate(1);
-  return date.toISOString().split('T')[0];
-}
-
-function getDefaultEndDate(): string {
-  return new Date().toISOString().split('T')[0];
-}

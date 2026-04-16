@@ -23,6 +23,7 @@ import {
   IconComponent,
   CardComponent,
 } from '../../../../../shared/components/index';
+import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-legal-documents',
@@ -187,7 +188,7 @@ export class LegalDocumentsComponent implements OnInit {
       {
         key: 'effective_date',
         label: 'Fecha Efectiva',
-        transform: (val: string) => new Date(val).toLocaleDateString(),
+        transform: (val: string) => formatDateOnlyUTC(val),
       },
     ],
   };
@@ -213,7 +214,7 @@ export class LegalDocumentsComponent implements OnInit {
       key: 'effective_date',
       label: 'Fecha Efectiva',
       width: '20%',
-      transform: (val: string) => new Date(val).toLocaleDateString(),
+      transform: (val: string) => formatDateOnlyUTC(val),
     },
   ];
 

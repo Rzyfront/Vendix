@@ -629,7 +629,7 @@ export class SettingsService {
 
     const errors = validateSync(partialDto, {
       whitelist: true,
-      forbidNonWhitelisted: true,
+      forbidNonWhitelisted: false,
       stopAtFirstError: false,
     });
 

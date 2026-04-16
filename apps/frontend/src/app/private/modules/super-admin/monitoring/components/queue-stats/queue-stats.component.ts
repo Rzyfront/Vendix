@@ -1,13 +1,15 @@
-import { Component, Input } from '@angular/core';
+import { Component, Input, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { QueueStats } from '../../interfaces';
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 
 @Component({
   selector: 'app-queue-stats',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, CardComponent],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="rounded-xl overflow-hidden" style="background: var(--color-background); border: 1px solid var(--color-border);">
+    <app-card [padding]="false" overflow="hidden" customClasses="!overflow-hidden">
       <div class="px-4 py-3 flex items-center gap-2" style="border-bottom: 1px solid var(--color-border); background: linear-gradient(135deg, rgba(99,102,241,0.05) 0%, transparent 100%);">
         <span class="w-5 h-5 rounded flex items-center justify-center bg-indigo-500/10">
           <svg class="w-3 h-3 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -19,7 +21,7 @@ import { QueueStats } from '../../interfaces';
 
       <div *ngIf="loading" class="p-4 animate-pulse">
         <div class="grid grid-cols-4 gap-3 mb-4">
-          <div *ngFor="let i of [1,2,3,4]" class="h-16 rounded-lg" style="background: var(--color-border); opacity: 0.3;"></div>
+          <div *ngFor="let i of [1,2,3,4]; trackBy: trackByIndex" class="h-16 rounded-lg" style="background: var(--color-border); opacity: 0.3;"></div>
         </div>
       </div>
 
@@ -46,7 +48,7 @@ import { QueueStats } from '../../interfaces';
 
         <!-- Per-queue cards (better than table for mobile) -->
         <div class="space-y-2" *ngIf="queues && queues.length > 0">
-          <div *ngFor="let q of queues"
+          <div *ngFor="let q of queues; trackBy: trackByName"
             class="flex items-center gap-3 p-3 rounded-lg transition-colors"
             style="background: var(--color-surface); border: 1px solid var(--color-border);">
             <div class="flex-1 min-w-0">
@@ -78,12 +80,20 @@ import { QueueStats } from '../../interfaces';
           <p class="text-sm" style="color: var(--color-text-muted);">Sin colas activas</p>
         </div>
       </div>
-    </div>
+    </app-card>
   `,
 })
 export class QueueStatsComponent {
   @Input() queues: QueueStats[] | undefined | null;
   @Input() loading: boolean = false;
+
+  trackByName(index: number, queue: QueueStats): string {
+    return queue.name;
+  }
+
+  trackByIndex(index: number): number {
+    return index;
+  }
 
   get totalActive(): number {
     return this.queues?.reduce((sum, q) => sum + q.active, 0) ?? 0;

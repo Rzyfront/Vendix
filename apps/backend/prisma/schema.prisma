@@ -37,6 +37,7 @@ model users {
   inventory_adjustments      inventory_adjustments[]      @relation("inventory_adjustments_created_by")
   expenses1                  expenses[]                   @relation("expenses_approved_by")
   expenses                   expenses[]                   @relation("expenses_created_by")
+  expenses2                  expenses[]                   @relation("expenses_refunded_by")
   inventory_movements        inventory_movements[]
   inventory_transactions     inventory_transactions[]
   password_reset_tokens      password_reset_tokens[]
@@ -150,6 +151,12 @@ model users {
 
   // Wallet
   wallets wallets[] @relation("wallet_owner")
+
+  // Data Collection & Consultation
+  data_collection_submissions    data_collection_submissions[] @relation("submission_customer")
+  metadata_snapshots             booking_metadata_snapshots[]  @relation("metadata_snapshot_customer")
+  consultation_notes_as_customer customer_consultation_notes[] @relation("consultation_notes_customer")
+  consultation_notes_created     customer_consultation_notes[] @relation("consultation_notes_created_by")
 
   @@index([email_verified])
   @@index([state])
@@ -558,6 +565,17 @@ model stores {
 
   // Invoice Data Requests
   invoice_data_requests invoice_data_requests[]
+
+  // Metadata & Data Collection
+  entity_metadata_fields      entity_metadata_fields[]
+  entity_metadata_values      entity_metadata_values[]
+  data_collection_templates   data_collection_templates[]
+  data_collection_submissions data_collection_submissions[]
+  booking_metadata_snapshots  booking_metadata_snapshots[]
+  customer_consultation_notes customer_consultation_notes[]
+  booking_confirmation_tokens booking_confirmation_tokens[]
+  email_templates             email_templates[]
+  messaging_channels          messaging_channels[]
 
   @@unique([organization_id, slug])
   @@index([onboarding])
@@ -971,6 +989,12 @@ model products {
   buffer_minutes           Int?                       @default(0)
   is_recurring             Boolean                    @default(false)
   service_instructions     String?                    @db.Text
+  is_consultation             Boolean                    @default(false)
+  send_preconsultation        Boolean                    @default(false)
+  consultation_template_id    Int?
+  consultation_template       data_collection_templates? @relation("product_consultation_template", fields: [consultation_template_id], references: [id], onDelete: SetNull)
+  preconsultation_template_id Int?
+  preconsultation_template    data_collection_templates? @relation("product_preconsultation_template", fields: [preconsultation_template_id], references: [id], onDelete: SetNull)
   available_for_ecommerce  Boolean                    @default(false)
   is_on_sale               Boolean                    @default(false)
   sale_price               Decimal?                   @db.Decimal(12, 2)
@@ -1021,10 +1045,14 @@ model products {
   // Dispatch Notes
   dispatch_note_items dispatch_note_items[]
 
+  // Data Collection
+  data_collection_template_products data_collection_template_products[]
+
   @@unique([store_id, slug])
   @@unique([store_id, sku])
   @@index([store_id, sku])
   @@index([store_id, product_type])
+  @@index([store_id, is_consultation])
 }
 
 model refund_items {
@@ -1374,6 +1402,9 @@ model expenses {
   created_by_user_id  Int?
   approved_by_user_id Int?
   approved_at         DateTime?           @db.Timestamp(6)
+  refunded_at         DateTime?           @db.Timestamp(6)
+  refunded_by_user_id Int?
+  refund_reason       String?             @db.VarChar(500)
   created_at          DateTime?           @default(now()) @db.Timestamp(6)
   updated_at          DateTime?           @default(now()) @db.Timestamp(6)
 
@@ -1382,6 +1413,7 @@ model expenses {
   expense_categories expense_categories? @relation(fields: [category_id], references: [id])
   created_by_user    users?              @relation("expenses_created_by", fields: [created_by_user_id], references: [id])
   approved_by_user   users?              @relation("expenses_approved_by", fields: [approved_by_user_id], references: [id])
+  refunded_by_user   users?              @relation("expenses_refunded_by", fields: [refunded_by_user_id], references: [id])
 
   @@index([store_id, expense_date])
   @@index([organization_id, expense_date])
@@ -2012,6 +2044,12 @@ enum notification_type_enum {
   customer_queue_consumed
   customer_queue_cancelled
   customer_queue_released
+  booking_check_in
+  booking_confirmation_request
+  booking_auto_cancelled
+  data_collection_created
+  data_collection_submitted
+  data_collection_prediagnosis_ready
 }
 
 model notifications {
@@ -2038,6 +2076,7 @@ model notification_subscriptions {
   type       notification_type_enum
   in_app     Boolean                @default(true)
   email      Boolean                @default(false)
+  whatsapp   Boolean                @default(false)
   created_at DateTime               @default(now()) @db.Timestamp(6)
   stores     stores                 @relation(fields: [store_id], references: [id], onDelete: Cascade)
   users      users                  @relation(fields: [user_id], references: [id], onDelete: Cascade)
@@ -2531,6 +2570,7 @@ enum expenses_state_enum {
   rejected
   paid
   cancelled
+  refunded
 }
 
 // ===== INVOICING, ACCOUNTING & PAYROLL ENUMS =====
@@ -3855,6 +3895,7 @@ model cash_register_sessions {
   difference              Decimal?                          @db.Decimal(12, 2)
   closing_notes           String?
   summary                 Json?
+  ai_summary              String?                           @db.Text
   created_at              DateTime?                         @default(now()) @db.Timestamp(6)
   updated_at              DateTime?                         @default(now()) @db.Timestamp(6)
 
@@ -4074,6 +4115,45 @@ enum booking_status_enum {
 enum booking_mode_enum {
   provider_required
   free_booking
+}
+
+enum field_type_enum {
+  text
+  number
+  date
+  select
+  checkbox
+  textarea
+  file
+  email
+  phone
+  url
+}
+
+enum entity_type_enum {
+  customer
+  booking
+  order
+}
+
+enum template_status_enum {
+  active
+  inactive
+  archived
+}
+
+enum submission_status_enum {
+  pending
+  in_progress
+  submitted
+  processing
+  completed
+  expired
+}
+
+enum metadata_display_mode_enum {
+  summary
+  detail
 }
 
 // ===== BANK RECONCILIATION DOMAIN =====
@@ -4714,23 +4794,27 @@ model invoice_retry_queue {
 }
 
 model bookings {
-  id                 Int                 @id @default(autoincrement())
-  store_id           Int
-  customer_id        Int
-  product_id         Int
-  booking_number     String              @db.VarChar(50)
-  date               DateTime            @db.Date
-  start_time         String              @db.VarChar(5)
-  end_time           String              @db.VarChar(5)
-  status             booking_status_enum @default(pending)
-  channel            order_channel_enum  @default(pos)
-  notes              String?             @db.Text
-  internal_notes     String?             @db.Text
-  order_id           Int?
-  created_by_user_id Int?
-  provider_id        Int?
-  created_at         DateTime?           @default(now()) @db.Timestamp(6)
-  updated_at         DateTime?           @default(now()) @db.Timestamp(6)
+  id                        Int                 @id @default(autoincrement())
+  store_id                  Int
+  customer_id               Int
+  product_id                Int
+  booking_number            String              @db.VarChar(50)
+  date                      DateTime            @db.Date
+  start_time                String              @db.VarChar(5)
+  end_time                  String              @db.VarChar(5)
+  status                    booking_status_enum @default(pending)
+  channel                   order_channel_enum  @default(pos)
+  notes                     String?             @db.Text
+  internal_notes            String?             @db.Text
+  order_id                  Int?
+  created_by_user_id        Int?
+  expires_at                DateTime?           @db.Timestamp(6)
+  provider_id               Int?
+  checked_in_at             DateTime?           @db.Timestamp(6)
+  confirmation_requested_at DateTime?           @db.Timestamp(6)
+  confirmation_deadline     DateTime?           @db.Timestamp(6)
+  created_at                DateTime?           @default(now()) @db.Timestamp(6)
+  updated_at                DateTime?           @default(now()) @db.Timestamp(6)
 
   store      stores             @relation(fields: [store_id], references: [id])
   customer   users              @relation("bookings_customer", fields: [customer_id], references: [id])
@@ -4738,6 +4822,12 @@ model bookings {
   order      orders?            @relation(fields: [order_id], references: [id])
   created_by users?             @relation("bookings_created_by", fields: [created_by_user_id], references: [id])
   provider   service_providers? @relation(fields: [provider_id], references: [id])
+
+  data_collection_submissions data_collection_submissions[]
+  metadata_snapshot           booking_metadata_snapshots?
+  consultation_notes          customer_consultation_notes[]
+  confirmation_tokens         booking_confirmation_tokens[]
+  reminder_logs               booking_reminder_logs[]
 
   @@unique([store_id, booking_number])
   @@index([store_id, date])
@@ -5260,4 +5350,302 @@ model invoice_data_requests {
   @@index([store_id, status])
   @@index([order_id])
   @@index([expires_at])
+}
+
+// ============================================
+// ENTITY METADATA SYSTEM (Dynamic Fields)
+// ============================================
+
+model entity_metadata_fields {
+  id            Int                        @id @default(autoincrement())
+  store_id      Int
+  entity_type   entity_type_enum
+  field_key     String                     @db.VarChar(100)
+  field_type    field_type_enum
+  label         String                     @db.VarChar(255)
+  description   String?                    @db.Text
+  is_required   Boolean                    @default(false)
+  display_mode  metadata_display_mode_enum @default(detail)
+  sort_order    Int                        @default(0)
+  options       Json?
+  default_value String?                    @db.Text
+  is_active     Boolean                    @default(true)
+  created_at    DateTime                   @default(now()) @db.Timestamp(6)
+  updated_at    DateTime                   @default(now()) @db.Timestamp(6)
+
+  store          stores                      @relation(fields: [store_id], references: [id])
+  values         entity_metadata_values[]
+  template_items data_collection_items[]
+
+  @@unique([store_id, entity_type, field_key])
+  @@index([store_id, entity_type, is_active])
+}
+
+model entity_metadata_values {
+  id           Int              @id @default(autoincrement())
+  store_id     Int
+  field_id     Int
+  entity_type  entity_type_enum
+  entity_id    Int
+  value_text   String?          @db.Text
+  value_number Decimal?         @db.Decimal(12, 4)
+  value_date   DateTime?        @db.Date
+  value_bool   Boolean?
+  value_json   Json?
+  created_at   DateTime         @default(now()) @db.Timestamp(6)
+  updated_at   DateTime         @default(now()) @db.Timestamp(6)
+
+  store stores                 @relation(fields: [store_id], references: [id])
+  field entity_metadata_fields @relation(fields: [field_id], references: [id], onDelete: Cascade)
+
+  @@unique([field_id, entity_type, entity_id])
+  @@index([store_id, entity_type, entity_id])
+  @@index([field_id])
+  @@index([field_id, value_number])
+  @@index([field_id, value_date])
+}
+
+// ============================================
+// DATA COLLECTION SYSTEM (Templates & Forms)
+// ============================================
+
+model data_collection_templates {
+  id          Int                  @id @default(autoincrement())
+  store_id    Int
+  name        String               @db.VarChar(255)
+  description String?              @db.Text
+  icon        String?              @db.VarChar(100)
+  status      template_status_enum @default(active)
+  entity_type entity_type_enum     @default(booking)
+  is_default  Boolean              @default(false)
+  created_at  DateTime             @default(now()) @db.Timestamp(6)
+  updated_at  DateTime             @default(now()) @db.Timestamp(6)
+
+  store       stores                              @relation(fields: [store_id], references: [id])
+  sections    data_collection_sections[]
+  tabs      data_collection_tabs[]
+  products    data_collection_template_products[]
+  submissions data_collection_submissions[]
+  consultation_products     products[]  @relation("product_consultation_template")
+  preconsultation_products  products[]  @relation("product_preconsultation_template")
+
+  @@index([store_id, status])
+  @@index([store_id, entity_type])
+}
+
+model data_collection_tabs {
+  id          Int      @id @default(autoincrement())
+  template_id Int
+  title       String   @db.VarChar(255)
+  icon        String?  @db.VarChar(100)
+  sort_order  Int      @default(0)
+  created_at  DateTime @default(now()) @db.Timestamp(6)
+  updated_at  DateTime @default(now()) @db.Timestamp(6)
+
+  template data_collection_templates @relation(fields: [template_id], references: [id], onDelete: Cascade)
+  sections data_collection_sections[]
+
+  @@index([template_id, sort_order])
+}
+
+model data_collection_sections {
+  id          Int      @id @default(autoincrement())
+  template_id Int
+  title       String   @db.VarChar(255)
+  description String?  @db.Text
+  sort_order  Int      @default(0)
+  tab_id            Int?
+  parent_section_id Int?
+  icon              String?  @db.VarChar(100)
+  created_at  DateTime @default(now()) @db.Timestamp(6)
+  updated_at  DateTime @default(now()) @db.Timestamp(6)
+
+  template data_collection_templates @relation(fields: [template_id], references: [id], onDelete: Cascade)
+  items    data_collection_items[]
+  tab            data_collection_tabs?      @relation(fields: [tab_id], references: [id], onDelete: SetNull)
+  parent_section data_collection_sections?  @relation("section_nesting", fields: [parent_section_id], references: [id], onDelete: Cascade)
+  child_sections data_collection_sections[] @relation("section_nesting")
+
+  @@index([template_id, sort_order])
+  @@index([tab_id, sort_order])
+  @@index([parent_section_id, sort_order])
+}
+
+model data_collection_items {
+  id                Int      @id @default(autoincrement())
+  section_id        Int
+  metadata_field_id Int
+  sort_order        Int      @default(0)
+  is_required        Boolean  @default(false)
+  include_in_summary Boolean  @default(false)
+  help_text          String?  @db.Text
+  placeholder        String?  @db.VarChar(255)
+  validation_rules   Json?
+  width              String?  @db.VarChar(10)
+  icon               String?  @db.VarChar(100)
+  created_at         DateTime @default(now()) @db.Timestamp(6)
+
+  section        data_collection_sections @relation(fields: [section_id], references: [id], onDelete: Cascade)
+  metadata_field entity_metadata_fields   @relation(fields: [metadata_field_id], references: [id])
+
+  @@unique([section_id, metadata_field_id])
+  @@index([section_id, sort_order])
+}
+
+model data_collection_template_products {
+  id          Int @id @default(autoincrement())
+  template_id Int
+  product_id  Int
+
+  template data_collection_templates @relation(fields: [template_id], references: [id], onDelete: Cascade)
+  product  products                  @relation(fields: [product_id], references: [id], onDelete: Cascade)
+
+  @@unique([template_id, product_id])
+  @@index([product_id])
+}
+
+model data_collection_submissions {
+  id              Int                    @id @default(autoincrement())
+  store_id        Int
+  template_id     Int
+  booking_id      Int?
+  customer_id     Int?
+  token           String                 @unique @db.VarChar(64)
+  status          submission_status_enum @default(pending)
+  current_step    Int                    @default(0)
+  ai_prediagnosis String?                @db.Text
+  ai_job_id       String?                @db.VarChar(100)
+  submitted_at    DateTime?              @db.Timestamp(6)
+  processed_at    DateTime?              @db.Timestamp(6)
+  expires_at      DateTime               @db.Timestamp(6)
+  created_at      DateTime               @default(now()) @db.Timestamp(6)
+  updated_at      DateTime               @default(now()) @db.Timestamp(6)
+
+  store     stores                      @relation(fields: [store_id], references: [id])
+  template  data_collection_templates   @relation(fields: [template_id], references: [id])
+  booking   bookings?                   @relation(fields: [booking_id], references: [id])
+  customer  users?                      @relation("submission_customer", fields: [customer_id], references: [id])
+  @@index([store_id, status])
+  @@index([booking_id])
+  @@index([customer_id])
+  @@index([expires_at])
+}
+
+// ============================================
+// CONSULTATION HISTORY (Snapshots & Notes)
+// ============================================
+
+model booking_metadata_snapshots {
+  id          Int      @id @default(autoincrement())
+  store_id    Int
+  booking_id  Int      @unique
+  customer_id Int
+  snapshot    Json
+  created_at  DateTime @default(now()) @db.Timestamp(6)
+
+  store    stores   @relation(fields: [store_id], references: [id])
+  booking  bookings @relation(fields: [booking_id], references: [id])
+  customer users    @relation("metadata_snapshot_customer", fields: [customer_id], references: [id])
+
+  @@index([customer_id, created_at])
+  @@index([store_id, customer_id])
+}
+
+model customer_consultation_notes {
+  id                 Int      @id @default(autoincrement())
+  store_id           Int
+  customer_id        Int
+  booking_id         Int
+  note_key           String   @db.VarChar(100)
+  note_value         String   @db.Text
+  include_in_summary Boolean  @default(false)
+  created_by_id      Int?
+  created_at         DateTime @default(now()) @db.Timestamp(6)
+  updated_at         DateTime @default(now()) @db.Timestamp(6)
+
+  store      stores   @relation(fields: [store_id], references: [id])
+  customer   users    @relation("consultation_notes_customer", fields: [customer_id], references: [id])
+  booking    bookings @relation(fields: [booking_id], references: [id])
+  created_by users?   @relation("consultation_notes_created_by", fields: [created_by_id], references: [id])
+
+  @@index([customer_id, store_id])
+  @@index([booking_id])
+  @@index([customer_id, include_in_summary])
+}
+
+// ============================================
+// BOOKING CONFIRMATION & REMINDERS
+// ============================================
+
+model booking_confirmation_tokens {
+  id         Int       @id @default(autoincrement())
+  booking_id Int
+  store_id   Int
+  token      String    @unique @db.VarChar(64)
+  action     String    @db.VarChar(20)
+  expires_at DateTime  @db.Timestamp(6)
+  used       Boolean   @default(false)
+  used_at    DateTime? @db.Timestamp(6)
+  created_at DateTime  @default(now()) @db.Timestamp(6)
+
+  booking bookings @relation(fields: [booking_id], references: [id], onDelete: Cascade)
+  store   stores   @relation(fields: [store_id], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([booking_id])
+}
+
+model booking_reminder_logs {
+  id           Int      @id @default(autoincrement())
+  booking_id   Int
+  store_id     Int
+  reminder_key String   @db.VarChar(30)
+  channel      String   @db.VarChar(20)
+  sent_at      DateTime @default(now()) @db.Timestamp(6)
+
+  booking bookings @relation(fields: [booking_id], references: [id], onDelete: Cascade)
+
+  @@unique([booking_id, reminder_key, channel])
+  @@index([store_id, sent_at])
+}
+
+// ============================================
+// EMAIL TEMPLATES
+// ============================================
+
+model email_templates {
+  id         Int      @id @default(autoincrement())
+  store_id   Int?
+  event_type String   @db.VarChar(50)
+  subject    String   @db.VarChar(255)
+  body_html  String   @db.Text
+  body_text  String?  @db.Text
+  variables  Json?
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now()) @db.Timestamp(6)
+  updated_at DateTime @default(now()) @db.Timestamp(6)
+
+  store stores? @relation(fields: [store_id], references: [id], onDelete: Cascade)
+
+  @@unique([store_id, event_type])
+  @@index([event_type, is_active])
+}
+
+// ============================================
+// MESSAGING CHANNELS (WhatsApp/SMS prep)
+// ============================================
+
+model messaging_channels {
+  id           Int      @id @default(autoincrement())
+  store_id     Int
+  channel_type String   @db.VarChar(20)
+  provider     String   @db.VarChar(30)
+  config       Json
+  is_active    Boolean  @default(true)
+  created_at   DateTime @default(now()) @db.Timestamp(6)
+  updated_at   DateTime @default(now()) @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onDelete: Cascade)
+
+  @@unique([store_id, channel_type])
 }

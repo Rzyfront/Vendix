@@ -17,9 +17,7 @@ import {
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import {
-
-} from './shipping-carriers.dto';
+import {} from './shipping-carriers.dto';
 
 export class GeneralSettingsDto {
   // Campos de store_settings (existentes)
@@ -118,8 +116,6 @@ export class CheckoutSettingsDto {
   require_payment_confirmation?: boolean;
 }
 
-
-
 export class NotificationsSettingsDto {
   @ApiProperty({ example: true, required: false })
   @IsOptional()
@@ -154,13 +150,19 @@ export class NotificationsSettingsDto {
   @ApiProperty({ example: '+573001234567', required: false })
   @IsOptional()
   @IsString()
-  @Matches(/^[\d+#*\s()-]*$/, { message: 'El teléfono solo puede contener números y los símbolos + # * ( ) -' })
+  @Matches(/^[\d+#*\s()-]*$/, {
+    message:
+      'El teléfono solo puede contener números y los símbolos + # * ( ) -',
+  })
   low_stock_alerts_phone?: string;
 
   @ApiProperty({ example: '+573001234567', required: false })
   @IsOptional()
   @IsString()
-  @Matches(/^[\d+#*\s()-]*$/, { message: 'El teléfono solo puede contener números y los símbolos + # * ( ) -' })
+  @Matches(/^[\d+#*\s()-]*$/, {
+    message:
+      'El teléfono solo puede contener números y los símbolos + # * ( ) -',
+  })
   new_order_alerts_phone?: string;
 }
 
@@ -183,12 +185,20 @@ export class ScaleDeviceConfigDto {
   @IsIn([1, 2])
   stop_bits?: 1 | 2;
 
-  @ApiProperty({ example: 'none', required: false, enum: ['none', 'even', 'odd'] })
+  @ApiProperty({
+    example: 'none',
+    required: false,
+    enum: ['none', 'even', 'odd'],
+  })
   @IsOptional()
   @IsIn(['none', 'even', 'odd'])
   parity?: 'none' | 'even' | 'odd';
 
-  @ApiProperty({ example: 'generic', required: false, enum: ['generic', 'cas', 'ohaus'] })
+  @ApiProperty({
+    example: 'generic',
+    required: false,
+    enum: ['generic', 'cas', 'ohaus'],
+  })
   @IsOptional()
   @IsIn(['generic', 'cas', 'ohaus'])
   protocol?: 'generic' | 'cas' | 'ohaus';
@@ -265,10 +275,6 @@ export class CustomerQueueSettingsDto {
   @IsOptional()
   @IsBoolean()
   require_email?: boolean;
-
-  @IsOptional()
-  @IsBoolean()
-  require_phone?: boolean;
 }
 
 export class PosSettingsDto {
@@ -347,10 +353,23 @@ export class PosSettingsDto {
   @Type(() => CashRegisterSettingsDto)
   cash_register?: CashRegisterSettingsDto;
 
-  @ApiProperty({ example: true, required: false, description: 'Show on-screen numeric keypad in POS cash payment' })
+  @ApiProperty({
+    example: true,
+    required: false,
+    description: 'Show on-screen numeric keypad in POS cash payment',
+  })
   @IsOptional()
   @IsBoolean()
   show_onscreen_keypad?: boolean;
+
+  @ApiProperty({
+    enum: ['contado', 'credito'],
+    example: 'contado',
+    required: false,
+  })
+  @IsOptional()
+  @IsIn(['contado', 'credito'])
+  default_payment_form?: 'contado' | 'credito';
 
   @ApiProperty({ type: () => CustomerQueueSettingsDto, required: false })
   @IsOptional()
@@ -382,34 +401,62 @@ export class ReceiptsSettingsDto {
 }
 
 export class AppSettingsDto {
-  @ApiProperty({ example: 'Vendix', description: 'Nombre de la aplicación', required: false })
+  @ApiProperty({
+    example: 'Vendix',
+    description: 'Nombre de la aplicación',
+    required: false,
+  })
   @IsOptional()
   @IsString()
   @MaxLength(100)
   name?: string;
 
-  @ApiProperty({ example: '#7ED7A5', description: 'Color primario en formato HEX', required: false })
+  @ApiProperty({
+    example: '#7ED7A5',
+    description: 'Color primario en formato HEX',
+    required: false,
+  })
   @IsOptional()
   @IsString()
-  @Matches(/^#[0-9A-Fa-f]{6}$/, { message: 'primary_color must be a valid hex color (e.g., #7ED7A5)' })
+  @Matches(/^#[0-9A-Fa-f]{6}$/, {
+    message: 'primary_color must be a valid hex color (e.g., #7ED7A5)',
+  })
   primary_color?: string;
 
-  @ApiProperty({ example: '#2F6F4E', description: 'Color secundario en formato HEX', required: false })
+  @ApiProperty({
+    example: '#2F6F4E',
+    description: 'Color secundario en formato HEX',
+    required: false,
+  })
   @IsOptional()
   @IsString()
-  @Matches(/^#[0-9A-Fa-f]{6}$/, { message: 'secondary_color must be a valid hex color' })
+  @Matches(/^#[0-9A-Fa-f]{6}$/, {
+    message: 'secondary_color must be a valid hex color',
+  })
   secondary_color?: string;
 
-  @ApiProperty({ example: '#FFFFFF', description: 'Color de acento en formato HEX', required: false })
+  @ApiProperty({
+    example: '#FFFFFF',
+    description: 'Color de acento en formato HEX',
+    required: false,
+  })
   @IsOptional()
   @IsString()
-  @Matches(/^#[0-9A-Fa-f]{6}$/, { message: 'accent_color must be a valid hex color' })
+  @Matches(/^#[0-9A-Fa-f]{6}$/, {
+    message: 'accent_color must be a valid hex color',
+  })
   accent_color?: string;
 
-  @ApiProperty({ enum: ['default', 'aura', 'monocromo'], example: 'default', required: false })
+  @ApiProperty({
+    enum: ['default', 'aura', 'monocromo'],
+    example: 'default',
+    required: false,
+  })
   @IsOptional()
   @ValidateIf((o) => o.theme !== undefined && o.theme !== null)
-  @IsIn(['default', 'aura', 'monocromo'], { message: 'theme must be either "default", "aura", or "monocromo"' })
+  @IsIn(['default', 'aura', 'monocromo'], {
+    message: 'theme must be either "default", "aura", or "monocromo"',
+  })
   theme?: 'default' | 'aura' | 'monocromo';
 
   @ApiProperty({ example: 'https://example.com/logo.png', required: false })

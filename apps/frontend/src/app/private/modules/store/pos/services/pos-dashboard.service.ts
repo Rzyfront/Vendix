@@ -1,4 +1,5 @@
 import { Injectable } from '@angular/core';
+import { toLocalDateString } from '../../../../../shared/utils/date.util';
 import { Observable, of } from 'rxjs';
 import { delay, map } from 'rxjs/operators';
 import {
@@ -78,7 +79,7 @@ export class PosDashboardService {
       date.setDate(date.getDate() - i);
 
       sales.push({
-        date: date.toISOString().split('T')[0],
+        date: toLocalDateString(date),
         sales: Math.floor(Math.random() * 5000) + 2000,
         orders: Math.floor(Math.random() * 30) + 10,
         customers: Math.floor(Math.random() * 25) + 8,

@@ -1,0 +1,68 @@
+<div class="aging-report">
+  <div class="table-wrapper">
+    <table class="aging-table">
+      <thead>
+        <tr>
+          @for (col of columns(); track col.key) {
+            <th
+              [style.text-align]="getAlign(col)"
+              [class]="getAgingClass(col)"
+            >
+              {{ col.header }}
+            </th>
+          }
+        </tr>
+      </thead>
+      <tbody>
+        @if (loading()) {
+          @for (i of skeletonRows; track i) {
+            <tr class="skeleton-row">
+              @for (col of columns(); track col.key) {
+                <td>
+                  <div class="skeleton" [style.width]="col.type === 'text' ? '70%' : '50%'"></div>
+                </td>
+              }
+            </tr>
+          }
+        } @else if (data().length === 0) {
+          <tr>
+            <td [attr.colspan]="columns().length" class="empty-cell">
+              <div class="empty-state">
+                <p>No hay datos para mostrar</p>
+                <span>Ajusta los filtros o genera el reporte</span>
+              </div>
+            </td>
+          </tr>
+        } @else {
+          @for (row of data(); track row.id ?? $index) {
+            <tr>
+              @for (col of columns(); track col.key) {
+                <td
+                  [style.text-align]="getAlign(col)"
+                  [class]="isOverdue(col, row) ? getAgingClass(col) : ''"
+                >
+                  {{ formatValue(row[col.key], col) }}
+                </td>
+              }
+            </tr>
+          }
+        }
+      </tbody>
+      @if (hasFooter() && data().length > 0 && !loading()) {
+        <tfoot>
+          <tr>
+            @for (col of columns(); track col.key; let first = $first) {
+              <td [style.text-align]="getAlign(col)" class="footer-cell">
+                @if (first && !col.footer) {
+                  <strong>Totales</strong>
+                } @else if (footerValues()[col.key] != null) {
+                  <strong>{{ formatValue(footerValues()[col.key], col) }}</strong>
+                }
+              </td>
+            }
+          </tr>
+        </tfoot>
+      }
+    </table>
+  </div>
+</div>

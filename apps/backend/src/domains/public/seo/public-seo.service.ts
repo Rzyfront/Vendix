@@ -1,12 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { PublicDomainsService } from '../domains/public-domains.service';
 import { DomainConfigService } from '@common/config/domain.config';
-
-interface CacheEntry {
-  content: string;
-  timestamp: number;
-}
 
 interface DomainContext {
   app_type: string;
@@ -15,24 +12,20 @@ interface DomainContext {
   organization_id?: number;
 }
 
-const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
-
 @Injectable()
 export class PublicSeoService {
   private readonly logger = new Logger(PublicSeoService.name);
-  private readonly sitemapCache = new Map<string, CacheEntry>();
-  private readonly robotsCache = new Map<string, CacheEntry>();
 
   constructor(
     private readonly globalPrisma: GlobalPrismaService,
     private readonly publicDomainsService: PublicDomainsService,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
   async generateSitemap(hostname: string): Promise<string> {
-    const cached = this.sitemapCache.get(hostname);
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-      return cached.content;
-    }
+    const cacheKey = `seo:sitemap:${hostname}`;
+    const cached = await this.cache.get<string>(cacheKey);
+    if (cached) return cached;
 
     const context = await this.resolveDomainContext(hostname);
     let xml: string;
@@ -53,17 +46,16 @@ export class PublicSeoService {
         break;
     }
 
-    this.sitemapCache.set(hostname, { content: xml, timestamp: Date.now() });
+    await this.cache.set(cacheKey, xml, 3_600_000);
     this.logger.log(`Sitemap generated for ${hostname} (${context.app_type})`);
 
     return xml;
   }
 
   async generateRobotsTxt(hostname: string): Promise<string> {
-    const cached = this.robotsCache.get(hostname);
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-      return cached.content;
-    }
+    const cacheKey = `seo:robots:${hostname}`;
+    const cached = await this.cache.get<string>(cacheKey);
+    if (cached) return cached;
 
     const context = await this.resolveDomainContext(hostname);
     let content: string;
@@ -110,7 +102,7 @@ Disallow: /
         break;
     }
 
-    this.robotsCache.set(hostname, { content, timestamp: Date.now() });
+    await this.cache.set(cacheKey, content, 3_600_000);
     return content;
   }
 

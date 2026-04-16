@@ -1,67 +1,86 @@
 <div class="booking-slot-picker">
-    <div class="booking-header">
-        <h3>{{ productName() }}</h3>
-        <span class="duration-badge">{{ serviceDuration() }} min</span>
-    </div>
+  <div class="booking-header">
+    <h3>{{ productName() }}</h3>
+    <span class="duration-badge">{{ serviceDuration() }} min</span>
+  </div>
 
-    @if (loading) {
+  @if (loading) {
     <div class="booking-loading">
-        <div class="spinner"></div>
-        <p>Cargando disponibilidad...</p>
+      <div class="spinner"></div>
+      <p>Cargando disponibilidad...</p>
     </div>
-    } @else if (errorLoading) {
+  } @else if (errorLoading) {
     <div class="booking-error">
-        <p>No se pudo cargar la disponibilidad.</p>
-        <button class="retry-btn" (click)="retryLoad()">Reintentar</button>
+      <p>No se pudo cargar la disponibilidad.</p>
+      <button class="retry-btn" (click)="retryLoad()">Reintentar</button>
     </div>
-    } @else {
+  } @else {
     <!-- Date pills -->
     <div class="date-selector">
-        <p class="section-label">Selecciona una fecha</p>
-        <div class="date-pills">
-            @for (date of availableDates; track date) {
-            <button
-                class="date-pill"
-                [class.selected]="selectedDate === date"
-                [class.disabled]="!hasAvailableSlotsForDate(date)"
-                [disabled]="!hasAvailableSlotsForDate(date)"
-                (click)="selectDate(date)"
-            >
-                {{ formatDate(date) }}
-            </button>
-            }
-        </div>
+      <p class="section-label">Selecciona una fecha</p>
+      <div class="date-pills">
+        @for (date of availableDates; track date) {
+          <button
+            class="date-pill"
+            [class.selected]="selectedDate === date"
+            (click)="selectDate(date)"
+          >
+            {{ formatDate(date) }}
+          </button>
+        }
+      </div>
     </div>
 
     <!-- Time slots -->
     @if (selectedDate) {
-    <div class="time-selector">
+      <div class="time-selector">
         <p class="section-label">Horarios disponibles</p>
-        @if (slotsForSelectedDate.length > 0) {
-        <div class="time-grid">
+        @if (bookingMode() === "free_booking") {
+          <div class="time-grid">
+            @for (slot of freeBookingSlots; track slot.time) {
+              <button
+                class="time-slot"
+                [class.selected]="selectedFreeSlot?.time === slot.time"
+                (click)="selectFreeSlot(slot)"
+              >
+                <span class="time-range"
+                  >{{ formatTime(slot.time) }} -
+                  {{ formatTime(slot.endTime) }}</span
+                >
+              </button>
+            }
+          </div>
+        } @else if (slotsForSelectedDate.length > 0) {
+          <div class="time-grid">
             @for (slot of slotsForSelectedDate; track slot.start_time) {
-            <button
+              <button
                 class="time-slot"
                 [class.selected]="selectedSlot === slot"
                 (click)="selectSlot(slot)"
-            >
-                <span class="time-range">{{ formatTime(slot.start_time) }} - {{ formatTime(slot.end_time) }}</span>
-                <span class="slot-availability">{{ slot.available }} {{ slot.available === 1 ? 'lugar' : 'lugares' }}</span>
-            </button>
+              >
+                <span class="time-range"
+                  >{{ formatTime(slot.start_time) }} -
+                  {{ formatTime(slot.end_time) }}</span
+                >
+                <span class="slot-availability"
+                  >{{ slot.available }}
+                  {{ slot.available === 1 ? "lugar" : "lugares" }}</span
+                >
+              </button>
             }
-        </div>
+          </div>
         } @else {
-        <div class="no-slots">
+          <div class="no-slots">
             <p>Sin disponibilidad para esta fecha</p>
-        </div>
+          </div>
         }
-    </div>
+      </div>
     }
 
-    @if (availableSlots.length === 0) {
-    <div class="no-slots">
-        <p>No hay horarios disponibles en los próximos 14 días</p>
-    </div>
+    @if (bookingMode() !== "free_booking" && availableSlots.length === 0) {
+      <div class="no-slots">
+        <p>No hay horarios disponibles en los proximos 14 dias</p>
+      </div>
     }
-    }
+  }
 </div>

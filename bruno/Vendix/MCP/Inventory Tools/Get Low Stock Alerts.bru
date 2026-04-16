@@ -1,0 +1,43 @@
+meta {
+  name: Get Low Stock Alerts
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/mcp/tools/call
+  body: json {
+    "name": "get_low_stock_alerts",
+    "arguments": {
+      "limit": 10
+    }
+  }
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("get_low_stock_alerts returns success", function() {
+    expect(res.status).to.equal(200);
+    const parsed = JSON.parse(res.body.content[0].text);
+    expect(parsed).to.have.property('summary');
+    expect(parsed).to.have.property('data');
+    expect(parsed.data).to.be.an('array');
+  });
+
+  test("Each alert has required fields", function() {
+    const parsed = JSON.parse(res.body.content[0].text);
+    if (parsed.data.length > 0) {
+      const alert = parsed.data[0];
+      expect(alert).to.have.property('product_id');
+      expect(alert).to.have.property('product');
+      expect(alert).to.have.property('location');
+      expect(alert).to.have.property('current_stock');
+      expect(alert).to.have.property('reorder_point');
+      expect(alert).to.have.property('deficit');
+      expect(alert.deficit).to.be.above(0);
+    }
+  });
+}

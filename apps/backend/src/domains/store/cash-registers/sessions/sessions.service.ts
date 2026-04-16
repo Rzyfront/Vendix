@@ -2,10 +2,14 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  MessageEvent,
+  Logger,
 } from '@nestjs/common';
+import { Observable } from 'rxjs';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
 import { OpenSessionDto } from '../dto/open-session.dto';
 import { CloseSessionDto } from '../dto/close-session.dto';
 import { QuerySessionDto } from '../dto/query-session.dto';
@@ -13,10 +17,13 @@ import { MovementsService } from '../movements/movements.service';
 
 @Injectable()
 export class SessionsService {
+  private readonly logger = new Logger(SessionsService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly movements_service: MovementsService,
     private readonly event_emitter: EventEmitter2,
+    private readonly aiEngine: AIEngineService,
   ) {}
 
   async getActiveSession(user_id?: number) {
@@ -149,10 +156,14 @@ export class SessionsService {
       const amount = Number(m.amount);
       switch (m.type) {
         case 'sale':
+          if (m.payment_method === 'cash') expected += amount;
+          break;
         case 'cash_in':
           expected += amount;
           break;
         case 'refund':
+          if (m.payment_method === 'cash') expected -= amount;
+          break;
         case 'cash_out':
           expected -= amount;
           break;
@@ -337,6 +348,141 @@ export class SessionsService {
     };
   }
 
+  streamClosingSummary(sessionId: number): Observable<MessageEvent> {
+    // Capture request context before entering the Observable async callback,
+    // because AsyncLocalStorage is lost inside the Observable's IIFE.
+    const context = RequestContextService.getContext();
+
+    return new Observable<MessageEvent>((subscriber) => {
+      const run = async () => {
+        try {
+          const report = await this.getSessionReport(sessionId);
+          const variables = this.buildAISummaryVariables(report);
+
+          try {
+            // Try streaming first
+            let accumulatedText = '';
+            for await (const chunk of this.aiEngine.runStream(
+              'cash_register_closing_summary',
+              variables,
+            )) {
+              if (chunk.type === 'text' && chunk.content) {
+                accumulatedText += chunk.content;
+              }
+
+              if (chunk.type === 'done') {
+                if (accumulatedText) {
+                  await this.saveAiSummary(sessionId, accumulatedText);
+                }
+                subscriber.next({
+                  data: JSON.stringify(chunk),
+                  type: 'ai-chunk',
+                } as MessageEvent);
+                subscriber.complete();
+                return;
+              }
+
+              if (chunk.type === 'error') {
+                subscriber.next({
+                  data: JSON.stringify(chunk),
+                  type: 'ai-chunk',
+                } as MessageEvent);
+                subscriber.complete();
+                return;
+              }
+
+              subscriber.next({
+                data: JSON.stringify(chunk),
+                type: 'ai-chunk',
+              } as MessageEvent);
+            }
+            subscriber.complete();
+          } catch {
+            // Fallback to non-streaming
+            try {
+              const result = await this.aiEngine.run(
+                'cash_register_closing_summary',
+                variables,
+              );
+              if (result.content) {
+                await this.saveAiSummary(sessionId, result.content);
+              }
+              subscriber.next({
+                data: JSON.stringify({ type: 'text', content: result.content }),
+                type: 'ai-chunk',
+              } as MessageEvent);
+              subscriber.next({
+                data: JSON.stringify({
+                  type: 'done',
+                  usage: result.usage,
+                }),
+                type: 'ai-chunk',
+              } as MessageEvent);
+              subscriber.complete();
+            } catch (fallbackError: any) {
+              subscriber.next({
+                data: JSON.stringify({
+                  type: 'error',
+                  error: fallbackError.message,
+                }),
+                type: 'ai-chunk',
+              } as MessageEvent);
+              subscriber.complete();
+            }
+          }
+        } catch (error: any) {
+          subscriber.next({
+            data: JSON.stringify({ type: 'error', error: error.message }),
+            type: 'ai-chunk',
+          } as MessageEvent);
+          subscriber.complete();
+        }
+      };
+
+      // Re-inject the captured request context into the async callback
+      if (context) {
+        RequestContextService.run(context, () => { run(); });
+      } else {
+        run();
+      }
+    });
+  }
+
+  private buildAISummaryVariables(report: any): Record<string, string> {
+    const s = report.session;
+    const summary = report.summary;
+
+    const formatUser = (user: any) =>
+      user ? `${user.first_name} ${user.last_name}` : 'N/A';
+
+    const formatDate = (date: any) =>
+      date ? new Date(date).toLocaleString('es-CO') : 'N/A';
+
+    const formatDecimal = (value: any) =>
+      value != null ? String(Number(value)) : '0';
+
+    const formatGrouped = (grouped: Record<string, { count: number; total: number }>) =>
+      Object.entries(grouped)
+        .map(([key, val]) => `- ${key}: ${val.count} movimiento(s), total $${val.total}`)
+        .join('\n') || 'Sin datos';
+
+    return {
+      register_name: s.register?.name || 'N/A',
+      opened_by: formatUser(s.opened_by),
+      closed_by: formatUser(s.closed_by),
+      opened_at: formatDate(s.opened_at),
+      closed_at: formatDate(s.closed_at),
+      opening_amount: formatDecimal(s.opening_amount),
+      expected_closing_amount: formatDecimal(s.expected_closing_amount),
+      actual_closing_amount: formatDecimal(s.actual_closing_amount),
+      difference: formatDecimal(s.difference),
+      closing_notes: s.closing_notes || 'Sin notas',
+      summary_by_method: formatGrouped(summary.by_payment_method),
+      summary_by_type: formatGrouped(summary.by_type),
+      total_movements: String(summary.total_movements),
+    };
+  }
+
   private generateSessionSummary(movements: any[]) {
     const by_method: Record<string, { count: number; total: number }> = {};
     const by_type: Record<string, { count: number; total: number }> = {};
@@ -381,5 +527,17 @@ export class SessionsService {
       result[method].total += Number(m.amount);
     }
     return result;
+  }
+
+  private async saveAiSummary(sessionId: number, summary: string): Promise<void> {
+    try {
+      await this.prisma.cash_register_sessions.update({
+        where: { id: sessionId },
+        data: { ai_summary: summary },
+      });
+    } catch (error: any) {
+      this.logger.error(`Failed to save AI summary for session ${sessionId}: ${error.message}`);
+      // Don't throw — saving the summary is best-effort, don't break the stream
+    }
   }
 }

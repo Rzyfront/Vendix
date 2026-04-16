@@ -1,0 +1,33 @@
+meta {
+  name: Create Product Test
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{url}}/store/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "Producto Prueba Checkout",
+    "base_price": 10000,
+    "sku": "PROD-TEST-001",
+    "stock_quantity": 100,
+    "track_inventory": true,
+    "available_for_ecommerce": true,
+    "state": "active"
+  }
+}
+
+tests {
+  test("Debe crear producto exitosamente", function() {
+    expect(res.status).to.equal(201);
+  });
+  
+  test("Debe retornar el ID del producto", function() {
+    expect(res.body.data.id).to.be.greaterThan(0);
+  });
+}

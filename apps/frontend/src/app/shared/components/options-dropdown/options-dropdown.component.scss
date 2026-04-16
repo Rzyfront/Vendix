@@ -28,19 +28,19 @@
   padding: 0 0.75rem;
   height: 2.5rem; // 40px mobile-first - matches inputsearch modern ($height-md-mobile)
   font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  font-family: var(--font-primary);
+  color: var(--color-text-primary);
+  min-width: 110px;
+  cursor: pointer;
+  background-color: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast) ease;
 
   @media (min-width: 640px) {
     height: 2.75rem; // 44px desktop - matches inputsearch modern ($height-md-desktop)
   }
-  font-weight: var(--fw-medium);
-  font-family: var(--font-primary);
-  background-color: var(--color-surface);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-primary);
-  min-width: 110px;
-  transition: all var(--transition-fast) ease;
-  cursor: pointer;
 
   &:hover {
     background-color: var(--color-surface);
@@ -186,7 +186,9 @@
   background-color: var(--color-surface);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  box-shadow:
+    0 10px 15px -3px rgba(0, 0, 0, 0.1),
+    0 4px 6px -2px rgba(0, 0, 0, 0.05);
   overflow: hidden;
   font-family: var(--font-primary);
   z-index: 99999;
@@ -415,7 +417,9 @@
   margin-top: 0;
   max-height: 70vh;
   border-radius: var(--radius-md);
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 2px 4px -1px rgba(0, 0, 0, 0.06);
 
   &.actions-dropdown {
     left: 0;

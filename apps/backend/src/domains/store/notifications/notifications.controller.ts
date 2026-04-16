@@ -10,6 +10,7 @@ import {
   ForbiddenException,
   MessageEvent,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { Observable, map } from 'rxjs';
 import { NotificationsService } from './notifications.service';
 import { NotificationsSseService } from './notifications-sse.service';
@@ -119,12 +120,16 @@ export class NotificationsController {
   }
 
   @Sse('stream')
-  stream(): Observable<MessageEvent> {
+  stream(@Req() req: Request): Observable<MessageEvent> {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     if (!store_id) throw new ForbiddenException('Store context required');
 
     const subject = this.sse_service.getOrCreate(store_id);
+
+    req.on('close', () => {
+      this.sse_service.unsubscribe(store_id);
+    });
 
     return subject.pipe(
       map(

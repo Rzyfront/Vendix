@@ -69,9 +69,17 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
       [subtitle]="payrollRun ? getFrequencyLabel(payrollRun.frequency) : ''"
       size="xl"
     >
-      <!-- Header slot: badge de estado -->
+      <!-- Header slot: icono de nómina -->
       @if (payrollRun) {
-        <span slot="header"
+        <div slot="header"
+             class="flex items-center justify-center w-9 h-9 rounded-lg bg-[var(--color-primary)]/10 text-[var(--color-primary)] flex-shrink-0">
+          <app-icon name="banknote" [size]="18"></app-icon>
+        </div>
+      }
+
+      <!-- Header-end slot: badge de estado -->
+      @if (payrollRun) {
+        <span slot="header-end"
               [class]="getStatusBadgeClass(payrollRun.status)"
               class="px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap">
           {{ getStatusLabel(payrollRun.status) }}

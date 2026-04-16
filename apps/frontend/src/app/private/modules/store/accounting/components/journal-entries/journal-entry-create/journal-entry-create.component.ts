@@ -22,6 +22,7 @@ import {
   TextareaComponent,
   IconComponent,
 } from '../../../../../../../shared/components/index';
+import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'vendix-journal-entry-create',
@@ -284,7 +285,7 @@ export class JournalEntryCreateComponent implements OnInit {
     });
 
     // Set default date to today
-    const today = new Date().toISOString().split('T')[0];
+    const today = toLocalDateString();
     this.form.patchValue({ entry_date: today });
   }
 
@@ -353,7 +354,7 @@ export class JournalEntryCreateComponent implements OnInit {
     this.form.reset({
       entry_type: 'manual',
       fiscal_period_id: null,
-      entry_date: new Date().toISOString().split('T')[0],
+      entry_date: toLocalDateString(),
       description: '',
     });
     while (this.lines.length > 0) {

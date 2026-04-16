@@ -117,7 +117,7 @@ export class ProductsAnalyticsEffects {
           map((response) =>
             ProductsActions.loadProductsTableSuccess({
               products: response.data,
-              total: response.meta.pagination.total,
+              total: response.meta.total,
             }),
           ),
           catchError((error) =>

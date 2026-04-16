@@ -23,6 +23,7 @@ export type TooltipColor =
   standalone: true,
   imports: [CommonModule],
   template: `
+    <ng-content></ng-content>
     <div
       class="tooltip-container"
       [attr.data-position]="position"
@@ -31,7 +32,7 @@ export type TooltipColor =
       [class.visible]="visible"
     >
       <div class="tooltip-content">
-        <ng-content></ng-content>
+        {{ content }}
       </div>
       <div class="tooltip-arrow"></div>
     </div>
@@ -353,6 +354,7 @@ export type TooltipColor =
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class TooltipComponent {
+  @Input() content = '';
   @Input() size: TooltipSize = 'md';
   @Input() position: TooltipPosition = 'top';
   @Input() color: TooltipColor = 'default';

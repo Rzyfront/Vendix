@@ -4,10 +4,10 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   InventoryAnalyticsQueryDto,
-  DatePreset,
   Granularity,
 } from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
+import { formatPeriodFromDate, parseDateRange, getDateTruncInterval } from '../utils/date.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -69,19 +69,20 @@ export class InventoryAnalyticsService {
   }
 
   async getStockLevels(query: InventoryAnalyticsQueryDto) {
-    // track_inventory is Boolean @default(false), not nullable
-    const products = await this.prisma.products.findMany({
-      where: {
-        state: 'active',
-        track_inventory: true,
-        ...(query.category_id && {
-          product_categories: {
-            some: {
-              category_id: query.category_id,
-            },
+    const productWhere: any = {
+      state: 'active',
+      track_inventory: true,
+      ...(query.category_id && {
+        product_categories: {
+          some: {
+            category_id: query.category_id,
           },
-        }),
-      },
+        },
+      }),
+    };
+
+    const products = await this.prisma.products.findMany({
+      where: productWhere,
       select: {
         id: true,
         name: true,
@@ -96,13 +97,12 @@ export class InventoryAnalyticsService {
         max_stock_level: true,
         reorder_point: true,
       },
-      take: query.limit || 100,
       orderBy: {
         stock_quantity: 'asc',
       },
     });
 
-    const results = products.map((product) => {
+    let results = products.map((product) => {
       const qty = Number(product.stock_quantity || 0);
       const cost = Number(product.cost_price || 0);
       const reorderPoint = Number(
@@ -138,10 +138,31 @@ export class InventoryAnalyticsService {
 
     // Filter by status if specified
     if (query.status) {
-      return results.filter((r) => r.status === query.status);
+      results = results.filter((r) => r.status === query.status);
     }
 
-    return results;
+    const isPaginated = query.page !== undefined && query.limit !== undefined;
+    if (isPaginated) {
+      const page = query.page!;
+      const limit = query.limit!;
+      const totalCount = results.length;
+      const paginatedData = results.slice((page - 1) * limit, page * limit);
+
+      return {
+        data: paginatedData,
+        meta: {
+          pagination: {
+            total: totalCount,
+            page,
+            limit,
+            total_pages: Math.ceil(totalCount / limit),
+          },
+        },
+      };
+    }
+
+    // Non-paginated: respect original limit behavior
+    return results.slice(0, query.limit || 100);
   }
 
   async getLowStockAlerts(query: InventoryAnalyticsQueryDto) {
@@ -167,10 +188,9 @@ export class InventoryAnalyticsService {
       orderBy: {
         stock_quantity: 'asc',
       },
-      take: query.limit || 100,
     });
 
-    return products
+    const results = products
       .filter((p) => {
         const qty = Number(p.stock_quantity || 0);
         const reorderPoint = Number(p.reorder_point || p.min_stock_level || 5);
@@ -193,22 +213,114 @@ export class InventoryAnalyticsService {
           status: qty === 0 ? 'out_of_stock' : 'low_stock',
         };
       });
+
+    const isPaginated = query.page !== undefined && query.limit !== undefined;
+    if (isPaginated) {
+      const page = query.page!;
+      const limit = query.limit!;
+      const totalCount = results.length;
+      const paginatedData = results.slice((page - 1) * limit, page * limit);
+
+      return {
+        data: paginatedData,
+        meta: {
+          pagination: {
+            total: totalCount,
+            page,
+            limit,
+            total_pages: Math.ceil(totalCount / limit),
+          },
+        },
+      };
+    }
+
+    // Non-paginated: respect original limit behavior
+    return results.slice(0, query.limit || 100);
   }
 
   async getStockMovements(query: InventoryAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
-    // inventory_movements is scoped by products relation
-    const movements = await this.prisma.inventory_movements.findMany({
-      where: {
-        created_at: {
-          gte: startDate,
-          lte: endDate,
-        },
-        ...(query.movement_type && {
-          movement_type: query.movement_type as any,
-        }),
+    const where: any = {
+      created_at: {
+        gte: startDate,
+        lte: endDate,
       },
+      ...(query.movement_type && {
+        movement_type: query.movement_type as any,
+      }),
+    };
+
+    const isPaginated = query.page !== undefined && query.limit !== undefined;
+
+    if (isPaginated) {
+      const page = query.page!;
+      const limit = query.limit!;
+      const totalCount = await this.prisma.inventory_movements.count({ where });
+
+      const movements = await this.prisma.inventory_movements.findMany({
+        where,
+        include: {
+          products: {
+            select: {
+              name: true,
+              sku: true,
+            },
+          },
+          from_location: {
+            select: {
+              name: true,
+            },
+          },
+          to_location: {
+            select: {
+              name: true,
+            },
+          },
+          users: {
+            select: {
+              username: true,
+            },
+          },
+        },
+        orderBy: {
+          created_at: 'desc',
+        },
+        skip: (page - 1) * limit,
+        take: limit,
+      });
+
+      const data = movements.map((m) => ({
+        id: m.id,
+        date: m.created_at.toISOString(),
+        product_id: m.product_id,
+        product_name: m.products?.name || 'Unknown',
+        sku: m.products?.sku || '',
+        movement_type: m.movement_type,
+        quantity: Number(m.quantity || 0),
+        from_location: m.from_location?.name || null,
+        to_location: m.to_location?.name || null,
+        reason: m.reason,
+        user_name: m.users?.username || null,
+        reference_id: m.source_order_id?.toString() || null,
+      }));
+
+      return {
+        data,
+        meta: {
+          pagination: {
+            total: totalCount,
+            page,
+            limit,
+            total_pages: Math.ceil(totalCount / limit),
+          },
+        },
+      };
+    }
+
+    // Non-paginated (retrocompatible)
+    const movements = await this.prisma.inventory_movements.findMany({
+      where,
       include: {
         products: {
           select: {
@@ -312,7 +424,7 @@ export class InventoryAnalyticsService {
   }
 
   async getMovementSummary(query: InventoryAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
     const context = RequestContextService.getContext();
 
     if (!context?.store_id) {
@@ -354,7 +466,7 @@ export class InventoryAnalyticsService {
   }
 
   async getMovementTrends(query: InventoryAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
     const granularity = query.granularity || Granularity.DAY;
     const context = RequestContextService.getContext();
 
@@ -363,7 +475,7 @@ export class InventoryAnalyticsService {
     }
     const storeId = context.store_id;
 
-    const truncSql = Prisma.raw(`'${this.getDateTruncInterval(granularity)}'`);
+    const truncSql = Prisma.raw(`'${getDateTruncInterval(granularity)}'`);
 
     // withoutScope() needed: $queryRaw is not available on the scoped client.
     // storeId is validated above and used in the WHERE clause.
@@ -395,7 +507,7 @@ export class InventoryAnalyticsService {
     `;
 
     const mapped = results.map((r) => ({
-      period: this.formatPeriodFromDate(new Date(r.period), granularity),
+      period: formatPeriodFromDate(new Date(r.period), granularity),
       stock_in: Number(r.stock_in),
       stock_out: Number(r.stock_out),
       adjustments: Number(r.adjustments),
@@ -409,12 +521,12 @@ export class InventoryAnalyticsService {
       endDate,
       granularity,
       { stock_in: 0, stock_out: 0, adjustments: 0, transfers: 0, total: 0 },
-      this.formatPeriodFromDate.bind(this),
+      formatPeriodFromDate,
     );
   }
 
   async getMovementsForExport(query: InventoryAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     const movements = await this.prisma.inventory_movements.findMany({
       where: {
@@ -468,98 +580,4 @@ export class InventoryAnalyticsService {
     }));
   }
 
-  private getDateTruncInterval(granularity: Granularity): string {
-    switch (granularity) {
-      case Granularity.HOUR:
-        return 'hour';
-      case Granularity.DAY:
-        return 'day';
-      case Granularity.WEEK:
-        return 'week';
-      case Granularity.MONTH:
-        return 'month';
-      case Granularity.YEAR:
-        return 'year';
-      default:
-        return 'day';
-    }
-  }
-
-  private formatPeriodFromDate(date: Date, granularity: Granularity): string {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-
-    switch (granularity) {
-      case Granularity.HOUR:
-        return `${y}-${m}-${d}T${String(date.getHours()).padStart(2, '0')}:00`;
-      case Granularity.DAY:
-        return `${y}-${m}-${d}`;
-      case Granularity.WEEK:
-        return `${y}-${m}-${d}`;
-      case Granularity.MONTH:
-        return `${y}-${m}`;
-      case Granularity.YEAR:
-        return `${y}`;
-      default:
-        return `${y}-${m}-${d}`;
-    }
-  }
-
-  private parseDateRange(query: InventoryAnalyticsQueryDto): {
-    startDate: Date;
-    endDate: Date;
-  } {
-    if (query.date_from && query.date_to) {
-      const endDate = new Date(query.date_to);
-      endDate.setUTCHours(23, 59, 59, 999);
-      return {
-        startDate: new Date(query.date_from),
-        endDate,
-      };
-    }
-
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-    switch (query.date_preset) {
-      case DatePreset.TODAY:
-        return { startDate: today, endDate: now };
-      case DatePreset.YESTERDAY:
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        return { startDate: yesterday, endDate: today };
-      case DatePreset.THIS_WEEK:
-        const weekStart = new Date(today);
-        weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-        return { startDate: weekStart, endDate: now };
-      case DatePreset.LAST_WEEK:
-        const lastWeekEnd = new Date(today);
-        lastWeekEnd.setDate(lastWeekEnd.getDate() - lastWeekEnd.getDay());
-        const lastWeekStart = new Date(lastWeekEnd);
-        lastWeekStart.setDate(lastWeekStart.getDate() - 7);
-        return { startDate: lastWeekStart, endDate: lastWeekEnd };
-      case DatePreset.LAST_MONTH:
-        const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
-        const lastMonthStart = new Date(
-          today.getFullYear(),
-          today.getMonth() - 1,
-          1,
-        );
-        return { startDate: lastMonthStart, endDate: lastMonthEnd };
-      case DatePreset.THIS_YEAR:
-        return { startDate: new Date(today.getFullYear(), 0, 1), endDate: now };
-      case DatePreset.LAST_YEAR:
-        return {
-          startDate: new Date(today.getFullYear() - 1, 0, 1),
-          endDate: new Date(today.getFullYear() - 1, 11, 31),
-        };
-      case DatePreset.THIS_MONTH:
-      default:
-        return {
-          startDate: new Date(today.getFullYear(), today.getMonth(), 1),
-          endDate: now,
-        };
-    }
-  }
 }

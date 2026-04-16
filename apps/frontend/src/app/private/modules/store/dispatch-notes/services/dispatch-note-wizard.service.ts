@@ -1,4 +1,5 @@
 import { Injectable, signal, computed } from '@angular/core';
+import { toLocalDateString } from '../../../../../shared/utils/date.util';
 
 // ============================================================================
 // INTERFACES
@@ -64,7 +65,7 @@ export class DispatchNoteWizardService {
   readonly customer = signal<WizardCustomer | null>(null);
   readonly items = signal<WizardItem[]>([]);
   readonly details = signal<WizardDetails>({
-    emission_date: new Date().toISOString().split('T')[0],
+    emission_date: toLocalDateString(),
     currency: 'COP',
   });
   readonly createAction = signal<WizardCreateAction>('draft');
@@ -199,7 +200,7 @@ export class DispatchNoteWizardService {
     this.items.set([]);
     this.createAction.set('draft');
     this.details.set({
-      emission_date: new Date().toISOString().split('T')[0],
+      emission_date: toLocalDateString(),
       currency: 'COP',
     });
   }

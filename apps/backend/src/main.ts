@@ -7,6 +7,7 @@ import { DomainConfigService } from '@common/config/domain.config';
 import { GlobalPrismaService } from './prisma/services/global-prisma.service';
 import { PublicSeoService } from './domains/public/seo/public-seo.service';
 import { json, urlencoded } from 'express';
+import * as v8 from 'v8';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -179,11 +180,19 @@ async function bootstrap() {
 
   // Health check endpoint
   app.getHttpAdapter().get('/api/health', (req, res) => {
+    const mem = process.memoryUsage();
+    const heapStats = v8.getHeapStatistics();
     res.status(200).json({
       status: 'ok',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
-      memory: process.memoryUsage(),
+      memory: {
+        rss: mem.rss,
+        heapTotal: heapStats.heap_size_limit,
+        heapUsed: mem.heapUsed,
+        external: mem.external,
+        arrayBuffers: mem.arrayBuffers,
+      },
       version: process.env.npm_package_version || '1.0.0',
     });
   });

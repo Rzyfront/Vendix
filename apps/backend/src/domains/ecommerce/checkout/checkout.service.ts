@@ -795,9 +795,9 @@ export class CheckoutService {
     const date_str = date.toISOString().slice(2, 10).replace(/-/g, '');
 
     const start_of_day = new Date(date);
-    start_of_day.setHours(0, 0, 0, 0);
+    start_of_day.setUTCHours(0, 0, 0, 0);
     const end_of_day = new Date(date);
-    end_of_day.setHours(23, 59, 59, 999);
+    end_of_day.setUTCHours(23, 59, 59, 999);
 
     // IMPORTANTE: Usar store_prisma para contar TODAS las órdenes de la tienda,
     // no solo las del usuario actual (que es lo que haría this.prisma.orders.count)

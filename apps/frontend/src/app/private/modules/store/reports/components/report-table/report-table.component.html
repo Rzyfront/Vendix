@@ -29,7 +29,7 @@
           </td>
         </tr>
       } @else {
-        @for (row of data(); track $index) {
+        @for (row of data(); track row[trackKey()] ?? $index) {
           <tr>
             @for (col of columns(); track col.key) {
               <td [style.text-align]="getAlign(col)">

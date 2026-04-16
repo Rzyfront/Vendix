@@ -19,7 +19,10 @@ import {
   BadgeComponent,
   DialogService,
 } from '../../../../shared/components';
-import { selectStoreSettings, selectUserDomainHostname } from '../../../../core/store/auth/auth.selectors';
+import {
+  selectStoreSettings,
+  selectUserDomainHostname,
+} from '../../../../core/store/auth/auth.selectors';
 import {
   PosCartService,
   CartState,
@@ -47,14 +50,21 @@ import { QuotationsService } from '../quotations/services/quotations.service';
 import { LayawayApiService } from '../layaway/services/layaway.service';
 import { LayawayConfigModalComponent } from './components/layaway-config-modal/layaway-config-modal.component';
 import { CreateLayawayRequest } from '../layaway/interfaces/layaway.interface';
-import { PosCashRegisterService, CashRegisterSession } from './services/pos-cash-register.service';
+import {
+  PosCashRegisterService,
+  CashRegisterSession,
+} from './services/pos-cash-register.service';
 import { PosQueueService } from './services/pos-queue.service';
 import { PosSessionStatusBarComponent } from './components/pos-session-status-bar.component';
 import { PosSessionOpenModalComponent } from './components/pos-session-open-modal.component';
 import { PosSessionCloseModalComponent } from './components/pos-session-close-modal.component';
 import { PosCashMovementModalComponent } from './components/pos-cash-movement-modal.component';
 import { PosSessionDetailModalComponent } from './components/pos-session-detail-modal.component';
+import { PosScheduleIndicatorComponent } from './components/pos-schedule-indicator.component';
+import { PosScheduleModalComponent } from './components/pos-schedule-modal.component';
+import { PosHeaderDropdownComponent } from './components/pos-header-dropdown.component';
 import { ReservationFormModalComponent } from '../reservations/components/reservation-form-modal/reservation-form-modal.component';
+import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.component';
 
 @Component({
   selector: 'app-pos',
@@ -80,8 +90,12 @@ import { ReservationFormModalComponent } from '../reservations/components/reserv
     PosSessionCloseModalComponent,
     PosCashMovementModalComponent,
     PosSessionDetailModalComponent,
+    PosScheduleIndicatorComponent,
+    PosScheduleModalComponent,
+    PosHeaderDropdownComponent,
     LayawayConfigModalComponent,
     ReservationFormModalComponent,
+    PosAISummaryModalComponent,
   ],
   template: `
     <div class="flex flex-col overflow-hidden pos-container">
@@ -98,7 +112,7 @@ import { ReservationFormModalComponent } from '../reservations/components/reserv
       >
         <!-- Header -->
         <div
-          class="flex-none px-4 lg:px-6 py-3 lg:py-4 border-b border-border pos-header"
+          class="flex-none px-4 lg:px-6 py-3 lg:py-4 border-b border-border pos-header relative z-30"
         >
           <div class="flex justify-between items-center gap-3">
             <!-- Left: Logo + Title -->
@@ -128,68 +142,108 @@ import { ReservationFormModalComponent } from '../reservations/components/reserv
                 </h1>
                 <span class="hidden sm:inline">
                   @if (isQuotationMode()) {
-                    <app-badge variant="primary" size="xs">Crear cotización</app-badge>
+                    <app-badge variant="primary" size="xs"
+                      >Crear cotización</app-badge
+                    >
                   } @else if (isLayawayMode()) {
-                    <app-badge variant="warning" size="xs">Crear plan separé</app-badge>
+                    <app-badge variant="warning" size="xs"
+                      >Crear plan separé</app-badge
+                    >
                   } @else if (isEditMode()) {
-                    <app-badge variant="warning" size="xs">Modificar items de la orden</app-badge>
+                    <app-badge variant="warning" size="xs"
+                      >Modificar items de la orden</app-badge
+                    >
                   } @else {
-                    <app-badge variant="success" size="xs">Punto de venta</app-badge>
+                    <app-badge variant="success" size="xs"
+                      >Punto de venta</app-badge
+                    >
                   }
                 </span>
               </div>
             </div>
 
-            <!-- Right: Customer + Settings -->
-            <div class="flex items-center gap-2 lg:gap-3">
-              <!-- Customer Badge (desktop only) -->
-              <div
-                *ngIf="selectedCustomer && !isMobile()"
-                class="group flex items-center gap-2.5 self-stretch bg-gradient-to-r from-primary-light/50 to-primary-light/30 px-3 rounded-lg cursor-pointer hover:from-primary-light/70 hover:to-primary-light/50 transition-all border border-primary/30 shadow-sm"
-                (click)="onOpenCustomerModal()"
-              >
-                <div
-                  class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary flex-shrink-0"
-                >
-                  <app-icon name="user" [size]="16"></app-icon>
-                </div>
-                <div class="flex flex-col min-w-0 flex-1">
-                  <span
-                    class="font-semibold text-text-primary text-sm leading-tight truncate"
-                    [title]="selectedCustomer.name"
-                    >{{ selectedCustomer.name }}</span
-                  >
-                  <span
-                    class="text-xs text-text-secondary leading-tight truncate"
-                    [title]="selectedCustomer.email"
-                    >{{ selectedCustomer.email }}</span
-                  >
-                </div>
-                <div
-                  class="w-6 h-6 rounded-full hover:bg-surface/60 flex items-center justify-center transition-colors flex-shrink-0"
-                  (click)="$event.stopPropagation(); onClearCustomer()"
-                >
-                  <app-icon
-                    name="x"
-                    [size]="14"
-                    class="text-text-secondary group-hover:text-destructive transition-colors"
-                  ></app-icon>
-                </div>
+            <!-- Right: Customer + Schedule + Cash Register -->
+            <div class="flex items-center gap-2 xl:gap-3">
+              <!-- Mobile/Tablet/Small desktop: Compact dropdown -->
+              <div class="flex xl:hidden">
+                <app-pos-header-dropdown
+                  [customer]="selectedCustomer"
+                  [scheduleEnabled]="enableScheduleValidation"
+                  [isWithinHours]="!isActuallyOutOfHours"
+                  [isDayClosed]="isTodayClosed"
+                  [todayHours]="todaySchedule"
+                  [cashSession]="activeSession"
+                  [showCashOpenButton]="cashRegisterEnabled"
+                  (customerClicked)="onOpenCustomerModal()"
+                  (clearCustomer)="onClearCustomer()"
+                  (scheduleClicked)="showScheduleModal = true"
+                  (cashOpenClicked)="showSessionOpenModal = true"
+                  (cashCloseClicked)="showSessionCloseModal = true"
+                  (cashMovementClicked)="showCashMovementModal = true"
+                  (cashDetailClicked)="showSessionDetailModal = true"
+                ></app-pos-header-dropdown>
               </div>
 
+              <!-- Desktop: Full expanded view -->
+              <div class="hidden xl:flex items-center gap-2 xl:gap-3">
+                <!-- Customer Badge -->
+                <div
+                  *ngIf="selectedCustomer"
+                  class="group flex items-center gap-2.5 self-stretch bg-gradient-to-r from-primary-light/50 to-primary-light/30 px-3 rounded-lg cursor-pointer hover:from-primary-light/70 hover:to-primary-light/50 transition-all border border-primary/30 shadow-sm"
+                  (click)="onOpenCustomerModal()"
+                >
+                  <div
+                    class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary flex-shrink-0"
+                  >
+                    <app-icon name="user" [size]="16"></app-icon>
+                  </div>
+                  <div class="flex flex-col min-w-0 flex-1">
+                    <span
+                      class="font-semibold text-text-primary text-sm leading-tight truncate"
+                      [title]="selectedCustomer.name"
+                      >{{ selectedCustomer.name }}</span
+                    >
+                    <span
+                      class="text-xs text-text-secondary leading-tight truncate"
+                      [title]="selectedCustomer.email"
+                      >{{ selectedCustomer.email }}</span
+                    >
+                  </div>
+                  <div
+                    class="w-6 h-6 rounded-full hover:bg-surface/60 flex items-center justify-center transition-colors flex-shrink-0"
+                    (click)="$event.stopPropagation(); onClearCustomer()"
+                  >
+                    <app-icon
+                      name="x"
+                      [size]="14"
+                      class="text-text-secondary group-hover:text-destructive transition-colors"
+                    ></app-icon>
+                  </div>
+                </div>
 
-              <!-- Cash Register Session Status Bar -->
-              @if (cashRegisterEnabled) {
-                <app-pos-session-status-bar
-                  [session]="activeSession"
-                  [showOpenButton]="true"
-                  (openClicked)="showSessionOpenModal = true"
-                  (closeClicked)="showSessionCloseModal = true"
-                  (movementClicked)="showCashMovementModal = true"
-                  (detailClicked)="showSessionDetailModal = true"
-                ></app-pos-session-status-bar>
-              }
+                <!-- Schedule Indicator -->
+                @if (enableScheduleValidation) {
+                  <app-pos-schedule-indicator
+                    [isWithinHours]="!isActuallyOutOfHours"
+                    [todayHours]="todaySchedule"
+                    [isDayClosed]="isTodayClosed"
+                    [enabled]="enableScheduleValidation"
+                    (clicked)="showScheduleModal = true"
+                  ></app-pos-schedule-indicator>
+                }
 
+                <!-- Cash Register Session Status Bar -->
+                @if (cashRegisterEnabled) {
+                  <app-pos-session-status-bar
+                    [session]="activeSession"
+                    [showOpenButton]="true"
+                    (openClicked)="showSessionOpenModal = true"
+                    (closeClicked)="showSessionCloseModal = true"
+                    (movementClicked)="showCashMovementModal = true"
+                    (detailClicked)="showSessionDetailModal = true"
+                  ></app-pos-session-status-bar>
+                }
+              </div>
             </div>
           </div>
         </div>
@@ -302,7 +356,6 @@ import { ReservationFormModalComponent } from '../reservations/components/reserv
                 (layaway)="onLayaway()"
               ></app-pos-cart>
             </div>
-
           </div>
 
           <!-- Mobile: Full width products only -->
@@ -416,6 +469,12 @@ import { ReservationFormModalComponent } from '../reservations/components/reserv
           (sessionClosed)="onSessionClosed($event)"
         ></app-pos-session-close-modal>
 
+        <app-pos-ai-summary-modal
+          [isOpen]="showAISummaryModal"
+          [sessionId]="closedSessionIdForSummary"
+          (isOpenChange)="showAISummaryModal = $event"
+        ></app-pos-ai-summary-modal>
+
         <app-pos-cash-movement-modal
           [isOpen]="showCashMovementModal"
           [sessionId]="activeSession?.id || null"
@@ -430,11 +489,22 @@ import { ReservationFormModalComponent } from '../reservations/components/reserv
         ></app-pos-session-detail-modal>
       }
 
+      <!-- Schedule Modal -->
+      <app-pos-schedule-modal
+        [isOpen]="showScheduleModal"
+        [businessHours]="businessHours"
+        [isWithinHours]="!isActuallyOutOfHours"
+        [todayKey]="todayKey"
+        (isOpenChange)="showScheduleModal = $event"
+        (goToSettings)="showScheduleModal = false; goToSettings()"
+      ></app-pos-schedule-modal>
+
       <!-- Reservation Modal from POS Cart -->
       <app-reservation-form-modal
         [isOpen]="showReservationModal"
         [initialProduct]="pendingBookingProduct"
         [initialCustomer]="selectedCustomer"
+        [posMode]="true"
         (closed)="onBookingModalClosed()"
         (created)="onBookingCreated($event)"
       ></app-reservation-form-modal>
@@ -459,7 +529,9 @@ import { ReservationFormModalComponent } from '../reservations/components/reserv
         height: 100%;
         overflow: hidden;
       }
-      .pos-container { height: 100%; }
+      .pos-container {
+        height: 100%;
+      }
 
       /* iOS-style blur header */
       .pos-header {
@@ -534,8 +606,12 @@ import { ReservationFormModalComponent } from '../reservations/components/reserv
       }
 
       @keyframes fadeIn {
-        from { opacity: 0; }
-        to { opacity: 1; }
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
       }
 
       @keyframes slideUp {
@@ -561,7 +637,6 @@ export class PosComponent implements OnInit, OnDestroy {
   selectedPaymentMethod: any = null;
 
   showShippingModal = false;
-
 
   showOrderConfirmation = false;
   productRefreshCounter = 0;
@@ -593,6 +668,44 @@ export class PosComponent implements OnInit, OnDestroy {
   showSessionCloseModal = false;
   showCashMovementModal = false;
   showSessionDetailModal = false;
+  showAISummaryModal = false;
+  closedSessionIdForSummary: number | null = null;
+
+  // Schedule
+  showScheduleModal = false;
+
+  /** Key of the current day (e.g. 'monday') based on store timezone */
+  get todayKey(): string {
+    const days = [
+      'sunday',
+      'monday',
+      'tuesday',
+      'wednesday',
+      'thursday',
+      'friday',
+      'saturday',
+    ];
+    try {
+      const now = new Date(
+        new Date().toLocaleString('en-US', { timeZone: this.storeTimezone }),
+      );
+      return days[now.getDay()];
+    } catch {
+      return days[new Date().getDay()];
+    }
+  }
+
+  /** Today's business hours from the config, or null if closed */
+  get todaySchedule(): { open: string; close: string } | null {
+    const hours = this.businessHours[this.todayKey];
+    if (!hours || !hours.open || !hours.close) return null;
+    return hours;
+  }
+
+  /** Whether today is explicitly marked as closed */
+  get isTodayClosed(): boolean {
+    return this.todaySchedule === null;
+  }
 
   // Customer Queue
   queueEnabled = false;
@@ -629,6 +742,7 @@ export class PosComponent implements OnInit, OnDestroy {
 
   // Schedule UI State
   isOutOfHours = false;
+  isActuallyOutOfHours = false;
   nextOpenTime?: string;
   outOfHoursMessage?: string;
   scheduleHandledByBackend = false;
@@ -714,12 +828,16 @@ export class PosComponent implements OnInit, OnDestroy {
             // Si está fuera de horario y no es admin
             if (!status.isWithinBusinessHours && !this.canBypassSchedule) {
               this.isOutOfHours = true;
+              this.isActuallyOutOfHours = true;
               this.nextOpenTime = status.nextOpenTime;
               this.outOfHoursMessage = status.message;
             }
             // Si está fuera de horario pero es admin, mostrar warning info
             else if (!status.isWithinBusinessHours && this.canBypassSchedule) {
+              this.isActuallyOutOfHours = true;
               this.showAdminScheduleWarning(status.message ?? '');
+            } else {
+              this.isActuallyOutOfHours = false;
             }
           }
         },
@@ -902,7 +1020,9 @@ export class PosComponent implements OnInit, OnDestroy {
 
   onQuote(): void {
     if (!this.selectedCustomer) {
-      this.toastService.warning('Debes asignar un cliente para crear una cotización');
+      this.toastService.warning(
+        'Debes asignar un cliente para crear una cotización',
+      );
       this.onOpenCustomerModal();
       return;
     }
@@ -914,7 +1034,10 @@ export class PosComponent implements OnInit, OnDestroy {
 
     this.loading = true;
     const items = this.cartState.items.map((item) => ({
-      product_id: typeof item.product.id === 'string' ? parseInt(item.product.id, 10) : item.product.id,
+      product_id:
+        typeof item.product.id === 'string'
+          ? parseInt(item.product.id, 10)
+          : item.product.id,
       product_name: item.product.name,
       quantity: item.quantity,
       unit_price: item.unitPrice,
@@ -924,9 +1047,7 @@ export class PosComponent implements OnInit, OnDestroy {
     }));
 
     const dto = {
-      customer_id: this.selectedCustomer
-        ? this.selectedCustomer.id
-        : undefined,
+      customer_id: this.selectedCustomer ? this.selectedCustomer.id : undefined,
       channel: 'pos' as const,
       items,
       notes: '',
@@ -937,35 +1058,35 @@ export class PosComponent implements OnInit, OnDestroy {
       ? this.quotationsService.updateQuotation(Number(editId), dto as any)
       : this.quotationsService.createQuotation(dto as any);
 
-    obs$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (res: any) => {
-          this.loading = false;
-          const qNumber =
-            res?.data?.quotation_number || res?.quotation_number || '';
-          this.toastService.success(
-            editId
-              ? `Cotización ${qNumber} actualizada correctamente`
-              : `Cotización ${qNumber} creada correctamente`,
-          );
-          this.onClearCart();
-          if (this.isQuotationMode()) {
-            this.router.navigate(['/admin/orders/quotations']);
-          }
-        },
-        error: (err: any) => {
-          this.loading = false;
-          this.toastService.error(
-            err?.error?.message || 'Error al crear cotización',
-          );
-        },
-      });
+    obs$.pipe(takeUntil(this.destroy$)).subscribe({
+      next: (res: any) => {
+        this.loading = false;
+        const qNumber =
+          res?.data?.quotation_number || res?.quotation_number || '';
+        this.toastService.success(
+          editId
+            ? `Cotización ${qNumber} actualizada correctamente`
+            : `Cotización ${qNumber} creada correctamente`,
+        );
+        this.onClearCart();
+        if (this.isQuotationMode()) {
+          this.router.navigate(['/admin/orders/quotations']);
+        }
+      },
+      error: (err: any) => {
+        this.loading = false;
+        this.toastService.error(
+          err?.error?.message || 'Error al crear cotización',
+        );
+      },
+    });
   }
 
   onLayaway(): void {
     if (!this.selectedCustomer) {
-      this.toastService.warning('Debes asignar un cliente para crear un plan separé');
+      this.toastService.warning(
+        'Debes asignar un cliente para crear un plan separé',
+      );
       this.onOpenCustomerModal();
       return;
     }
@@ -985,7 +1106,10 @@ export class PosComponent implements OnInit, OnDestroy {
     this.showLayawayConfigModal.set(false);
 
     const items = this.cartState.items.map((item) => ({
-      product_id: typeof item.product.id === 'string' ? parseInt(item.product.id, 10) : item.product.id,
+      product_id:
+        typeof item.product.id === 'string'
+          ? parseInt(item.product.id, 10)
+          : item.product.id,
       product_name: item.product.name,
       quantity: item.quantity,
       unit_price: item.unitPrice,
@@ -1002,19 +1126,24 @@ export class PosComponent implements OnInit, OnDestroy {
       installments: config.installments || [],
     };
 
-    this.layawayService.create(dto)
+    this.layawayService
+      .create(dto)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (res: any) => {
           this.loading = false;
           const planNumber = res?.data?.plan_number || res?.plan_number || '';
-          this.toastService.success(`Plan Separé ${planNumber} creado correctamente`);
+          this.toastService.success(
+            `Plan Separé ${planNumber} creado correctamente`,
+          );
           this.onClearCart();
           this.router.navigate(['/admin/orders/layaway']);
         },
         error: (err: any) => {
           this.loading = false;
-          this.toastService.error(err?.error?.message || 'Error al crear plan separé');
+          this.toastService.error(
+            err?.error?.message || 'Error al crear plan separé',
+          );
         },
       });
   }
@@ -1093,9 +1222,10 @@ export class PosComponent implements OnInit, OnDestroy {
         customer: paymentData.order?.customer || this.selectedCustomer,
         payment: paymentData.order?.payment || paymentData.payment,
         invoiceDataToken: paymentData.order?.invoice_data_token,
-        invoiceDataQrUrl: paymentData.order?.invoice_data_token && this.storeDomainHostname
-          ? `${window.location.protocol}//${this.storeDomainHostname}/factura/${paymentData.order.invoice_data_token}`
-          : undefined,
+        invoiceDataQrUrl:
+          paymentData.order?.invoice_data_token && this.storeDomainHostname
+            ? `${window.location.protocol}//${this.storeDomainHostname}/factura/${paymentData.order.invoice_data_token}`
+            : undefined,
       };
 
       this.showOrderConfirmation = true;
@@ -1108,16 +1238,24 @@ export class PosComponent implements OnInit, OnDestroy {
       this.productRefreshCounter++;
 
       // Consume queue entry if customer came from virtual queue
-      if (this.selectedCustomer?.fromQueue && this.selectedCustomer?.queueEntryId && paymentData.order?.id) {
-        this.queueService.consumeEntry(this.selectedCustomer.queueEntryId, paymentData.order.id)
+      if (
+        this.selectedCustomer?.fromQueue &&
+        this.selectedCustomer?.queueEntryId &&
+        paymentData.order?.id
+      ) {
+        this.queueService
+          .consumeEntry(
+            this.selectedCustomer.queueEntryId,
+            paymentData.order.id,
+          )
           .pipe(takeUntil(this.destroy$))
           .subscribe({
-            error: (err: any) => console.error('Error consuming queue entry:', err),
+            error: (err: any) =>
+              console.error('Error consuming queue entry:', err),
           });
       }
     }
   }
-
 
   onOrderConfirmationClosed(): void {
     this.showOrderConfirmation = false;
@@ -1135,8 +1273,11 @@ export class PosComponent implements OnInit, OnDestroy {
     this.showReservationModal = true;
   }
 
-  onBookingCreated(reservationCustomer?: any): void {
+  onBookingCreated(event?: any): void {
     this.showReservationModal = false;
+
+    const reservationCustomer = event?.customer || event;
+    const booking = event?.booking;
 
     // Si el modal retornó un cliente y no había uno en la orden, sincronizarlo al POS
     if (reservationCustomer && !this.selectedCustomer) {
@@ -1151,19 +1292,48 @@ export class PosComponent implements OnInit, OnDestroy {
         updated_at: reservationCustomer.updated_at || new Date(),
       };
       this.customerService.selectCustomer(posCustomer);
-      this.cartService.setCustomer(posCustomer).pipe(takeUntil(this.destroy$)).subscribe();
+      this.cartService
+        .setCustomer(posCustomer)
+        .pipe(takeUntil(this.destroy$))
+        .subscribe();
+    }
+
+    // Registrar pending booking en el carrito
+    if (booking) {
+      this.cartService
+        .addPendingBooking({
+          id: booking.id,
+          booking_number: booking.booking_number,
+          product_id: booking.product_id || booking.product?.id,
+          product_name:
+            booking.product?.name ||
+            this.pendingBookingProduct?.name ||
+            'Servicio',
+          customer_id: booking.customer_id || booking.customer?.id,
+          date: booking.date,
+          start_time: booking.start_time,
+          end_time: booking.end_time,
+          provider_name: booking.provider?.display_name,
+        })
+        .pipe(takeUntil(this.destroy$))
+        .subscribe();
     }
 
     if (this.pendingBookingProduct) {
-      this.cartService.addToCart({ product: this.pendingBookingProduct, quantity: 1 })
+      this.cartService
+        .addToCart({ product: this.pendingBookingProduct, quantity: 1 })
         .pipe(takeUntil(this.destroy$))
         .subscribe({
           next: () => {
-            this.toastService.success('Reserva creada y servicio agregado al carrito');
+            this.toastService.success(
+              'Reserva creada y servicio agregado al carrito',
+            );
             this.pendingBookingProduct = null;
           },
           error: () => {
-            this.toastService.error('Reserva creada, pero no se pudo agregar al carrito');
+            this.toastService.error(
+              'Reserva creada, pero no se pudo agregar al carrito',
+            );
             this.pendingBookingProduct = null;
           },
         });
@@ -1317,11 +1487,20 @@ export class PosComponent implements OnInit, OnDestroy {
       this.productRefreshCounter++;
 
       // Consume queue entry if customer came from virtual queue
-      if (this.selectedCustomer?.fromQueue && this.selectedCustomer?.queueEntryId && shippingData.order?.id) {
-        this.queueService.consumeEntry(this.selectedCustomer.queueEntryId, shippingData.order.id)
+      if (
+        this.selectedCustomer?.fromQueue &&
+        this.selectedCustomer?.queueEntryId &&
+        shippingData.order?.id
+      ) {
+        this.queueService
+          .consumeEntry(
+            this.selectedCustomer.queueEntryId,
+            shippingData.order.id,
+          )
           .pipe(takeUntil(this.destroy$))
           .subscribe({
-            error: (err: any) => console.error('Error consuming queue entry:', err),
+            error: (err: any) =>
+              console.error('Error consuming queue entry:', err),
           });
       }
     }
@@ -1373,7 +1552,8 @@ export class PosComponent implements OnInit, OnDestroy {
 
   private loadQuotationForEditing(quotationId: string): void {
     this.loading = true;
-    this.quotationsService.getQuotationById(Number(quotationId))
+    this.quotationsService
+      .getQuotationById(Number(quotationId))
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response: any) => {
@@ -1395,14 +1575,20 @@ export class PosComponent implements OnInit, OnDestroy {
           }));
 
           // Load items into cart
-          this.cartService.clearCart().pipe(takeUntil(this.destroy$)).subscribe(() => {
-            items.forEach((item: any) => {
-              this.cartService.addToCart({
-                product: item.product,
-                quantity: item.quantity,
-              }).pipe(takeUntil(this.destroy$)).subscribe();
+          this.cartService
+            .clearCart()
+            .pipe(takeUntil(this.destroy$))
+            .subscribe(() => {
+              items.forEach((item: any) => {
+                this.cartService
+                  .addToCart({
+                    product: item.product,
+                    quantity: item.quantity,
+                  })
+                  .pipe(takeUntil(this.destroy$))
+                  .subscribe();
+              });
             });
-          });
 
           // Set customer if available
           if (quotation.customer) {
@@ -1418,12 +1604,17 @@ export class PosComponent implements OnInit, OnDestroy {
               updated_at: quotation.customer.updated_at || new Date(),
             };
             this.customerService.selectCustomer(customer);
-            this.cartService.setCustomer(customer).pipe(takeUntil(this.destroy$)).subscribe();
+            this.cartService
+              .setCustomer(customer)
+              .pipe(takeUntil(this.destroy$))
+              .subscribe();
           }
 
           this.editingQuotationId.set(quotationId);
           this.loading = false;
-          this.toastService.info(`Editando Cotización #${quotation.quotation_number}`);
+          this.toastService.info(
+            `Editando Cotización #${quotation.quotation_number}`,
+          );
         },
         error: () => {
           this.loading = false;
@@ -1552,8 +1743,8 @@ export class PosComponent implements OnInit, OnDestroy {
                   this.cashRegisterEnabled = crFresh;
                   this.cashRegisterService.setFeatureEnabled(crFresh);
                   this.paymentService.setRequireSessionForSales(
-                    freshSettings.pos.cash_register
-                      .require_session_for_sales || false,
+                    freshSettings.pos.cash_register.require_session_for_sales ||
+                      false,
                   );
                   if (crFresh) {
                     this.initCashRegisterSession();
@@ -1580,14 +1771,18 @@ export class PosComponent implements OnInit, OnDestroy {
           if (
             !this.scheduleHandledByBackend &&
             this.scheduleStatusChecked &&
-            this.enableScheduleValidation &&
-            !this.isWithinBusinessHours() &&
-            !this.canBypassSchedule
+            this.enableScheduleValidation
           ) {
-            this.isOutOfHours = true;
-            this.nextOpenTime = this.getLocalNextOpenDay();
-            this.outOfHoursMessage =
-              'El punto de venta está fuera del horario de atención configurado (Validación local).';
+            const localOutOfHours = !this.isWithinBusinessHours();
+            if (localOutOfHours) {
+              this.isActuallyOutOfHours = true;
+              if (!this.canBypassSchedule) {
+                this.isOutOfHours = true;
+                this.nextOpenTime = this.getLocalNextOpenDay();
+                this.outOfHoursMessage =
+                  'El punto de venta está fuera del horario de atención configurado (Validación local).';
+              }
+            }
           }
         }
       });
@@ -1751,7 +1946,8 @@ export class PosComponent implements OnInit, OnDestroy {
   // =============================================
 
   private initCashRegisterSession(): void {
-    this.cashRegisterService.fetchActiveSession()
+    this.cashRegisterService
+      .fetchActiveSession()
       .pipe(takeUntil(this.destroy$))
       .subscribe((session) => {
         this.activeSession = session;
@@ -1771,8 +1967,13 @@ export class PosComponent implements OnInit, OnDestroy {
     this.activeSession = null;
     this.showSessionCloseModal = false;
 
+    // Open AI summary modal
+    this.closedSessionIdForSummary = session.id;
+    this.showAISummaryModal = true;
+
     const diff = Number(session.difference || 0);
-    const diffStr = diff >= 0 ? `+$${diff.toFixed(2)}` : `-$${Math.abs(diff).toFixed(2)}`;
+    const diffStr =
+      diff >= 0 ? `+$${diff.toFixed(2)}` : `-$${Math.abs(diff).toFixed(2)}`;
     this.toastService.info(
       `Caja cerrada. Diferencia: ${diffStr}`,
       'Cierre de Caja',

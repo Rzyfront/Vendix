@@ -849,6 +849,80 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
 
+    // Metadata y Recolección de Datos
+    {
+      name: 'store:settings:write',
+      description: 'Escribir configuración de tienda (metadata, templates, email)',
+      path: '/api/store/metadata-fields',
+      method: 'POST',
+    },
+    {
+      name: 'store:metadata:read',
+      description: 'Leer campos de metadata',
+      path: '/api/store/metadata-fields',
+      method: 'GET',
+    },
+    {
+      name: 'store:metadata:write',
+      description: 'Gestionar campos de metadata',
+      path: '/api/store/metadata-fields',
+      method: 'POST',
+    },
+    {
+      name: 'store:data_collection:templates:read',
+      description: 'Leer plantillas de recolección de datos',
+      path: '/api/store/data-collection/templates',
+      method: 'GET',
+    },
+    {
+      name: 'store:data_collection:templates:write',
+      description: 'Gestionar plantillas de recolección de datos',
+      path: '/api/store/data-collection/templates',
+      method: 'POST',
+    },
+    {
+      name: 'store:data_collection:submissions:read',
+      description: 'Leer formularios enviados de recolección de datos',
+      path: '/api/store/data-collection/submissions',
+      method: 'GET',
+    },
+    {
+      name: 'store:data_collection:submissions:write',
+      description: 'Gestionar formularios de recolección de datos',
+      path: '/api/store/data-collection/submissions',
+      method: 'POST',
+    },
+    {
+      name: 'store:customers:history:read',
+      description: 'Leer historial de consultas del cliente',
+      path: '/api/store/customers/:customerId/history',
+      method: 'GET',
+    },
+    {
+      name: 'store:customers:history:write',
+      description: 'Agregar notas al historial del cliente',
+      path: '/api/store/customers/:customerId/history/:bookingId/notes',
+      method: 'POST',
+    },
+    {
+      name: 'store:email_templates:read',
+      description: 'Leer plantillas de email',
+      path: '/api/store/email-templates',
+      method: 'GET',
+    },
+    {
+      name: 'store:email_templates:write',
+      description: 'Gestionar plantillas de email',
+      path: '/api/store/email-templates/:eventType',
+      method: 'PUT',
+    },
+    {
+      name: 'store:reservations:write',
+      description: 'Escribir reservas (check-in, submissions)',
+      path: '/api/store/reservations/:id/check-in',
+      method: 'PATCH',
+    },
+
     // Store Domains
     {
       name: 'store:domains:create',
@@ -1579,6 +1653,12 @@ export async function seedPermissionsAndRoles(
       method: 'PATCH',
     },
     {
+      name: 'store:expenses:refund',
+      description: 'Refund expenses',
+      path: '/api/store/expenses/:id/refund',
+      method: 'POST',
+    },
+    {
       name: 'store:inventory:inventory:create',
       description: 'Create inventory inventory',
       path: '/api/store/inventory/inventory',
@@ -1991,7 +2071,8 @@ export async function seedPermissionsAndRoles(
     },
     {
       name: 'store:payroll:settlements:manage',
-      description: 'Gestionar liquidaciones (recalcular, aprobar, pagar, cancelar)',
+      description:
+        'Gestionar liquidaciones (recalcular, aprobar, pagar, cancelar)',
       path: '/api/store/payroll/settlements',
       method: 'PATCH',
     },
@@ -2224,7 +2305,8 @@ export async function seedPermissionsAndRoles(
     },
     {
       name: 'store:accounting:bank_reconciliation:create',
-      description: 'Crear cuentas bancarias, importar transacciones y conciliaciones',
+      description:
+        'Crear cuentas bancarias, importar transacciones y conciliaciones',
       path: '/api/store/accounting/bank-reconciliation/accounts',
       method: 'POST',
     },
@@ -2619,7 +2701,13 @@ export async function seedPermissionsAndRoles(
       p.name === 'store:accounting:bank_reconciliation:read' ||
       p.name === 'store:accounting:budgets:read' ||
       p.name === 'store:accounting:consolidation:read' ||
-      p.name === 'store:accounting:fixed_assets:read',
+      p.name === 'store:accounting:fixed_assets:read' ||
+      p.name.includes('store:data_collection:') ||
+      p.name.includes('store:metadata:read') ||
+      p.name.includes('store:customers:history:read') ||
+      p.name.includes('store:email_templates:read') ||
+      p.name.includes('store:reservations:write') ||
+      p.name.includes('store:settings:write'),
   );
 
   for (const permission of supervisorPermissions) {
@@ -2660,7 +2748,10 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:dispatch_notes:create') ||
       p.name.includes('store:dispatch_notes:read') ||
       p.name.includes('store:dispatch_notes:read:one') ||
-      p.name.includes('store:reviews:read'),
+      p.name.includes('store:reviews:read') ||
+      p.name.includes('store:data_collection:submissions:read') ||
+      p.name.includes('store:customers:history:read') ||
+      p.name.includes('store:reservations:write'),
   );
 
   for (const permission of employeePermissions) {
@@ -2809,6 +2900,9 @@ export async function seedPermissionsAndRoles(
       // Cola virtual - leer y gestionar
       p.name.includes('store:customer_queue:read') ||
       p.name.includes('store:customer_queue:manage') ||
+      // Reservas - check-in y submissions
+      p.name.includes('store:reservations:write') ||
+      p.name.includes('store:data_collection:submissions:read') ||
       // Dominios públicos
       p.name.includes('domains.resolve') ||
       p.name.includes('domains.check') ||

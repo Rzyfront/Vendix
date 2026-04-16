@@ -1,0 +1,23 @@
+meta {
+  name: Wishlist - Con product_id valido
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{url}}/ecommerce/wishlist
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "product_id": 1
+  }
+}
+
+tests {
+  test("No debe ser 400 por validacion de ID", function() {
+    expect(res.status).to.not.equal(400);
+  });
+}

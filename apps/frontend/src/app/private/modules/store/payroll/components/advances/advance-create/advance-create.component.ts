@@ -11,6 +11,7 @@ import { ModalComponent } from '../../../../../../../shared/components/modal/mod
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
+import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-advance-create',
@@ -142,7 +143,7 @@ export class AdvanceCreateComponent implements OnInit, OnDestroy {
     this.loadEmployees();
 
     // Set default date to today
-    const today = new Date().toISOString().split('T')[0];
+    const today = toLocalDateString();
     this.form.patchValue({ advance_date: today });
   }
 

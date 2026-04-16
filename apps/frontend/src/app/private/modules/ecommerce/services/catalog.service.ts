@@ -23,6 +23,7 @@ export interface EcommerceProduct {
   service_duration_minutes?: number | null;
   service_modality?: 'in_person' | 'virtual' | 'hybrid' | null;
   requires_booking?: boolean;
+  booking_mode?: 'provider_required' | 'free_booking';
   brand: { id: number; name: string } | null;
   categories: { id: number; name: string; slug: string }[];
   variant_count?: number;
@@ -54,6 +55,7 @@ export interface ProductDetail extends EcommerceProduct {
   }[];
   avg_rating: number;
   review_count: number;
+  booking_mode?: 'provider_required' | 'free_booking';
 }
 
 export interface Category {
@@ -105,7 +107,7 @@ export class CatalogService {
   constructor(
     private http: HttpClient,
     private domain_service: TenantFacade,
-  ) { }
+  ) {}
 
   private getHeaders(): HttpHeaders {
     const domainConfig = this.domain_service.getCurrentDomainConfig();

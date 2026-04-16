@@ -11,6 +11,7 @@ import { ModalComponent } from '../../../../../../../shared/components/modal/mod
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
+import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'vendix-employee-create',
@@ -31,7 +32,7 @@ import { SelectorComponent, SelectorOption } from '../../../../../../../shared/c
       title="Nuevo Empleado"
       size="lg"
     >
-      <div class="p-4 max-h-[70vh] overflow-y-auto">
+      <div class="p-4">
         <form [formGroup]="employeeForm" (ngSubmit)="onSubmit()" class="space-y-6">
 
           <!-- Link User (optional) -->
@@ -278,7 +279,7 @@ export class EmployeeCreateComponent {
   ) {
     this.loading$ = this.store.select(selectEmployeesLoading);
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = toLocalDateString();
 
     this.employeeForm = this.fb.group({
       // User link
@@ -384,7 +385,7 @@ export class EmployeeCreateComponent {
       contract_type: 'indefinite',
       payment_frequency: 'monthly',
       cost_center: 'administrative',
-      hire_date: new Date().toISOString().split('T')[0],
+      hire_date: toLocalDateString(),
       arl_risk_level: 1,
     });
   }

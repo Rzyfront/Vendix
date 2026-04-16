@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
@@ -11,6 +12,8 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class CartService {
+  private readonly logger = new Logger(CartService.name);
+
   constructor(
     private readonly prisma: EcommercePrismaService,
     private readonly s3Service: S3Service,
@@ -169,6 +172,10 @@ export class CartService {
   }
 
   async updateItem(item_id: number, dto: UpdateCartItemDto) {
+    if (dto.quantity === 0) {
+      return this.removeItem(item_id);
+    }
+
     const cart = await this.prisma.carts.findFirst({});
 
     if (!cart) {
@@ -253,8 +260,8 @@ export class CartService {
           product_variant_id: item.product_variant_id,
           quantity: item.quantity,
         });
-      } catch {
-        // Skip invalid items during sync
+      } catch (error) {
+        this.logger.warn(`Skipping invalid cart item during sync: product_id=${item.product_id}, error=${error.message}`);
       }
     }
 

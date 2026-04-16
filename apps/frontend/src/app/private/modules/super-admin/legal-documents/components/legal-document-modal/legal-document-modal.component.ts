@@ -31,6 +31,7 @@ import {
   UpdateSystemDocumentDto,
   LegalDocument,
 } from '../../interfaces/legal-document.interface';
+import { toUTCDateString } from '../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-legal-document-modal',
@@ -376,7 +377,7 @@ export class LegalDocumentModalComponent implements OnInit, OnChanges {
 
   private formatDateForInput(dateStr?: string): string | null {
     if (!dateStr) return null;
-    return new Date(dateStr).toISOString().split('T')[0];
+    return toUTCDateString(new Date(dateStr));
   }
 
   private formatEnumLabel(type: string): string {

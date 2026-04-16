@@ -1,385 +1,507 @@
 <div class="checkout-page">
-    <h1>Finalizar Compra</h1>
+  <h1>Finalizar Compra</h1>
 
-    <!-- Steps indicator -->
-    <div class="steps">
-        @if (!cartHasOnlyServices) {
-        <div class="step" [class.active]="step >= 1" [class.completed]="step > 1">
-            <span class="step-number">1</span>
-            <span class="step-label">Direccion</span>
-        </div>
-        <div class="step-line" [class.completed]="step > 1"></div>
-        }
+  <!-- Steps indicator -->
+  <div class="steps">
+    @if (!cartHasOnlyServices) {
+      <div class="step" [class.active]="step >= 1" [class.completed]="step > 1">
+        <span class="step-number">1</span>
+        <span class="step-label">Direccion</span>
+      </div>
+      <div class="step-line" [class.completed]="step > 1"></div>
+    }
 
-        @if (cartHasBookableServices) {
-        <div class="step" [class.active]="step >= bookingStep!" [class.completed]="step > bookingStep!">
-            <span class="step-number">{{ bookingStep }}</span>
-            <span class="step-label">Reserva</span>
-        </div>
-        <div class="step-line" [class.completed]="step > bookingStep!"></div>
-        }
+    @if (cartHasBookableServices) {
+      <div
+        class="step"
+        [class.active]="step >= bookingStep!"
+        [class.completed]="step > bookingStep!"
+      >
+        <span class="step-number">{{ bookingStep }}</span>
+        <span class="step-label">Reserva</span>
+      </div>
+      <div class="step-line" [class.completed]="step > bookingStep!"></div>
+    }
 
-        <div class="step" [class.active]="step >= paymentStep" [class.completed]="step > paymentStep">
-            <span class="step-number">{{ paymentStep }}</span>
-            <span class="step-label">Pago</span>
-        </div>
-        <div class="step-line" [class.completed]="step > paymentStep"></div>
-        <div class="step" [class.active]="step >= confirmStep">
-            <span class="step-number">{{ confirmStep }}</span>
-            <span class="step-label">Confirmar</span>
-        </div>
+    <div
+      class="step"
+      [class.active]="step >= paymentStep"
+      [class.completed]="step > paymentStep"
+    >
+      <span class="step-number">{{ paymentStep }}</span>
+      <span class="step-label">Pago</span>
     </div>
+    <div class="step-line" [class.completed]="step > paymentStep"></div>
+    <div class="step" [class.active]="step >= confirmStep">
+      <span class="step-number">{{ confirmStep }}</span>
+      <span class="step-label">Confirmar</span>
+    </div>
+  </div>
 
-    @if (is_loading) {
+  @if (is_loading) {
     <div class="loading">
-        <div class="spinner"></div>
-        <p>Cargando...</p>
+      <div class="spinner"></div>
+      <p>Cargando...</p>
     </div>
-    } @else {
+  } @else {
     <div class="checkout-content">
-        <div class="checkout-main">
-            <!-- Step 1: Address (hidden for service-only carts) -->
-            @if (step === 1 && !cartHasOnlyServices) {
-            <div class="checkout-section">
-                <h2>Direccion de Envio</h2>
+      <div class="checkout-main">
+        <!-- Step 1: Address (hidden for service-only carts) -->
+        @if (step === 1 && !cartHasOnlyServices) {
+          <div class="checkout-section">
+            <h2>Direccion de Envio</h2>
 
-                @if (addresses.length > 0) {
-                <div class="address-list">
-                    @for (addr of addresses; track addr.id) {
-                    <div class="address-card" [class.selected]="selected_address_id === addr.id && !use_new_address"
-                        (click)="selectAddress(addr.id)">
-                        <div class="address-radio">
-                            <span class="radio"
-                                [class.checked]="selected_address_id === addr.id && !use_new_address"></span>
-                        </div>
-                        <div class="address-info">
-                            <p class="address-line">{{ addr.address_line1 }}</p>
-                            @if (addr.address_line2) {
-                            <p class="address-line">{{ addr.address_line2 }}</p>
-                            }
-                            <p class="address-city">{{ addr.city }}, {{ addr.state_province }}</p>
-                            <p class="address-phone">Tel: {{ addr.phone_number }}</p>
-                        </div>
+            @if (addresses.length > 0) {
+              <div class="address-list">
+                @for (addr of addresses; track addr.id) {
+                  <div
+                    class="address-card"
+                    [class.selected]="
+                      selected_address_id === addr.id && !use_new_address
+                    "
+                    (click)="selectAddress(addr.id)"
+                  >
+                    <div class="address-radio">
+                      <span
+                        class="radio"
+                        [class.checked]="
+                          selected_address_id === addr.id && !use_new_address
+                        "
+                      ></span>
                     </div>
-                    }
+                    <div class="address-info">
+                      <p class="address-line">{{ addr.address_line1 }}</p>
+                      @if (addr.address_line2) {
+                        <p class="address-line">{{ addr.address_line2 }}</p>
+                      }
+                      <p class="address-city">
+                        {{ addr.city }}, {{ addr.state_province }}
+                      </p>
+                      <p class="address-phone">Tel: {{ addr.phone_number }}</p>
+                    </div>
+                  </div>
+                }
 
-                    <div class="address-card new" [class.selected]="use_new_address" (click)="selectNewAddress()">
-                        <div class="address-radio">
-                            <span class="radio" [class.checked]="use_new_address"></span>
-                        </div>
-                        <div class="address-info">
-                            <i class="pi pi-plus"></i>
-                            <span>Agregar nueva direccion</span>
-                        </div>
-                    </div>
+                <div
+                  class="address-card new"
+                  [class.selected]="use_new_address"
+                  (click)="selectNewAddress()"
+                >
+                  <div class="address-radio">
+                    <span
+                      class="radio"
+                      [class.checked]="use_new_address"
+                    ></span>
+                  </div>
+                  <div class="address-info">
+                    <i class="pi pi-plus"></i>
+                    <span>Agregar nueva direccion</span>
+                  </div>
                 </div>
-                }
-
-                @if (use_new_address) {
-                <form [formGroup]="address_form" class="address-form">
-                    <app-input label="Direccion" formControlName="address_line1" placeholder="Calle y numero"
-                        [control]="address_form.get('address_line1')" [required]="true"></app-input>
-
-                    <app-input label="Apartamento, oficina, etc. (opcional)" formControlName="address_line2"
-                        placeholder="Apto, piso, oficina"></app-input>
-
-                    <div class="form-row">
-                        <app-selector
-                            label="Pais"
-                            formControlName="country_code"
-                            [options]="countryOptions"
-                            placeholder="Selecciona un pais"
-                            [errorText]="getFieldError('country_code')"
-                            [required]="true"
-                        ></app-selector>
-
-                        <app-selector
-                            label="Departamento/Estado"
-                            formControlName="state_province"
-                            [options]="departmentOptions"
-                            [placeholder]="loading_departments ? 'Cargando...' : 'Selecciona un departamento'"
-                            [disabled]="loading_departments || departmentOptions.length === 0"
-                            [errorText]="getFieldError('state_province')"
-                        ></app-selector>
-                    </div>
-
-                    <div class="form-row">
-                        <app-selector
-                            label="Ciudad"
-                            formControlName="city"
-                            [options]="cityOptions"
-                            [placeholder]="loading_cities ? 'Cargando...' : 'Selecciona una ciudad'"
-                            [disabled]="loading_cities || cityOptions.length === 0"
-                            [errorText]="getFieldError('city')"
-                            [required]="true"
-                        ></app-selector>
-
-                        <app-input label="Codigo Postal" formControlName="postal_code"
-                            placeholder="Codigo postal"></app-input>
-                    </div>
-
-                    <app-input label="Telefono" formControlName="phone_number" type="tel"
-                        placeholder="Telefono de contacto" [control]="address_form.get('phone_number')"
-                        [required]="true"></app-input>
-
-                    <!-- Save address checkbox -->
-                    <div class="save-address-option">
-                        <label class="checkbox-label">
-                            <input type="checkbox" [(ngModel)]="save_new_address" [ngModelOptions]="{standalone: true}">
-                            <span class="checkbox-text">Guardar esta direccion para futuras compras</span>
-                        </label>
-                    </div>
-                </form>
-                }
-            </div>
+              </div>
             }
 
-            <!-- Booking Step: shown only when cart has bookable services -->
-            @if (bookingStep !== null && step === bookingStep) {
-            <div class="checkout-section">
-                <h2>Reserva de Horario</h2>
-                <p class="booking-description">Selecciona la fecha y horario para tus servicios.</p>
+            @if (use_new_address) {
+              <form [formGroup]="address_form" class="address-form">
+                <app-input
+                  label="Direccion"
+                  formControlName="address_line1"
+                  placeholder="Calle y numero"
+                  [control]="address_form.get('address_line1')"
+                  [required]="true"
+                ></app-input>
 
-                @for (item of bookableItems; track item.product_id) {
-                <app-booking-slot-picker
-                    [productId]="item.product_id"
-                    [productName]="item.product.name"
-                    [serviceDuration]="item.product.service_duration_minutes || 60"
-                    (slotSelected)="onBookingSlotSelected(item.product_id, $event)"
-                />
-                @if (hasBookingForProduct(item.product_id)) {
+                <app-input
+                  label="Apartamento, oficina, etc. (opcional)"
+                  formControlName="address_line2"
+                  placeholder="Apto, piso, oficina"
+                ></app-input>
+
+                <div class="form-row">
+                  <app-selector
+                    label="Pais"
+                    formControlName="country_code"
+                    [options]="countryOptions"
+                    placeholder="Selecciona un pais"
+                    [errorText]="getFieldError('country_code')"
+                    [required]="true"
+                  ></app-selector>
+
+                  <app-selector
+                    label="Departamento/Estado"
+                    formControlName="state_province"
+                    [options]="departmentOptions"
+                    [placeholder]="
+                      loading_departments
+                        ? 'Cargando...'
+                        : 'Selecciona un departamento'
+                    "
+                    [disabled]="
+                      loading_departments || departmentOptions.length === 0
+                    "
+                    [errorText]="getFieldError('state_province')"
+                  ></app-selector>
+                </div>
+
+                <div class="form-row">
+                  <app-selector
+                    label="Ciudad"
+                    formControlName="city"
+                    [options]="cityOptions"
+                    [placeholder]="
+                      loading_cities ? 'Cargando...' : 'Selecciona una ciudad'
+                    "
+                    [disabled]="loading_cities || cityOptions.length === 0"
+                    [errorText]="getFieldError('city')"
+                    [required]="true"
+                  ></app-selector>
+
+                  <app-input
+                    label="Codigo Postal"
+                    formControlName="postal_code"
+                    placeholder="Codigo postal"
+                  ></app-input>
+                </div>
+
+                <app-input
+                  label="Telefono"
+                  formControlName="phone_number"
+                  type="tel"
+                  placeholder="Telefono de contacto"
+                  [control]="address_form.get('phone_number')"
+                  [required]="true"
+                ></app-input>
+
+                <!-- Save address checkbox -->
+                <div class="save-address-option">
+                  <label class="checkbox-label">
+                    <input
+                      type="checkbox"
+                      [(ngModel)]="save_new_address"
+                      [ngModelOptions]="{ standalone: true }"
+                    />
+                    <span class="checkbox-text"
+                      >Guardar esta direccion para futuras compras</span
+                    >
+                  </label>
+                </div>
+              </form>
+            }
+          </div>
+        }
+
+        <!-- Booking Step: shown only when cart has bookable services -->
+        @if (bookingStep !== null && step === bookingStep) {
+          <div class="checkout-section">
+            <h2>Reserva de Horario</h2>
+            <p class="booking-description">
+              Selecciona la fecha y horario para tus servicios.
+            </p>
+
+            @for (item of bookableItems; track item.product_id) {
+              <app-booking-slot-picker
+                [productId]="item.product_id"
+                [productName]="item.product.name"
+                [serviceDuration]="item.product.service_duration_minutes || 60"
+                [bookingMode]="item.product.booking_mode || 'provider_required'"
+                (slotSelected)="onBookingSlotSelected(item.product_id, $event)"
+              />
+              @if (hasBookingForProduct(item.product_id)) {
                 <div class="booking-confirmed">
-                    <i class="pi pi-check-circle"></i>
-                    <span>{{ getBookingSummary(item.product_id) }}</span>
+                  <i class="pi pi-check-circle"></i>
+                  <span>{{ getBookingSummary(item.product_id) }}</span>
                 </div>
+              }
+            }
+          </div>
+        }
+
+        <!-- Payment Step -->
+        @if (step === paymentStep) {
+          <div class="checkout-section">
+            @if (!cartHasOnlyServices) {
+              <h2>Opciones de Envio</h2>
+            }
+            @if (!cartHasOnlyServices && shipping_options.length > 0) {
+              <div class="payment-list" style="margin-bottom: 2rem">
+                @for (option of shipping_options; track option.id) {
+                  <div
+                    class="payment-card"
+                    [class.selected]="selected_shipping_option_id === option.id"
+                    (click)="selectShippingMethod(option, option.cost)"
+                  >
+                    <div class="payment-radio">
+                      <span
+                        class="radio"
+                        [class.checked]="
+                          selected_shipping_option_id === option.id
+                        "
+                      ></span>
+                    </div>
+                    <div class="payment-info" style="flex: 1">
+                      <span class="payment-name">{{ option.method_name }}</span>
+                      <span class="payment-type">{{ option.description }}</span>
+                    </div>
+                    <div class="payment-price" style="font-weight: bold">
+                      {{
+                        option.cost === 0 ? "Gratis" : (option.cost | currency)
+                      }}
+                    </div>
+                  </div>
                 }
-                }
-            </div>
+              </div>
+            } @else if (!cartHasOnlyServices) {
+              <div class="error-message" style="margin-bottom: 2rem">
+                <i class="pi pi-exclamation-triangle"></i>
+                No hay opciones de envio disponibles para esta ubicacion. Por
+                favor revisa tu direccion.
+              </div>
             }
 
-            <!-- Payment Step -->
-            @if (step === paymentStep) {
-            <div class="checkout-section">
-                @if (!cartHasOnlyServices) {
-                <h2>Opciones de Envio</h2>
-                }
-                @if (!cartHasOnlyServices && shipping_options.length > 0) {
-                <div class="payment-list" style="margin-bottom: 2rem;">
-                    @for (option of shipping_options; track option.id) {
-                    <div class="payment-card" [class.selected]="selected_shipping_option_id === option.id"
-                        (click)="selectShippingMethod(option, option.cost)">
-                        <div class="payment-radio">
-                            <span class="radio" [class.checked]="selected_shipping_option_id === option.id"></span>
-                        </div>
-                        <div class="payment-info" style="flex: 1;">
-                            <span class="payment-name">{{ option.method_name }}</span>
-                            <span class="payment-type">{{ option.description }}</span>
-                        </div>
-                        <div class="payment-price" style="font-weight: bold;">
-                            {{ option.cost === 0 ? 'Gratis' : (option.cost | currency) }}
-                        </div>
-                    </div>
+            <h2>Metodo de Pago</h2>
+
+            <div class="payment-list">
+              @for (method of payment_methods; track method.id) {
+                <div
+                  class="payment-card"
+                  [class.selected]="selected_payment_method_id === method.id"
+                  (click)="selectPaymentMethod(method.id)"
+                >
+                  <div class="payment-radio">
+                    <span
+                      class="radio"
+                      [class.checked]="selected_payment_method_id === method.id"
+                    ></span>
+                  </div>
+                  @if (method.logo_url) {
+                    <img
+                      [src]="method.logo_url"
+                      [alt]="method.name"
+                      class="payment-logo"
+                    />
+                  }
+                  <div class="payment-info">
+                    <span class="payment-name">{{ method.name }}</span>
+                    <span class="payment-type">{{ method.type }}</span>
+                  </div>
+                </div>
+              }
+            </div>
+
+            <!-- Wompi Info Panel -->
+            @if (isWompiPayment) {
+              <div class="wompi-info-panel">
+                <div class="wompi-info-header">
+                  <app-icon name="shield-check" [size]="20"></app-icon>
+                  <span>Pago seguro con Wompi</span>
+                </div>
+                <p class="wompi-info-text">
+                  Al confirmar, se abrira la ventana de pago seguro de Wompi.
+                  Podras elegir entre Tarjeta, Nequi, PSE o Bancolombia.
+                </p>
+              </div>
+            }
+          </div>
+        }
+
+        <!-- Confirm Step -->
+        @if (step === confirmStep) {
+          <div class="checkout-section">
+            <h2>Confirmar Pedido</h2>
+
+            <div class="confirm-details">
+              @if (!cartHasOnlyServices) {
+                <div class="confirm-block">
+                  <h3>Direccion de Envio</h3>
+                  @if (use_new_address) {
+                    <p>{{ address_form.value.address_line1 }}</p>
+                    @if (address_form.value.address_line2) {
+                      <p>{{ address_form.value.address_line2 }}</p>
                     }
-                </div>
-                } @else if (!cartHasOnlyServices) {
-                <div class="error-message" style="margin-bottom: 2rem;">
-                    <i class="pi pi-exclamation-triangle"></i>
-                    No hay opciones de envio disponibles para esta ubicacion. Por favor revisa tu direccion.
-                </div>
-                }
-
-                <h2>Metodo de Pago</h2>
-
-                <div class="payment-list">
-                    @for (method of payment_methods; track method.id) {
-                    <div class="payment-card" [class.selected]="selected_payment_method_id === method.id"
-                        (click)="selectPaymentMethod(method.id)">
-                        <div class="payment-radio">
-                            <span class="radio" [class.checked]="selected_payment_method_id === method.id"></span>
-                        </div>
-                        @if (method.logo_url) {
-                        <img [src]="method.logo_url" [alt]="method.name" class="payment-logo">
-                        }
-                        <div class="payment-info">
-                            <span class="payment-name">{{ method.name }}</span>
-                            <span class="payment-type">{{ method.type }}</span>
-                        </div>
-                    </div>
-                    }
-                </div>
-
-                <!-- Wompi Info Panel -->
-                @if (isWompiPayment) {
-                <div class="wompi-info-panel">
-                    <div class="wompi-info-header">
-                        <app-icon name="shield-check" [size]="20"></app-icon>
-                        <span>Pago seguro con Wompi</span>
-                    </div>
-                    <p class="wompi-info-text">
-                        Al confirmar, se abrira la ventana de pago seguro de Wompi.
-                        Podras elegir entre Tarjeta, Nequi, PSE o Bancolombia.
+                    <p>
+                      {{ getSelectedCityName() }},
+                      {{ getSelectedDepartmentName() }}
                     </p>
-                </div>
-                }
-            </div>
-            }
-
-            <!-- Confirm Step -->
-            @if (step === confirmStep) {
-            <div class="checkout-section">
-                <h2>Confirmar Pedido</h2>
-
-                <div class="confirm-details">
-                    @if (!cartHasOnlyServices) {
-                    <div class="confirm-block">
-                        <h3>Direccion de Envio</h3>
-                        @if (use_new_address) {
-                        <p>{{ address_form.value.address_line1 }}</p>
-                        @if (address_form.value.address_line2) {
-                        <p>{{ address_form.value.address_line2 }}</p>
-                        }
-                        <p>{{ getSelectedCityName() }}, {{ getSelectedDepartmentName() }}</p>
-                        <p>{{ getSelectedCountryName() }}</p>
-                        @if (address_form.value.postal_code) {
-                        <p>Codigo Postal: {{ address_form.value.postal_code }}</p>
-                        }
-                        <p>Tel: {{ address_form.value.phone_number }}</p>
-                        } @else {
-                        @for (addr of addresses; track addr.id) {
-                        @if (addr.id === selected_address_id) {
+                    <p>{{ getSelectedCountryName() }}</p>
+                    @if (address_form.value.postal_code) {
+                      <p>Codigo Postal: {{ address_form.value.postal_code }}</p>
+                    }
+                    <p>Tel: {{ address_form.value.phone_number }}</p>
+                  } @else {
+                    @for (addr of addresses; track addr.id) {
+                      @if (addr.id === selected_address_id) {
                         <p>{{ addr.address_line1 }}</p>
                         @if (addr.address_line2) {
-                        <p>{{ addr.address_line2 }}</p>
+                          <p>{{ addr.address_line2 }}</p>
                         }
                         <p>{{ addr.city }}, {{ addr.state_province }}</p>
                         <p>Tel: {{ addr.phone_number }}</p>
-                        }
-                        }
-                        }
-                    </div>
+                      }
                     }
-
-                    @if (cartHasBookableServices && bookingSelections.size > 0) {
-                    <div class="confirm-block">
-                        <h3>Reservas</h3>
-                        @for (item of bookableItems; track item.product_id) {
-                        @if (hasBookingForProduct(item.product_id)) {
-                        <p><strong>{{ item.product.name }}:</strong> {{ getBookingSummary(item.product_id) }}</p>
-                        }
-                        }
-                    </div>
-                    }
-
-                    <div class="confirm-block">
-                        <h3>Metodo de Pago</h3>
-                        @for (method of payment_methods; track method.id) {
-                        @if (method.id === selected_payment_method_id) {
-                        <p>{{ method.name }}</p>
-                        }
-                        }
-                    </div>
-
-                    <div class="notes-section">
-                        <label>Notas del pedido (opcional)</label>
-                        <textarea [(ngModel)]="notes"
-                            placeholder="Instrucciones especiales para la entrega..."></textarea>
-                    </div>
+                  }
                 </div>
+              }
+
+              @if (cartHasBookableServices && bookingSelections.size > 0) {
+                <div class="confirm-block">
+                  <h3>Reservas</h3>
+                  @for (item of bookableItems; track item.product_id) {
+                    @if (hasBookingForProduct(item.product_id)) {
+                      <p>
+                        <strong>{{ item.product.name }}:</strong>
+                        {{ getBookingSummary(item.product_id) }}
+                      </p>
+                    }
+                  }
+                </div>
+              }
+
+              <div class="confirm-block">
+                <h3>Metodo de Pago</h3>
+                @for (method of payment_methods; track method.id) {
+                  @if (method.id === selected_payment_method_id) {
+                    <p>{{ method.name }}</p>
+                  }
+                }
+              </div>
+
+              <div class="notes-section">
+                <label>Notas del pedido (opcional)</label>
+                <textarea
+                  [(ngModel)]="notes"
+                  placeholder="Instrucciones especiales para la entrega..."
+                ></textarea>
+              </div>
             </div>
+          </div>
+        }
+
+        @if (error_message) {
+          <div class="error-message">
+            <i class="pi pi-exclamation-circle"></i>
+            {{ error_message }}
+          </div>
+        }
+
+        <div class="checkout-actions">
+          @if (step > 1) {
+            <app-button variant="outline" (clicked)="prevStep()">
+              <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
+              Anterior
+            </app-button>
+          } @else {
+            <app-button variant="outline" (clicked)="goToCart()">
+              <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
+              Volver al carrito
+            </app-button>
+          }
+
+          @if (step < confirmStep) {
+            <app-button
+              variant="primary"
+              (clicked)="nextStep()"
+              [disabled]="
+                bookingStep !== null &&
+                step === bookingStep &&
+                !allBookingSlotsSelected
+              "
+            >
+              Continuar
+              <app-icon slot="icon" name="arrow-right" [size]="16"></app-icon>
+            </app-button>
+          } @else if (step >= confirmStep) {
+            <app-button
+              variant="primary"
+              (clicked)="placeOrder()"
+              [loading]="is_submitting || wompiWidgetLoading"
+              [disabled]="is_submitting || wompiWidgetLoading"
+            >
+              @if (!is_submitting && !wompiWidgetLoading) {
+                <app-icon
+                  slot="icon"
+                  [name]="isWompiPayment ? 'shield-check' : 'check'"
+                  [size]="16"
+                ></app-icon>
+              }
+              {{
+                is_submitting || wompiWidgetLoading
+                  ? "Procesando..."
+                  : isWompiPayment
+                    ? "Pagar con Wompi"
+                    : "Confirmar Pedido"
+              }}
+            </app-button>
+          }
+        </div>
+      </div>
+
+      <!-- Order Summary -->
+      <div class="checkout-summary">
+        <div class="summary-card">
+          <h3>Resumen</h3>
+
+          @if (cart) {
+            <div class="summary-items">
+              @for (item of cart.items; track item.id) {
+                <div class="summary-item">
+                  <span class="item-qty">{{ item.quantity }}x</span>
+                  <span class="item-name">{{ item.product.name }}</span>
+                  <span class="item-price">{{
+                    item.total_price | currency
+                  }}</span>
+                </div>
+              }
+            </div>
+
+            <hr />
+
+            <div class="summary-row">
+              <span>Subtotal</span>
+              <span>{{ cart.subtotal | currency }}</span>
+            </div>
+            @if (!cartHasOnlyServices) {
+              <div class="summary-row">
+                <span>Envio</span>
+                <span>{{
+                  shipping_cost === 0 ? "Gratis" : (shipping_cost | currency)
+                }}</span>
+              </div>
             }
 
-            @if (error_message) {
-            <div class="error-message">
-                <i class="pi pi-exclamation-circle"></i>
-                {{ error_message }}
-            </div>
-            }
+            <hr />
 
-            <div class="checkout-actions">
-                @if (step > 1) {
-                <app-button variant="outline" (clicked)="prevStep()">
-                    <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
-                    Anterior
-                </app-button>
-                } @else {
-                <app-button variant="outline" (clicked)="goToCart()">
-                    <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
-                    Volver al carrito
-                </app-button>
-                }
-
-                @if (step < confirmStep) {
-                <app-button variant="primary" (clicked)="nextStep()"
-                    [disabled]="bookingStep !== null && step === bookingStep && !allBookingSlotsSelected">
-                    Continuar
-                    <app-icon slot="icon" name="arrow-right" [size]="16"></app-icon>
-                </app-button>
-                } @else if (step >= confirmStep) {
-                <app-button variant="primary" (clicked)="placeOrder()" [loading]="is_submitting || wompiWidgetLoading" [disabled]="is_submitting || wompiWidgetLoading">
-                    @if (!is_submitting && !wompiWidgetLoading) {
-                    <app-icon slot="icon" [name]="isWompiPayment ? 'shield-check' : 'check'" [size]="16"></app-icon>
-                    }
-                    {{ (is_submitting || wompiWidgetLoading) ? 'Procesando...' : (isWompiPayment ? 'Pagar con Wompi' : 'Confirmar Pedido') }}
-                </app-button>
-                }
+            <div class="summary-row total">
+              <span>Total</span>
+              <span>{{ cart.subtotal + shipping_cost | currency }}</span>
             </div>
+          }
         </div>
-
-        <!-- Order Summary -->
-        <div class="checkout-summary">
-            <div class="summary-card">
-                <h3>Resumen</h3>
-
-                @if (cart) {
-                <div class="summary-items">
-                    @for (item of cart.items; track item.id) {
-                    <div class="summary-item">
-                        <span class="item-qty">{{ item.quantity }}x</span>
-                        <span class="item-name">{{ item.product.name }}</span>
-                        <span class="item-price">{{ item.total_price | currency }}</span>
-                    </div>
-                    }
-                </div>
-
-                <hr>
-
-                <div class="summary-row">
-                    <span>Subtotal</span>
-                    <span>{{ cart.subtotal | currency }}</span>
-                </div>
-                @if (!cartHasOnlyServices) {
-                <div class="summary-row">
-                    <span>Envio</span>
-                    <span>{{ shipping_cost === 0 ? 'Gratis' : (shipping_cost | currency) }}</span>
-                </div>
-                }
-
-                <hr>
-
-                <div class="summary-row total">
-                    <span>Total</span>
-                    <span>{{ (cart.subtotal + shipping_cost) | currency }}</span>
-                </div>
-                }
-            </div>
-        </div>
+      </div>
     </div>
-    }
+  }
 
-    @if (recommendedProducts().length > 0 && !is_submitting) {
+  @if (recommendedProducts().length > 0 && !is_submitting) {
     <div class="checkout-offers">
-        <app-product-carousel title="Agrega ofertas imperdibles a tu compra" [products]="recommendedProducts()"
-            (quick_view)="onQuickView($event)" (add_to_cart)="onAddToCartFromSlider($event)" />
+      <app-product-carousel
+        title="Agrega ofertas imperdibles a tu compra"
+        [products]="recommendedProducts()"
+        (quick_view)="onQuickView($event)"
+        (add_to_cart)="onAddToCartFromSlider($event)"
+      />
     </div>
-    }
+  }
 
-    <app-product-quick-view-modal [isOpen]="quickViewOpen" [productSlug]="selectedProductSlug"
-        (closed)="quickViewOpen = false" (addedToCart)="onAddToCartFromSlider($event)" />
+  <app-product-quick-view-modal
+    [isOpen]="quickViewOpen"
+    [productSlug]="selectedProductSlug"
+    (closed)="quickViewOpen = false"
+    (addedToCart)="onAddToCartFromSlider($event)"
+  />
 
-    @if (wompiWidgetLoading) {
+  @if (wompiWidgetLoading) {
     <div class="wompi-loading-overlay">
-        <div class="spinner"></div>
-        <p>Preparando pago seguro...</p>
+      <div class="spinner"></div>
+      <p>Preparando pago seguro...</p>
     </div>
-    }
+  }
 </div>

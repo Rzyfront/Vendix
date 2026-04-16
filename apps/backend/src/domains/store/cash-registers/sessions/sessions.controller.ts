@@ -9,7 +9,10 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  Sse,
+  MessageEvent,
 } from '@nestjs/common';
+import { Observable } from 'rxjs';
 import { SessionsService } from './sessions.service';
 import { MovementsService } from '../movements/movements.service';
 import { ResponseService } from '../../../../common/responses/response.service';
@@ -56,6 +59,14 @@ export class SessionsController {
       result.meta.page,
       result.meta.limit,
     );
+  }
+
+  // --- SSE routes ---
+
+  @Sse(':id/ai-summary')
+  @Permissions('store:cash_registers:read')
+  streamAISummary(@Param('id') id: string): Observable<MessageEvent> {
+    return this.sessions_service.streamClosingSummary(+id);
   }
 
   // --- Parameter routes AFTER ---

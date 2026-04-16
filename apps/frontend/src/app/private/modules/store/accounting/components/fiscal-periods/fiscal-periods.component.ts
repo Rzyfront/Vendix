@@ -20,6 +20,7 @@ import {
   ItemListCardConfig,
   DropdownAction,
 } from '../../../../../../shared/components/index';
+import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 
 interface PeriodStats {
   total: number;
@@ -160,13 +161,13 @@ export class FiscalPeriodsComponent implements OnInit {
       key: 'start_date',
       label: 'Fecha Inicio',
       priority: 1,
-      transform: (val: any) => (val ? new Date(val).toLocaleDateString() : ''),
+      transform: (val: any) => (val ? formatDateOnlyUTC(val) : ''),
     },
     {
       key: 'end_date',
       label: 'Fecha Fin',
       priority: 2,
-      transform: (val: any) => (val ? new Date(val).toLocaleDateString() : ''),
+      transform: (val: any) => (val ? formatDateOnlyUTC(val) : ''),
     },
     {
       key: 'status',
@@ -213,14 +214,14 @@ export class FiscalPeriodsComponent implements OnInit {
         label: 'Inicio',
         icon: 'calendar',
         transform: (val: any) =>
-          val ? new Date(val).toLocaleDateString() : '-',
+          val ? formatDateOnlyUTC(val) : '-',
       },
       {
         key: 'end_date',
         label: 'Fin',
         icon: 'calendar',
         transform: (val: any) =>
-          val ? new Date(val).toLocaleDateString() : '-',
+          val ? formatDateOnlyUTC(val) : '-',
       },
     ],
   };

@@ -265,6 +265,22 @@ export const storeAdminRoutes: Routes = [
           },
         ],
       },
+      // Consultations Routes
+      {
+        path: 'consultations',
+        loadChildren: () =>
+          import('../../private/modules/store/consultations/consultations.routes').then(
+            (r) => r.CONSULTATIONS_ROUTES,
+          ),
+      },
+      // Data Collection Routes
+      {
+        path: 'data-collection',
+        loadChildren: () =>
+          import('../../private/modules/store/data-collection/data-collection.routes').then(
+            (r) => r.DATA_COLLECTION_ROUTES,
+          ),
+      },
       // Customers Routes
       {
         path: 'customers',

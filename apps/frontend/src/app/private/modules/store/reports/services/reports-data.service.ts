@@ -3,6 +3,8 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, map, shareReplay } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import { DateRangeFilter as DateRange } from '../../analytics/interfaces/analytics.interface';
+import { ReportDataAdapterService } from './report-data-adapter.service';
+import { ReportDefinition, ReportAdaptedData } from '../interfaces/report.interface';
 
 interface CacheEntry<T> {
   observable: T;
@@ -16,6 +18,7 @@ const reportsCache = new Map<string, CacheEntry<Observable<any>>>();
 })
 export class ReportsDataService {
   private http = inject(HttpClient);
+  private adapter = inject(ReportDataAdapterService);
   private readonly CACHE_TTL = 60000;
 
   private withCache<T>(key: string, factory: () => Observable<T>): Observable<T> {
@@ -33,15 +36,18 @@ export class ReportsDataService {
 
   /**
    * Fetch report data from any endpoint defined in the registry.
-   * Handles both analytics-style (ApiResponse wrapper) and direct responses.
+   * Uses ReportDataAdapterService to normalize and map response keys.
    */
   fetchReportData(
     dataEndpoint: string,
+    report: ReportDefinition,
     options?: {
       dateRange?: DateRange;
       fiscalPeriodId?: number | null;
+      page?: number;
+      limit?: number;
     },
-  ): Observable<{ data: any[]; meta?: Record<string, any> }> {
+  ): Observable<ReportAdaptedData> {
     const url = `${environment.apiUrl}/${dataEndpoint}`;
     let params = new HttpParams();
 
@@ -58,24 +64,17 @@ export class ReportsDataService {
       params = params.set('fiscal_period_id', String(options.fiscalPeriodId));
     }
 
-    const cacheKey = `${dataEndpoint}-${JSON.stringify(options)}`;
+    if (options?.page) {
+      params = params.set('page', String(options.page));
+    }
+    if (options?.limit) {
+      params = params.set('limit', String(options.limit));
+    }
+
+    const cacheKey = `${report.id}-${dataEndpoint}-${JSON.stringify(options)}`;
     return this.withCache(cacheKey, () =>
       this.http.get<any>(url, { params }).pipe(
-        map((response) => {
-          // Handle both { data: [...] } wrapper and direct array responses
-          if (response?.data && Array.isArray(response.data)) {
-            const { data, ...meta } = response;
-            return { data, meta };
-          }
-          if (Array.isArray(response)) {
-            return { data: response };
-          }
-          // Single object response — wrap in array
-          if (response?.data && !Array.isArray(response.data)) {
-            return { data: [response.data], meta: response };
-          }
-          return { data: [], meta: response };
-        }),
+        map((response) => this.adapter.adapt(response, report)),
       ),
     );
   }

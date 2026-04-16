@@ -24,6 +24,7 @@ import {
   DialogService,
   ToastService,
 } from '../../../../../../shared/components/index';
+import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 import type {
   TableColumn,
   TableAction,
@@ -153,7 +154,7 @@ export class PayablesComponent implements OnInit, OnDestroy {
       sortable: true,
       align: 'center',
       priority: 2,
-      transform: (val: any) => (val ? new Date(val).toLocaleDateString() : '—'),
+      transform: (val: any) => (val ? formatDateOnlyUTC(val) : '—'),
     },
     {
       key: 'priority',
@@ -214,7 +215,7 @@ export class PayablesComponent implements OnInit, OnDestroy {
         label: 'Vencimiento',
         icon: 'calendar',
         transform: (val: any) =>
-          val ? new Date(val).toLocaleDateString() : '—',
+          val ? formatDateOnlyUTC(val) : '—',
       },
       {
         key: 'priority',

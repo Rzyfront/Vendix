@@ -1,5 +1,13 @@
-import { Injectable } from '@nestjs/common';
-import { PerformanceCollectorService, RequestRecord, MinuteBucket, EventLoopSample } from './performance-collector.service';
+import { Inject, Injectable } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
+import {
+  PerformanceCollectorService,
+  RequestRecord,
+  MinuteBucket,
+  EventLoopSample,
+} from './performance-collector.service';
+import { CACHE_TTL_PERFORMANCE } from '../constants/cloudwatch.constants';
 
 export interface ResponseTimeStats {
   p50: number;
@@ -26,20 +34,27 @@ export interface ErrorCounts {
 
 @Injectable()
 export class PerformanceMetricsService {
-  constructor(private readonly collector: PerformanceCollectorService) {}
+  constructor(
+    private readonly collector: PerformanceCollectorService,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
+  ) {}
 
-  getPerformanceSnapshot() {
+  async getPerformanceSnapshot() {
+    const cacheKey = 'monitoring:performance:snapshot';
+    const cached = await this.cache.get(cacheKey);
+    if (cached) return cached;
+
     const buffer = this.collector.getBuffer();
     const minuteBuckets = this.collector.getMinuteBuckets();
     const eventLoopCurrent = this.collector.getCurrentEventLoopStats();
     const eventLoopSamples = this.collector.getEventLoopSamples();
 
-    return {
+    const result = {
       responseTime: this.calculateResponseTimeStats(buffer),
-      slowestEndpoints: this.getTopSlowEndpoints(buffer, 10),
+      slowestEndpoints: this.getTopSlowEndpoints(buffer, 50),
       throughput: {
         current: this.getCurrentThroughput(minuteBuckets),
-        history: minuteBuckets.map(b => ({
+        history: minuteBuckets.map((b) => ({
           timestamp: new Date(b.timestamp).toISOString(),
           count: b.count,
           totalDuration: b.totalDuration,
@@ -49,7 +64,7 @@ export class PerformanceMetricsService {
       },
       eventLoop: {
         current: eventLoopCurrent,
-        samples: eventLoopSamples.map(s => ({
+        samples: eventLoopSamples.map((s) => ({
           ...s,
           timestamp: new Date(s.timestamp).toISOString(),
         })),
@@ -62,9 +77,16 @@ export class PerformanceMetricsService {
       activeRequests: this.collector.getActiveRequests(),
       totalRecorded: buffer.length,
     };
+
+    await this.cache.set(cacheKey, result, CACHE_TTL_PERFORMANCE);
+    return result;
   }
 
-  getPerformanceHistory(period: string = '1h') {
+  async getPerformanceHistory(period: string = '1h') {
+    const cacheKey = `monitoring:performance:history:${period}`;
+    const cached = await this.cache.get(cacheKey);
+    if (cached) return cached;
+
     const minuteBuckets = this.collector.getMinuteBuckets();
     const eventLoopSamples = this.collector.getEventLoopSamples();
     const buffer = this.collector.getBuffer();
@@ -72,9 +94,11 @@ export class PerformanceMetricsService {
     const minutes = this.periodToMinutes(period);
     const cutoff = Date.now() - minutes * 60_000;
 
-    const filteredBuckets = minuteBuckets.filter(b => b.timestamp >= cutoff);
-    const filteredSamples = eventLoopSamples.filter(s => s.timestamp >= cutoff);
-    const filteredRecords = buffer.filter(r => r.timestamp >= cutoff);
+    const filteredBuckets = minuteBuckets.filter((b) => b.timestamp >= cutoff);
+    const filteredSamples = eventLoopSamples.filter(
+      (s) => s.timestamp >= cutoff,
+    );
+    const filteredRecords = buffer.filter((r) => r.timestamp >= cutoff);
 
     // Group records by minute for response time percentiles
     const recordsByMinute = new Map<number, RequestRecord[]>();
@@ -86,43 +110,50 @@ export class PerformanceMetricsService {
       recordsByMinute.get(minuteKey)!.push(record);
     }
 
-    const responseTimes = filteredBuckets.map(bucket => {
+    const responseTimes = filteredBuckets.map((bucket) => {
       const records = recordsByMinute.get(bucket.timestamp) || [];
-      const durations = records.map(r => r.duration).sort((a, b) => a - b);
+      const durations = records.map((r) => r.duration).sort((a, b) => a - b);
       return {
         timestamp: new Date(bucket.timestamp).toISOString(),
         p50: this.percentile(durations, 50),
         p95: this.percentile(durations, 95),
         p99: this.percentile(durations, 99),
-        mean: durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0,
+        mean:
+          durations.length > 0
+            ? durations.reduce((a, b) => a + b, 0) / durations.length
+            : 0,
       };
     });
 
-    const throughput = filteredBuckets.map(b => ({
+    const throughput = filteredBuckets.map((b) => ({
       timestamp: new Date(b.timestamp).toISOString(),
       requestsPerSecond: b.count / 60,
     }));
 
-    const errors = filteredBuckets.map(b => ({
+    const errors = filteredBuckets.map((b) => ({
       timestamp: new Date(b.timestamp).toISOString(),
       errors4xx: b.errors4xx,
       errors5xx: b.errors5xx,
     }));
 
-    const eventLoopLag = filteredSamples.map(s => ({
+    const eventLoopLag = filteredSamples.map((s) => ({
       timestamp: new Date(s.timestamp).toISOString(),
       p99: s.p99,
     }));
 
-    return { responseTimes, throughput, errors, eventLoopLag };
+    const result = { responseTimes, throughput, errors, eventLoopLag };
+    await this.cache.set(cacheKey, result, CACHE_TTL_PERFORMANCE);
+    return result;
   }
 
-  private calculateResponseTimeStats(records: RequestRecord[]): ResponseTimeStats {
+  private calculateResponseTimeStats(
+    records: RequestRecord[],
+  ): ResponseTimeStats {
     if (records.length === 0) {
       return { p50: 0, p95: 0, p99: 0, mean: 0, min: 0, max: 0 };
     }
 
-    const durations = records.map(r => r.duration).sort((a, b) => a - b);
+    const durations = records.map((r) => r.duration).sort((a, b) => a - b);
     const sum = durations.reduce((a, b) => a + b, 0);
 
     return {
@@ -135,16 +166,26 @@ export class PerformanceMetricsService {
     };
   }
 
-  private getTopSlowEndpoints(records: RequestRecord[], topN: number): SlowEndpoint[] {
+  private getTopSlowEndpoints(
+    records: RequestRecord[],
+    topN: number,
+  ): SlowEndpoint[] {
     if (records.length === 0) return [];
 
     // Group by method + path
-    const groups = new Map<string, { durations: number[]; method: string; path: string }>();
+    const groups = new Map<
+      string,
+      { durations: number[]; method: string; path: string }
+    >();
 
     for (const record of records) {
       const key = `${record.method} ${record.path}`;
       if (!groups.has(key)) {
-        groups.set(key, { durations: [], method: record.method, path: record.path });
+        groups.set(key, {
+          durations: [],
+          method: record.method,
+          path: record.path,
+        });
       }
       groups.get(key)!.durations.push(record.duration);
     }
@@ -164,7 +205,9 @@ export class PerformanceMetricsService {
     }
 
     // Sort by avgDuration descending, return top N
-    return endpoints.sort((a, b) => b.avgDuration - a.avgDuration).slice(0, topN);
+    return endpoints
+      .sort((a, b) => b.avgDuration - a.avgDuration)
+      .slice(0, topN);
   }
 
   private getCurrentThroughput(buckets: MinuteBucket[]): number {
@@ -181,7 +224,10 @@ export class PerformanceMetricsService {
     return lastBucket.count / 60;
   }
 
-  private getErrorCounts(buckets: MinuteBucket[], minutes: number): ErrorCounts {
+  private getErrorCounts(
+    buckets: MinuteBucket[],
+    minutes: number,
+  ): ErrorCounts {
     const cutoff = Date.now() - minutes * 60_000;
     let errors4xx = 0;
     let errors5xx = 0;
@@ -206,12 +252,20 @@ export class PerformanceMetricsService {
 
   private periodToMinutes(period: string): number {
     switch (period) {
-      case '15m': return 15;
-      case '30m': return 30;
-      case '1h': return 60;
-      case '6h': return 360;
-      case '24h': return 1440;
-      default: return 60;
+      case '15m':
+        return 15;
+      case '30m':
+        return 30;
+      case '1h':
+        return 60;
+      case '6h':
+        return 360;
+      case '24h':
+        return 1440;
+      case '7d':
+        return 10080;
+      default:
+        return 60;
     }
   }
 }

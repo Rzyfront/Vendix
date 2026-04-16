@@ -26,6 +26,7 @@ import {
   DropdownAction,
   FilterValues,
 } from '../../../../../../../shared/components/index';
+import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 import { SessionCreateModalComponent } from '../session-create-modal/session-create-modal.component';
 
 @Component({
@@ -197,7 +198,7 @@ export class ConsolidationSessionsComponent implements OnInit, OnDestroy {
       label: 'Fecha',
       sortable: true,
       priority: 1,
-      transform: (val: any) => (val ? new Date(val).toLocaleDateString() : '-'),
+      transform: (val: any) => (val ? formatDateOnlyUTC(val) : '-'),
     },
     {
       key: 'status',

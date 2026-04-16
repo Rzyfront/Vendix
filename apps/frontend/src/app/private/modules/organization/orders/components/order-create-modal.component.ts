@@ -19,6 +19,7 @@ import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../../../environments/environment';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency/currency.pipe';
 import { CurrencyService } from '../../../../../services/currency.service';
+import { toLocalDateString } from '../../../../../shared/utils/date.util';
 
 import {
   ModalComponent,
@@ -744,7 +745,7 @@ export class OrderCreateModalComponent implements OnInit {
       organization_id: ['', Validators.required],
       store_id: [''], // Will be conditionally required
       customer_id: [''], // Will be conditionally required
-      order_date: [new Date().toISOString().split('T')[0]],
+      order_date: [toLocalDateString()],
       expected_delivery_date: [''],
       status: ['draft'],
       payment_method: [''],
@@ -1117,7 +1118,7 @@ export class OrderCreateModalComponent implements OnInit {
       organization_id: '',
       store_id: '',
       customer_id: '',
-      order_date: new Date().toISOString().split('T')[0],
+      order_date: toLocalDateString(),
       expected_delivery_date: '',
       status: 'draft',
       payment_method: '',

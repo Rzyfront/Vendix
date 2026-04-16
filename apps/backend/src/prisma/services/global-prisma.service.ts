@@ -497,4 +497,19 @@ export class GlobalPrismaService extends BasePrismaService {
   get customer_queue() {
     return this.baseClient.customer_queue;
   }
+
+  // Email Templates (store_id nullable - system defaults have null)
+  get email_templates() {
+    return this.baseClient.email_templates;
+  }
+
+  // Booking reminder logs
+  get booking_reminder_logs() {
+    return this.baseClient.booking_reminder_logs;
+  }
+
+  // Messaging channels
+  get messaging_channels() {
+    return this.baseClient.messaging_channels;
+  }
 }
