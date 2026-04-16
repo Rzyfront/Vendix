@@ -1,0 +1,33 @@
+meta {
+  name: Checkout - Validacion Min(1) IDs
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{url}}/ecommerce/checkout
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "payment_method_id": 0,
+    "items": [
+      {
+        "product_id": 0,
+        "quantity": 1
+      }
+    ]
+  }
+}
+
+tests {
+  test("Debe fallar con payment_method_id = 0", function() {
+    expect(res.status).to.equal(400);
+  });
+  
+  test("Error debe mencionar validation error", function() {
+    expect(res.body.message).to.include("validation");
+  });
+}
